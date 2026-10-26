@@ -1,0 +1,20 @@
+{
+  "name": "@nexstock/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@nexstock/contracts": "workspace:*",
+    "@nexstock/sqlite-schema": "workspace:*",
+    "@nexstock/ui": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.2",
+    "vitest": "^3.0.8"
+  }
+}

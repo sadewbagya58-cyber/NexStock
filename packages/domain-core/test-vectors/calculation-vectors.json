@@ -1,0 +1,160 @@
+{
+  "metadata": {
+    "schemaVersion": "1.0.0",
+    "description": "Canonical fixed-point calculation test vectors for NexStock (Money, Quantity, Tax, MAC/FIFO Valuation, Negative-Stock Recovery, Landed Cost Adjustments).",
+    "typescriptVerificationStatus": "EXECUTED_IN_MILESTONE_0",
+    "dartFlutterParityStatus": "PENDING_MILESTONE_6_FLUTTER_SDK"
+  },
+  "roundingVectors": [
+    {
+      "id": "RND-01-HALF-EVEN-DOWN",
+      "input": "10.12345",
+      "currency": "USD",
+      "roundingMode": "HALF_EVEN",
+      "expectedScaled4": "10.1234",
+      "expectedMinorString": "10.12"
+    },
+    {
+      "id": "RND-02-HALF-EVEN-UP",
+      "input": "10.12355",
+      "currency": "USD",
+      "roundingMode": "HALF_EVEN",
+      "expectedScaled4": "10.1236",
+      "expectedMinorString": "10.12"
+    },
+    {
+      "id": "RND-03-HALF-UP",
+      "input": "10.12345",
+      "currency": "USD",
+      "roundingMode": "HALF_UP",
+      "expectedScaled4": "10.1235",
+      "expectedMinorString": "10.12"
+    },
+    {
+      "id": "RND-04-JPY-ZERO-DECIMALS",
+      "input": "1500.5000",
+      "currency": "JPY",
+      "roundingMode": "HALF_EVEN",
+      "expectedScaled4": "1500.5000",
+      "expectedMinorString": "1500"
+    },
+    {
+      "id": "RND-05-KWD-THREE-DECIMALS",
+      "input": "45.1255",
+      "currency": "KWD",
+      "roundingMode": "HALF_EVEN",
+      "expectedScaled4": "45.1255",
+      "expectedMinorString": "45.126"
+    },
+    {
+      "id": "RND-06-LKR-TWO-DECIMALS",
+      "input": "2950.2550",
+      "currency": "LKR",
+      "roundingMode": "HALF_EVEN",
+      "expectedScaled4": "2950.2550",
+      "expectedMinorString": "2950.26"
+    }
+  ],
+  "taxVectors": [
+    {
+      "id": "TAX-01-EXCLUSIVE-LK-VAT-18",
+      "currency": "LKR",
+      "unitPrice": "1000.0000",
+      "quantity": "2.500000",
+      "lineDiscount": "0.0000",
+      "isTaxInclusive": false,
+      "taxRules": [
+        {
+          "taxRateId": "VAT-18",
+          "name": "VAT 18%",
+          "ratePercentage": "18.0000",
+          "isCompound": false
+        }
+      ],
+      "expectedNetTaxable": "2500.0000",
+      "expectedTotalTax": "450.0000",
+      "expectedLineTotalWithTax": "2950.0000"
+    },
+    {
+      "id": "TAX-02-INCLUSIVE-LK-VAT-18",
+      "currency": "LKR",
+      "unitPrice": "1180.0000",
+      "quantity": "1.000000",
+      "lineDiscount": "0.0000",
+      "isTaxInclusive": true,
+      "taxRules": [
+        {
+          "taxRateId": "VAT-18",
+          "name": "VAT 18%",
+          "ratePercentage": "18.0000",
+          "isCompound": false
+        }
+      ],
+      "expectedNetTaxable": "1000.0000",
+      "expectedTotalTax": "180.0000",
+      "expectedLineTotalWithTax": "1180.0000"
+    },
+    {
+      "id": "TAX-03-COMPOUND-MULTI-TAX",
+      "currency": "USD",
+      "unitPrice": "100.0000",
+      "quantity": "1.000000",
+      "lineDiscount": "0.0000",
+      "isTaxInclusive": false,
+      "taxRules": [
+        {
+          "taxRateId": "BASE-LEVY-10",
+          "name": "Base Levy 10%",
+          "ratePercentage": "10.0000",
+          "isCompound": false
+        },
+        {
+          "taxRateId": "COMPOUND-VAT-5",
+          "name": "Compound Tax 5%",
+          "ratePercentage": "5.0000",
+          "isCompound": true
+        }
+      ],
+      "expectedNetTaxable": "100.0000",
+      "expectedTotalTax": "15.5000",
+      "expectedLineTotalWithTax": "115.5000"
+    }
+  ],
+  "valuationVectors": {
+    "macPositiveReceipt": {
+      "currency": "USD",
+      "initialQty": "10.000000",
+      "initialMac": "10.0000",
+      "initialTotalValue": "100.0000",
+      "receiptQty": "10.000000",
+      "receiptUnitCost": "15.0000",
+      "expectedNewQty": "20.000000",
+      "expectedNewMac": "12.5000",
+      "expectedNewTotalValue": "250.0000",
+      "expectedPpv": "0.0000"
+    },
+    "macNegativeStockRecovery": {
+      "currency": "USD",
+      "initialQty": "-5.000000",
+      "initialMac": "10.0000",
+      "initialTotalValue": "-50.0000",
+      "receiptQty": "15.000000",
+      "receiptUnitCost": "12.0000",
+      "expectedNewQty": "10.000000",
+      "expectedNewMac": "12.0000",
+      "expectedNewTotalValue": "120.0000",
+      "expectedInventoryAssetDelta": "170.0000",
+      "expectedNegativeStockPpv": "10.0000",
+      "expectedDeficitCovered": "5.000000",
+      "expectedSurplusAdded": "10.000000"
+    },
+    "postReceiptLandedCostSplit": {
+      "currency": "USD",
+      "originalReceivedQty": "100.000000",
+      "remainingQtyFromReceipt": "60.000000",
+      "totalCostAdjustment": "200.0000",
+      "expectedCapitalizedInventoryDelta": "120.0000",
+      "expectedExpensedPpvDelta": "80.0000"
+    }
+  }
+}

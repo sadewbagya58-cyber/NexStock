@@ -1,0 +1,30 @@
+{
+  "name": "nexstock-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "NexStock Universal Inventory Management and Point-of-Sale (POS) SaaS Platform",
+  "packageManager": "pnpm@12.15.0",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/api",
+    "apps/web",
+    "apps/desktop"
+  ],
+  "scripts": {
+    "lint": "eslint . --max-warnings=0",
+    "typecheck": "corepack pnpm -r run typecheck",
+    "test": "corepack pnpm -r run test",
+    "build": "corepack pnpm -r run build"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.22.0",
+    "@types/node": "^22.13.10",
+    "eslint": "^9.22.0",
+    "typescript": "^5.8.2",
+    "typescript-eslint": "^8.26.1",
+    "vitest": "^3.0.8"
+  }
+}
