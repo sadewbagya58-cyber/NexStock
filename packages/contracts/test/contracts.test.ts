@@ -1,9 +1,11 @@
 import { Value } from '@sinclair/typebox/value';
 import { describe, expect, it } from 'vitest';
 import {
+  CreateProductRequestSchema,
   CurrencyCodeSchema,
   DecimalMoneyStringSchema,
   DecimalQuantityStringSchema,
+  PostStockMovementRequestSchema,
   ProblemDetailsSchema,
   SyncPushBatchRequestSchema,
   UuidSchema,
@@ -59,5 +61,48 @@ describe('@nexstock/contracts — TypeBox Wire Schema Validation', () => {
       ],
     };
     expect(Value.Check(SyncPushBatchRequestSchema, syncBatch)).toBe(true);
+  });
+
+  it('validates Phase 2 product and stock movement wire contracts', () => {
+    expect(
+      Value.Check(CreateProductRequestSchema, {
+        sku: 'SKU-TEA-001',
+        name: 'Ceylon Black Tea 500g',
+        baseUom: 'PCS',
+        purchaseCost: '450.0000',
+        sellingPrice: '650.0000',
+        trackInventory: true,
+        primaryBarcode: '4791000000012',
+        unitConversions: [
+          {
+            uomCode: 'BOX',
+            uomName: 'Box of 12',
+            conversionFactorToBase: '12.000000',
+          },
+        ],
+      }),
+    ).toBe(true);
+
+    // Reject float numbers on purchaseCost
+    expect(
+      Value.Check(CreateProductRequestSchema, {
+        sku: 'SKU-TEA-001',
+        name: 'Ceylon Black Tea 500g',
+        baseUom: 'PCS',
+        purchaseCost: 450,
+        sellingPrice: '650.0000',
+      }),
+    ).toBe(false);
+
+    expect(
+      Value.Check(PostStockMovementRequestSchema, {
+        branchId: '0192b4a0-1c2b-7000-8000-000000000001',
+        warehouseId: '0192b4a0-1c2b-7000-8000-000000000002',
+        productId: '0192b4a0-1c2b-7000-8000-000000000003',
+        movementType: 'OPENING_STOCK',
+        quantity: '25.000000',
+        unitCost: '450.0000',
+      }),
+    ).toBe(true);
   });
 });

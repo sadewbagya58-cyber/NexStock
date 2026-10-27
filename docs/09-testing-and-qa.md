@@ -5,7 +5,7 @@
 | **Document ID** | `NEX-DOC-09` |
 | **Status** | Approved Baseline (Rev 1.1 — UD-01..UD-05 Incorporated) |
 | **Principle Addressed** | Principle #5 (Tenant Isolation), Principle #6 (Transactions), Principle #8 (Idempotency), Principle #10 (Automated Testing & Incremental Releases) |
-| **Status Note** | No tests have been executed yet as no application code has been written. |
+| **Status Note** | **Phase 1 (`M0` + `M1`) Verified Locally**: TypeScript unit tests (`packages/domain-core`) and PostgreSQL 16 integration/RLS/concurrency/migration tests (`apps/api` via `@electric-sql/pglite`) are implemented and passing. Dart/Flutter cross-language parity tests (`apps/mobile`) and live remote Supabase `PRODUCTION` execution remain pending their respective milestones/operator runs. |
 
 ---
 

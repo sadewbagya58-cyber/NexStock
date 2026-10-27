@@ -52,5 +52,33 @@ describe('NexStock Module Boundary & DAG Validator (NEX-DOC-03)', () => {
     );
     expect(sharedToIam).not.toBeNull();
     expect(sharedToIam?.code).toBe('DAG_DEPENDENCY_VIOLATION');
+
+    // CAT (Tier 2) cannot depend on INV (Tier 3) or PUR (Tier 4)
+    const catToInv = validateModuleImport(
+      'c:/repo/apps/api/src/modules/cat/application/cat.service.ts',
+      '../../inv/index.js',
+    );
+    expect(catToInv).not.toBeNull();
+    expect(catToInv?.code).toBe('DAG_DEPENDENCY_VIOLATION');
+
+    // INV (Tier 3) can depend on CAT (Tier 2) and SUB (Tier 1), but cannot depend on PUR (Tier 4)
+    expect(
+      validateModuleImport(
+        'c:/repo/apps/api/src/modules/inv/application/inv.service.ts',
+        '../../cat/index.js',
+      ),
+    ).toBeNull();
+    expect(
+      validateModuleImport(
+        'c:/repo/apps/api/src/modules/inv/application/inv.service.ts',
+        '../../sub/index.js',
+      ),
+    ).toBeNull();
+    const invToPur = validateModuleImport(
+      'c:/repo/apps/api/src/modules/inv/application/inv.service.ts',
+      '../../pur/index.js',
+    );
+    expect(invToPur).not.toBeNull();
+    expect(invToPur?.code).toBe('DAG_DEPENDENCY_VIOLATION');
   });
 });

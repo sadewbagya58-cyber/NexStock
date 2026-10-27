@@ -303,6 +303,20 @@ export async function updateSubscriptionLifecycleAndOverride(
     input.overrideReason !== undefined
       ? input.overrideReason
       : current.overrideReason;
+
+  if (
+    nextAllowOverride &&
+    (!nextOverrideReason || nextOverrideReason.trim().length < 5)
+  ) {
+    throw new AppError({
+      statusCode: 400,
+      errorCode: 'ERR_VALIDATION_FAILED',
+      title: 'Administrative Override Reason Required',
+      detail:
+        'Enabling allowAdminOverride requires a non-empty recorded overrideReason (minimum 5 characters).',
+    });
+  }
+
   const nextTrialEndsAt =
     input.trialEndsAt !== undefined
       ? input.trialEndsAt

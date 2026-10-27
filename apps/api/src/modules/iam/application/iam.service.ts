@@ -31,7 +31,24 @@ export type PermissionKey =
   | 'i18n:settings:read'
   | 'i18n:settings:manage'
   | 'i18n:fx:manage'
-  | 'i18n:tax:manage';
+  | 'i18n:tax:manage'
+  | 'cat:category:read'
+  | 'cat:category:manage'
+  | 'cat:product:read'
+  | 'cat:product:manage'
+  | 'pur:supplier:read'
+  | 'pur:supplier:manage'
+  | 'inv:balance:read'
+  | 'inv:movement:read'
+  | 'inv:movement:post'
+  | 'inv:movement:reverse'
+  | 'pos:register:read'
+  | 'pos:shift:open'
+  | 'pos:shift:close'
+  | 'pos:sale:create'
+  | 'pos:sale:read'
+  | 'pos:sale:void'
+  | 'pos:payment:create';
 
 const ALL_MILESTONE1_PERMISSIONS: readonly PermissionKey[] = [
   'org:tenant:manage',
@@ -51,6 +68,23 @@ const ALL_MILESTONE1_PERMISSIONS: readonly PermissionKey[] = [
   'i18n:settings:manage',
   'i18n:fx:manage',
   'i18n:tax:manage',
+  'cat:category:read',
+  'cat:category:manage',
+  'cat:product:read',
+  'cat:product:manage',
+  'pur:supplier:read',
+  'pur:supplier:manage',
+  'inv:balance:read',
+  'inv:movement:read',
+  'inv:movement:post',
+  'inv:movement:reverse',
+  'pos:register:read',
+  'pos:shift:open',
+  'pos:shift:close',
+  'pos:sale:create',
+  'pos:sale:read',
+  'pos:sale:void',
+  'pos:payment:create',
 ];
 
 export const SYSTEM_ROLE_DEFINITIONS: Readonly<
@@ -80,6 +114,23 @@ export const SYSTEM_ROLE_DEFINITIONS: Readonly<
       'org:register:manage',
       'iam:member:read',
       'i18n:settings:read',
+      'cat:category:read',
+      'cat:category:manage',
+      'cat:product:read',
+      'cat:product:manage',
+      'pur:supplier:read',
+      'pur:supplier:manage',
+      'inv:balance:read',
+      'inv:movement:read',
+      'inv:movement:post',
+      'inv:movement:reverse',
+      'pos:register:read',
+      'pos:shift:open',
+      'pos:shift:close',
+      'pos:sale:create',
+      'pos:sale:read',
+      'pos:sale:void',
+      'pos:payment:create',
     ],
   },
   CASHIER: {
@@ -88,6 +139,15 @@ export const SYSTEM_ROLE_DEFINITIONS: Readonly<
       'org:branch:read',
       'org:register:read',
       'i18n:settings:read',
+      'cat:category:read',
+      'cat:product:read',
+      'inv:balance:read',
+      'pos:register:read',
+      'pos:shift:open',
+      'pos:shift:close',
+      'pos:sale:create',
+      'pos:sale:read',
+      'pos:payment:create',
     ],
   },
   WAREHOUSE_CLERK: {
@@ -96,6 +156,12 @@ export const SYSTEM_ROLE_DEFINITIONS: Readonly<
       'org:branch:read',
       'org:warehouse:read',
       'i18n:settings:read',
+      'cat:category:read',
+      'cat:product:read',
+      'pur:supplier:read',
+      'inv:balance:read',
+      'inv:movement:read',
+      'inv:movement:post',
     ],
   },
   PURCHASER: {
@@ -104,6 +170,14 @@ export const SYSTEM_ROLE_DEFINITIONS: Readonly<
       'org:branch:read',
       'org:warehouse:read',
       'i18n:settings:read',
+      'cat:category:read',
+      'cat:category:manage',
+      'cat:product:read',
+      'cat:product:manage',
+      'pur:supplier:read',
+      'pur:supplier:manage',
+      'inv:balance:read',
+      'inv:movement:read',
     ],
   },
   ACCOUNTANT: {
@@ -116,6 +190,11 @@ export const SYSTEM_ROLE_DEFINITIONS: Readonly<
       'i18n:settings:read',
       'i18n:fx:manage',
       'i18n:tax:manage',
+      'cat:category:read',
+      'cat:product:read',
+      'pur:supplier:read',
+      'inv:balance:read',
+      'inv:movement:read',
     ],
   },
 };
@@ -445,6 +524,31 @@ export async function resolveMemberAuthorizationContext(
       }
       if (row.warehouse_id) {
         allowedWarehouseIds.add(row.warehouse_id);
+      }
+    }
+
+    if (allowedBranchIds.size > 0) {
+      const branchIdList = [...allowedBranchIds];
+      const branchWarehouses = await trx.db
+        .selectFrom('warehouses')
+        .select(['id'])
+        .where('tenant_id', '=', trx.tenantId)
+        .where('branch_id', 'in', branchIdList)
+        .execute();
+
+      for (const wh of branchWarehouses) {
+        allowedWarehouseIds.add(wh.id);
+      }
+
+      const linkedWarehouses = await trx.db
+        .selectFrom('branch_warehouse_links')
+        .select(['warehouse_id'])
+        .where('tenant_id', '=', trx.tenantId)
+        .where('branch_id', 'in', branchIdList)
+        .execute();
+
+      for (const link of linkedWarehouses) {
+        allowedWarehouseIds.add(link.warehouse_id);
       }
     }
   }

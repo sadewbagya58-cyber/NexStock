@@ -244,13 +244,30 @@ CREATE POLICY tenant_isolation_policy ON sync_conflicts
   USING (tenant_id = app_current_tenant_id())
   WITH CHECK (tenant_id = app_current_tenant_id());
 
--- 9. Least-Privilege Grants to Runtime Role (`nexstock_app_user`)
+-- 9. SHARED Table: schema_migrations (Safe Migration Tracking Ledger)
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  version integer PRIMARY KEY CHECK (version >= 1),
+  name text NOT NULL UNIQUE,
+  filename text NOT NULL UNIQUE,
+  applied_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+  applied_by text NOT NULL DEFAULT current_user
+);
+
+-- 10. Least-Privilege Grants to Runtime Role (`nexstock_app_user`)
 GRANT USAGE ON SCHEMA public TO nexstock_app_user;
 GRANT EXECUTE ON FUNCTION app_current_tenant_id() TO nexstock_app_user;
 GRANT EXECUTE ON FUNCTION app_current_user_id() TO nexstock_app_user;
 
+GRANT SELECT ON TABLE schema_migrations TO nexstock_app_user;
 GRANT SELECT, INSERT, UPDATE ON TABLE idempotency_keys TO nexstock_app_user;
 GRANT SELECT, INSERT, UPDATE ON TABLE outbox_events TO nexstock_app_user;
 GRANT SELECT, INSERT ON TABLE audit_logs TO nexstock_app_user;
 GRANT SELECT, INSERT, UPDATE ON TABLE sync_command_log TO nexstock_app_user;
 GRANT SELECT, INSERT, UPDATE ON TABLE sync_conflicts TO nexstock_app_user;
+
+-- Record completion of Migration 0001
+INSERT INTO schema_migrations (version, name, filename)
+VALUES (1, '0001_shared_foundation_rls', '0001_shared_foundation_rls.sql')
+ON CONFLICT (version) DO UPDATE
+  SET applied_at = clock_timestamp(),
+      applied_by = current_user;

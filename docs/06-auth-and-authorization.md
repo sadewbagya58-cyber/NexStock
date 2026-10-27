@@ -78,33 +78,21 @@ $$\text{Authorized} = \text{HasTenantMembership}(\text{user}, \text{tenant}) \la
 
 ### 3.2 Canonical Permission Taxonomy
 
-Permissions follow a strict `<module>.<resource>.<action>` naming convention:
+Phase 1 (`M0` + `M1`) implements the colon-delimited `<module>:<resource>:<action>` permission registry enforced by `assertAuthorized` in `apps/api/src/modules/iam/application/iam.service.ts` and seeded by `apps/api/migrations/0002_milestone1_iam_org_sub_i18n.sql`:
 
-| Module | Permission Key | Description |
+| Module | Implemented Phase 1 Permission Keys | Description |
 | :--- | :--- | :--- |
-| **`ORG`** | `org.settings.manage` | Update tenant profile, base currency, fiscal year |
-| **`ORG`** | `org.branches.manage` | Create/update branches, warehouses, and POS registers |
-| **`IAM`** | `iam.members.manage` | Invite users, assign roles, assign branch/warehouse scopes |
-| **`IAM`** | `iam.roles.manage` | Create/edit custom roles and permission assignments |
-| **`SUB`** | `sub.billing.manage` | Change subscription plans, view billing invoices, manage payment methods |
-| **`CAT`** | `cat.products.read` / `cat.products.write` | View or create/update products, variants, barcodes, UoMs |
-| **`CAT`** | `cat.prices.manage` | Manage price lists and branch price overrides |
-| **`CAT`** | `cat.costs.read` | View purchase cost and profit margins (hidden from standard cashiers) |
-| **`INV`** | `inv.balances.read` | View on-hand and available inventory balances |
-| **`INV`** | `inv.transfers.dispatch` / `inv.transfers.receive` | Dispatch or receive inter-warehouse stock transfers |
-| **`INV`** | `inv.stocktake.count` / `inv.stocktake.approve` | Submit blind/guided counts vs. approve variance adjustments |
-| **`INV`** | `inv.adjustments.create` / `inv.adjustments.approve` | Create or approve manual stock write-offs/adjustments |
-| **`POS`** | `pos.shift.open_close` | Open and close POS register shifts and record cash counts |
-| **`POS`** | `pos.sale.create` | Process standard POS sales and split payments |
-| **`POS`** | `pos.sale.return` | Process customer returns and refunds |
-| **`POS`** | `pos.sale.void` | Void a completed invoice (Supervisor permission) |
-| **`POS`** | `pos.discount.override` | Apply discount exceeding standard cashier threshold |
-| **`PUR`** | `pur.suppliers.manage` | Manage supplier records and supplier catalog mappings |
-| **`PUR`** | `pur.po.create` / `pur.po.approve` | Draft purchase orders vs. approve purchase orders |
-| **`PUR`** | `pur.grn.receive` | Record Goods Receipt Notes against POs |
-| **`PUR`** | `pur.bills.manage` | Record supplier bills and landed cost allocations |
-| **`FIN`** | `fin.reports.branch` / `fin.reports.organization` | View branch-level Z-reports vs. organization-wide P&L/Tax/Ledger reports |
-| **`FIN`** | `fin.periods.lock` | Close and lock accounting periods |
+| **`ORG`** | `org:branch:read`, `org:branch:manage` | Read or create/update branches |
+| **`ORG`** | `org:warehouse:read`, `org:warehouse:manage` | Read or create/update warehouses and storage bins |
+| **`ORG`** | `org:register:read`, `org:register:manage` | Read or create/update POS registers |
+| **`IAM`** | `iam:member:read`, `iam:member:manage` | Read or provision/update tenant members, role assignments, and location scopes |
+| **`IAM`** | `iam:role:read`, `iam:role:manage` | Read or manage roles and permission assignments |
+| **`SUB`** | `sub:subscription:read`, `sub:subscription:manage` | View subscription status/quotas or record manual invoices, payments, and administrative overrides |
+| **`I18N`** | `i18n:currency:read`, `i18n:currency:manage` | View or manage tenant currencies and effective-dated exchange rates |
+| **`I18N`** | `i18n:tax:read`, `i18n:tax:manage` | View or manage tax groups and tax rules |
+| **`POS`** | `pos:sale:execute` | Seeded Phase 1 permission key for `TENANT_OWNER`, `ORG_ADMIN`, `BRANCH_MANAGER`, and `CASHIER` roles (endpoint implementation scheduled for Milestone 4) |
+
+Future Phase 2+ modules (`CAT`, `INV`, `POS`, `PUR`, `FIN`) extend this taxonomy with module-specific resource actions (`cat.products.read`/`write`, `inv.balances.read`, `inv.transfers.dispatch`/`receive`, `pos.shift.open_close`, `pur.po.create`/`approve`, `fin.reports.branch`/`organization`, `fin.periods.lock`).
 
 ---
 

@@ -49,6 +49,20 @@ BEGIN
   IF NOT has_table_privilege('nexstock_app_user', 'public.sync_conflicts', 'SELECT') THEN
     RAISE EXCEPTION 'MIGRATION_ORDER_ERROR: Final grants from 0001_shared_foundation_rls.sql have not been applied to "nexstock_app_user".';
   END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.tables
+    WHERE table_schema = 'public'
+      AND table_name = 'schema_migrations'
+  ) OR NOT EXISTS (
+    SELECT 1
+    FROM schema_migrations
+    WHERE version = 1
+      AND name = '0001_shared_foundation_rls'
+  ) THEN
+    RAISE EXCEPTION 'MIGRATION_ORDER_ERROR: Migration 1 ("0001_shared_foundation_rls") is not recorded in schema_migrations.';
+  END IF;
 END
 $$;
 
@@ -605,3 +619,10 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE role_permissions TO nexstock_app_u
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE member_role_assignments TO nexstock_app_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE member_location_scopes TO nexstock_app_user;
 GRANT SELECT, INSERT ON TABLE supervisor_override_logs TO nexstock_app_user;
+
+-- Record completion of Migration 0002
+INSERT INTO schema_migrations (version, name, filename)
+VALUES (2, '0002_milestone1_iam_org_sub_i18n', '0002_milestone1_iam_org_sub_i18n.sql')
+ON CONFLICT (version) DO UPDATE
+  SET applied_at = clock_timestamp(),
+      applied_by = current_user;

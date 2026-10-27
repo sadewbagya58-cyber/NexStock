@@ -10,13 +10,13 @@ const ALLOWED_MODULE_DEPENDENCIES = {
   sub: ['shared'],
   i18n: ['shared'],
   org: ['shared', 'iam', 'sub', 'i18n'],
-  cat: ['shared', 'i18n', 'org', 'iam'],
-  crm: ['shared', 'i18n', 'org', 'iam'],
-  fin: ['shared', 'i18n', 'org', 'iam'],
-  inv: ['shared', 'cat', 'org', 'iam', 'fin', 'i18n'],
-  pos: ['shared', 'inv', 'cat', 'crm', 'i18n', 'org', 'iam', 'fin'],
-  pur: ['shared', 'inv', 'cat', 'i18n', 'org', 'iam', 'fin'],
-  sync: ['shared', 'pos', 'inv', 'cat', 'crm', 'org', 'iam'],
+  cat: ['shared', 'sub', 'i18n', 'org', 'iam'],
+  crm: ['shared', 'sub', 'i18n', 'org', 'iam'],
+  fin: ['shared', 'sub', 'i18n', 'org', 'iam'],
+  inv: ['shared', 'sub', 'cat', 'org', 'iam', 'fin', 'i18n'],
+  pos: ['shared', 'sub', 'inv', 'cat', 'crm', 'i18n', 'org', 'iam', 'fin'],
+  pur: ['shared', 'sub', 'inv', 'cat', 'i18n', 'org', 'iam', 'fin'],
+  sync: ['shared', 'sub', 'pos', 'inv', 'cat', 'crm', 'org', 'iam'],
 };
 
 const VALID_MODULES = new Set(Object.keys(ALLOWED_MODULE_DEPENDENCIES));

@@ -126,9 +126,22 @@ All five architectural decision gates have been formally reviewed and locked:
 
 ---
 
-## 5. Milestone 0 Implementation Plan (Pending Final Sign-Off to Execute)
+## 5. Phase 1 Implementation Status (`Milestone 0` + `Milestone 1`)
 
-Per project constraints, no application code or database migrations have been created yet. Upon your approval of this Milestone 0 plan, we will execute the following steps in order:
+- **Milestone 0 (`SHARED` Foundation, Monorepo & Database Security Harness)**: **COMPLETED (Backend, Packages & Migrations)**
+  - Monorepo workspace (`packages/config`, `packages/domain-core`, `packages/contracts`, `packages/sqlite-schema`, `packages/ui`, `apps/api`, `apps/web`, `apps/desktop`, `apps/mobile/README.md`) implemented with module boundary enforcement (`eslint-plugin-boundaries` + `apps/api/test/module-boundaries.test.ts`).
+  - `packages/domain-core` fixed-point `Money`, `Quantity`, `TaxCalculator`, and `ValuationCalculator` (MAC, FIFO, negative-stock recovery, post-sale landed cost PPV split) verified against canonical JSON test vectors in TypeScript (Dart parity runner deferred to Milestone 6).
+  - `apps/api/migrations/0001_shared_foundation_rls.sql` establishes `schema_migrations`, `nexstock_app_user` (`NOBYPASSRLS` compatible with non-superuser `CREATEROLE`), `app.current_tenant_id()`, and `ENABLE + FORCE ROW LEVEL SECURITY` on `idempotency_keys`, `outbox_events`, and `audit_logs`.
+- **Milestone 1 (`IAM`, `ORG`, `SUB`, `I18N` Backend & Migrations)**: **COMPLETED (Backend & Database Foundation; Web Admin UI Deferred)**
+  - `apps/api/migrations/0002_milestone1_iam_org_sub_i18n.sql` establishes `tenants`, `users`, `roles`, `permissions`, `role_permissions`, `tenant_memberships`, `member_roles`, `member_location_scopes`, `branches`, `warehouses`, `storage_bins`, `pos_registers`, `subscription_plans`, `tenant_subscriptions`, `subscription_invoices`, `subscription_payments`, `currencies`, `tenant_currencies`, `exchange_rates`, `tax_groups`, and `tax_rules` with `FORCE ROW LEVEL SECURITY` and composite tenant foreign keys.
+  - Supabase JWT (`ES256` / `RS256` JWKS) authentication with key rotation, cooldown, and timeout handling; 3-dimensional server-side authorization (`Tenant Membership` + `Role Permission` + `Location Scope`); manual/admin-provisioned subscription billing & quota enforcement (`ManualAdminBillingAdapter`); and multi-currency/tax rules are implemented and verified in `apps/api`.
+  - Next.js Web Admin views (`apps/web`) remain a minimal Phase 1 workspace shell until UI implementation milestones begin.
+- **Phase 2: Core Inventory (`CAT`, `PUR` Suppliers, `INV` Stock Movements & Materialized Inventory Balances)**: **COMPLETED (Backend, Contracts, PostgreSQL `0003` & SQLite `0002` Migrations)**
+  - `apps/api/migrations/0003_phase2_core_inventory.sql` establishes `categories`, `products`, `product_barcodes`, `product_unit_conversions`, `suppliers`, `supplier_products`, `stock_ledger_entries`, and `inventory_balances` with composite foreign keys, `ENABLE + FORCE ROW LEVEL SECURITY`, hard-delete prevention triggers, append-only ledger immutability trigger, and a database-level balance-vs-ledger integrity trigger (`enforce_inventory_balance_ledger_integrity`).
+  - `packages/sqlite-schema/migrations/0002_local_catalog_and_inventory.sql` defines `STRICT` local offline catalog and balance caches (`local_categories`, `local_products`, `local_product_barcodes`, `local_product_unit_conversions`, `local_suppliers`, `local_supplier_products`, `local_inventory_balances`).
+  - Backend API routes in `apps/api` implement `/v1/categories`, `/v1/products`, `/v1/suppliers`, `/v1/inventory/movements` (with `Idempotency-Key`, UoM conversion, concurrency serialization via `pg_advisory_xact_lock`, negative-stock policy & privileged override, and single-use `CORRECTION_REVERSAL`), and `/v1/inventory/balances` (including `/v1/inventory/balances/reconcile`).
+
+### Milestone 0 Reference Architecture Plan
 
 ### Step M0.1 — Workspace Monorepo & Tooling Bootstrap
 Create the root `pnpm-workspace.yaml`, `turbo.json`, `package.json`, `tsconfig.base.json`, and ESLint boundary rules (`eslint-plugin-boundaries` enforcing the Tier 0 → Tier 5 DAG):

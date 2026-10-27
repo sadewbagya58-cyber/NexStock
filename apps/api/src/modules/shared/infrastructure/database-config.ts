@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type Kysely, type Transaction, sql } from 'kysely';
@@ -21,6 +21,95 @@ export interface PostgresMigrationSpec {
 
 export interface PostgresMigrationRawExecutor {
   exec(sqlText: string): Promise<unknown> | unknown;
+}
+
+export interface ValidatedEnvironmentConfig {
+  readonly supabaseUrl: string;
+  readonly supabaseJwksUrl: string;
+  readonly supabaseJwtIssuer: string;
+  readonly supabaseJwtAudience: string;
+  readonly appDatabaseUrl: string;
+  readonly migrationDatabaseUrl?: string | undefined;
+}
+
+function assertNonEmptyEnvVar(
+  env: Readonly<Record<string, string | undefined>>,
+  key: string,
+): string {
+  const raw = env[key]?.trim();
+  if (!raw) {
+    throw new SecurityConfigurationError(
+      `Missing required environment variable "${key}". Configure it in your local environment (see .env.example).`,
+    );
+  }
+  if (raw.includes('SET_IN_LOCAL_ENV')) {
+    throw new SecurityConfigurationError(
+      `Environment variable "${key}" still contains the placeholder value "SET_IN_LOCAL_ENV". Replace it with a valid configuration value in your local .env file.`,
+    );
+  }
+  return raw;
+}
+
+/**
+ * Validates required runtime and optional migration environment variables without
+ * printing or logging any secret/password values (Phase 1 Section 8).
+ */
+export function validateEnvironmentConfig(
+  env: Readonly<Record<string, string | undefined>>,
+  options?: { readonly requireMigrationDatabaseUrl?: boolean },
+): ValidatedEnvironmentConfig {
+  const supabaseUrl = assertNonEmptyEnvVar(env, 'SUPABASE_URL');
+  const supabaseJwksUrl = assertNonEmptyEnvVar(env, 'SUPABASE_JWKS_URL');
+  const supabaseJwtIssuer = assertNonEmptyEnvVar(env, 'SUPABASE_JWT_ISSUER');
+  const supabaseJwtAudience = assertNonEmptyEnvVar(
+    env,
+    'SUPABASE_JWT_AUDIENCE',
+  );
+  const appDatabaseUrl = assertNonEmptyEnvVar(env, 'APP_DATABASE_URL');
+
+  try {
+    const parsedSupabase = new URL(supabaseUrl);
+    const parsedJwks = new URL(supabaseJwksUrl);
+    if (
+      parsedSupabase.protocol !== 'https:' ||
+      parsedJwks.protocol !== 'https:'
+    ) {
+      throw new Error('Supabase URLs must use https.');
+    }
+  } catch {
+    throw new SecurityConfigurationError(
+      'Invalid SUPABASE_URL or SUPABASE_JWKS_URL format; both must be valid HTTPS URLs.',
+    );
+  }
+
+  let migrationDatabaseUrl: string | undefined;
+  if (
+    options?.requireMigrationDatabaseUrl ||
+    (env['MIGRATION_DATABASE_URL'] &&
+      env['MIGRATION_DATABASE_URL'].trim() !== '')
+  ) {
+    migrationDatabaseUrl = assertNonEmptyEnvVar(env, 'MIGRATION_DATABASE_URL');
+    validateDatabaseCredentialSeparation({
+      appDatabaseUrl,
+      migrationDatabaseUrl,
+    });
+  } else {
+    // Still validate that APP_DATABASE_URL alone is not using a privileged role
+    validateDatabaseCredentialSeparation({
+      appDatabaseUrl,
+      migrationDatabaseUrl:
+        'postgresql://nexstock_migrator:placeholder@localhost:5432/nexstock',
+    });
+  }
+
+  return {
+    supabaseUrl,
+    supabaseJwksUrl,
+    supabaseJwtIssuer,
+    supabaseJwtAudience,
+    appDatabaseUrl,
+    migrationDatabaseUrl,
+  };
 }
 
 /**
@@ -143,7 +232,11 @@ export function assertPostgresMigrationSqlCompatible(
     );
   }
 
-  if (/\b(local_device_metadata|local_sync_outbox|local_sync_watermarks|local_inventory_balances)\b/i.test(executableSql)) {
+  if (
+    /\b(local_device_metadata|local_sync_outbox|local_sync_watermarks|local_inventory_balances|local_categories|local_products|local_product_barcodes|local_product_unit_conversions|local_suppliers)\b/i.test(
+      executableSql,
+    )
+  ) {
     throw new SecurityConfigurationError(
       `SQLITE_MIGRATION_REJECTED: "${sourceName}" defines local offline SQLite device tables and must not be executed against PostgreSQL/Supabase.`,
     );
@@ -151,7 +244,18 @@ export function assertPostgresMigrationSqlCompatible(
 }
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
-const migrationsDir = resolve(currentDir, '../../../../migrations');
+function resolveMigrationsDir(): string {
+  const candidate1 = resolve(currentDir, '../../../../migrations');
+  if (existsSync(candidate1)) {
+    return candidate1;
+  }
+  const candidate2 = resolve(currentDir, '../../../../../migrations');
+  if (existsSync(candidate2)) {
+    return candidate2;
+  }
+  return candidate1;
+}
+const migrationsDir = resolveMigrationsDir();
 
 export function loadFoundationMigrationSql(): string {
   const filename = '0001_shared_foundation_rls.sql';
@@ -162,6 +266,20 @@ export function loadFoundationMigrationSql(): string {
 
 export function loadMilestone1MigrationSql(): string {
   const filename = '0002_milestone1_iam_org_sub_i18n.sql';
+  const sqlText = readFileSync(resolve(migrationsDir, filename), 'utf-8');
+  assertPostgresMigrationSqlCompatible(sqlText, filename);
+  return sqlText;
+}
+
+export function loadPhase2MigrationSql(): string {
+  const filename = '0003_phase2_core_inventory.sql';
+  const sqlText = readFileSync(resolve(migrationsDir, filename), 'utf-8');
+  assertPostgresMigrationSqlCompatible(sqlText, filename);
+  return sqlText;
+}
+
+export function loadPhase3MigrationSql(): string {
+  const filename = '0004_phase3_pos_and_billing.sql';
   const sqlText = readFileSync(resolve(migrationsDir, filename), 'utf-8');
   assertPostgresMigrationSqlCompatible(sqlText, filename);
   return sqlText;
@@ -182,6 +300,20 @@ export function getOrderedPostgresMigrations(): readonly PostgresMigrationSpec[]
       name: '0002_milestone1_iam_org_sub_i18n',
       filename: '0002_milestone1_iam_org_sub_i18n.sql',
       sql: loadMilestone1MigrationSql(),
+    },
+    {
+      dialect: 'postgres',
+      version: 3,
+      name: '0003_phase2_core_inventory',
+      filename: '0003_phase2_core_inventory.sql',
+      sql: loadPhase2MigrationSql(),
+    },
+    {
+      dialect: 'postgres',
+      version: 4,
+      name: '0004_phase3_pos_and_billing',
+      filename: '0004_phase3_pos_and_billing.sql',
+      sql: loadPhase3MigrationSql(),
     },
   ];
 }

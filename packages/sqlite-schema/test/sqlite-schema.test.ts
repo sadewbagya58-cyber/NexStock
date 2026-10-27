@@ -9,10 +9,14 @@ describe('@nexstock/sqlite-schema — Canonical Offline SQLite STRICT Schema', (
   it('applies 0001_local_sync_foundation.sql cleanly, preserves SQLite PRAGMAs, and enforces STRICT types and single-tenant binding', () => {
     const db = new DatabaseSync(':memory:');
     const migrations = initializeLocalSqliteDatabase(db);
-    expect(migrations.length).toBe(1);
+    expect(migrations.length).toBe(3);
     expect(migrations[0]!.dialect).toBe('sqlite');
+    expect(migrations[1]!.dialect).toBe('sqlite');
+    expect(migrations[2]!.dialect).toBe('sqlite');
     expect(migrations[0]!.sql).toContain('PRAGMA journal_mode = WAL;');
     expect(migrations[0]!.sql).toContain('PRAGMA foreign_keys = ON;');
+    expect(migrations[1]!.sql).toContain('CREATE TABLE IF NOT EXISTS local_products');
+    expect(migrations[2]!.sql).toContain('CREATE TABLE IF NOT EXISTS local_sales_invoices');
 
     const fkRow = db.prepare('PRAGMA foreign_keys;').get() as {
       foreign_keys: number;

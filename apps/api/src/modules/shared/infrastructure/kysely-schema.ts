@@ -1,5 +1,13 @@
 import type { ColumnType, Generated } from 'kysely';
 
+export interface SchemaMigrationsTable {
+  version: number;
+  name: string;
+  filename: string;
+  applied_at: Generated<Date>;
+  applied_by: Generated<string>;
+}
+
 export interface IdempotencyKeysTable {
   tenant_id: string;
   idempotency_key: string;
@@ -316,7 +324,248 @@ export interface SupervisorOverrideLogsTable {
   created_at: Generated<Date>;
 }
 
+// ============================================================================
+// Phase 2 Core Inventory Tables (CAT, PUR, INV)
+// ============================================================================
+
+export interface CategoriesTable {
+  id: string;
+  tenant_id: string;
+  parent_id: string | null;
+  name: string;
+  description: string | null;
+  status: Generated<'ACTIVE' | 'ARCHIVED'>;
+  sync_version: Generated<string | number>;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+  archived_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+}
+
+export interface ProductsTable {
+  id: string;
+  tenant_id: string;
+  sku: string;
+  name: string;
+  description: string | null;
+  product_type: Generated<'STANDARD' | 'SERVICE' | 'BUNDLE'>;
+  status: Generated<'ACTIVE' | 'ARCHIVED'>;
+  category_id: string | null;
+  base_uom: string;
+  purchase_cost: string;
+  selling_price: string;
+  tax_group_id: string | null;
+  track_inventory: Generated<boolean>;
+  reorder_point: Generated<string>;
+  reorder_qty: Generated<string>;
+  image_url: string | null;
+  image_alt: string | null;
+  primary_barcode: string | null;
+  sync_version: Generated<string | number>;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+  archived_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+}
+
+export interface ProductBarcodesTable {
+  id: string;
+  tenant_id: string;
+  product_id: string;
+  barcode: string;
+  barcode_type: Generated<'EAN13' | 'UPCA' | 'CODE128' | 'QR' | 'CUSTOM'>;
+  uom_code: string;
+  is_primary: Generated<boolean>;
+  created_at: Generated<Date>;
+}
+
+export interface ProductUnitConversionsTable {
+  id: string;
+  tenant_id: string;
+  product_id: string;
+  uom_code: string;
+  uom_name: string;
+  conversion_factor_to_base: string;
+  is_active: Generated<boolean>;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface SuppliersTable {
+  id: string;
+  tenant_id: string;
+  code: string;
+  business_name: string;
+  contact_person: string | null;
+  email: string | null;
+  phone: string | null;
+  address: string | null;
+  tax_registration_number: string | null;
+  notes: string | null;
+  status: Generated<'ACTIVE' | 'ARCHIVED'>;
+  sync_version: Generated<string | number>;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+  archived_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+}
+
+export interface SupplierProductsTable {
+  id: string;
+  tenant_id: string;
+  supplier_id: string;
+  product_id: string;
+  supplier_sku: string | null;
+  supplier_product_name: string | null;
+  unit_cost: string | null;
+  currency_code: string | null;
+  minimum_order_qty: string | null;
+  lead_time_days: number | null;
+  is_preferred: Generated<boolean>;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export type StockMovementTypeDb =
+  | 'OPENING_STOCK'
+  | 'STOCK_IN'
+  | 'STOCK_OUT'
+  | 'ADJUSTMENT_POSITIVE'
+  | 'ADJUSTMENT_NEGATIVE'
+  | 'CORRECTION_REVERSAL'
+  | 'CUSTOMER_RETURN_RESTOCK'
+  | 'SUPPLIER_RETURN';
+
+export interface StockLedgerEntriesTable {
+  id: string;
+  tenant_id: string;
+  branch_id: string;
+  warehouse_id: string;
+  product_id: string;
+  supplier_id: string | null;
+  movement_type: StockMovementTypeDb;
+  uom_code: string;
+  input_qty: string;
+  conversion_factor_to_base: string;
+  qty_delta: string;
+  balance_before: string;
+  balance_after: string;
+  unit_cost: string;
+  reference_type: string | null;
+  reference_id: string | null;
+  reversed_entry_id: string | null;
+  reason: string | null;
+  negative_stock_override_applied: Generated<boolean>;
+  actor_user_id: string;
+  idempotency_key: string;
+  occurred_at: ColumnType<Date, Date | string, Date | string>;
+  recorded_at: Generated<Date>;
+  metadata_json: Generated<unknown>;
+}
+
+export interface InventoryBalancesTable {
+  id: string;
+  tenant_id: string;
+  branch_id: string;
+  warehouse_id: string;
+  product_id: string;
+  uom_code: string;
+  qty_on_hand: string;
+  qty_reserved: Generated<string>;
+  qty_in_transit: Generated<string>;
+  qty_damaged: Generated<string>;
+  moving_avg_cost: Generated<string>;
+  total_inventory_value: Generated<string>;
+  last_ledger_entry_id: string;
+  last_movement_at: ColumnType<Date, Date | string, Date | string>;
+  sync_version: Generated<string | number>;
+  updated_at: Generated<Date>;
+}
+
+export interface PosShiftsTable {
+  id: string;
+  tenant_id: string;
+  branch_id: string;
+  register_id: string;
+  opened_by_user_id: string;
+  closed_by_user_id: string | null;
+  currency_code: string;
+  opening_cash_float: Generated<string>;
+  expected_closing_cash: Generated<string>;
+  counted_closing_cash: string | null;
+  cash_variance: string | null;
+  status: Generated<'OPEN' | 'CLOSED'>;
+  opened_at: Generated<Date>;
+  closed_at: Date | string | null;
+  notes: string | null;
+  metadata_json: Generated<unknown>;
+}
+
+export interface SalesInvoicesTable {
+  id: string;
+  tenant_id: string;
+  branch_id: string;
+  warehouse_id: string;
+  register_id: string;
+  shift_id: string | null;
+  customer_id: string | null;
+  cashier_user_id: string;
+  invoice_number: string;
+  status: Generated<'COMPLETED' | 'VOIDED'>;
+  currency_code: string;
+  exchange_rate_to_base: Generated<string>;
+  subtotal_amount: string;
+  discount_amount: Generated<string>;
+  tax_amount: Generated<string>;
+  rounding_adjustment: Generated<string>;
+  grand_total: string;
+  total_paid: string;
+  change_given: Generated<string>;
+  customer_name: string | null;
+  notes: string | null;
+  voided_at: Date | string | null;
+  void_reason: string | null;
+  voided_by_user_id: string | null;
+  idempotency_key: string;
+  created_at: Generated<Date>;
+  metadata_json: Generated<unknown>;
+}
+
+export interface SalesInvoiceLinesTable {
+  id: string;
+  tenant_id: string;
+  invoice_id: string;
+  line_number: number;
+  product_id: string;
+  sku: string;
+  product_name: string;
+  uom_code: string;
+  quantity: string;
+  unit_price: string;
+  discount_amount: Generated<string>;
+  tax_amount: Generated<string>;
+  line_total: string;
+  tax_rate_snapshot: Generated<unknown>;
+  unit_cost_snapshot: Generated<string>;
+  created_at: Generated<Date>;
+}
+
+export interface SalesPaymentsTable {
+  id: string;
+  tenant_id: string;
+  invoice_id: string;
+  payment_method: 'CASH' | 'CARD' | 'OTHER';
+  amount: string;
+  currency_code: string;
+  status: Generated<'COMPLETED' | 'VOIDED'>;
+  tendered_amount: string;
+  change_amount: Generated<string>;
+  card_reference: string | null;
+  card_last_four: string | null;
+  notes: string | null;
+  recorded_by_user_id: string;
+  created_at: Generated<Date>;
+}
+
 export interface NexStockDatabase {
+  schema_migrations: SchemaMigrationsTable;
   idempotency_keys: IdempotencyKeysTable;
   outbox_events: OutboxEventsTable;
   audit_logs: AuditLogsTable;
@@ -343,4 +592,16 @@ export interface NexStockDatabase {
   member_role_assignments: MemberRoleAssignmentsTable;
   member_location_scopes: MemberLocationScopesTable;
   supervisor_override_logs: SupervisorOverrideLogsTable;
+  categories: CategoriesTable;
+  products: ProductsTable;
+  product_barcodes: ProductBarcodesTable;
+  product_unit_conversions: ProductUnitConversionsTable;
+  suppliers: SuppliersTable;
+  supplier_products: SupplierProductsTable;
+  stock_ledger_entries: StockLedgerEntriesTable;
+  inventory_balances: InventoryBalancesTable;
+  pos_shifts: PosShiftsTable;
+  sales_invoices: SalesInvoicesTable;
+  sales_invoice_lines: SalesInvoiceLinesTable;
+  sales_payments: SalesPaymentsTable;
 }

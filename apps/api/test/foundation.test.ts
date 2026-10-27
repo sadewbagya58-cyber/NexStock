@@ -13,8 +13,10 @@ import {
   getOrderedPostgresMigrations,
   loadFoundationMigrationSql,
   loadMilestone1MigrationSql,
+  loadPhase2MigrationSql,
   runPostgresMigrations,
   validateDatabaseCredentialSeparation,
+  validateEnvironmentConfig,
   withTenantTransaction,
 } from '../src/index.js';
 import {
@@ -67,6 +69,47 @@ describe('@nexstock/api — Milestone 0 Foundation, RLS, Idempotency & Sync Inva
             'postgresql://nexstock_migrator:secret@localhost:5432/nexstock',
         }),
       ).toThrow(/privileged owner/);
+
+      // Environment config validation: valid env succeeds, missing or placeholder env fails safely without leaking secrets
+      const validEnv = {
+        SUPABASE_URL: 'https://tokylhdgzyoxiqwvncis.supabase.co',
+        SUPABASE_JWKS_URL:
+          'https://tokylhdgzyoxiqwvncis.supabase.co/auth/v1/.well-known/jwks.json',
+        SUPABASE_JWT_ISSUER:
+          'https://tokylhdgzyoxiqwvncis.supabase.co/auth/v1',
+        SUPABASE_JWT_AUDIENCE: 'authenticated',
+        APP_DATABASE_URL:
+          'postgresql://nexstock_app_user:local_dev_pw@localhost:5432/nexstock',
+        MIGRATION_DATABASE_URL:
+          'postgresql://nexstock_migrator:local_mig_pw@localhost:5432/nexstock',
+      };
+      expect(
+        validateEnvironmentConfig(validEnv, {
+          requireMigrationDatabaseUrl: true,
+        }).supabaseJwtAudience,
+      ).toBe('authenticated');
+
+      expect(() =>
+        validateEnvironmentConfig({
+          ...validEnv,
+          APP_DATABASE_URL: undefined,
+        }),
+      ).toThrow(/Missing required environment variable "APP_DATABASE_URL"/);
+
+      expect(() =>
+        validateEnvironmentConfig({
+          ...validEnv,
+          APP_DATABASE_URL:
+            'postgresql://nexstock_app_user:SET_IN_LOCAL_ENV@localhost:5432/nexstock',
+        }),
+      ).toThrow(/still contains the placeholder value "SET_IN_LOCAL_ENV"/);
+
+      expect(() =>
+        validateEnvironmentConfig({
+          ...validEnv,
+          SUPABASE_URL: 'http://insecure.supabase.co',
+        }),
+      ).toThrow(/must be valid HTTPS URLs/);
     });
 
     it('is safe to rerun 0001_shared_foundation_rls.sql idempotently and enforces NOBYPASSRLS inside withTenantTransaction', async () => {
@@ -93,6 +136,35 @@ describe('@nexstock/api — Milestone 0 Foundation, RLS, Idempotency & Sync Inva
       expect(status.roleName).toBe('nexstock_app_user');
       expect(status.isSuperuser).toBe(false);
       expect(status.bypassesRls).toBe(false);
+
+      // Verify schema_migrations ledger recorded versions 1, 2, 3, and 4
+      const appliedMigrations = await harness.db
+        .selectFrom('schema_migrations')
+        .select(['version', 'name', 'filename'])
+        .orderBy('version', 'asc')
+        .execute();
+      expect(appliedMigrations).toEqual([
+        {
+          version: 1,
+          name: '0001_shared_foundation_rls',
+          filename: '0001_shared_foundation_rls.sql',
+        },
+        {
+          version: 2,
+          name: '0002_milestone1_iam_org_sub_i18n',
+          filename: '0002_milestone1_iam_org_sub_i18n.sql',
+        },
+        {
+          version: 3,
+          name: '0003_phase2_core_inventory',
+          filename: '0003_phase2_core_inventory.sql',
+        },
+        {
+          version: 4,
+          name: '0004_phase3_pos_and_billing',
+          filename: '0004_phase3_pos_and_billing.sql',
+        },
+      ]);
     });
 
     it('rejects SQLite migration scripts (PRAGMA, AUTOINCREMENT, STRICT) and out-of-order migrations in the PostgreSQL runner', async () => {
@@ -152,6 +224,8 @@ describe('@nexstock/api — Milestone 0 Foundation, RLS, Idempotency & Sync Inva
       expect(pgMigrations.map((m) => m.filename)).toEqual([
         '0001_shared_foundation_rls.sql',
         '0002_milestone1_iam_org_sub_i18n.sql',
+        '0003_phase2_core_inventory.sql',
+        '0004_phase3_pos_and_billing.sql',
       ]);
 
       await expect(
@@ -159,15 +233,18 @@ describe('@nexstock/api — Milestone 0 Foundation, RLS, Idempotency & Sync Inva
       ).rejects.toThrow(/MIGRATION_ORDER_ERROR/);
       expect(executedCount).toBe(0);
 
-      // 5. SQL-level prerequisite guard: executing 0002 directly on an uninitialized PostgreSQL DB fails with MIGRATION_ORDER_ERROR
+      // 5. SQL-level prerequisite guard: executing 0002 or 0003 directly on an uninitialized PostgreSQL DB fails with MIGRATION_ORDER_ERROR
       const blankPg = new PGlite();
       await expect(
         blankPg.exec(loadMilestone1MigrationSql()),
       ).rejects.toThrow(/MIGRATION_ORDER_ERROR/);
+      await expect(
+        blankPg.exec(loadPhase2MigrationSql()),
+      ).rejects.toThrow(/MIGRATION_ORDER_ERROR/);
       await blankPg.close();
     });
 
-    it('executes and reruns 0001 and 0002 under a non-superuser CREATEROLE migration role (simulating managed Supabase postgres role)', async () => {
+    it('executes and reruns 0001, 0002, and 0003 under a non-superuser CREATEROLE migration role (simulating managed Supabase postgres role)', async () => {
       const managedPg = new PGlite();
 
       // Simulate Supabase managed PostgreSQL environment:
@@ -195,26 +272,35 @@ describe('@nexstock/api — Milestone 0 Foundation, RLS, Idempotency & Sync Inva
         rolcreaterole: true,
       });
 
-      // If only `nexstock_app_user` exists without 0001's tables, 0002 must reject with MIGRATION_ORDER_ERROR
+      // If only `nexstock_app_user` exists without 0001's tables, 0002 and 0003 must reject with MIGRATION_ORDER_ERROR
       await managedPg.exec(`CREATE ROLE nexstock_app_user NOLOGIN;`);
       await expect(
         managedPg.exec(loadMilestone1MigrationSql()),
       ).rejects.toThrow(/MIGRATION_ORDER_ERROR/);
+      await expect(
+        managedPg.exec(loadPhase2MigrationSql()),
+      ).rejects.toThrow(/MIGRATION_ORDER_ERROR/);
 
-      // 1st run of 0001 (when `nexstock_app_user` already exists!) and 0002 under non-superuser CREATEROLE
+      // 1st run of 0001 (when `nexstock_app_user` already exists!), 0002, and 0003 under non-superuser CREATEROLE
       await expect(
         managedPg.exec(loadFoundationMigrationSql()),
       ).resolves.not.toThrow();
       await expect(
         managedPg.exec(loadMilestone1MigrationSql()),
       ).resolves.not.toThrow();
+      await expect(
+        managedPg.exec(loadPhase2MigrationSql()),
+      ).resolves.not.toThrow();
 
-      // 2nd rerun of 0001 and 0002 under non-superuser CREATEROLE must also succeed without 42501 permission denied
+      // 2nd rerun of 0001, 0002, and 0003 under non-superuser CREATEROLE must also succeed without 42501 permission denied
       await expect(
         managedPg.exec(loadFoundationMigrationSql()),
       ).resolves.not.toThrow();
       await expect(
         managedPg.exec(loadMilestone1MigrationSql()),
+      ).resolves.not.toThrow();
+      await expect(
+        managedPg.exec(loadPhase2MigrationSql()),
       ).resolves.not.toThrow();
 
       // Verify `nexstock_app_user` attributes and runtime RLS enforcement under `SET LOCAL ROLE nexstock_app_user`

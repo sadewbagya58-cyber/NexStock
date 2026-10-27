@@ -1,0 +1,2495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NexStock — Universal Inventory &amp; POS SaaS</title>
+  <style>
+    :root {
+      --bg-primary: #F8FAFC;
+      --surface-card: #FFFFFF;
+      --border-subtle: #E2E8F0;
+      --text-primary: #0F172A;
+      --text-secondary: #475569;
+      --accent-primary: #2563EB;
+      --accent-hover: #1D4ED8;
+      --accent-light: #EFF6FF;
+      --status-success: #16A34A;
+      --status-warning: #D97706;
+      --status-danger: #DC2626;
+      --status-info: #0284C7;
+      --sidebar-width: 250px;
+      --header-height: 64px;
+      --radius: 8px;
+      --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+      --shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+      --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+      --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    [data-theme="dark"] {
+      --bg-primary: #0B1120;
+      --surface-card: #111827;
+      --border-subtle: #1E293B;
+      --text-primary: #F8FAFC;
+      --text-secondary: #94A3B8;
+      --accent-primary: #3B82F6;
+      --accent-hover: #60A5FA;
+      --accent-light: #1E293B;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: var(--font-family);
+      background-color: var(--bg-primary);
+      color: var(--text-primary);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Top Navigation Bar */
+    header.topbar {
+      height: var(--header-height);
+      background: var(--surface-card);
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 24px;
+      position: sticky;
+      top: 0;
+      z-index: 40;
+    }
+
+    .brand-section {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand-logo {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 700;
+      font-size: 18px;
+      color: var(--accent-primary);
+      text-decoration: none;
+    }
+
+    .badge-pill {
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 9999px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .badge-blue { background: var(--accent-light); color: var(--accent-primary); }
+    .badge-green { background: #DCFCE7; color: var(--status-success); }
+    .badge-yellow { background: #FEF3C7; color: var(--status-warning); }
+    .badge-red { background: #FEE2E2; color: var(--status-danger); }
+
+    .topbar-context {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .context-selector {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      color: var(--text-secondary);
+      background: var(--bg-primary);
+      padding: 6px 12px;
+      border-radius: var(--radius);
+      border: 1px solid var(--border-subtle);
+    }
+
+    .context-selector strong { color: var(--text-primary); font-weight: 600; }
+
+    .topbar-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .btn-icon {
+      background: none;
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius);
+      width: 36px;
+      height: 36px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-secondary);
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .btn-icon:hover {
+      background: var(--bg-primary);
+      color: var(--text-primary);
+    }
+
+    /* Main Layout */
+    .app-container {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    /* Sidebar Navigation */
+    aside.sidebar {
+      width: var(--sidebar-width);
+      background: var(--surface-card);
+      border-right: 1px solid var(--border-subtle);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+      padding: 16px 8px;
+    }
+
+    .nav-section-title {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      padding: 12px 12px 6px;
+    }
+
+    .nav-link {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 14px;
+      border-radius: var(--radius);
+      color: var(--text-secondary);
+      text-decoration: none;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .nav-link:hover {
+      background: var(--bg-primary);
+      color: var(--text-primary);
+    }
+    .nav-link.active {
+      background: var(--accent-light);
+      color: var(--accent-primary);
+      font-weight: 600;
+    }
+
+    .nav-link svg {
+      width: 18px;
+      height: 18px;
+      flex-shrink: 0;
+    }
+
+    /* Main Content Area */
+    main.main-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 28px 32px;
+      background: var(--bg-primary);
+    }
+
+    .view-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 24px;
+    }
+
+    .view-title {
+      font-size: 24px;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+
+    .view-subtitle {
+      font-size: 14px;
+      color: var(--text-secondary);
+      margin-top: 4px;
+    }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 16px;
+      border-radius: var(--radius);
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      border: 1px solid transparent;
+      transition: all 0.15s ease;
+      text-decoration: none;
+    }
+    .btn-primary {
+      background: var(--accent-primary);
+      color: #FFFFFF;
+    }
+    .btn-primary:hover {
+      background: var(--accent-hover);
+    }
+    .btn-secondary {
+      background: var(--surface-card);
+      border-color: var(--border-subtle);
+      color: var(--text-primary);
+    }
+    .btn-secondary:hover {
+      background: var(--bg-primary);
+    }
+    .btn-danger {
+      background: var(--status-danger);
+      color: #FFFFFF;
+    }
+    .btn-danger:hover {
+      background: #B91C1C;
+    }
+    .btn-sm {
+      padding: 4px 10px;
+      font-size: 12px;
+    }
+
+    /* Cards */
+    .card {
+      background: var(--surface-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow-sm);
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+
+    .card-title {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 16px;
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    /* Metric KPI Grid */
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .kpi-card {
+      background: var(--surface-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius);
+      padding: 18px 20px;
+      box-shadow: var(--shadow-sm);
+    }
+    .kpi-label {
+      font-size: 13px;
+      color: var(--text-secondary);
+      font-weight: 500;
+    }
+    .kpi-value {
+      font-size: 28px;
+      font-weight: 700;
+      color: var(--text-primary);
+      margin: 8px 0 4px;
+    }
+    .kpi-trend {
+      font-size: 12px;
+      color: var(--status-success);
+      font-weight: 500;
+    }
+
+    /* Data Tables */
+    .table-responsive {
+      width: 100%;
+      overflow-x: auto;
+    }
+    table.data-table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+      font-size: 13px;
+    }
+    table.data-table th {
+      padding: 12px 14px;
+      background: var(--bg-primary);
+      color: var(--text-secondary);
+      font-weight: 600;
+      border-bottom: 1px solid var(--border-subtle);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      font-size: 11px;
+    }
+    table.data-table td {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border-subtle);
+      color: var(--text-primary);
+    }
+    table.data-table tr:hover td {
+      background: var(--accent-light);
+    }
+
+    /* Forms & Inputs */
+    .form-group {
+      margin-bottom: 16px;
+    }
+    .form-label {
+      display: block;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-primary);
+      margin-bottom: 6px;
+    }
+    .form-input, .form-select, .form-textarea {
+      width: 100%;
+      padding: 8px 12px;
+      border-radius: var(--radius);
+      border: 1px solid var(--border-subtle);
+      background: var(--surface-card);
+      color: var(--text-primary);
+      font-size: 14px;
+      font-family: inherit;
+    }
+    .form-input:focus, .form-select:focus, .form-textarea:focus {
+      outline: none;
+      border-color: var(--accent-primary);
+      box-shadow: 0 0 0 3px var(--accent-light);
+    }
+
+    /* Search & Filter Bar */
+    .filter-bar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .search-input {
+      flex: 1;
+      max-width: 380px;
+    }
+
+    /* Modal System */
+    .modal-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.5);
+      backdrop-filter: blur(2px);
+      z-index: 50;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .modal-backdrop.active {
+      display: flex;
+    }
+    .modal-box {
+      background: var(--surface-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow-lg);
+      width: 100%;
+      max-width: 540px;
+      max-height: 90vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .modal-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .modal-title {
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+    .modal-body {
+      padding: 20px;
+      overflow-y: auto;
+      flex: 1;
+    }
+    .modal-footer {
+      padding: 14px 20px;
+      border-top: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 10px;
+      background: var(--bg-primary);
+    }
+
+    /* POS Grid & Cart Styles */
+    .pos-layout {
+      display: grid;
+      grid-template-columns: 1fr 380px;
+      gap: 20px;
+      height: calc(100vh - var(--header-height) - 56px);
+    }
+    .pos-catalog-panel {
+      display: flex;
+      flex-direction: column;
+      background: var(--surface-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius);
+      padding: 16px;
+      overflow: hidden;
+    }
+    .pos-product-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 12px;
+      overflow-y: auto;
+      flex: 1;
+      padding-top: 12px;
+    }
+    .pos-product-card {
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius);
+      padding: 12px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      background: var(--surface-card);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    .pos-product-card:hover {
+      border-color: var(--accent-primary);
+      transform: translateY(-2px);
+      box-shadow: var(--shadow-sm);
+    }
+    .pos-product-name {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-primary);
+      margin-bottom: 4px;
+    }
+    .pos-product-sku {
+      font-size: 11px;
+      color: var(--text-secondary);
+      font-family: monospace;
+    }
+    .pos-product-price {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--accent-primary);
+      margin-top: 8px;
+    }
+
+    .pos-cart-panel {
+      background: var(--surface-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .pos-cart-header {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border-subtle);
+      font-weight: 600;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .pos-cart-items {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px 16px;
+    }
+    .cart-line {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 0;
+      border-bottom: 1px dashed var(--border-subtle);
+    }
+    .cart-line-info {
+      flex: 1;
+    }
+    .cart-line-name {
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .cart-line-sub {
+      font-size: 11px;
+      color: var(--text-secondary);
+    }
+    .cart-line-controls {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-left: 12px;
+    }
+    .qty-btn {
+      width: 26px;
+      height: 26px;
+      border-radius: 4px;
+      border: 1px solid var(--border-subtle);
+      background: var(--bg-primary);
+      cursor: pointer;
+      font-weight: bold;
+      color: var(--text-primary);
+    }
+    .pos-cart-summary {
+      background: var(--bg-primary);
+      border-top: 1px solid var(--border-subtle);
+      padding: 16px;
+    }
+    .summary-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 13px;
+      color: var(--text-secondary);
+      margin-bottom: 6px;
+    }
+    .summary-total {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--text-primary);
+      border-top: 1px solid var(--border-subtle);
+      padding-top: 8px;
+      margin-top: 8px;
+    }
+
+    /* Thermal Receipt View */
+    .receipt-container {
+      background: #FFFFFF;
+      color: #000000;
+      font-family: 'Courier New', Courier, monospace;
+      padding: 16px;
+      max-width: 340px;
+      margin: 0 auto;
+      border: 1px dashed #CCCCCC;
+      font-size: 12px;
+    }
+    .receipt-center { text-align: center; }
+    .receipt-divider { border-top: 1px dashed #000000; margin: 8px 0; }
+    .receipt-row { display: flex; justify-content: space-between; margin-bottom: 4px; }
+    .receipt-bold { font-weight: bold; }
+
+    /* Toast Notifications */
+    .toast-container {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      z-index: 100;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .toast {
+      background: var(--surface-card);
+      color: var(--text-primary);
+      border: 1px solid var(--border-subtle);
+      border-left: 4px solid var(--accent-primary);
+      box-shadow: var(--shadow-lg);
+      padding: 12px 18px;
+      border-radius: var(--radius);
+      font-size: 13px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      animation: slideIn 0.2s ease;
+      max-width: 360px;
+    }
+    .toast.error { border-left-color: var(--status-danger); }
+    .toast.success { border-left-color: var(--status-success); }
+    @keyframes slideIn {
+      from { transform: translateX(100%); opacity: 0; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+
+    /* Empty States */
+    .empty-state {
+      text-align: center;
+      padding: 48px 24px;
+      color: var(--text-secondary);
+    }
+    .empty-state svg {
+      width: 48px;
+      height: 48px;
+      margin-bottom: 12px;
+      color: var(--border-subtle);
+    }
+    .empty-state-title {
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--text-primary);
+      margin-bottom: 4px;
+    }
+
+    /* Responsive */
+    @media (max-width: 900px) {
+      .app-container { flex-direction: column; }
+      aside.sidebar { width: 100%; border-right: none; border-bottom: 1px solid var(--border-subtle); }
+      .pos-layout { grid-template-columns: 1fr; height: auto; }
+      main.main-content { padding: 16px; }
+    }
+  </style>
+</head>
+<body data-theme="light">
+
+  <!-- Top Bar -->
+  <header class="topbar">
+    <div class="brand-section">
+      <a href="#dashboard" class="brand-logo">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+        NexStock
+      </a>
+      <span class="badge-pill badge-blue">v0.1.0 Phase 3</span>
+    </div>
+
+    <div class="topbar-context">
+      <div class="context-selector" id="topbarTenantContext">
+        <span>Org:</span> <strong id="topbarTenantName">NexStock Global Retail Ltd</strong>
+        <span class="badge-pill badge-green" id="topbarPlanBadge">GROWTH</span>
+      </div>
+
+      <div class="context-selector">
+        <span>Branch:</span> <strong id="topbarBranchName">Manhattan Store</strong>
+      </div>
+
+      <div class="context-selector">
+        <span>Role:</span> <strong id="topbarUserRole">OWNER</strong>
+      </div>
+    </div>
+
+    <div class="topbar-actions">
+      <button class="btn btn-secondary btn-sm" id="btnSwitchRole" title="Toggle between Owner &amp; Cashier demo sessions">
+        Switch User
+      </button>
+
+      <button class="btn-icon" id="btnThemeToggle" title="Toggle Dark/Light Mode">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
+      </button>
+
+      <div class="badge-pill badge-green" id="topbarSyncStatus" title="System Status">
+        ● Online
+      </div>
+    </div>
+  </header>
+
+  <!-- App Body Layout -->
+  <div class="app-container">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="nav-section-title">Overview</div>
+      <a class="nav-link active" data-view="dashboard">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+        Dashboard
+      </a>
+
+      <div class="nav-section-title">Inventory</div>
+      <a class="nav-link" data-view="products">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path><line x1="3" y1="6" x2="21" y2="6"></line><path d="M16 10a4 4 0 0 1-8 0"></path></svg>
+        Products
+      </a>
+      <a class="nav-link" data-view="categories">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path><line x1="7" y1="7" x2="7.01" y2="7"></line></svg>
+        Categories
+      </a>
+      <a class="nav-link" data-view="suppliers">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"></rect><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"></polygon><circle cx="5.5" cy="18.5" r="2.5"></circle><circle cx="18.5" cy="18.5" r="2.5"></circle></svg>
+        Suppliers
+      </a>
+      <a class="nav-link" data-view="movements">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"></polyline><path d="M3 11V9a4 4 0 0 1 4-4h14"></path><polyline points="7 23 3 19 7 15"></polyline><path d="M21 13v2a4 4 0 0 1-4 4H3"></path></svg>
+        Stock Movements
+      </a>
+      <a class="nav-link" data-view="balances">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path></svg>
+        Inventory Balances
+      </a>
+
+      <div class="nav-section-title">Point of Sale</div>
+      <a class="nav-link" data-view="pos-checkout">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="21" r="1"></circle><circle cx="20" cy="21" r="1"></circle><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path></svg>
+        POS Checkout
+      </a>
+      <a class="nav-link" data-view="pos-registers">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+        Registers
+      </a>
+      <a class="nav-link" data-view="pos-shifts">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+        Cashier Shifts
+      </a>
+      <a class="nav-link" data-view="pos-sales">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+        Sales History
+      </a>
+
+      <div class="nav-section-title">Organization</div>
+      <a class="nav-link" data-view="org-settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+        Settings &amp; Quotas
+      </a>
+    </aside>
+
+    <!-- Main Content Container -->
+    <main class="main-content" id="mainContainer">
+      <!-- Views are dynamically rendered here -->
+    </main>
+  </div>
+
+  <!-- Shared Modals Container -->
+  <div class="modal-backdrop" id="modalContainer">
+    <div class="modal-box" id="modalBox">
+      <!-- Modal Header -->
+      <div class="modal-header">
+        <h3 class="modal-title" id="modalTitle">Modal</h3>
+        <button class="btn-icon btn-sm" id="modalCloseBtn">&times;</button>
+      </div>
+      <!-- Modal Content -->
+      <div class="modal-body" id="modalBody"></div>
+      <!-- Modal Footer -->
+      <div class="modal-footer" id="modalFooter"></div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <!-- Application Logic -->
+  <script>
+    // State Store
+    const state = {
+      apiBaseUrl: 'http://localhost:4000',
+      token: '',
+      tenantId: '0192b4c0-1111-7000-8000-000000000001',
+      branchId: '0192b4c0-3333-7000-8000-000000000001',
+      warehouseId: '0192b4c0-4444-7000-8000-000000000001',
+      registerId: '0192b4c0-5555-7000-8000-000000000001',
+      userRole: 'OWNER',
+      userEmail: 'owner@demo.nexstock.local',
+      fullName: 'Demo Store Owner',
+      activeView: 'dashboard',
+      theme: 'light',
+      activeShift: null,
+      cart: [],
+      orderDiscount: 0,
+      cachedProducts: [],
+      cachedCategories: [],
+      cachedSuppliers: [],
+      cachedRegisters: []
+    };
+
+    // Helper: Toast Notifications
+    function showToast(message, type = 'info') {
+      const container = document.getElementById('toastContainer');
+      const toast = document.createElement('div');
+      toast.className = `toast ${type}`;
+      toast.innerText = message;
+      container.appendChild(toast);
+      setTimeout(() => {
+        toast.style.opacity = '0';
+        setTimeout(() => toast.remove(), 200);
+      }, 4000);
+    }
+
+    // API Client with automatic auth, tenant header, and idempotency key
+    async function apiFetch(endpoint, options = {}) {
+      const headers = {
+        'Content-Type': 'application/json',
+        'x-tenant-id': state.tenantId,
+        ...(state.token ? { 'Authorization': `Bearer ${state.token}` } : {}),
+        ...(options.headers || {})
+      };
+
+      if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(options.method)) {
+        if (!headers['idempotency-key']) {
+          headers['idempotency-key'] = crypto.randomUUID();
+        }
+      }
+
+      try {
+        const res = await fetch(`${state.apiBaseUrl}${endpoint}`, {
+          ...options,
+          headers
+        });
+
+        const contentType = res.headers.get('content-type') || '';
+        const data = contentType.includes('application/json') ? await res.json() : null;
+
+        if (!res.ok) {
+          const detail = data?.detail || data?.title || `HTTP ${res.status}`;
+          throw new Error(detail);
+        }
+
+        return data;
+      } catch (err) {
+        showToast(err.message, 'error');
+        throw err;
+      }
+    }
+
+    // Modal Manager
+    function openModal({ title, bodyHtml, footerHtml }) {
+      document.getElementById('modalTitle').innerText = title;
+      document.getElementById('modalBody').innerHTML = bodyHtml;
+      document.getElementById('modalFooter').innerHTML = footerHtml || `
+        <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+      `;
+      document.getElementById('modalContainer').classList.add('active');
+    }
+
+    function closeModal() {
+      document.getElementById('modalContainer').classList.remove('active');
+    }
+
+    document.getElementById('modalCloseBtn').onclick = closeModal;
+
+    // Theme Management
+    function toggleTheme() {
+      state.theme = state.theme === 'light' ? 'dark' : 'light';
+      document.body.setAttribute('data-theme', state.theme);
+      localStorage.setItem('nexstock_theme', state.theme);
+    }
+
+    document.getElementById('btnThemeToggle').onclick = toggleTheme;
+
+    // Switch Role (Demo Admin vs Demo Cashier)
+    async function switchRole() {
+      const targetRole = state.userRole === 'OWNER' ? 'CASHIER' : 'OWNER';
+      try {
+        const session = await fetch(`${state.apiBaseUrl}/v1/auth/demo-session`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ role: targetRole })
+        }).then(r => r.json());
+
+        state.token = session.token;
+        state.userRole = session.role;
+        state.fullName = session.fullName;
+        state.userEmail = session.email;
+
+        document.getElementById('topbarUserRole').innerText = session.role;
+        showToast(`Switched active session to ${session.fullName} (${session.role})`, 'success');
+        renderView(state.activeView);
+      } catch (err) {
+        showToast('Failed to switch demo session', 'error');
+      }
+    }
+
+    document.getElementById('btnSwitchRole').onclick = switchRole;
+
+    // View Navigation Router
+    function renderView(viewName) {
+      state.activeView = viewName;
+      document.querySelectorAll('.nav-link').forEach(el => {
+        el.classList.toggle('active', el.getAttribute('data-view') === viewName);
+      });
+
+      const container = document.getElementById('mainContainer');
+      container.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-secondary);">Loading...</div>';
+
+      switch (viewName) {
+        case 'dashboard': renderDashboardView(); break;
+        case 'products': renderProductsView(); break;
+        case 'categories': renderCategoriesView(); break;
+        case 'suppliers': renderSuppliersView(); break;
+        case 'movements': renderMovementsView(); break;
+        case 'balances': renderBalancesView(); break;
+        case 'pos-checkout': renderPosCheckoutView(); break;
+        case 'pos-registers': renderPosRegistersView(); break;
+        case 'pos-shifts': renderPosShiftsView(); break;
+        case 'pos-sales': renderPosSalesView(); break;
+        case 'org-settings': renderOrgSettingsView(); break;
+        default: renderDashboardView();
+      }
+    }
+
+    document.querySelectorAll('.nav-link').forEach(el => {
+      el.onclick = (e) => {
+        e.preventDefault();
+        const view = el.getAttribute('data-view');
+        renderView(view);
+      };
+    });
+
+    // =========================================================================
+    // 1. DASHBOARD VIEW
+    // =========================================================================
+    async function renderDashboardView() {
+      const container = document.getElementById('mainContainer');
+      try {
+        const [products, balances, sales, registers] = await Promise.all([
+          apiFetch('/v1/products?limit=100').catch(() => ({ data: [] })),
+          apiFetch(`/v1/inventory/balances?warehouseId=${state.warehouseId}&limit=100`).catch(() => ({ data: [] })),
+          apiFetch('/v1/pos/sales?limit=10').catch(() => ({ data: [] })),
+          apiFetch(`/v1/pos/registers?branchId=${state.branchId}`).catch(() => [])
+        ]);
+
+        const prodList = products.data || [];
+        const balList = balances.data || [];
+        const saleList = sales.data || [];
+
+        const totalProducts = prodList.length;
+        const totalOnHand = balList.reduce((acc, b) => acc + parseFloat(b.qtyOnHand || '0'), 0);
+        const lowStockCount = balList.filter(b => parseFloat(b.availableQuantity || '0') <= parseFloat(b.reorderPoint || '0')).length;
+        const totalSalesRevenue = saleList.reduce((acc, s) => s.status === 'COMPLETED' ? acc + parseFloat(s.grandTotal || '0') : acc, 0);
+
+        container.innerHTML = `
+          <div class="view-header">
+            <div>
+              <h1 class="view-title">Store Operations Dashboard</h1>
+              <div class="view-subtitle">Live status for Manhattan Flagship Branch (WH-NYC-01)</div>
+            </div>
+          </div>
+
+          <div class="kpi-grid">
+            <div class="kpi-card">
+              <div class="kpi-label">Active Products</div>
+              <div class="kpi-value">${totalProducts}</div>
+              <div class="kpi-trend">Catalog Synced</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Units on Hand</div>
+              <div class="kpi-value">${totalOnHand.toFixed(0)} PCS</div>
+              <div class="kpi-trend">Live Ledger Balance</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Low Stock Alerts</div>
+              <div class="kpi-value" style="color: ${lowStockCount > 0 ? 'var(--status-warning)' : 'var(--text-primary)'};">${lowStockCount}</div>
+              <div class="kpi-trend">At or below reorder pt</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Today's POS Sales</div>
+              <div class="kpi-value">$${totalSalesRevenue.toFixed(2)}</div>
+              <div class="kpi-trend">${saleList.length} transactions recorded</div>
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+            <div class="card">
+              <div class="card-title">
+                <span>Recent Completed Sales</span>
+                <button class="btn btn-secondary btn-sm" onclick="renderView('pos-sales')">View All</button>
+              </div>
+              ${saleList.length === 0 ? '<div class="empty-state"><div class="empty-state-title">No sales recorded yet</div></div>' : `
+                <div class="table-responsive">
+                  <table class="data-table">
+                    <thead>
+                      <tr>
+                        <th>Invoice</th>
+                        <th>Total</th>
+                        <th>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${saleList.slice(0, 5).map(s => `
+                        <tr>
+                          <td><strong>${s.invoiceNumber}</strong></td>
+                          <td>$${parseFloat(s.grandTotal).toFixed(2)}</td>
+                          <td><span class="badge-pill ${s.status === 'COMPLETED' ? 'badge-green' : 'badge-red'}">${s.status}</span></td>
+                        </tr>
+                      `).join('')}
+                    </tbody>
+                  </table>
+                </div>
+              `}
+            </div>
+
+            <div class="card">
+              <div class="card-title">
+                <span>Inventory Levels &amp; Balances</span>
+                <button class="btn btn-secondary btn-sm" onclick="renderView('balances')">Inspect Stock</button>
+              </div>
+              ${balList.length === 0 ? '<div class="empty-state"><div class="empty-state-title">No inventory recorded</div></div>' : `
+                <div class="table-responsive">
+                  <table class="data-table">
+                    <thead>
+                      <tr>
+                        <th>SKU</th>
+                        <th>On Hand</th>
+                        <th>Available</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${balList.slice(0, 5).map(b => `
+                        <tr>
+                          <td><strong>${b.sku}</strong></td>
+                          <td>${parseFloat(b.qtyOnHand).toFixed(0)}</td>
+                          <td>${parseFloat(b.availableQuantity).toFixed(0)}</td>
+                        </tr>
+                      `).join('')}
+                    </tbody>
+                  </table>
+                </div>
+              `}
+            </div>
+          </div>
+        `;
+      } catch (err) {
+        container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load dashboard: ${err.message}</div>`;
+      }
+    }
+
+    // =========================================================================
+    // 2. PRODUCTS VIEW
+    // =========================================================================
+    async function renderProductsView() {
+      const container = document.getElementById('mainContainer');
+      try {
+        const [productsRes, categoriesRes] = await Promise.all([
+          apiFetch('/v1/products?limit=100'),
+          apiFetch('/v1/categories?limit=100')
+        ]);
+        state.cachedProducts = productsRes.data || [];
+        state.cachedCategories = categoriesRes.data || [];
+
+        container.innerHTML = `
+          <div class="view-header">
+            <div>
+              <h1 class="view-title">Product Catalog</h1>
+              <div class="view-subtitle">Manage SKUs, prices, unit conversions, and barcodes</div>
+            </div>
+            <button class="btn btn-primary" onclick="openCreateProductModal()">+ Add Product</button>
+          </div>
+
+          <div class="card">
+            <div class="filter-bar">
+              <input type="text" class="form-input search-input" id="productSearchInput" placeholder="Search by SKU, Name or Barcode..." oninput="filterProductsTable()">
+            </div>
+
+            <div class="table-responsive">
+              <table class="data-table" id="productsTable">
+                <thead>
+                  <tr>
+                    <th>SKU</th>
+                    <th>Product Name</th>
+                    <th>Base UoM</th>
+                    <th>Cost</th>
+                    <th>Selling Price</th>
+                    <th>Primary Barcode</th>
+                    <th>Inventory Tracked</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${state.cachedProducts.map(p => `
+                    <tr data-sku="${p.sku.toLowerCase()}" data-name="${p.name.toLowerCase()}" data-barcode="${(p.primaryBarcode || '').toLowerCase()}">
+                      <td><strong>${p.sku}</strong></td>
+                      <td>${p.name}</td>
+                      <td><span class="badge-pill badge-blue">${p.baseUom}</span></td>
+                      <td>$${parseFloat(p.purchaseCost).toFixed(2)}</td>
+                      <td><strong style="color: var(--accent-primary);">$${parseFloat(p.sellingPrice).toFixed(2)}</strong></td>
+                      <td><code>${p.primaryBarcode || '—'}</code></td>
+                      <td>${p.trackInventory ? '<span class="badge-pill badge-green">Tracked</span>' : '<span class="badge-pill badge-yellow">Non-Tracked</span>'}</td>
+                      <td><span class="badge-pill ${p.status === 'ACTIVE' ? 'badge-green' : 'badge-red'}">${p.status}</span></td>
+                      <td>
+                        ${p.status === 'ACTIVE' ? `
+                          <button class="btn btn-secondary btn-sm" onclick="archiveProduct('${p.id}', '${p.name}')">Archive</button>
+                        ` : '—'}
+                      </td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        `;
+      } catch (err) {
+        container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load products: ${err.message}</div>`;
+      }
+    }
+
+    function filterProductsTable() {
+      const q = (document.getElementById('productSearchInput')?.value || '').toLowerCase().trim();
+      document.querySelectorAll('#productsTable tbody tr').forEach(tr => {
+        const sku = tr.getAttribute('data-sku') || '';
+        const name = tr.getAttribute('data-name') || '';
+        const barcode = tr.getAttribute('data-barcode') || '';
+        const match = sku.includes(q) || name.includes(q) || barcode.includes(q);
+        tr.style.display = match ? '' : 'none';
+      });
+    }
+
+    function openCreateProductModal() {
+      openModal({
+        title: 'Create New Product',
+        bodyHtml: `
+          <div class="form-group">
+            <label class="form-label">SKU *</label>
+            <input type="text" class="form-input" id="newProdSku" placeholder="e.g. MOUSE-BT-02" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Product Name *</label>
+            <input type="text" class="form-input" id="newProdName" placeholder="e.g. Bluetooth Compact Mouse" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Category</label>
+            <select class="form-select" id="newProdCategory">
+              <option value="">(None)</option>
+              ${state.cachedCategories.map(c => `<option value="${c.id}">${c.name}</option>`).join('')}
+            </select>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <div class="form-group">
+              <label class="form-label">Base UoM *</label>
+              <input type="text" class="form-input" id="newProdUom" value="PCS" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Primary Barcode</label>
+              <input type="text" class="form-input" id="newProdBarcode" placeholder="e.g. 012345678999">
+            </div>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <div class="form-group">
+              <label class="form-label">Purchase Cost ($) *</label>
+              <input type="number" step="0.01" class="form-input" id="newProdCost" value="10.00" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Selling Price ($) *</label>
+              <input type="number" step="0.01" class="form-input" id="newProdPrice" value="20.00" required>
+            </div>
+          </div>
+          <div class="form-group">
+            <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+              <input type="checkbox" id="newProdTrackStock" checked> Track Inventory in Stock Ledger
+            </label>
+          </div>
+        `,
+        footerHtml: `
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="submitCreateProduct()">Create Product</button>
+        `
+      });
+    }
+
+    async function submitCreateProduct() {
+      const sku = document.getElementById('newProdSku').value.trim();
+      const name = document.getElementById('newProdName').value.trim();
+      const categoryId = document.getElementById('newProdCategory').value || null;
+      const baseUom = document.getElementById('newProdUom').value.trim().toUpperCase() || 'PCS';
+      const barcode = document.getElementById('newProdBarcode').value.trim() || null;
+      const cost = parseFloat(document.getElementById('newProdCost').value || '0').toFixed(4);
+      const price = parseFloat(document.getElementById('newProdPrice').value || '0').toFixed(4);
+      const trackInventory = document.getElementById('newProdTrackStock').checked;
+
+      if (!sku || !name) {
+        showToast('SKU and Product Name are required', 'error');
+        return;
+      }
+
+      try {
+        await apiFetch('/v1/products', {
+          method: 'POST',
+          body: JSON.stringify({
+            sku,
+            name,
+            categoryId,
+            baseUom,
+            purchaseCost: cost,
+            sellingPrice: price,
+            trackInventory,
+            ...(barcode ? { primaryBarcode: barcode } : {})
+          })
+        });
+
+        showToast(`Product ${sku} created successfully`, 'success');
+        closeModal();
+        renderProductsView();
+      } catch (err) {
+        // error toast already shown
+      }
+    }
+
+    async function archiveProduct(id, name) {
+      if (!confirm(`Are you sure you want to archive "${name}"? It will no longer be available for sale.`)) return;
+      try {
+        await apiFetch(`/v1/products/${id}/archive`, { method: 'POST' });
+        showToast(`Product "${name}" archived`, 'success');
+        renderProductsView();
+      } catch (err) {}
+    }
+
+    // =========================================================================
+    // 3. CATEGORIES VIEW
+    // =========================================================================
+    async function renderCategoriesView() {
+      const container = document.getElementById('mainContainer');
+      try {
+        const res = await apiFetch('/v1/categories?limit=100');
+        state.cachedCategories = res.data || [];
+
+        container.innerHTML = `
+          <div class="view-header">
+            <div>
+              <h1 class="view-title">Product Categories</h1>
+              <div class="view-subtitle">Organize products into hierarchical classification groups</div>
+            </div>
+            <button class="btn btn-primary" onclick="openCreateCategoryModal()">+ Add Category</button>
+          </div>
+
+          <div class="card">
+            <div class="table-responsive">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Category Name</th>
+                    <th>Description</th>
+                    <th>Status</th>
+                    <th>Created At</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${state.cachedCategories.map(c => `
+                    <tr>
+                      <td><strong>${c.name}</strong></td>
+                      <td>${c.description || '—'}</td>
+                      <td><span class="badge-pill ${c.status === 'ACTIVE' ? 'badge-green' : 'badge-red'}">${c.status}</span></td>
+                      <td>${new Date(c.createdAt).toLocaleDateString()}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        `;
+      } catch (err) {
+        container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load categories: ${err.message}</div>`;
+      }
+    }
+
+    function openCreateCategoryModal() {
+      openModal({
+        title: 'Add New Category',
+        bodyHtml: `
+          <div class="form-group">
+            <label class="form-label">Category Name *</label>
+            <input type="text" class="form-input" id="newCatName" placeholder="e.g. Audio Equipment" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Description</label>
+            <textarea class="form-textarea" id="newCatDesc" rows="3" placeholder="Category notes or details..."></textarea>
+          </div>
+        `,
+        footerHtml: `
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="submitCreateCategory()">Create Category</button>
+        `
+      });
+    }
+
+    async function submitCreateCategory() {
+      const name = document.getElementById('newCatName').value.trim();
+      const description = document.getElementById('newCatDesc').value.trim() || null;
+      if (!name) return showToast('Category Name is required', 'error');
+
+      try {
+        await apiFetch('/v1/categories', {
+          method: 'POST',
+          body: JSON.stringify({ name, description })
+        });
+        showToast(`Category "${name}" created`, 'success');
+        closeModal();
+        renderCategoriesView();
+      } catch (err) {}
+    }
+
+    // =========================================================================
+    // 4. SUPPLIERS VIEW
+    // =========================================================================
+    async function renderSuppliersView() {
+      const container = document.getElementById('mainContainer');
+      try {
+        const res = await apiFetch('/v1/suppliers?limit=100');
+        state.cachedSuppliers = res.data || [];
+
+        container.innerHTML = `
+          <div class="view-header">
+            <div>
+              <h1 class="view-title">Suppliers &amp; Vendors</h1>
+              <div class="view-subtitle">Manage procurement partners and wholesale vendor terms</div>
+            </div>
+            <button class="btn btn-primary" onclick="openCreateSupplierModal()">+ Add Supplier</button>
+          </div>
+
+          <div class="card">
+            <div class="table-responsive">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Supplier Code</th>
+                    <th>Vendor Name</th>
+                    <th>Contact Person</th>
+                    <th>Email</th>
+                    <th>Phone</th>
+                    <th>Currency</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${state.cachedSuppliers.map(s => `
+                    <tr>
+                      <td><strong>${s.code}</strong></td>
+                      <td>${s.name}</td>
+                      <td>${s.contactPerson || '—'}</td>
+                      <td><a href="mailto:${s.email || ''}">${s.email || '—'}</a></td>
+                      <td>${s.phone || '—'}</td>
+                      <td><span class="badge-pill badge-blue">${s.currencyCode}</span></td>
+                      <td><span class="badge-pill ${s.isActive ? 'badge-green' : 'badge-red'}">${s.isActive ? 'ACTIVE' : 'INACTIVE'}</span></td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        `;
+      } catch (err) {
+        container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load suppliers: ${err.message}</div>`;
+      }
+    }
+
+    function openCreateSupplierModal() {
+      openModal({
+        title: 'Add New Supplier',
+        bodyHtml: `
+          <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 12px;">
+            <div class="form-group">
+              <label class="form-label">Code *</label>
+              <input type="text" class="form-input" id="newSupCode" placeholder="SUP-001" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Vendor Name *</label>
+              <input type="text" class="form-input" id="newSupName" placeholder="Acme Components Inc" required>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Contact Person</label>
+            <input type="text" class="form-input" id="newSupContact" placeholder="Jane Doe">
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <div class="form-group">
+              <label class="form-label">Email</label>
+              <input type="email" class="form-input" id="newSupEmail" placeholder="orders@vendor.com">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Phone</label>
+              <input type="text" class="form-input" id="newSupPhone" placeholder="+1-555-0199">
+            </div>
+          </div>
+        `,
+        footerHtml: `
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="submitCreateSupplier()">Create Supplier</button>
+        `
+      });
+    }
+
+    async function submitCreateSupplier() {
+      const code = document.getElementById('newSupCode').value.trim();
+      const name = document.getElementById('newSupName').value.trim();
+      const contactPerson = document.getElementById('newSupContact').value.trim() || null;
+      const email = document.getElementById('newSupEmail').value.trim() || null;
+      const phone = document.getElementById('newSupPhone').value.trim() || null;
+
+      if (!code || !name) return showToast('Code and Name are required', 'error');
+
+      try {
+        await apiFetch('/v1/suppliers', {
+          method: 'POST',
+          body: JSON.stringify({
+            code,
+            name,
+            contactPerson,
+            email,
+            phone,
+            countryCode: 'US',
+            currencyCode: 'USD'
+          })
+        });
+        showToast(`Supplier ${code} created`, 'success');
+        closeModal();
+        renderSuppliersView();
+      } catch (err) {}
+    }
+
+    // =========================================================================
+    // 5. STOCK MOVEMENTS & BALANCES VIEWS
+    // =========================================================================
+    async function renderMovementsView() {
+      const container = document.getElementById('mainContainer');
+      try {
+        const movementsRes = await apiFetch(`/v1/inventory/movements?warehouseId=${state.warehouseId}&limit=50`);
+        const movements = movementsRes.data || [];
+
+        container.innerHTML = `
+          <div class="view-header">
+            <div>
+              <h1 class="view-title">Stock Movement Ledger</h1>
+              <div class="view-subtitle">Immutable append-only ledger tracking every inventory quantity and cost delta</div>
+            </div>
+            <button class="btn btn-primary" onclick="openRecordStockMovementModal()">+ Post Movement</button>
+          </div>
+
+          <div class="card">
+            <div class="table-responsive">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Date / Time</th>
+                    <th>Movement Type</th>
+                    <th>Product</th>
+                    <th>Delta Qty</th>
+                    <th>Unit Cost</th>
+                    <th>Balance After</th>
+                    <th>Reference</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${movements.map(m => `
+                    <tr>
+                      <td>${new Date(m.createdAt).toLocaleString()}</td>
+                      <td><span class="badge-pill ${m.movementType.includes('IN') || m.movementType.includes('RETURN') ? 'badge-green' : 'badge-yellow'}">${m.movementType}</span></td>
+                      <td><strong>${m.productSku}</strong> (${m.productName})</td>
+                      <td style="font-weight: 700; color: ${parseFloat(m.quantity) >= 0 ? 'var(--status-success)' : 'var(--status-danger)'};">
+                        ${parseFloat(m.quantity) > 0 ? '+' : ''}${parseFloat(m.quantity).toFixed(0)} ${m.uomCode}
+                      </td>
+                      <td>$${parseFloat(m.unitCost).toFixed(2)}</td>
+                      <td><strong>${parseFloat(m.balanceAfter).toFixed(0)}</strong></td>
+                      <td><code>${m.referenceType || 'MANUAL'}</code></td>
+                      <td>
+                        ${!m.reversedEntryId && m.movementType !== 'CUSTOMER_RETURN_RESTOCK' ? `
+                          <button class="btn btn-secondary btn-sm" onclick="reverseStockMovement('${m.id}', '${m.productSku}')">Reverse</button>
+                        ` : '—'}
+                      </td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        `;
+      } catch (err) {
+        container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load movements: ${err.message}</div>`;
+      }
+    }
+
+    async function openRecordStockMovementModal() {
+      const prodsRes = await apiFetch('/v1/products?limit=100').catch(() => ({ data: [] }));
+      const products = prodsRes.data || [];
+
+      openModal({
+        title: 'Post Inventory Stock Movement',
+        bodyHtml: `
+          <div class="form-group">
+            <label class="form-label">Product *</label>
+            <select class="form-select" id="moveProdId">
+              ${products.map(p => `<option value="${p.id}">${p.sku} — ${p.name} ($${p.purchaseCost})</option>`).join('')}
+            </select>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <div class="form-group">
+              <label class="form-label">Movement Type *</label>
+              <select class="form-select" id="moveType">
+                <option value="STOCK_IN">STOCK_IN (Receiving)</option>
+                <option value="STOCK_OUT">STOCK_OUT (Disposal/Usage)</option>
+                <option value="ADJUSTMENT_IN">ADJUSTMENT_IN (Audit Up)</option>
+                <option value="ADJUSTMENT_OUT">ADJUSTMENT_OUT (Audit Down)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Quantity *</label>
+              <input type="number" step="1" class="form-input" id="moveQty" value="10" required>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Unit Cost ($) *</label>
+            <input type="number" step="0.01" class="form-input" id="moveCost" value="12.00" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Reason / Notes</label>
+            <input type="text" class="form-input" id="moveNotes" placeholder="e.g. Shipment arrival / audit check">
+          </div>
+        `,
+        footerHtml: `
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="submitStockMovement()">Post to Ledger</button>
+        `
+      });
+    }
+
+    async function submitStockMovement() {
+      const productId = document.getElementById('moveProdId').value;
+      const movementType = document.getElementById('moveType').value;
+      const rawQty = parseFloat(document.getElementById('moveQty').value || '0');
+      const unitCost = parseFloat(document.getElementById('moveCost').value || '0').toFixed(4);
+      const notes = document.getElementById('moveNotes').value.trim() || null;
+
+      if (rawQty <= 0) return showToast('Quantity must be greater than zero', 'error');
+
+      // Stock out is recorded as negative delta in the ledger
+      const isOut = movementType.includes('OUT');
+      const quantity = (isOut ? -rawQty : rawQty).toFixed(6);
+
+      try {
+        await apiFetch('/v1/inventory/movements', {
+          method: 'POST',
+          body: JSON.stringify({
+            branchId: state.branchId,
+            warehouseId: state.warehouseId,
+            productId,
+            movementType,
+            quantity,
+            unitCost,
+            notes
+          })
+        });
+
+        showToast('Stock movement recorded in immutable ledger', 'success');
+        closeModal();
+        renderMovementsView();
+      } catch (err) {}
+    }
+
+    async function reverseStockMovement(movementId, sku) {
+      const reason = prompt(`Enter mandatory reversal audit reason for reversing movement of ${sku}:`);
+      if (!reason) return;
+
+      try {
+        await apiFetch(`/v1/inventory/movements/${movementId}/reverse`, {
+          method: 'POST',
+          body: JSON.stringify({ reason })
+        });
+        showToast('Compensating reversal movement recorded', 'success');
+        renderMovementsView();
+      } catch (err) {}
+    }
+
+    async function renderBalancesView() {
+      const container = document.getElementById('mainContainer');
+      try {
+        const res = await apiFetch(`/v1/inventory/balances?warehouseId=${state.warehouseId}&limit=100`);
+        const balances = res.data || [];
+
+        container.innerHTML = `
+          <div class="view-header">
+            <div>
+              <h1 class="view-title">Inventory Balances</h1>
+              <div class="view-subtitle">Snapshot of on-hand and reserved stock across warehouse bins</div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="table-responsive">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>SKU</th>
+                    <th>Product Name</th>
+                    <th>On Hand</th>
+                    <th>Reserved</th>
+                    <th>Available</th>
+                    <th>Reorder Pt</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${balances.map(b => {
+                    const avail = parseFloat(b.availableQuantity);
+                    const ro = parseFloat(b.reorderPoint || '0');
+                    let badge = '<span class="badge-pill badge-green">In Stock</span>';
+                    if (avail <= 0) badge = '<span class="badge-pill badge-red">Out of Stock</span>';
+                    else if (avail <= ro) badge = '<span class="badge-pill badge-yellow">Low Stock</span>';
+
+                    return `
+                      <tr>
+                        <td><strong>${b.sku}</strong></td>
+                        <td>${b.productName}</td>
+                        <td><strong>${parseFloat(b.qtyOnHand).toFixed(0)}</strong></td>
+                        <td>${parseFloat(b.qtyReserved).toFixed(0)}</td>
+                        <td style="color: var(--accent-primary); font-weight: 700;">${avail.toFixed(0)}</td>
+                        <td>${ro.toFixed(0)}</td>
+                        <td>${badge}</td>
+                      </tr>
+                    `;
+                  }).join('')}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        `;
+      } catch (err) {
+        container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load balances: ${err.message}</div>`;
+      }
+    }
+
+    // =========================================================================
+    // 6. POS CHECKOUT VIEW & SCANNER BUFFER
+    // =========================================================================
+    async function renderPosCheckoutView() {
+      const container = document.getElementById('mainContainer');
+      try {
+        // 1. Check for open shift
+        let activeShift = null;
+        try {
+          activeShift = await apiFetch(`/v1/pos/shifts/active?registerId=${state.registerId}`);
+          state.activeShift = activeShift;
+        } catch (e) {
+          state.activeShift = null;
+        }
+
+        // 2. Fetch catalog products
+        const productsRes = await apiFetch(`/v1/pos/products/search?warehouseId=${state.warehouseId}&limit=50`);
+        const products = productsRes || [];
+
+        container.innerHTML = `
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <div>
+              <h1 class="view-title">Point of Sale (POS)</h1>
+              <div class="view-subtitle">Front Counter Terminal (Register REG-01)</div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 12px;">
+              ${state.activeShift ? `
+                <div class="badge-pill badge-green">● Shift Open (Opened: $${parseFloat(state.activeShift.openingCashFloat).toFixed(2)})</div>
+                <button class="btn btn-secondary btn-sm" onclick="openCloseShiftModal('${state.activeShift.id}')">Close Shift</button>
+              ` : `
+                <div class="badge-pill badge-yellow">Shift Closed</div>
+                <button class="btn btn-primary btn-sm" onclick="openShiftModal()">Open Shift to Sell</button>
+              `}
+            </div>
+          </div>
+
+          <div class="pos-layout">
+            <!-- Catalog Panel -->
+            <div class="pos-catalog-panel">
+              <div style="display: flex; gap: 10px; margin-bottom: 8px;">
+                <input type="text" class="form-input" id="posBarcodeScannerInput" placeholder="Scan barcode or type SKU/Name and press Enter..." autofocus>
+                <button class="btn btn-secondary" onclick="handlePosManualSearch()">Find</button>
+              </div>
+
+              <div class="pos-product-grid" id="posProductGrid">
+                ${products.map(p => `
+                  <div class="pos-product-card" onclick="addToCart('${p.id}', '${p.sku}', '${p.name}', '${p.sellingPrice}', '${p.baseUom}', ${p.trackInventory}, '${p.availableQuantity}')">
+                    <div>
+                      <div class="pos-product-name">${p.name}</div>
+                      <div class="pos-product-sku">${p.sku}</div>
+                      <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">
+                        ${p.trackInventory ? `Stock: <strong>${parseFloat(p.availableQuantity).toFixed(0)}</strong>` : 'Service (No Stock)'}
+                      </div>
+                    </div>
+                    <div class="pos-product-price">$${parseFloat(p.sellingPrice).toFixed(2)}</div>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+
+            <!-- Cart Panel -->
+            <div class="pos-cart-panel">
+              <div class="pos-cart-header">
+                <span>Current Order</span>
+                <button class="btn btn-secondary btn-sm" onclick="clearCart()">Clear</button>
+              </div>
+
+              <div class="pos-cart-items" id="posCartItemsList">
+                ${state.cart.length === 0 ? `
+                  <div class="empty-state" style="padding-top: 80px;">
+                    <div class="empty-state-title">Cart is empty</div>
+                    <div style="font-size: 13px;">Scan a barcode or tap products from the catalog to add items.</div>
+                  </div>
+                ` : state.cart.map((line, idx) => `
+                  <div class="cart-line">
+                    <div class="cart-line-info">
+                      <div class="cart-line-name">${line.name}</div>
+                      <div class="cart-line-sub">$${parseFloat(line.unitPrice).toFixed(2)} / ${line.uomCode}</div>
+                    </div>
+                    <div class="cart-line-controls">
+                      <button class="qty-btn" onclick="updateCartQty(${idx}, -1)">-</button>
+                      <strong style="min-width: 20px; text-align: center;">${line.qty}</strong>
+                      <button class="qty-btn" onclick="updateCartQty(${idx}, 1)">+</button>
+                    </div>
+                    <div style="min-width: 65px; text-align: right; font-weight: 700; color: var(--text-primary); margin-left: 12px;">
+                      $${(line.qty * parseFloat(line.unitPrice)).toFixed(2)}
+                    </div>
+                  </div>
+                `).join('')}
+              </div>
+
+              <div class="pos-cart-summary">
+                <div class="summary-row">
+                  <span>Subtotal</span>
+                  <span id="cartSubtotalText">$${calculateCartSubtotal().toFixed(2)}</span>
+                </div>
+                <div class="summary-row">
+                  <span>NYC Sales Tax (8.875%)</span>
+                  <span id="cartTaxText">$${calculateCartTax().toFixed(2)}</span>
+                </div>
+                <div class="summary-row summary-total">
+                  <span>Grand Total</span>
+                  <span id="cartGrandTotalText" style="color: var(--accent-primary);">$${calculateCartGrandTotal().toFixed(2)}</span>
+                </div>
+
+                <button class="btn btn-primary" style="width: 100%; margin-top: 14px; justify-content: center; font-size: 16px; padding: 12px;" onclick="openPaymentDrawer()" ${state.cart.length === 0 ? 'disabled' : ''}>
+                  Checkout &amp; Pay ($${calculateCartGrandTotal().toFixed(2)})
+                </button>
+              </div>
+            </div>
+          </div>
+        `;
+
+        // Barcode Scanner Listener
+        const scannerInput = document.getElementById('posBarcodeScannerInput');
+        if (scannerInput) {
+          scannerInput.addEventListener('keydown', async (e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              const query = scannerInput.value.trim();
+              if (query) {
+                await executeBarcodeScan(query);
+                scannerInput.value = '';
+              }
+            }
+          });
+        }
+      } catch (err) {
+        container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load POS: ${err.message}</div>`;
+      }
+    }
+
+    async function executeBarcodeScan(barcodeOrSku) {
+      try {
+        const results = await apiFetch(`/v1/pos/products/search?warehouseId=${state.warehouseId}&barcode=${encodeURIComponent(barcodeOrSku)}`);
+        if (results && results.length > 0) {
+          const p = results[0];
+          addToCart(p.id, p.sku, p.name, p.sellingPrice, p.baseUom, p.trackInventory, p.availableQuantity);
+          showToast(`Scanned: ${p.name}`, 'success');
+        } else {
+          // Fallback to text query
+          const textResults = await apiFetch(`/v1/pos/products/search?warehouseId=${state.warehouseId}&q=${encodeURIComponent(barcodeOrSku)}`);
+          if (textResults && textResults.length > 0) {
+            const p = textResults[0];
+            addToCart(p.id, p.sku, p.name, p.sellingPrice, p.baseUom, p.trackInventory, p.availableQuantity);
+            showToast(`Added: ${p.name}`, 'success');
+          } else {
+            showToast(`No product matching "${barcodeOrSku}"`, 'error');
+          }
+        }
+      } catch (err) {}
+    }
+
+    function addToCart(productId, sku, name, unitPrice, uomCode, trackInventory, availableQuantity) {
+      if (!state.activeShift) {
+        showToast('Please open a cashier shift before checking out sales', 'error');
+        openShiftModal();
+        return;
+      }
+
+      const existingIndex = state.cart.findIndex(i => i.productId === productId && i.uomCode === uomCode);
+      if (existingIndex >= 0) {
+        state.cart[existingIndex].qty += 1;
+      } else {
+        state.cart.push({
+          productId,
+          sku,
+          name,
+          unitPrice,
+          uomCode,
+          qty: 1,
+          trackInventory,
+          availableQuantity: parseFloat(availableQuantity)
+        });
+      }
+
+      renderPosCartPanel();
+    }
+
+    function updateCartQty(index, delta) {
+      if (state.cart[index]) {
+        state.cart[index].qty += delta;
+        if (state.cart[index].qty <= 0) {
+          state.cart.splice(index, 1);
+        }
+        renderPosCartPanel();
+      }
+    }
+
+    function clearCart() {
+      state.cart = [];
+      renderPosCartPanel();
+    }
+
+    function calculateCartSubtotal() {
+      return state.cart.reduce((acc, item) => acc + (item.qty * parseFloat(item.unitPrice)), 0);
+    }
+
+    function calculateCartTax() {
+      const sub = calculateCartSubtotal();
+      return Math.round(sub * 0.08875 * 100) / 100;
+    }
+
+    function calculateCartGrandTotal() {
+      return calculateCartSubtotal() + calculateCartTax();
+    }
+
+    function renderPosCartPanel() {
+      const subtotal = calculateCartSubtotal();
+      const tax = calculateCartTax();
+      const grandTotal = calculateCartGrandTotal();
+
+      const itemsListEl = document.getElementById('posCartItemsList');
+      if (itemsListEl) {
+        itemsListEl.innerHTML = state.cart.length === 0 ? `
+          <div class="empty-state" style="padding-top: 80px;">
+            <div class="empty-state-title">Cart is empty</div>
+            <div style="font-size: 13px;">Scan a barcode or tap products from the catalog to add items.</div>
+          </div>
+        ` : state.cart.map((line, idx) => `
+          <div class="cart-line">
+            <div class="cart-line-info">
+              <div class="cart-line-name">${line.name}</div>
+              <div class="cart-line-sub">$${parseFloat(line.unitPrice).toFixed(2)} / ${line.uomCode}</div>
+            </div>
+            <div class="cart-line-controls">
+              <button class="qty-btn" onclick="updateCartQty(${idx}, -1)">-</button>
+              <strong style="min-width: 20px; text-align: center;">${line.qty}</strong>
+              <button class="qty-btn" onclick="updateCartQty(${idx}, 1)">+</button>
+            </div>
+            <div style="min-width: 65px; text-align: right; font-weight: 700; color: var(--text-primary); margin-left: 12px;">
+              $${(line.qty * parseFloat(line.unitPrice)).toFixed(2)}
+            </div>
+          </div>
+        `).join('');
+      }
+
+      const subEl = document.getElementById('cartSubtotalText');
+      if (subEl) subEl.innerText = `$${subtotal.toFixed(2)}`;
+
+      const taxEl = document.getElementById('cartTaxText');
+      if (taxEl) taxEl.innerText = `$${tax.toFixed(2)}`;
+
+      const totalEl = document.getElementById('cartGrandTotalText');
+      if (totalEl) totalEl.innerText = `$${grandTotal.toFixed(2)}`;
+    }
+
+    // Checkout & Payment Modal
+    function openPaymentDrawer() {
+      const grandTotal = calculateCartGrandTotal();
+      openModal({
+        title: 'Complete Sale Checkout',
+        bodyHtml: `
+          <div style="text-align: center; margin-bottom: 20px; padding: 14px; background: var(--bg-primary); border-radius: var(--radius);">
+            <div style="font-size: 13px; color: var(--text-secondary);">Amount Due</div>
+            <div style="font-size: 32px; font-weight: 800; color: var(--accent-primary);">$${grandTotal.toFixed(2)}</div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Payment Method</label>
+            <select class="form-select" id="payMethod" onchange="togglePaymentInputs()">
+              <option value="CASH">Cash Payment</option>
+              <option value="CARD">Credit / Debit Card</option>
+              <option value="SPLIT">Split Payment (Cash + Card)</option>
+            </select>
+          </div>
+
+          <div id="cashPaymentFields">
+            <div class="form-group">
+              <label class="form-label">Tendered Cash ($)</label>
+              <input type="number" step="0.01" class="form-input" id="payCashTendered" value="${grandTotal.toFixed(2)}" oninput="calculateChangeDue()">
+            </div>
+            <div style="display: flex; justify-content: space-between; padding: 10px; background: var(--bg-primary); border-radius: var(--radius); font-weight: 600;">
+              <span>Change Due:</span>
+              <strong id="payChangeDueText" style="color: var(--status-success);">$0.00</strong>
+            </div>
+          </div>
+
+          <div id="cardPaymentFields" style="display: none; margin-top: 12px;">
+            <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 12px;">
+              <div class="form-group">
+                <label class="form-label">Auth Reference</label>
+                <input type="text" class="form-input" id="payCardAuth" value="AUTH-${Math.floor(100000 + Math.random() * 900000)}">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Last 4 Digits</label>
+                <input type="text" class="form-input" id="payCardDigits" maxlength="4" value="4242">
+              </div>
+            </div>
+          </div>
+
+          <div class="form-group" style="margin-top: 14px;">
+            <label class="form-label">Customer Name (Optional)</label>
+            <input type="text" class="form-input" id="payCustomerName" placeholder="Walk-in Customer">
+          </div>
+        `,
+        footerHtml: `
+          <button class="btn btn-secondary" onclick="closeModal()">Back to Cart</button>
+          <button class="btn btn-primary" onclick="submitPosCheckout()">Process Payment ($${grandTotal.toFixed(2)})</button>
+        `
+      });
+    }
+
+    function togglePaymentInputs() {
+      const method = document.getElementById('payMethod').value;
+      const cashDiv = document.getElementById('cashPaymentFields');
+      const cardDiv = document.getElementById('cardPaymentFields');
+
+      if (method === 'CASH') {
+        cashDiv.style.display = 'block';
+        cardDiv.style.display = 'none';
+      } else if (method === 'CARD') {
+        cashDiv.style.display = 'none';
+        cardDiv.style.display = 'block';
+      } else {
+        cashDiv.style.display = 'block';
+        cardDiv.style.display = 'block';
+      }
+      calculateChangeDue();
+    }
+
+    function calculateChangeDue() {
+      const total = calculateCartGrandTotal();
+      const tendered = parseFloat(document.getElementById('payCashTendered')?.value || '0');
+      const change = Math.max(0, tendered - total);
+      const el = document.getElementById('payChangeDueText');
+      if (el) el.innerText = `$${change.toFixed(2)}`;
+    }
+
+    async function submitPosCheckout() {
+      const grandTotal = calculateCartGrandTotal();
+      const method = document.getElementById('payMethod').value;
+      const customerName = document.getElementById('payCustomerName').value.trim() || null;
+
+      const lines = state.cart.map(c => ({
+        productId: c.productId,
+        quantity: c.qty.toFixed(6),
+        uomCode: c.uomCode
+      }));
+
+      let payments = [];
+      if (method === 'CASH') {
+        const tendered = parseFloat(document.getElementById('payCashTendered').value || grandTotal.toString()).toFixed(4);
+        payments.push({
+          paymentMethod: 'CASH',
+          amount: grandTotal.toFixed(4),
+          tenderedAmount: tendered
+        });
+      } else if (method === 'CARD') {
+        const auth = document.getElementById('payCardAuth').value.trim() || 'MANUAL-AUTH';
+        const last4 = document.getElementById('payCardDigits').value.trim() || '4242';
+        payments.push({
+          paymentMethod: 'CARD',
+          amount: grandTotal.toFixed(4),
+          tenderedAmount: grandTotal.toFixed(4),
+          cardReference: auth,
+          cardLastFour: last4
+        });
+      } else {
+        // Split 50/50
+        const half = (grandTotal / 2).toFixed(4);
+        const secondHalf = (grandTotal - parseFloat(half)).toFixed(4);
+        payments.push({
+          paymentMethod: 'CASH',
+          amount: half,
+          tenderedAmount: half
+        });
+        payments.push({
+          paymentMethod: 'CARD',
+          amount: secondHalf,
+          tenderedAmount: secondHalf,
+          cardReference: 'SPLIT-VISA',
+          cardLastFour: '1234'
+        });
+      }
+
+      try {
+        const sale = await apiFetch('/v1/pos/sales', {
+          method: 'POST',
+          body: JSON.stringify({
+            registerId: state.registerId,
+            shiftId: state.activeShift?.id || null,
+            customerName,
+            lines,
+            payments
+          })
+        });
+
+        showToast(`Sale completed! Invoice: ${sale.invoiceNumber}`, 'success');
+        state.cart = [];
+        closeModal();
+        openReceiptModal(sale.id);
+      } catch (err) {}
+    }
+
+    // Receipt Modal & Printing
+    async function openReceiptModal(saleId) {
+      try {
+        const receipt = await apiFetch(`/v1/pos/sales/${saleId}/receipt`);
+        openModal({
+          title: `Receipt #${receipt.invoiceNumber}`,
+          bodyHtml: `
+            <div class="receipt-container" id="printableReceipt">
+              <div class="receipt-center">
+                <div class="receipt-bold" style="font-size: 15px;">${receipt.businessName || 'NexStock Retail'}</div>
+                <div style="font-size: 11px;">${receipt.branchName || 'Flagship Store'}</div>
+                <div style="font-size: 11px;">Register: ${receipt.registerCode} | Cashier: ${receipt.cashierName}</div>
+              </div>
+              <div class="receipt-divider"></div>
+              <div class="receipt-row">
+                <span>Invoice:</span> <strong>${receipt.invoiceNumber}</strong>
+              </div>
+              <div class="receipt-row">
+                <span>Date:</span> <span>${receipt.formattedTimestamp || new Date().toLocaleString()}</span>
+              </div>
+              <div class="receipt-divider"></div>
+              <div style="margin-bottom: 8px;">
+                ${receipt.lines.map(l => `
+                  <div class="receipt-row">
+                    <span>${l.name} (x${parseFloat(l.quantity).toFixed(0)})</span>
+                    <span>$${parseFloat(l.lineTotal).toFixed(2)}</span>
+                  </div>
+                `).join('')}
+              </div>
+              <div class="receipt-divider"></div>
+              <div class="receipt-row">
+                <span>Subtotal:</span> <span>$${parseFloat(receipt.subtotalAmount).toFixed(2)}</span>
+              </div>
+              <div class="receipt-row">
+                <span>Tax:</span> <span>$${parseFloat(receipt.taxAmount).toFixed(2)}</span>
+              </div>
+              <div class="receipt-row receipt-bold" style="font-size: 14px; margin-top: 4px;">
+                <span>Total:</span> <span>$${parseFloat(receipt.grandTotal).toFixed(2)}</span>
+              </div>
+              <div class="receipt-divider"></div>
+              ${receipt.payments.map(p => `
+                <div class="receipt-row">
+                  <span>Paid (${p.method || p.paymentMethod}):</span> <span>$${parseFloat(p.amount).toFixed(2)}</span>
+                </div>
+                ${parseFloat(p.changeAmount || '0') > 0 ? `
+                  <div class="receipt-row">
+                    <span>Change Due:</span> <span>$${parseFloat(p.changeAmount).toFixed(2)}</span>
+                  </div>
+                ` : ''}
+              `).join('')}
+              ${parseFloat(receipt.changeGiven || '0') > 0 ? `
+                <div class="receipt-row">
+                  <span>Change Given:</span> <span>$${parseFloat(receipt.changeGiven).toFixed(2)}</span>
+                </div>
+              ` : ''}
+              <div class="receipt-divider"></div>
+              <div class="receipt-center" style="font-size: 11px; margin-top: 8px;">
+                ${receipt.notes || 'Thank you for shopping with NexStock!'}
+              </div>
+            </div>
+          `,
+          footerHtml: `
+            <button class="btn btn-secondary" onclick="closeModal()">Close</button>
+            <button class="btn btn-primary" onclick="window.print()">Print Receipt</button>
+          `
+        });
+      } catch (err) {}
+    }
+
+    // =========================================================================
+    // 7. POS REGISTERS & SHIFTS
+    // =========================================================================
+    async function renderPosRegistersView() {
+      const container = document.getElementById('mainContainer');
+      try {
+        const registers = await apiFetch(`/v1/pos/registers?branchId=${state.branchId}`);
+        state.cachedRegisters = registers || [];
+
+        container.innerHTML = `
+          <div class="view-header">
+            <div>
+              <h1 class="view-title">Point of Sale Registers</h1>
+              <div class="view-subtitle">Manage physical checkouts, assigned warehouses and hardware terminals</div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="table-responsive">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Register Code</th>
+                    <th>Terminal Name</th>
+                    <th>Status</th>
+                    <th>Last Invoice #</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${registers.map(r => `
+                    <tr>
+                      <td><strong>${r.code}</strong></td>
+                      <td>${r.name}</td>
+                      <td><span class="badge-pill ${r.status === 'ACTIVE' ? 'badge-green' : 'badge-red'}">${r.status}</span></td>
+                      <td><code>${r.code}-${r.lastInvoiceSeq.toString().padStart(6, '0')}</code></td>
+                      <td>
+                        <button class="btn btn-primary btn-sm" onclick="selectRegister('${r.id}', '${r.code}')">Use for POS</button>
+                      </td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        `;
+      } catch (err) {
+        container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load registers: ${err.message}</div>`;
+      }
+    }
+
+    function selectRegister(id, code) {
+      state.registerId = id;
+      showToast(`Selected register ${code} for checkout`, 'success');
+      renderView('pos-checkout');
+    }
+
+    async function renderPosShiftsView() {
+      const container = document.getElementById('mainContainer');
+      try {
+        let activeShift = null;
+        try {
+          activeShift = await apiFetch(`/v1/pos/shifts/active?registerId=${state.registerId}`);
+        } catch (e) {}
+
+        container.innerHTML = `
+          <div class="view-header">
+            <div>
+              <h1 class="view-title">Cashier Shifts &amp; Floats</h1>
+              <div class="view-subtitle">Cash register float accountability and end-of-shift reconciliation</div>
+            </div>
+            ${activeShift ? `
+              <button class="btn btn-danger" onclick="openCloseShiftModal('${activeShift.id}')">Close Active Shift</button>
+            ` : `
+              <button class="btn btn-primary" onclick="openShiftModal()">+ Open Shift</button>
+            `}
+          </div>
+
+          <div class="card">
+            <div class="card-title">Active Shift Overview</div>
+            ${activeShift ? `
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px;">
+                <div>
+                  <div class="kpi-label">Status</div>
+                  <div style="font-weight: 700; color: var(--status-success); margin-top: 4px;">OPEN</div>
+                </div>
+                <div>
+                  <div class="kpi-label">Opened At</div>
+                  <div style="font-weight: 600; margin-top: 4px;">${new Date(activeShift.openedAt).toLocaleTimeString()}</div>
+                </div>
+                <div>
+                  <div class="kpi-label">Opening Float</div>
+                  <div style="font-weight: 700; color: var(--accent-primary); margin-top: 4px;">$${parseFloat(activeShift.openingCashFloat).toFixed(2)}</div>
+                </div>
+                <div>
+                  <div class="kpi-label">Expected Drawer Cash</div>
+                  <div style="font-weight: 700; color: var(--text-primary); margin-top: 4px;">$${parseFloat(activeShift.expectedClosingCash).toFixed(2)}</div>
+                </div>
+              </div>
+            ` : `
+              <div class="empty-state">
+                <div class="empty-state-title">No active shift on register REG-01</div>
+                <div style="font-size: 13px; margin-bottom: 16px;">Start a cashier session with an opening cash float to begin checkout.</div>
+                <button class="btn btn-primary" onclick="openShiftModal()">Open Shift</button>
+              </div>
+            `}
+          </div>
+        `;
+      } catch (err) {
+        container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load shifts: ${err.message}</div>`;
+      }
+    }
+
+    function openShiftModal() {
+      openModal({
+        title: 'Open Cashier Shift',
+        bodyHtml: `
+          <div class="form-group">
+            <label class="form-label">Opening Cash Float ($) *</label>
+            <input type="number" step="0.01" class="form-input" id="openFloatInput" value="150.00" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Notes (Optional)</label>
+            <input type="text" class="form-input" id="openShiftNotes" placeholder="Morning shift opening float">
+          </div>
+        `,
+        footerHtml: `
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="submitOpenShift()">Open Shift</button>
+        `
+      });
+    }
+
+    async function submitOpenShift() {
+      const floatVal = parseFloat(document.getElementById('openFloatInput').value || '0').toFixed(4);
+      const notes = document.getElementById('openShiftNotes').value.trim() || null;
+
+      try {
+        await apiFetch('/v1/pos/shifts', {
+          method: 'POST',
+          body: JSON.stringify({
+            registerId: state.registerId,
+            openingCashFloat: floatVal,
+            notes
+          })
+        });
+        showToast('Cashier shift opened successfully', 'success');
+        closeModal();
+        renderView('pos-checkout');
+      } catch (err) {}
+    }
+
+    function openCloseShiftModal(shiftId) {
+      openModal({
+        title: 'Close Cashier Shift &amp; Reconcile Cash',
+        bodyHtml: `
+          <div class="form-group">
+            <label class="form-label">Counted Drawer Cash ($) *</label>
+            <input type="number" step="0.01" class="form-input" id="closeCountedInput" placeholder="Enter counted cash in drawer..." required>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Closing Notes</label>
+            <textarea class="form-textarea" id="closeShiftNotes" rows="2" placeholder="Variance explanation or end of shift notes..."></textarea>
+          </div>
+        `,
+        footerHtml: `
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-danger" onclick="submitCloseShift('${shiftId}')">Close &amp; Finalize Shift</button>
+        `
+      });
+    }
+
+    async function submitCloseShift(shiftId) {
+      const counted = parseFloat(document.getElementById('closeCountedInput').value || '0').toFixed(4);
+      const notes = document.getElementById('closeShiftNotes').value.trim() || null;
+
+      try {
+        const closed = await apiFetch(`/v1/pos/shifts/${shiftId}/close`, {
+          method: 'POST',
+          body: JSON.stringify({
+            countedClosingCash: counted,
+            notes
+          })
+        });
+
+        const variance = parseFloat(closed.cashVariance || '0');
+        showToast(`Shift closed! Cash variance: $${variance.toFixed(2)}`, variance === 0 ? 'success' : 'warning');
+        state.activeShift = null;
+        closeModal();
+        renderView('pos-shifts');
+      } catch (err) {}
+    }
+
+    // =========================================================================
+    // 8. SALES HISTORY & VOID WORKFLOW
+    // =========================================================================
+    async function renderPosSalesView() {
+      const container = document.getElementById('mainContainer');
+      try {
+        const res = await apiFetch('/v1/pos/sales?limit=50');
+        const sales = res.data || [];
+
+        container.innerHTML = `
+          <div class="view-header">
+            <div>
+              <h1 class="view-title">Sales History &amp; Orders</h1>
+              <div class="view-subtitle">Audit completed POS transactions, review receipts and execute authorized voids</div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="table-responsive">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Invoice #</th>
+                    <th>Date / Time</th>
+                    <th>Customer</th>
+                    <th>Subtotal</th>
+                    <th>Tax</th>
+                    <th>Grand Total</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${sales.map(s => `
+                    <tr>
+                      <td><strong>${s.invoiceNumber}</strong></td>
+                      <td>${new Date(s.soldAt).toLocaleString()}</td>
+                      <td>${s.customerName || 'Walk-in Customer'}</td>
+                      <td>$${parseFloat(s.subtotalAmount).toFixed(2)}</td>
+                      <td>$${parseFloat(s.taxAmount).toFixed(2)}</td>
+                      <td style="font-weight: 700; color: var(--accent-primary);">$${parseFloat(s.grandTotal).toFixed(2)}</td>
+                      <td><span class="badge-pill ${s.status === 'COMPLETED' ? 'badge-green' : 'badge-red'}">${s.status}</span></td>
+                      <td>
+                        <button class="btn btn-secondary btn-sm" onclick="openReceiptModal('${s.id}')">Receipt</button>
+                        ${s.status === 'COMPLETED' ? `
+                          <button class="btn btn-danger btn-sm" onclick="voidSalePrompt('${s.id}', '${s.invoiceNumber}')" ${state.userRole === 'CASHIER' ? 'disabled title="Cashiers cannot void sales. Requires Owner/Admin."' : ''}>
+                            Void
+                          </button>
+                        ` : ''}
+                      </td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        `;
+      } catch (err) {
+        container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load sales: ${err.message}</div>`;
+      }
+    }
+
+    async function voidSalePrompt(saleId, invoiceNumber) {
+      if (state.userRole === 'CASHIER') {
+        showToast('Permission denied: Cashiers cannot void sales. Switch to Owner role.', 'error');
+        return;
+      }
+
+      const reason = prompt(`Enter reason for voiding invoice ${invoiceNumber} (inventory will be automatically returned to stock):`);
+      if (!reason) return;
+
+      try {
+        await apiFetch(`/v1/pos/sales/${saleId}/void`, {
+          method: 'POST',
+          body: JSON.stringify({ reason })
+        });
+        showToast(`Invoice ${invoiceNumber} voided and stock restocked`, 'success');
+        renderPosSalesView();
+      } catch (err) {}
+    }
+
+    // =========================================================================
+    // 9. ORGANIZATION SETTINGS & ENTITLEMENTS VIEW
+    // =========================================================================
+    async function renderOrgSettingsView() {
+      const container = document.getElementById('mainContainer');
+      try {
+        const entRes = await apiFetch('/v1/subscriptions/entitlement').catch(() => ({
+          planCode: 'GROWTH',
+          status: 'ACTIVE',
+          maxBranches: 10,
+          maxWarehouses: 20,
+          maxUsers: 50,
+          maxSkus: 10000
+        }));
+
+        container.innerHTML = `
+          <div class="view-header">
+            <div>
+              <h1 class="view-title">Organization Settings &amp; Subscription</h1>
+              <div class="view-subtitle">Multi-tenant account parameters, plan limits, and tax configurations</div>
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+            <div class="card">
+              <div class="card-title">Tenant Profile</div>
+              <div class="form-group">
+                <label class="form-label">Legal Name</label>
+                <input type="text" class="form-input" value="NexStock Global Retail Ltd (Demo Store)" readonly>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Tenant ID</label>
+                <input type="text" class="form-input" value="${state.tenantId}" readonly style="font-family: monospace; font-size: 12px;">
+              </div>
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                <div class="form-group">
+                  <label class="form-label">Base Currency</label>
+                  <input type="text" class="form-input" value="USD" readonly>
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Default Country</label>
+                  <input type="text" class="form-input" value="US" readonly>
+                </div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-title">
+                <span>Subscription Plan</span>
+                <span class="badge-pill badge-green">${entRes.planCode} (${entRes.status})</span>
+              </div>
+              <div style="margin-bottom: 12px; font-size: 13px; color: var(--text-secondary);">
+                Active enterprise subscription with multi-branch allocation and unrestricted POS checkout registers.
+              </div>
+              <div class="table-responsive">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>Quota Resource</th>
+                      <th>Entitlement Limit</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr><td>Max Store Branches</td><td><strong>${entRes.maxBranches}</strong></td></tr>
+                    <tr><td>Max Warehouses</td><td><strong>${entRes.maxWarehouses}</strong></td></tr>
+                    <tr><td>Max Team Members</td><td><strong>${entRes.maxUsers}</strong></td></tr>
+                    <tr><td>Max Product SKUs</td><td><strong>${entRes.maxSkus}</strong></td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        `;
+      } catch (err) {
+        container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load settings: ${err.message}</div>`;
+      }
+    }
+
+    // Initialize Application
+    async function initApp() {
+      const savedTheme = localStorage.getItem('nexstock_theme');
+      if (savedTheme) {
+        state.theme = savedTheme;
+        document.body.setAttribute('data-theme', savedTheme);
+      }
+
+      // 1. Obtain demo session token from backend
+      try {
+        const session = await fetch(`${state.apiBaseUrl}/v1/auth/demo-session`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ role: 'OWNER' })
+        }).then(r => r.json());
+
+        state.token = session.token;
+        state.userRole = session.role;
+        state.fullName = session.fullName;
+        state.userEmail = session.email;
+        state.tenantId = session.tenantId;
+        state.branchId = session.branchId;
+        state.warehouseId = session.warehouseId;
+        state.registerId = session.registerId;
+
+        document.getElementById('topbarUserRole').innerText = session.role;
+        document.getElementById('topbarSyncStatus').innerText = '● Connected';
+        document.getElementById('topbarSyncStatus').className = 'badge-pill badge-green';
+      } catch (err) {
+        document.getElementById('topbarSyncStatus').innerText = '● Offline / Disconnected';
+        document.getElementById('topbarSyncStatus').className = 'badge-pill badge-red';
+        showToast('Could not reach API at ' + state.apiBaseUrl + '. Ensure API server is running on port 4000.', 'error');
+      }
+
+      // 2. Render initial view
+      renderView('dashboard');
+    }
+
+    window.onload = initApp;
+  </script>
+</body>
+</html>

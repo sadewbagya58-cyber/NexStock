@@ -10,6 +10,7 @@ import {
   DEFAULT_SUPABASE_JWT_AUDIENCE,
   DEFAULT_SUPABASE_JWT_ISSUER,
   I18N_COMPLIANCE_DECISIONS_FOR_REVIEW,
+  RemoteJwksProvider,
   StaticJwksProvider,
   type SupabaseJwk,
   buildApp,
@@ -18,6 +19,7 @@ import {
   createTaxGroupWithRates,
   generateUuidV7,
   listSupportedCurrencies,
+  provisionTenantMember,
   updateSubscriptionLifecycleAndOverride,
   verifySupabaseJwt,
   withTenantTransaction,
@@ -261,6 +263,121 @@ describe('Milestone 1 — IAM, ORG, SUB, and I18N Integration Suite', () => {
     });
     expect(hs256Verified.algorithm).toBe('HS256');
     expect(hs256Verified.userId).toBe(userId);
+
+    // 7. Not-before (nbf) in the future & wrong audience & alg="none"
+    const futureNbfToken = signEs256Jwt(primaryKey, {
+      iss: DEFAULT_SUPABASE_JWT_ISSUER,
+      aud: DEFAULT_SUPABASE_JWT_AUDIENCE,
+      sub: userId,
+      nbf: nowSeconds + 600,
+      exp: nowSeconds + 3600,
+    });
+    await expect(
+      verifySupabaseJwt(futureNbfToken, jwksProvider, {
+        expectedIssuer: DEFAULT_SUPABASE_JWT_ISSUER,
+        expectedAudience: DEFAULT_SUPABASE_JWT_AUDIENCE,
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 401,
+      errorCode: 'IAM_UNAUTHENTICATED_TOKEN',
+      extensions: { reasonCode: 'TOKEN_NOT_YET_VALID' },
+    });
+
+    const wrongAudToken = signEs256Jwt(primaryKey, {
+      iss: DEFAULT_SUPABASE_JWT_ISSUER,
+      aud: 'wrong-audience',
+      sub: userId,
+      exp: nowSeconds + 3600,
+    });
+    await expect(
+      verifySupabaseJwt(wrongAudToken, jwksProvider, {
+        expectedIssuer: DEFAULT_SUPABASE_JWT_ISSUER,
+        expectedAudience: DEFAULT_SUPABASE_JWT_AUDIENCE,
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 401,
+      errorCode: 'IAM_UNAUTHENTICATED_TOKEN',
+      extensions: { reasonCode: 'INVALID_AUDIENCE' },
+    });
+
+    // 8. RemoteJwksProvider caching, key rotation (forceRefresh on new kid), and timeout/network error handling
+    const rotatedKey = createTestEs256KeyMaterial(
+      '0192b4a0-rotated-7000-8000-000000000099',
+    );
+    let simulatedClockMs = 1_000_000;
+    let fetchCallCount = 0;
+    let serveRotatedKey = false;
+
+    const rotatingProvider = new RemoteJwksProvider({
+      jwksUrl: DEFAULT_SUPABASE_JWKS_URL,
+      cacheTtlMs: 300_000,
+      minRefreshIntervalMs: 10_000,
+      nowMs: () => simulatedClockMs,
+      fetchFn: async () => {
+        fetchCallCount++;
+        const keys = serveRotatedKey
+          ? [primaryKey.publicJwk, rotatedKey.publicJwk]
+          : [primaryKey.publicJwk];
+        return new Response(JSON.stringify({ keys }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      },
+    });
+
+    // Initial verification populates JWKS cache (fetchCallCount = 1)
+    await verifySupabaseJwt(validToken, rotatingProvider, {
+      expectedIssuer: DEFAULT_SUPABASE_JWT_ISSUER,
+      expectedAudience: DEFAULT_SUPABASE_JWT_AUDIENCE,
+    });
+    expect(fetchCallCount).toBe(1);
+
+    // Second verification within TTL uses cache (fetchCallCount remains 1)
+    await verifySupabaseJwt(validToken, rotatingProvider, {
+      expectedIssuer: DEFAULT_SUPABASE_JWT_ISSUER,
+      expectedAudience: DEFAULT_SUPABASE_JWT_AUDIENCE,
+    });
+    expect(fetchCallCount).toBe(1);
+
+    // Advance clock past minRefreshIntervalMs (15s) and rotate signing key upstream
+    simulatedClockMs += 15_000;
+    serveRotatedKey = true;
+    const rotatedToken = signEs256Jwt(rotatedKey, {
+      iss: DEFAULT_SUPABASE_JWT_ISSUER,
+      aud: DEFAULT_SUPABASE_JWT_AUDIENCE,
+      sub: userId,
+      exp: nowSeconds + 3600,
+    });
+
+    // Verifier encounters unknown kid, triggers forceRefresh, fetches rotated key, and succeeds!
+    const verifiedRotated = await verifySupabaseJwt(
+      rotatedToken,
+      rotatingProvider,
+      {
+        expectedIssuer: DEFAULT_SUPABASE_JWT_ISSUER,
+        expectedAudience: DEFAULT_SUPABASE_JWT_AUDIENCE,
+      },
+    );
+    expect(verifiedRotated.keyId).toBe(rotatedKey.kid);
+    expect(fetchCallCount).toBe(2);
+
+    // Network/timeout failure on RemoteJwksProvider produces structured 500 error
+    const failingProvider = new RemoteJwksProvider({
+      jwksUrl: DEFAULT_SUPABASE_JWKS_URL,
+      fetchFn: async () => {
+        throw new Error('Simulated JWKS timeout');
+      },
+    });
+    await expect(
+      verifySupabaseJwt(validToken, failingProvider, {
+        expectedIssuer: DEFAULT_SUPABASE_JWT_ISSUER,
+        expectedAudience: DEFAULT_SUPABASE_JWT_AUDIENCE,
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 500,
+      errorCode: 'ERR_INTERNAL_SERVER_ERROR',
+      extensions: { reasonCode: 'JWKS_FETCH_TIMEOUT_OR_NETWORK_ERROR' },
+    });
   });
 
   it('enforces cross-tenant RLS isolation and 3-dimensional branch/warehouse location scope authorization', async () => {
@@ -566,6 +683,37 @@ describe('Milestone 1 — IAM, ORG, SUB, and I18N Integration Suite', () => {
       errorCode: 'IAM_PERMISSION_DENIED',
     });
 
+    // Immediate Server-Side Revocation Check: Disabling Cashier's membership immediately blocks their next request
+    // even though their Bearer JWT has not expired yet!
+    await withTenantTransaction(
+      harness.db,
+      { tenantId: tenantAId, userId: ownerAId, traceId: generateUuidV7() },
+      async (trx) => {
+        await provisionTenantMember(trx, {
+          userId: cashierId,
+          email: 'cashier1@nexstock.example',
+          fullName: 'Cashier One',
+          roleCodes: ['CASHIER'],
+          allLocationsAccess: false,
+          branchIds: [branch1.id],
+          status: 'DISABLED',
+        });
+      },
+    );
+
+    const disabledCashierReadRes = await app.inject({
+      method: 'GET',
+      url: `/v1/org/branches/${branch1.id}`,
+      headers: {
+        authorization: `Bearer ${cashierToken}`,
+        'x-tenant-id': tenantAId,
+      },
+    });
+    expect(disabledCashierReadRes.statusCode).toBe(403);
+    expect(disabledCashierReadRes.json()).toMatchObject({
+      errorCode: 'IAM_TENANT_MEMBERSHIP_REQUIRED',
+    });
+
     await app.close();
   });
 
@@ -686,18 +834,77 @@ describe('Milestone 1 — IAM, ORG, SUB, and I18N Integration Suite', () => {
       errorCode: 'SUB_SUBSCRIPTION_INACTIVE',
     });
 
-    // 4. Authorized Admin Override permits access even while SUSPENDED or over quota
+    // 4. Administrative Override Authority & Recorded Reason Checks
+    // Non-admin role (e.g. BRANCH_MANAGER) attempting subscription override must fail with 403 IAM_PERMISSION_DENIED
+    const nonAdminId = '0192b4a0-cccc-7000-8000-000000000099';
     await withTenantTransaction(
       harness.db,
       { tenantId, userId: ownerId, traceId: generateUuidV7() },
       async (trx) => {
-        await updateSubscriptionLifecycleAndOverride(trx, {
-          allowAdminOverride: true,
-          overrideReason:
-            'Verified wire transfer receipt pending bank clearance (#OVR-101)',
+        await provisionTenantMember(trx, {
+          userId: nonAdminId,
+          email: 'mgr-starter@nexstock.example',
+          fullName: 'Starter Branch Manager',
+          roleCodes: ['BRANCH_MANAGER'],
+          allLocationsAccess: false,
+          branchIds: [firstBranch.id],
         });
       },
     );
+    const nonAdminToken = issueValidTokenForUser(
+      nonAdminId,
+      'mgr-starter@nexstock.example',
+    );
+    const unauthorizedOverrideRes = await app.inject({
+      method: 'PATCH',
+      url: '/v1/subscriptions/lifecycle',
+      headers: {
+        authorization: `Bearer ${nonAdminToken}`,
+        'x-tenant-id': tenantId,
+      },
+      payload: {
+        allowAdminOverride: true,
+        overrideReason: 'Unauthorized attempt by branch manager',
+      },
+    });
+    expect(unauthorizedOverrideRes.statusCode).toBe(403);
+    expect(unauthorizedOverrideRes.json()).toMatchObject({
+      errorCode: 'IAM_PERMISSION_DENIED',
+    });
+
+    // Enabling allowAdminOverride without a recorded overrideReason must fail with 400 ERR_VALIDATION_FAILED
+    const missingReasonOverrideRes = await app.inject({
+      method: 'PATCH',
+      url: '/v1/subscriptions/lifecycle',
+      headers: {
+        authorization: `Bearer ${ownerToken}`,
+        'x-tenant-id': tenantId,
+      },
+      payload: {
+        allowAdminOverride: true,
+        overrideReason: '',
+      },
+    });
+    expect(missingReasonOverrideRes.statusCode).toBe(400);
+    expect(missingReasonOverrideRes.json()).toMatchObject({
+      errorCode: 'ERR_VALIDATION_FAILED',
+    });
+
+    // Authorized Admin Override with recorded reason permits access even while SUSPENDED or over quota
+    const validOverrideRes = await app.inject({
+      method: 'PATCH',
+      url: '/v1/subscriptions/lifecycle',
+      headers: {
+        authorization: `Bearer ${ownerToken}`,
+        'x-tenant-id': tenantId,
+      },
+      payload: {
+        allowAdminOverride: true,
+        overrideReason:
+          'Verified wire transfer receipt pending bank clearance (#OVR-101)',
+      },
+    });
+    expect(validOverrideRes.statusCode).toBe(200);
 
     const overrideBranchCreateRes = await app.inject({
       method: 'POST',

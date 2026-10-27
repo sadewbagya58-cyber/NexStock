@@ -34,19 +34,19 @@ export const ALLOWED_MODULE_DEPENDENCIES: Readonly<
   org: ['shared', 'iam', 'sub', 'i18n'],
 
   // Tier 2: Master Data & Financial Core
-  cat: ['shared', 'i18n', 'org', 'iam'],
-  crm: ['shared', 'i18n', 'org', 'iam'],
-  fin: ['shared', 'i18n', 'org', 'iam'],
+  cat: ['shared', 'sub', 'i18n', 'org', 'iam'],
+  crm: ['shared', 'sub', 'i18n', 'org', 'iam'],
+  fin: ['shared', 'sub', 'i18n', 'org', 'iam'],
 
   // Tier 3: Core Inventory Engine
-  inv: ['shared', 'cat', 'org', 'iam', 'fin', 'i18n'],
+  inv: ['shared', 'sub', 'cat', 'org', 'iam', 'fin', 'i18n'],
 
   // Tier 4: Transactional Flows
-  pos: ['shared', 'inv', 'cat', 'crm', 'i18n', 'org', 'iam', 'fin'],
-  pur: ['shared', 'inv', 'cat', 'i18n', 'org', 'iam', 'fin'],
+  pos: ['shared', 'sub', 'inv', 'cat', 'crm', 'i18n', 'org', 'iam', 'fin'],
+  pur: ['shared', 'sub', 'inv', 'cat', 'i18n', 'org', 'iam', 'fin'],
 
   // Tier 5: Edge Orchestration
-  sync: ['shared', 'pos', 'inv', 'cat', 'crm', 'org', 'iam'],
+  sync: ['shared', 'sub', 'pos', 'inv', 'cat', 'crm', 'org', 'iam'],
 };
 
 export interface BoundaryViolation {

@@ -6,13 +6,16 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --passWithNoTests",
+    "start": "node dist/src/server.js",
+    "dev": "node dist/src/server.js"
   },
   "dependencies": {
     "@nexstock/contracts": "workspace:*",
     "@nexstock/ui": "workspace:*"
   },
   "devDependencies": {
+    "@types/node": "^22.13.10",
     "typescript": "^5.8.2",
     "vitest": "^3.0.8"
   }

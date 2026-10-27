@@ -64,8 +64,12 @@ export interface JwtVerificationOptions {
   readonly legacyHs256SharedSecret?: string | undefined;
 }
 
+export interface JwksRetrievalOptions {
+  readonly forceRefresh?: boolean | undefined;
+}
+
 export interface JwksKeyProvider {
-  getJwks(): Promise<SupabaseJwksDocument>;
+  getJwks(options?: JwksRetrievalOptions): Promise<SupabaseJwksDocument>;
 }
 
 const UUID_REGEX =
@@ -85,10 +89,7 @@ function decodeBase64UrlToBuffer(segment: string): Buffer {
   return Buffer.from(segment, 'base64url');
 }
 
-function throwInvalidToken(
-  detail: string,
-  reasonCode: string,
-): never {
+function throwInvalidToken(detail: string, reasonCode: string): never {
   throw new AppError({
     statusCode: 401,
     errorCode: 'IAM_UNAUTHENTICATED_TOKEN',
@@ -99,30 +100,71 @@ function throwInvalidToken(
 }
 
 /**
- * Remote HTTP JWKS provider with in-memory TTL caching for Supabase Auth
+ * Remote HTTP JWKS provider with in-memory TTL caching, key-rotation refresh cooldown,
+ * and request timeout handling for Supabase Auth
  * (`https://tokylhdgzyoxiqwvncis.supabase.co/auth/v1/.well-known/jwks.json`).
  */
 export class RemoteJwksProvider implements JwksKeyProvider {
   private readonly jwksUrl: string;
   private readonly cacheTtlMs: number;
+  private readonly minRefreshIntervalMs: number;
+  private readonly timeoutMs: number;
+  private readonly fetchFn: typeof fetch;
+  private readonly nowMs: () => number;
   private cachedDoc: SupabaseJwksDocument | null = null;
   private cachedAtMs = 0;
 
-  constructor(params: { readonly jwksUrl: string; readonly cacheTtlMs?: number }) {
+  constructor(params: {
+    readonly jwksUrl: string;
+    readonly cacheTtlMs?: number;
+    readonly minRefreshIntervalMs?: number;
+    readonly timeoutMs?: number;
+    readonly fetchFn?: typeof fetch;
+    readonly nowMs?: () => number;
+  }) {
     this.jwksUrl = params.jwksUrl;
     this.cacheTtlMs = params.cacheTtlMs ?? 5 * 60 * 1000;
+    this.minRefreshIntervalMs = params.minRefreshIntervalMs ?? 10 * 1000;
+    this.timeoutMs = params.timeoutMs ?? 5000;
+    this.fetchFn = params.fetchFn ?? fetch;
+    this.nowMs = params.nowMs ?? (() => Date.now());
   }
 
-  async getJwks(): Promise<SupabaseJwksDocument> {
-    const now = Date.now();
-    if (this.cachedDoc && now - this.cachedAtMs < this.cacheTtlMs) {
-      return this.cachedDoc;
+  async getJwks(options?: JwksRetrievalOptions): Promise<SupabaseJwksDocument> {
+    const now = this.nowMs();
+    const forceRefresh = options?.forceRefresh === true;
+
+    if (this.cachedDoc) {
+      const ageMs = now - this.cachedAtMs;
+      if (!forceRefresh && ageMs < this.cacheTtlMs) {
+        return this.cachedDoc;
+      }
+      // Cooldown protection: if forceRefresh was requested on an unknown kid,
+      // avoid hammering the upstream JWKS endpoint if we just refreshed recently.
+      if (forceRefresh && ageMs < this.minRefreshIntervalMs) {
+        return this.cachedDoc;
+      }
     }
 
-    const response = await fetch(this.jwksUrl, {
-      method: 'GET',
-      headers: { accept: 'application/json' },
-    });
+    let response: Response;
+    try {
+      response = await this.fetchFn(this.jwksUrl, {
+        method: 'GET',
+        headers: { accept: 'application/json' },
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+    } catch (err) {
+      throw new AppError({
+        statusCode: 500,
+        errorCode: 'ERR_INTERNAL_SERVER_ERROR',
+        title: 'JWKS Discovery Network or Timeout Error',
+        detail:
+          err instanceof Error
+            ? `JWKS retrieval failed: ${err.message}`
+            : 'JWKS retrieval failed due to a network or timeout error.',
+        extensions: { reasonCode: 'JWKS_FETCH_TIMEOUT_OR_NETWORK_ERROR' },
+      });
+    }
 
     if (!response.ok) {
       throw new AppError({
@@ -130,20 +172,36 @@ export class RemoteJwksProvider implements JwksKeyProvider {
         errorCode: 'ERR_INTERNAL_SERVER_ERROR',
         title: 'JWKS Discovery Failure',
         detail: `Failed to fetch JWKS from configured endpoint (HTTP ${String(response.status)}).`,
+        extensions: { reasonCode: 'JWKS_HTTP_ERROR' },
       });
     }
 
-    const payload = (await response.json()) as unknown;
+    let payload: unknown;
+    try {
+      payload = await response.json();
+    } catch {
+      throw new AppError({
+        statusCode: 500,
+        errorCode: 'ERR_INTERNAL_SERVER_ERROR',
+        title: 'Invalid JWKS JSON Response',
+        detail: 'JWKS endpoint returned malformed JSON.',
+        extensions: { reasonCode: 'JWKS_INVALID_JSON' },
+      });
+    }
+
     if (
       typeof payload !== 'object' ||
       payload === null ||
-      !Array.isArray((payload as { keys?: unknown }).keys)
+      !Array.isArray((payload as { keys?: unknown }).keys) ||
+      (payload as { keys: unknown[] }).keys.length === 0
     ) {
       throw new AppError({
         statusCode: 500,
         errorCode: 'ERR_INTERNAL_SERVER_ERROR',
         title: 'Invalid JWKS Payload',
-        detail: 'JWKS endpoint did not return a valid RFC 7517 keys array.',
+        detail:
+          'JWKS endpoint did not return a non-empty RFC 7517 keys array.',
+        extensions: { reasonCode: 'JWKS_EMPTY_OR_INVALID_KEYS' },
       });
     }
 
@@ -168,6 +226,20 @@ export class StaticJwksProvider implements JwksKeyProvider {
   }
 }
 
+function findMatchingJwk(
+  jwks: SupabaseJwksDocument,
+  alg: AllowedAsymmetricJwtAlg,
+  kid: string | undefined,
+): SupabaseJwk | undefined {
+  const expectedKty = alg === 'ES256' ? 'EC' : 'RSA';
+  return jwks.keys.find((k) => {
+    if (k.kty !== expectedKty) return false;
+    if (kid && k.kid && k.kid !== kid) return false;
+    if (k.alg && k.alg !== alg) return false;
+    return true;
+  });
+}
+
 /**
  * Verifies a Bearer JWT token against Supabase JWKS (`ES256`/`RS256`) and strict claim invariants.
  *
@@ -176,6 +248,7 @@ export class StaticJwksProvider implements JwksKeyProvider {
  * 2. Enforces algorithm allowlist (`ES256`, `RS256`; `HS256` only when legacy fallback is explicitly configured).
  *    Strictly rejects `alg: "none"` and prevents RSA/EC-to-HMAC key confusion.
  * 3. Verifies cryptographic signature using Node's native `node:crypto` against the matching JWK (`kid` + `kty`).
+ *    Automatically triggers a rate-limited JWKS refresh (`forceRefresh: true`) if a newly rotated `kid` is encountered.
  * 4. Validates `iss`, `aud`, `exp`, `nbf`, and `sub` (UUID).
  * 5. Never trusts client-supplied `role`, `tenant_id`, or `app_metadata` claims for tenant/permission authority;
  *    only extracts the verified `sub` (`userId`) and optional `email`.
@@ -268,14 +341,14 @@ export async function verifySupabaseJwt(
     allowedAsymmetric.includes(alg as AllowedAsymmetricJwtAlg) &&
     (alg === 'ES256' || alg === 'RS256')
   ) {
-    const jwks = await jwksProvider.getJwks();
-    const expectedKty = alg === 'ES256' ? 'EC' : 'RSA';
-    const matchingKey = jwks.keys.find((k) => {
-      if (k.kty !== expectedKty) return false;
-      if (kid && k.kid && k.kid !== kid) return false;
-      if (k.alg && k.alg !== alg) return false;
-      return true;
-    });
+    let jwks = await jwksProvider.getJwks();
+    let matchingKey = findMatchingJwk(jwks, alg, kid);
+
+    // If a key rotation occurred upstream, retry once with forceRefresh=true
+    if (!matchingKey && kid) {
+      jwks = await jwksProvider.getJwks({ forceRefresh: true });
+      matchingKey = findMatchingJwk(jwks, alg, kid);
+    }
 
     if (!matchingKey) {
       throwInvalidToken(
@@ -325,7 +398,9 @@ export async function verifySupabaseJwt(
   }
 
   // Validate standard claims: iss, aud, exp, nbf, sub
-  const nowSeconds = Math.floor((options.nowMs ? options.nowMs() : Date.now()) / 1000);
+  const nowSeconds = Math.floor(
+    (options.nowMs ? options.nowMs() : Date.now()) / 1000,
+  );
   const tolerance = options.clockToleranceSeconds ?? 0;
 
   const iss = payload['iss'];
@@ -361,7 +436,10 @@ export async function verifySupabaseJwt(
       throwInvalidToken('Invalid JWT "nbf" claim.', 'INVALID_NBF');
     }
     if (nowSeconds + tolerance < nbf) {
-      throwInvalidToken('JWT token is not yet valid (nbf).', 'TOKEN_NOT_YET_VALID');
+      throwInvalidToken(
+        'JWT token is not yet valid (nbf).',
+        'TOKEN_NOT_YET_VALID',
+      );
     }
   }
 
