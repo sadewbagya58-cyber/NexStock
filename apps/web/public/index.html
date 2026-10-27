@@ -718,6 +718,24 @@
         Inventory Balances
       </a>
 
+      <div class="nav-section-title">Advanced Inventory</div>
+      <a class="nav-link" data-view="batches">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+        Batches &amp; Expiry
+      </a>
+      <a class="nav-link" data-view="serials">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="9" x2="20" y2="9"></line><line x1="4" y1="15" x2="20" y2="15"></line><line x1="10" y1="3" x2="8" y2="21"></line><line x1="16" y1="3" x2="14" y2="21"></line></svg>
+        Serial Registry
+      </a>
+      <a class="nav-link" data-view="valuation">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
+        Costing &amp; Valuation
+      </a>
+      <a class="nav-link" data-view="stocktakes">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
+        Stock Counts &amp; Stocktake
+      </a>
+
       <div class="nav-section-title">Point of Sale</div>
       <a class="nav-link" data-view="pos-checkout">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="21" r="1"></circle><circle cx="20" cy="21" r="1"></circle><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path></svg>
@@ -854,6 +872,12 @@
       document.getElementById('modalContainer').classList.remove('active');
     }
 
+    function formatQty(val, decimals = 0) {
+      if (val === null || val === undefined) return '0';
+      const n = parseFloat(val);
+      return isNaN(n) ? '0' : n.toFixed(decimals);
+    }
+
     document.getElementById('modalCloseBtn').onclick = closeModal;
 
     // Theme Management
@@ -907,6 +931,10 @@
         case 'suppliers': renderSuppliersView(); break;
         case 'movements': renderMovementsView(); break;
         case 'balances': renderBalancesView(); break;
+        case 'batches': renderBatchesView(); break;
+        case 'serials': renderSerialsView(); break;
+        case 'valuation': renderValuationView(); break;
+        case 'stocktakes': renderStocktakesView(); break;
         case 'pos-checkout': renderPosCheckoutView(); break;
         case 'pos-registers': renderPosRegistersView(); break;
         case 'pos-shifts': renderPosShiftsView(); break;
@@ -943,7 +971,7 @@
 
         const totalProducts = prodList.length;
         const totalOnHand = balList.reduce((acc, b) => acc + parseFloat(b.qtyOnHand || '0'), 0);
-        const lowStockCount = balList.filter(b => parseFloat(b.availableQuantity || '0') <= parseFloat(b.reorderPoint || '0')).length;
+        const lowStockCount = balList.filter(b => parseFloat(b.availableQty ?? b.availableQuantity ?? '0') <= parseFloat(b.reorderPoint || '0')).length;
         const totalSalesRevenue = saleList.reduce((acc, s) => s.status === 'COMPLETED' ? acc + parseFloat(s.grandTotal || '0') : acc, 0);
 
         container.innerHTML = `
@@ -1026,8 +1054,8 @@
                       ${balList.slice(0, 5).map(b => `
                         <tr>
                           <td><strong>${b.sku}</strong></td>
-                          <td>${parseFloat(b.qtyOnHand).toFixed(0)}</td>
-                          <td>${parseFloat(b.availableQuantity).toFixed(0)}</td>
+                          <td>${formatQty(b.qtyOnHand)}</td>
+                          <td>${formatQty(b.availableQty ?? b.availableQuantity)}</td>
                         </tr>
                       `).join('')}
                     </tbody>
@@ -1607,7 +1635,7 @@
                 </thead>
                 <tbody>
                   ${balances.map(b => {
-                    const avail = parseFloat(b.availableQuantity);
+                    const avail = parseFloat(b.availableQty ?? b.availableQuantity ?? '0');
                     const ro = parseFloat(b.reorderPoint || '0');
                     let badge = '<span class="badge-pill badge-green">In Stock</span>';
                     if (avail <= 0) badge = '<span class="badge-pill badge-red">Out of Stock</span>';
@@ -1617,10 +1645,10 @@
                       <tr>
                         <td><strong>${b.sku}</strong></td>
                         <td>${b.productName}</td>
-                        <td><strong>${parseFloat(b.qtyOnHand).toFixed(0)}</strong></td>
-                        <td>${parseFloat(b.qtyReserved).toFixed(0)}</td>
-                        <td style="color: var(--accent-primary); font-weight: 700;">${avail.toFixed(0)}</td>
-                        <td>${ro.toFixed(0)}</td>
+                        <td><strong>${formatQty(b.qtyOnHand)}</strong></td>
+                        <td>${formatQty(b.qtyReserved)}</td>
+                        <td style="color: var(--accent-primary); font-weight: 700;">${formatQty(avail)}</td>
+                        <td>${formatQty(ro)}</td>
                         <td>${badge}</td>
                       </tr>
                     `;
@@ -2448,6 +2476,959 @@
         `;
       } catch (err) {
         container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load settings: ${err.message}</div>`;
+      }
+    }
+
+    // =========================================================================
+    // 10. ADVANCED INVENTORY: BATCHES & EXPIRY VIEW
+    // =========================================================================
+    async function renderBatchesView() {
+      const container = document.getElementById('mainContainer');
+      try {
+        const [batchesRes, prodsRes] = await Promise.all([
+          apiFetch(`/v1/inventory/batches?warehouseId=${state.warehouseId}&limit=100`).catch(() => ({ data: [] })),
+          apiFetch('/v1/products?limit=100').catch(() => ({ data: [] }))
+        ]);
+
+        const batches = batchesRes.data || [];
+        const products = prodsRes.data || [];
+        const prodMap = new Map(products.map(p => [p.id, p]));
+
+        const totalBatches = batches.length;
+        const expiringSoon = batches.filter(b => b.expiryStatus === 'EXPIRING_SOON').length;
+        const expired = batches.filter(b => b.expiryStatus === 'EXPIRED').length;
+        const quarantined = batches.filter(b => b.status === 'QUARANTINED').length;
+
+        container.innerHTML = `
+          <div class="view-header">
+            <div>
+              <h1 class="view-title">Batch &amp; Lot Tracking</h1>
+              <div class="view-subtitle">Monitor production lots, expiration dates, FEFO allocations and quarantine states</div>
+            </div>
+            <button class="btn btn-primary" id="btnOpenNewBatchModal">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+              Register New Batch
+            </button>
+          </div>
+
+          <div class="kpi-grid">
+            <div class="kpi-card">
+              <div class="kpi-label">Total Batches</div>
+              <div class="kpi-value">${totalBatches}</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Expiring Soon (&le;30d)</div>
+              <div class="kpi-value" style="color: var(--status-warning);">${expiringSoon}</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Expired Batches</div>
+              <div class="kpi-value" style="color: var(--status-danger);">${expired}</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Quarantined Lots</div>
+              <div class="kpi-value">${quarantined}</div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-title">Batch Inventory Registry</div>
+            <div class="table-responsive">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Batch #</th>
+                    <th>Product SKU &amp; Name</th>
+                    <th>Received Date</th>
+                    <th>Expiry Date</th>
+                    <th>Initial Qty</th>
+                    <th>Current Qty</th>
+                    <th>Unit Cost</th>
+                    <th>Expiry Status</th>
+                    <th>Batch Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${batches.length === 0 ? '<tr><td colspan="10" style="text-align: center; color: var(--text-secondary);">No batches found for this warehouse. Click "Register New Batch" above.</td></tr>' : ''}
+                  ${batches.map(b => {
+                    const prod = prodMap.get(b.productId);
+                    let expBadge = '<span class="badge-pill badge-green">VALID</span>';
+                    if (b.expiryStatus === 'EXPIRING_SOON') expBadge = '<span class="badge-pill badge-yellow">EXPIRING SOON</span>';
+                    else if (b.expiryStatus === 'EXPIRED') expBadge = '<span class="badge-pill badge-red">EXPIRED</span>';
+
+                    let statusBadge = '<span class="badge-pill badge-green">ACTIVE</span>';
+                    if (b.status === 'QUARANTINED') statusBadge = '<span class="badge-pill badge-red">QUARANTINED</span>';
+                    else if (b.status === 'DEPLETED') statusBadge = '<span class="badge-pill">DEPLETED</span>';
+
+                    return `
+                      <tr>
+                        <td><strong>${b.batchNumber}</strong></td>
+                        <td>${prod ? `${prod.sku} - ${prod.name}` : b.productId}</td>
+                        <td>${b.receivedDate}</td>
+                        <td>${b.expiryDate || '—'}</td>
+                        <td>${formatQty(b.initialQuantity)}</td>
+                        <td><strong>${formatQty(b.currentQuantity)}</strong></td>
+                        <td>$${parseFloat(b.unitCost).toFixed(2)}</td>
+                        <td>${expBadge}</td>
+                        <td>${statusBadge}</td>
+                        <td>
+                          ${b.status === 'ACTIVE' ? `
+                            <button class="btn btn-secondary btn-sm" onclick="quarantineBatchAction('${b.id}', '${b.batchNumber}')" style="color: var(--status-danger);">Quarantine</button>
+                          ` : b.status === 'QUARANTINED' ? `
+                            <button class="btn btn-secondary btn-sm" onclick="releaseBatchAction('${b.id}', '${b.batchNumber}')" style="color: var(--status-success);">Release</button>
+                          ` : '—'}
+                        </td>
+                      </tr>
+                    `;
+                  }).join('')}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        `;
+
+        document.getElementById('btnOpenNewBatchModal').onclick = () => openCreateBatchModal(products);
+      } catch (err) {
+        container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load batches: ${err.message}</div>`;
+      }
+    }
+
+    function openCreateBatchModal(products) {
+      const batchTrackedProds = products.filter(p => p.trackingMode === 'BATCH' || p.trackingMode === 'BATCH_EXPIRY');
+      const prodOptions = (batchTrackedProds.length > 0 ? batchTrackedProds : products).map(p =>
+        `<option value="${p.id}">${p.sku} - ${p.name} (${p.trackingMode || 'NONE'})</option>`
+      ).join('');
+
+      const today = new Date().toISOString().slice(0, 10);
+      const nextYear = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+      const html = `
+        <div style="font-size: 18px; font-weight: 700; margin-bottom: 16px;">Register New Batch / Lot</div>
+        <form id="createBatchForm">
+          <div class="form-group">
+            <label class="form-label">Product</label>
+            <select class="form-select" id="newBatchProductId" required>
+              ${prodOptions}
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Batch Number</label>
+            <input type="text" class="form-input" id="newBatchNumber" placeholder="e.g. LOT-2026-001" required>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <div class="form-group">
+              <label class="form-label">Initial Quantity</label>
+              <input type="number" step="1" min="1" class="form-input" id="newBatchQty" value="100" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Unit Cost (USD)</label>
+              <input type="number" step="0.01" min="0" class="form-input" id="newBatchUnitCost" value="15.00" required>
+            </div>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <div class="form-group">
+              <label class="form-label">Received Date</label>
+              <input type="date" class="form-input" id="newBatchReceivedDate" value="${today}" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Expiry Date (Optional)</label>
+              <input type="date" class="form-input" id="newBatchExpiryDate" value="${nextYear}">
+            </div>
+          </div>
+          <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px;">
+            <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+            <button type="submit" class="btn btn-primary">Create Batch</button>
+          </div>
+        </form>
+      `;
+
+      openModal(html);
+      document.getElementById('createBatchForm').onsubmit = async (e) => {
+        e.preventDefault();
+        try {
+          const payload = {
+            warehouseId: state.warehouseId,
+            productId: document.getElementById('newBatchProductId').value,
+            batchNumber: document.getElementById('newBatchNumber').value.trim(),
+            initialQuantity: document.getElementById('newBatchQty').value,
+            unitCost: parseFloat(document.getElementById('newBatchUnitCost').value).toFixed(4),
+            receivedDate: document.getElementById('newBatchReceivedDate').value,
+            expiryDate: document.getElementById('newBatchExpiryDate').value || null
+          };
+
+          await apiFetch('/v1/inventory/batches', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+          });
+
+          showToast('Batch created successfully', 'success');
+          closeModal();
+          renderBatchesView();
+        } catch (err) {
+          showToast(`Error creating batch: ${err.message}`, 'error');
+        }
+      };
+    }
+
+    async function quarantineBatchAction(batchId, batchNum) {
+      const reason = prompt(`Enter quarantine reason for batch "${batchNum}":`, 'Quality inspection required');
+      if (!reason || reason.trim().length < 3) return;
+
+      try {
+        await apiFetch(`/v1/inventory/batches/${batchId}/quarantine`, {
+          method: 'POST',
+          body: JSON.stringify({ reason: reason.trim() })
+        });
+        showToast(`Batch "${batchNum}" quarantined`, 'success');
+        renderBatchesView();
+      } catch (err) {
+        showToast(`Quarantine failed: ${err.message}`, 'error');
+      }
+    }
+
+    async function releaseBatchAction(batchId, batchNum) {
+      if (!confirm(`Release batch "${batchNum}" from quarantine?`)) return;
+
+      try {
+        await apiFetch(`/v1/inventory/batches/${batchId}/release`, {
+          method: 'POST',
+          body: JSON.stringify({ reason: 'Inspection passed' })
+        });
+        showToast(`Batch "${batchNum}" released`, 'success');
+        renderBatchesView();
+      } catch (err) {
+        showToast(`Release failed: ${err.message}`, 'error');
+      }
+    }
+
+    // =========================================================================
+    // 11. ADVANCED INVENTORY: SERIAL REGISTRY VIEW
+    // =========================================================================
+    async function renderSerialsView() {
+      const container = document.getElementById('mainContainer');
+      try {
+        const [serialsRes, prodsRes] = await Promise.all([
+          apiFetch(`/v1/inventory/serials?warehouseId=${state.warehouseId}&limit=100`).catch(() => ({ data: [] })),
+          apiFetch('/v1/products?limit=100').catch(() => ({ data: [] }))
+        ]);
+
+        const serials = serialsRes.data || [];
+        const products = prodsRes.data || [];
+        const prodMap = new Map(products.map(p => [p.id, p]));
+
+        const inStock = serials.filter(s => s.status === 'IN_STOCK').length;
+        const sold = serials.filter(s => s.status === 'SOLD').length;
+        const quarantined = serials.filter(s => s.status === 'QUARANTINED').length;
+        const damaged = serials.filter(s => s.status === 'DAMAGED' || s.status === 'WRITTEN_OFF').length;
+
+        container.innerHTML = `
+          <div class="view-header">
+            <div>
+              <h1 class="view-title">Serial Number Registry</h1>
+              <div class="view-subtitle">Individual piece tracking, status lifecycle audit, and warranty/sale verification</div>
+            </div>
+            <button class="btn btn-primary" id="btnOpenRegisterSerialsModal">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+              Register Serial Numbers
+            </button>
+          </div>
+
+          <div class="kpi-grid">
+            <div class="kpi-card">
+              <div class="kpi-label">In-Stock Serials</div>
+              <div class="kpi-value" style="color: var(--status-success);">${inStock}</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Sold Units</div>
+              <div class="kpi-value">${sold}</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Quarantined</div>
+              <div class="kpi-value" style="color: var(--status-warning);">${quarantined}</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Damaged / Written-Off</div>
+              <div class="kpi-value" style="color: var(--status-danger);">${damaged}</div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-title">
+              <span>Tracked Serials</span>
+              <input type="text" id="serialSearchInput" class="form-input" placeholder="Quick search serial #..." style="width: 240px; padding: 4px 8px; font-size: 13px;">
+            </div>
+            <div class="table-responsive">
+              <table class="data-table" id="serialsDataTable">
+                <thead>
+                  <tr>
+                    <th>Serial Number</th>
+                    <th>Product</th>
+                    <th>Lifecycle Status</th>
+                    <th>Unit Cost</th>
+                    <th>Received At</th>
+                    <th>Sold At</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${serials.length === 0 ? '<tr><td colspan="7" style="text-align: center; color: var(--text-secondary);">No serials found. Click "Register Serial Numbers" to intake items.</td></tr>' : ''}
+                  ${serials.map(s => {
+                    const prod = prodMap.get(s.productId);
+                    let badgeClass = 'badge-green';
+                    if (s.status === 'SOLD') badgeClass = 'badge-blue';
+                    else if (s.status === 'QUARANTINED') badgeClass = 'badge-yellow';
+                    else if (s.status === 'DAMAGED' || s.status === 'WRITTEN_OFF') badgeClass = 'badge-red';
+
+                    return `
+                      <tr class="serial-row" data-sn="${s.serialNumber.toLowerCase()}">
+                        <td><strong style="font-family: monospace; font-size: 13px;">${s.serialNumber}</strong></td>
+                        <td>${prod ? `${prod.sku} - ${prod.name}` : s.productId}</td>
+                        <td><span class="badge-pill ${badgeClass}">${s.status}</span></td>
+                        <td>$${parseFloat(s.unitCost).toFixed(2)}</td>
+                        <td>${new Date(s.receivedAt).toLocaleDateString()}</td>
+                        <td>${s.soldAt ? new Date(s.soldAt).toLocaleDateString() : '—'}</td>
+                        <td>
+                          <button class="btn btn-secondary btn-sm" onclick="openSerialTransitionModal('${s.id}', '${s.serialNumber}', '${s.status}')">Transition Status</button>
+                        </td>
+                      </tr>
+                    `;
+                  }).join('')}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        `;
+
+        document.getElementById('btnOpenRegisterSerialsModal').onclick = () => openRegisterSerialsModal(products);
+        document.getElementById('serialSearchInput').oninput = (e) => {
+          const q = e.target.value.toLowerCase().trim();
+          document.querySelectorAll('.serial-row').forEach(row => {
+            const sn = row.getAttribute('data-sn') || '';
+            row.style.display = sn.includes(q) ? '' : 'none';
+          });
+        };
+      } catch (err) {
+        container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load serials: ${err.message}</div>`;
+      }
+    }
+
+    function openRegisterSerialsModal(products) {
+      const serialTracked = products.filter(p => p.trackingMode === 'SERIAL');
+      const prodOptions = (serialTracked.length > 0 ? serialTracked : products).map(p =>
+        `<option value="${p.id}">${p.sku} - ${p.name} (${p.trackingMode || 'NONE'})</option>`
+      ).join('');
+
+      const html = `
+        <div style="font-size: 18px; font-weight: 700; margin-bottom: 16px;">Register Serial Numbers</div>
+        <form id="registerSerialsForm">
+          <div class="form-group">
+            <label class="form-label">Product</label>
+            <select class="form-select" id="regSerialProductId" required>
+              ${prodOptions}
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Serial Numbers (One per line or comma-separated)</label>
+            <textarea class="form-input" id="regSerialNumbers" rows="4" placeholder="SN-10001&#10;SN-10002&#10;SN-10003" required style="font-family: monospace;"></textarea>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Unit Cost (USD)</label>
+            <input type="number" step="0.01" min="0" class="form-input" id="regSerialCost" value="120.00" required>
+          </div>
+          <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px;">
+            <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+            <button type="submit" class="btn btn-primary">Intake Serials</button>
+          </div>
+        </form>
+      `;
+
+      openModal(html);
+      document.getElementById('registerSerialsForm').onsubmit = async (e) => {
+        e.preventDefault();
+        try {
+          const raw = document.getElementById('regSerialNumbers').value;
+          const serialNumbers = raw.split(/[\n,]/).map(s => s.trim().toUpperCase()).filter(Boolean);
+
+          if (serialNumbers.length === 0) {
+            showToast('Please enter at least one serial number', 'error');
+            return;
+          }
+
+          const payload = {
+            branchId: state.branchId,
+            warehouseId: state.warehouseId,
+            productId: document.getElementById('regSerialProductId').value,
+            serialNumbers,
+            unitCost: parseFloat(document.getElementById('regSerialCost').value).toFixed(4)
+          };
+
+          await apiFetch('/v1/inventory/serials', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+          });
+
+          showToast(`Successfully registered ${serialNumbers.length} serial numbers`, 'success');
+          closeModal();
+          renderSerialsView();
+        } catch (err) {
+          showToast(`Error registering serials: ${err.message}`, 'error');
+        }
+      };
+    }
+
+    function openSerialTransitionModal(serialId, serialNumber, currentStatus) {
+      const allStatuses = ['IN_STOCK', 'RESERVED', 'SOLD', 'RETURNED', 'QUARANTINED', 'DAMAGED', 'WRITTEN_OFF'];
+      const options = allStatuses.filter(s => s !== currentStatus).map(s => `<option value="${s}">${s}</option>`).join('');
+
+      const html = `
+        <div style="font-size: 18px; font-weight: 700; margin-bottom: 16px;">Transition Serial: ${serialNumber}</div>
+        <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px;">Current Status: <strong style="color: var(--text-primary);">${currentStatus}</strong></div>
+        <form id="serialTransitionForm">
+          <div class="form-group">
+            <label class="form-label">New Status</label>
+            <select class="form-select" id="targetSerialStatus" required>
+              ${options}
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Reason / Audit Note</label>
+            <input type="text" class="form-input" id="serialTransitionReason" placeholder="e.g. Returned by customer for exchange" required minlength="3">
+          </div>
+          <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px;">
+            <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+            <button type="submit" class="btn btn-primary">Update Status</button>
+          </div>
+        </form>
+      `;
+
+      openModal(html);
+      document.getElementById('serialTransitionForm').onsubmit = async (e) => {
+        e.preventDefault();
+        try {
+          const payload = {
+            toStatus: document.getElementById('targetSerialStatus').value,
+            reason: document.getElementById('serialTransitionReason').value.trim()
+          };
+
+          await apiFetch(`/v1/inventory/serials/${serialId}/transition`, {
+            method: 'POST',
+            body: JSON.stringify(payload)
+          });
+
+          showToast(`Serial "${serialNumber}" updated to ${payload.toStatus}`, 'success');
+          closeModal();
+          renderSerialsView();
+        } catch (err) {
+          showToast(`Transition failed: ${err.message}`, 'error');
+        }
+      };
+    }
+
+    // =========================================================================
+    // 12. ADVANCED INVENTORY: COSTING & VALUATION VIEW
+    // =========================================================================
+    async function renderValuationView() {
+      const container = document.getElementById('mainContainer');
+      try {
+        const valRes = await apiFetch(`/v1/inventory/valuation?warehouseId=${state.warehouseId}`).catch(() => ({
+          totalAssetValue: '0.0000',
+          currencyCode: 'USD',
+          items: []
+        }));
+
+        const items = valRes.items || [];
+        const totalAssetVal = parseFloat(valRes.totalAssetValue || '0').toFixed(2);
+        const fifoCount = items.filter(i => i.valuationMethod === 'FIFO').length;
+        const macCount = items.filter(i => i.valuationMethod === 'MOVING_AVG').length;
+
+        container.innerHTML = `
+          <div class="view-header">
+            <div>
+              <h1 class="view-title">Inventory Costing &amp; Asset Valuation</h1>
+              <div class="view-subtitle">Real-time asset balance sheet, Moving Average Cost, and FIFO chronological layers</div>
+            </div>
+          </div>
+
+          <div class="kpi-grid">
+            <div class="kpi-card">
+              <div class="kpi-label">Total Inventory Asset Value</div>
+              <div class="kpi-value" style="color: var(--accent-primary);">$${totalAssetVal}</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Tracked SKUs</div>
+              <div class="kpi-value">${items.length}</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">FIFO Items</div>
+              <div class="kpi-value">${fifoCount}</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Moving Average Items</div>
+              <div class="kpi-value">${macCount}</div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-title">Product Valuation Breakdown</div>
+            <div class="table-responsive">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>SKU</th>
+                    <th>Product Name</th>
+                    <th>Valuation Method</th>
+                    <th>On Hand</th>
+                    <th>Unit / MAC Cost</th>
+                    <th>Total Inventory Value</th>
+                    <th>Open FIFO Layers</th>
+                    <th>Active Batches</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${items.length === 0 ? '<tr><td colspan="9" style="text-align: center; color: var(--text-secondary);">No inventory balances recorded yet.</td></tr>' : ''}
+                  ${items.map(i => {
+                    const methodBadge = i.valuationMethod === 'FIFO'
+                      ? '<span class="badge-pill badge-blue">FIFO</span>'
+                      : '<span class="badge-pill badge-green">MOVING_AVG</span>';
+
+                    return `
+                      <tr>
+                        <td><strong>${i.sku}</strong></td>
+                        <td>${i.productName}</td>
+                        <td>${methodBadge}</td>
+                        <td>${formatQty(i.qtyOnHand)}</td>
+                        <td>$${parseFloat(i.movingAvgCost).toFixed(2)}</td>
+                        <td><strong>$${parseFloat(i.totalInventoryValue).toFixed(2)}</strong></td>
+                        <td>${i.openLayersCount}</td>
+                        <td>${i.activeBatchesCount}</td>
+                        <td>
+                          <button class="btn btn-secondary btn-sm" onclick="drilldownFifoLayers('${i.productId}', '${i.sku}')">Inspect Layers</button>
+                        </td>
+                      </tr>
+                    `;
+                  }).join('')}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        `;
+      } catch (err) {
+        container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load valuation: ${err.message}</div>`;
+      }
+    }
+
+    async function drilldownFifoLayers(productId, sku) {
+      try {
+        const layers = await apiFetch(`/v1/inventory/cost-layers?warehouseId=${state.warehouseId}&productId=${productId}`).catch(() => []);
+
+        const html = `
+          <div style="font-size: 18px; font-weight: 700; margin-bottom: 16px;">FIFO Cost Layers for ${sku}</div>
+          <div class="table-responsive">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Layer Date</th>
+                  <th>Received Qty</th>
+                  <th>Remaining Qty</th>
+                  <th>Layer Unit Cost</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${layers.length === 0 ? '<tr><td colspan="5" style="text-align: center; color: var(--text-secondary);">No FIFO layers found for this product.</td></tr>' : ''}
+                ${layers.map(l => `
+                  <tr>
+                    <td>${new Date(l.layerDate).toLocaleDateString()} ${new Date(l.layerDate).toLocaleTimeString()}</td>
+                    <td>${formatQty(l.receivedQty)}</td>
+                    <td><strong>${formatQty(l.remainingQty)}</strong></td>
+                    <td>$${parseFloat(l.unitCost).toFixed(2)}</td>
+                    <td><span class="badge-pill ${l.status === 'OPEN' ? 'badge-green' : 'badge-yellow'}">${l.status}</span></td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+          <div style="display: flex; justify-content: flex-end; margin-top: 16px;">
+            <button class="btn btn-secondary" onclick="closeModal()">Close</button>
+          </div>
+        `;
+        openModal(html);
+      } catch (err) {
+        showToast(`Failed to load layers: ${err.message}`, 'error');
+      }
+    }
+
+    // =========================================================================
+    // 13. ADVANCED INVENTORY: STOCKTAKE & RECONCILIATION VIEW
+    // =========================================================================
+    async function renderStocktakesView() {
+      const container = document.getElementById('mainContainer');
+      try {
+        const res = await apiFetch(`/v1/inventory/stocktakes?warehouseId=${state.warehouseId}&limit=50`).catch(() => ({ data: [] }));
+        const sessions = res.data || [];
+
+        const total = sessions.length;
+        const inProgress = sessions.filter(s => s.status === 'DRAFT' || s.status === 'IN_PROGRESS' || s.status === 'SUBMITTED').length;
+        const posted = sessions.filter(s => s.status === 'POSTED').length;
+
+        container.innerHTML = `
+          <div class="view-header">
+            <div>
+              <h1 class="view-title">Physical Stock Counts &amp; Stocktake</h1>
+              <div class="view-subtitle">Conduct cycle counts, record physical variances, supervise approvals and post ledger adjustments</div>
+            </div>
+            <button class="btn btn-primary" id="btnOpenNewStocktakeModal">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+              Start New Stocktake
+            </button>
+          </div>
+
+          <div class="kpi-grid">
+            <div class="kpi-card">
+              <div class="kpi-label">Stocktake Sessions</div>
+              <div class="kpi-value">${total}</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">In Progress / Pending Review</div>
+              <div class="kpi-value" style="color: var(--status-warning);">${inProgress}</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Posted &amp; Reconciled</div>
+              <div class="kpi-value" style="color: var(--status-success);">${posted}</div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-title">Stocktake Counting Sessions</div>
+            <div class="table-responsive">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Count #</th>
+                    <th>Scope</th>
+                    <th>Status</th>
+                    <th>Total Lines</th>
+                    <th>Discrepant Lines</th>
+                    <th>Net Variance Value</th>
+                    <th>Started At</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${sessions.length === 0 ? '<tr><td colspan="8" style="text-align: center; color: var(--text-secondary);">No stocktake sessions found. Click "Start New Stocktake" above.</td></tr>' : ''}
+                  ${sessions.map(s => {
+                    let statusBadge = '<span class="badge-pill">DRAFT</span>';
+                    if (s.status === 'IN_PROGRESS') statusBadge = '<span class="badge-pill badge-blue">IN PROGRESS</span>';
+                    else if (s.status === 'SUBMITTED') statusBadge = '<span class="badge-pill badge-yellow">SUBMITTED</span>';
+                    else if (s.status === 'APPROVED') statusBadge = '<span class="badge-pill badge-green">APPROVED</span>';
+                    else if (s.status === 'REJECTED') statusBadge = '<span class="badge-pill badge-red">REJECTED</span>';
+                    else if (s.status === 'POSTED') statusBadge = '<span class="badge-pill badge-green">POSTED</span>';
+
+                    return `
+                      <tr>
+                        <td><strong>${s.countNumber}</strong></td>
+                        <td><span class="badge-pill">${s.scope}</span></td>
+                        <td>${statusBadge}</td>
+                        <td>${s.totalLinesCount}</td>
+                        <td>${s.discrepantLinesCount > 0 ? `<strong style="color: var(--status-warning);">${s.discrepantLinesCount}</strong>` : '0'}</td>
+                        <td><strong>$${parseFloat(s.totalVarianceValue).toFixed(2)}</strong></td>
+                        <td>${s.startedAt ? new Date(s.startedAt).toLocaleDateString() : '—'}</td>
+                        <td style="display: flex; gap: 6px;">
+                          ${s.status === 'DRAFT' || s.status === 'IN_PROGRESS' ? `
+                            <button class="btn btn-secondary btn-sm" onclick="openCountEntryModal('${s.id}')">Enter Counts</button>
+                            <button class="btn btn-primary btn-sm" onclick="submitStocktakeAction('${s.id}')">Submit</button>
+                          ` : s.status === 'SUBMITTED' ? `
+                            <button class="btn btn-secondary btn-sm" onclick="openReviewStocktakeModal('${s.id}')">Review &amp; Approve</button>
+                          ` : s.status === 'APPROVED' ? `
+                            <button class="btn btn-primary btn-sm" onclick="postStocktakeAdjustmentsAction('${s.id}')">Post Adjustments</button>
+                          ` : `
+                            <button class="btn btn-secondary btn-sm" onclick="openViewStocktakeDetailsModal('${s.id}')">View Details</button>
+                          `}
+                        </td>
+                      </tr>
+                    `;
+                  }).join('')}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        `;
+
+        document.getElementById('btnOpenNewStocktakeModal').onclick = openNewStocktakeModal;
+      } catch (err) {
+        container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load stocktakes: ${err.message}</div>`;
+      }
+    }
+
+    function openNewStocktakeModal() {
+      const html = `
+        <div style="font-size: 18px; font-weight: 700; margin-bottom: 16px;">Initiate Stocktake Session</div>
+        <form id="newStocktakeForm">
+          <div class="form-group">
+            <label class="form-label">Counting Scope</label>
+            <select class="form-select" id="stocktakeScope">
+              <option value="FULL_WAREHOUSE">FULL WAREHOUSE (All active items)</option>
+              <option value="CATEGORY">CATEGORY SCOPE</option>
+              <option value="PARTIAL">PARTIAL SPOT CHECK</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Notes / Instructions</label>
+            <input type="text" class="form-input" id="stocktakeNotes" placeholder="e.g. End of Month Inventory Count">
+          </div>
+          <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px;">
+            <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+            <button type="submit" class="btn btn-primary">Start Session</button>
+          </div>
+        </form>
+      `;
+
+      openModal(html);
+      document.getElementById('newStocktakeForm').onsubmit = async (e) => {
+        e.preventDefault();
+        try {
+          const payload = {
+            branchId: state.branchId,
+            warehouseId: state.warehouseId,
+            scope: document.getElementById('stocktakeScope').value,
+            notes: document.getElementById('stocktakeNotes').value.trim() || undefined
+          };
+
+          await apiFetch('/v1/inventory/stocktakes', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+          });
+
+          showToast('Stocktake session initiated', 'success');
+          closeModal();
+          renderStocktakesView();
+        } catch (err) {
+          showToast(`Error initiating stocktake: ${err.message}`, 'error');
+        }
+      };
+    }
+
+    async function openCountEntryModal(sessionId) {
+      try {
+        const session = await apiFetch(`/v1/inventory/stocktakes/${sessionId}`);
+        const lines = session.lines || [];
+
+        const html = `
+          <div style="font-size: 18px; font-weight: 700; margin-bottom: 8px;">Record Physical Counts (${session.countNumber})</div>
+          <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px;">Enter the verified on-hand quantity for each item below.</div>
+          <form id="countEntryForm">
+            <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>SKU</th>
+                    <th>Product</th>
+                    <th>Expected</th>
+                    <th>Counted Qty</th>
+                    <th>Variance</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${lines.map(l => `
+                    <tr>
+                      <td><strong>${l.productSku}</strong></td>
+                      <td>${l.productName}</td>
+                      <td>${formatQty(l.expectedQty)}</td>
+                      <td>
+                        <input type="number" step="1" min="0" class="form-input count-input" data-prod-id="${l.productId}" data-expected="${l.expectedQty}" value="${l.countedQty !== null ? formatQty(l.countedQty) : formatQty(l.expectedQty)}" style="width: 100px; padding: 4px 8px;">
+                      </td>
+                      <td class="variance-cell" data-prod-id="${l.productId}">
+                        <strong>${l.varianceQty !== null ? formatQty(l.varianceQty) : '0'}</strong>
+                      </td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+            <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px;">
+              <button type="button" class="btn btn-secondary" onclick="closeModal()">Close</button>
+              <button type="submit" class="btn btn-primary">Save Physical Counts</button>
+            </div>
+          </form>
+        `;
+
+        openModal(html);
+
+        // Dynamic live variance update
+        document.querySelectorAll('.count-input').forEach(input => {
+          input.oninput = (e) => {
+            const exp = parseFloat(e.target.getAttribute('data-expected') || '0');
+            const counted = parseFloat(e.target.value || '0');
+            const diff = counted - exp;
+            const cell = document.querySelector(`.variance-cell[data-prod-id="${e.target.getAttribute('data-prod-id')}"]`);
+            if (cell) {
+              cell.innerHTML = `<strong style="color: ${diff < 0 ? 'var(--status-danger)' : diff > 0 ? 'var(--status-success)' : 'inherit'}">${diff >= 0 ? '+' : ''}${diff.toFixed(0)}</strong>`;
+            }
+          };
+        });
+
+        document.getElementById('countEntryForm').onsubmit = async (e) => {
+          e.preventDefault();
+          try {
+            const linesPayload = [];
+            document.querySelectorAll('.count-input').forEach(input => {
+              linesPayload.push({
+                productId: input.getAttribute('data-prod-id'),
+                countedQty: parseFloat(input.value || '0').toFixed(6)
+              });
+            });
+
+            await apiFetch(`/v1/inventory/stocktakes/${sessionId}/counts`, {
+              method: 'POST',
+              body: JSON.stringify({ lines: linesPayload })
+            });
+
+            showToast('Physical counts saved successfully', 'success');
+            closeModal();
+            renderStocktakesView();
+          } catch (err) {
+            showToast(`Error saving counts: ${err.message}`, 'error');
+          }
+        };
+      } catch (err) {
+        showToast(`Failed to open count entry: ${err.message}`, 'error');
+      }
+    }
+
+    async function submitStocktakeAction(sessionId) {
+      if (!confirm('Submit entered stock counts for supervisor review?')) return;
+      try {
+        await apiFetch(`/v1/inventory/stocktakes/${sessionId}/submit`, { method: 'POST' });
+        showToast('Stocktake submitted for supervisor review', 'success');
+        renderStocktakesView();
+      } catch (err) {
+        showToast(`Submit failed: ${err.message}`, 'error');
+      }
+    }
+
+    async function openReviewStocktakeModal(sessionId) {
+      try {
+        const session = await apiFetch(`/v1/inventory/stocktakes/${sessionId}`);
+        const lines = session.lines || [];
+
+        const html = `
+          <div style="font-size: 18px; font-weight: 700; margin-bottom: 8px;">Supervisor Review: ${session.countNumber}</div>
+          <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px;">
+            Total lines: <strong>${session.totalLinesCount}</strong> | Discrepancies: <strong style="color: var(--status-warning);">${session.discrepantLinesCount}</strong> | Net Variance: <strong>$${parseFloat(session.totalVarianceValue).toFixed(2)}</strong>
+          </div>
+          <div class="table-responsive" style="max-height: 350px; overflow-y: auto;">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>SKU</th>
+                  <th>Product</th>
+                  <th>Expected</th>
+                  <th>Counted</th>
+                  <th>Variance Qty</th>
+                  <th>Variance Value</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${lines.map(l => `
+                  <tr>
+                    <td><strong>${l.productSku}</strong></td>
+                    <td>${l.productName}</td>
+                    <td>${formatQty(l.expectedQty)}</td>
+                    <td>${formatQty(l.countedQty)}</td>
+                    <td><strong style="color: ${parseFloat(l.varianceQty || '0') < 0 ? 'var(--status-danger)' : parseFloat(l.varianceQty || '0') > 0 ? 'var(--status-success)' : 'inherit'};">${formatQty(l.varianceQty)}</strong></td>
+                    <td>$${parseFloat(l.varianceValue || '0').toFixed(2)}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+          <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px;">
+            <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+            <button type="button" class="btn btn-danger" onclick="reviewAction('${sessionId}', 'REJECT')">Reject Count</button>
+            <button type="button" class="btn btn-primary" onclick="reviewAction('${sessionId}', 'APPROVE')">Approve Count</button>
+          </div>
+        `;
+        openModal(html);
+      } catch (err) {
+        showToast(`Failed to open review: ${err.message}`, 'error');
+      }
+    }
+
+    async function reviewAction(sessionId, action) {
+      let rejectionReason;
+      if (action === 'REJECT') {
+        rejectionReason = prompt('Enter reason for count rejection:', 'Recount requested due to high discrepancy');
+        if (!rejectionReason || rejectionReason.trim().length < 3) return;
+      }
+
+      try {
+        await apiFetch(`/v1/inventory/stocktakes/${sessionId}/review`, {
+          method: 'POST',
+          body: JSON.stringify({ action, rejectionReason })
+        });
+        showToast(`Stocktake ${action.toLowerCase()}d successfully`, 'success');
+        closeModal();
+        renderStocktakesView();
+      } catch (err) {
+        showToast(`Review failed: ${err.message}`, 'error');
+      }
+    }
+
+    async function postStocktakeAdjustmentsAction(sessionId) {
+      if (!confirm('Post approved variance adjustments to the immutable stock ledger? This action cannot be undone.')) return;
+      try {
+        await apiFetch(`/v1/inventory/stocktakes/${sessionId}/post-adjustments`, { method: 'POST' });
+        showToast('Stocktake adjustments posted to stock ledger', 'success');
+        renderStocktakesView();
+      } catch (err) {
+        showToast(`Posting adjustments failed: ${err.message}`, 'error');
+      }
+    }
+
+    async function openViewStocktakeDetailsModal(sessionId) {
+      try {
+        const session = await apiFetch(`/v1/inventory/stocktakes/${sessionId}`);
+        const lines = session.lines || [];
+
+        const html = `
+          <div style="font-size: 18px; font-weight: 700; margin-bottom: 8px;">Stocktake Details: ${session.countNumber}</div>
+          <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px;">
+            Status: <span class="badge-pill badge-green">${session.status}</span> | Total Variance: <strong>$${parseFloat(session.totalVarianceValue).toFixed(2)}</strong>
+          </div>
+          <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>SKU</th>
+                  <th>Product</th>
+                  <th>Expected</th>
+                  <th>Counted</th>
+                  <th>Variance</th>
+                  <th>Ledger Adjustment</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${lines.map(l => `
+                  <tr>
+                    <td><strong>${l.productSku}</strong></td>
+                    <td>${l.productName}</td>
+                    <td>${formatQty(l.expectedQty)}</td>
+                    <td>${formatQty(l.countedQty)}</td>
+                    <td><strong>${formatQty(l.varianceQty)}</strong></td>
+                    <td>${l.adjustmentMovementId ? `<span class="badge-pill badge-green">Posted</span>` : '—'}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+          <div style="display: flex; justify-content: flex-end; margin-top: 16px;">
+            <button class="btn btn-secondary" onclick="closeModal()">Close</button>
+          </div>
+        `;
+        openModal(html);
+      } catch (err) {
+        showToast(`Failed to load details: ${err.message}`, 'error');
       }
     }
 

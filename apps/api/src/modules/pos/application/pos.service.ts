@@ -10,6 +10,8 @@ import {
   type PosShiftResponse,
   type ReceiptResponse,
   type SalesInvoiceResponse,
+  type TrackingMode,
+  type ValuationMethod,
   type VoidSaleRequest,
 } from '@nexstock/contracts';
 import {
@@ -18,7 +20,7 @@ import {
   calculateLinePricingAndTax,
 } from '@nexstock/domain-core';
 import { assertAuthorized } from '../../iam/index.js';
-import { postStockMovement } from '../../inv/index.js';
+import { postStockMovement, selectFefoBatches } from '../../inv/index.js';
 import {
   AppError,
   type TenantTransactionContext,
@@ -468,6 +470,8 @@ export async function searchPosProducts(
       'products.base_uom as base_uom',
       'products.selling_price as selling_price',
       'products.track_inventory as track_inventory',
+      'products.tracking_mode as tracking_mode',
+      'products.valuation_method as valuation_method',
       'categories.name as category_name',
       'inventory_balances.qty_on_hand as qty_on_hand',
       'inventory_balances.qty_reserved as qty_reserved',
@@ -558,6 +562,8 @@ export async function searchPosProducts(
       sku: r.sku,
       name: r.name,
       productType: r.product_type as 'STANDARD' | 'SERVICE',
+      trackingMode: (r.tracking_mode ?? 'NONE') as TrackingMode,
+      valuationMethod: (r.valuation_method ?? 'MOVING_AVG') as ValuationMethod,
       baseUom: r.base_uom,
       retailPrice: Money.fromDecimalString(r.selling_price, 'USD').toDecimalString(),
       trackInventory: r.track_inventory,
@@ -673,7 +679,11 @@ export async function checkoutSale(
     readonly taxAmount: Money;
     readonly lineTotal: Money;
     readonly trackInventory: boolean;
+    readonly trackingMode: string;
+    readonly valuationMethod: string;
     readonly unitCostSnapshot: string;
+    readonly batchId: string | null;
+    readonly serialId: string | null;
   }> = [];
 
   let subtotalAccumulator = Money.zero(currencyCode);
@@ -828,6 +838,60 @@ export async function checkoutSale(
     totalLineDiscounts = totalLineDiscounts.add(lineCalc.discountAmount);
     totalTaxes = totalTaxes.add(lineCalc.totalTaxAmount);
 
+    let batchId: string | null = lineItem.batchId ?? null;
+    let serialId: string | null = lineItem.serialId ?? null;
+
+    if (
+      product.track_inventory &&
+      (product.tracking_mode === 'BATCH' ||
+        product.tracking_mode === 'BATCH_EXPIRY')
+    ) {
+      if (!batchId) {
+        const fefo = await selectFefoBatches(trx, {
+          warehouseId: register.warehouse_id,
+          productId: product.id,
+          requiredQuantity: lineQty.toDecimalString(),
+        });
+        if (fefo.allocations.length > 0) {
+          batchId = fefo.allocations[0]!.batchId;
+        } else if (!input.allowNegativeStockOverride) {
+          throw new AppError({
+            statusCode: 409,
+            errorCode: 'INV_INSUFFICIENT_BATCH_STOCK',
+            title: 'No Available Batch Stock',
+            detail: `No active non-expired batch found for product "${product.sku}".`,
+          });
+        }
+      }
+    } else if (
+      product.track_inventory &&
+      product.tracking_mode === 'SERIAL'
+    ) {
+      if (!serialId && lineItem.serialNumber) {
+        const sRow = await trx.db
+          .selectFrom('inventory_serials')
+          .select(['id', 'status'])
+          .where('tenant_id', '=', trx.tenantId)
+          .where('product_id', '=', product.id)
+          .where(
+            'serial_number',
+            '=',
+            lineItem.serialNumber.trim().toUpperCase(),
+          )
+          .executeTakeFirst();
+        if (sRow) {
+          serialId = sRow.id;
+        } else {
+          throw new AppError({
+            statusCode: 404,
+            errorCode: 'INV_SERIAL_NOT_FOUND',
+            title: 'Serial Number Not Found',
+            detail: `Serial number "${lineItem.serialNumber}" not found for product "${product.sku}".`,
+          });
+        }
+      }
+    }
+
     processedLines.push({
       lineNumber,
       productId: product.id,
@@ -840,7 +904,11 @@ export async function checkoutSale(
       taxAmount: lineCalc.totalTaxAmount,
       lineTotal: lineCalc.lineTotalWithTax,
       trackInventory: product.track_inventory,
+      trackingMode: product.tracking_mode ?? 'NONE',
+      valuationMethod: product.valuation_method ?? 'MOVING_AVG',
       unitCostSnapshot: product.purchase_cost,
+      batchId,
+      serialId,
     });
   }
 
@@ -967,6 +1035,8 @@ export async function checkoutSale(
           branchId: register.branch_id,
           warehouseId: register.warehouse_id,
           productId: line.productId,
+          batchId: line.batchId ?? null,
+          serialId: line.serialId ?? null,
           movementType: 'STOCK_OUT',
           quantity: deductionQtyStr,
           uomCode: line.uomCode,
@@ -1028,6 +1098,9 @@ export async function checkoutSale(
     discountAmount: string;
     taxAmount: string;
     lineTotal: string;
+    unitCostSnapshot?: string;
+    batchId?: string | null;
+    serialId?: string | null;
   }> = [];
 
   for (const line of processedLines) {
@@ -1050,6 +1123,8 @@ export async function checkoutSale(
         line_total: line.lineTotal.toDecimalString(),
         tax_rate_snapshot: JSON.stringify({}),
         unit_cost_snapshot: line.unitCostSnapshot,
+        batch_id: line.batchId ?? null,
+        serial_id: line.serialId ?? null,
       })
       .execute();
 
@@ -1065,6 +1140,9 @@ export async function checkoutSale(
       discountAmount: line.discountAmount.toDecimalString(),
       taxAmount: line.taxAmount.toDecimalString(),
       lineTotal: line.lineTotal.toDecimalString(),
+      unitCostSnapshot: line.unitCostSnapshot,
+      batchId: line.batchId ?? null,
+      serialId: line.serialId ?? null,
     });
   }
 
@@ -1267,6 +1345,8 @@ export async function voidSale(
       'sales_invoice_lines.tax_amount',
       'sales_invoice_lines.line_total',
       'sales_invoice_lines.unit_cost_snapshot',
+      'sales_invoice_lines.batch_id',
+      'sales_invoice_lines.serial_id',
       'products.track_inventory',
     ])
     .where('sales_invoice_lines.tenant_id', '=', trx.tenantId)
@@ -1285,6 +1365,8 @@ export async function voidSale(
           branchId: sale.branch_id,
           warehouseId: sale.warehouse_id,
           productId: line.product_id,
+          batchId: line.batch_id ?? null,
+          serialId: line.serial_id ?? null,
           movementType: 'CUSTOMER_RETURN_RESTOCK',
           quantity: line.quantity,
           uomCode: line.uom_code,
@@ -1540,6 +1622,9 @@ export async function getSaleById(
         l.line_total,
         sale.currency_code,
       ).toDecimalString(),
+      unitCostSnapshot: l.unit_cost_snapshot,
+      batchId: l.batch_id ?? null,
+      serialId: l.serial_id ?? null,
     })),
     payments: payments.map((p) => ({
       id: p.id,
@@ -1839,6 +1924,9 @@ export async function getReceiptData(
         l.line_total,
         sale.currency_code,
       ).toDecimalString(),
+      unitCostSnapshot: l.unit_cost_snapshot,
+      batchId: l.batch_id ?? null,
+      serialId: l.serial_id ?? null,
     })),
     subtotalAmount: Money.fromDecimalString(
       sale.subtotal_amount,

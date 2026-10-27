@@ -285,6 +285,13 @@ export function loadPhase3MigrationSql(): string {
   return sqlText;
 }
 
+export function loadPhase4MigrationSql(): string {
+  const filename = '0005_phase4_advanced_inventory.sql';
+  const sqlText = readFileSync(resolve(migrationsDir, filename), 'utf-8');
+  assertPostgresMigrationSqlCompatible(sqlText, filename);
+  return sqlText;
+}
+
 export function getOrderedPostgresMigrations(): readonly PostgresMigrationSpec[] {
   return [
     {
@@ -314,6 +321,13 @@ export function getOrderedPostgresMigrations(): readonly PostgresMigrationSpec[]
       name: '0004_phase3_pos_and_billing',
       filename: '0004_phase3_pos_and_billing.sql',
       sql: loadPhase3MigrationSql(),
+    },
+    {
+      dialect: 'postgres',
+      version: 5,
+      name: '0005_phase4_advanced_inventory',
+      filename: '0005_phase4_advanced_inventory.sql',
+      sql: loadPhase4MigrationSql(),
     },
   ];
 }

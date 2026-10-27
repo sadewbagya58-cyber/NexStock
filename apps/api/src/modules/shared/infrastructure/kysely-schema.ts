@@ -348,6 +348,8 @@ export interface ProductsTable {
   name: string;
   description: string | null;
   product_type: Generated<'STANDARD' | 'SERVICE' | 'BUNDLE'>;
+  tracking_mode: Generated<'NONE' | 'BATCH' | 'BATCH_EXPIRY' | 'SERIAL'>;
+  valuation_method: Generated<'MOVING_AVG' | 'FIFO'>;
   status: Generated<'ACTIVE' | 'ARCHIVED'>;
   category_id: string | null;
   base_uom: string;
@@ -439,6 +441,8 @@ export interface StockLedgerEntriesTable {
   branch_id: string;
   warehouse_id: string;
   product_id: string;
+  batch_id: string | null;
+  serial_id: string | null;
   supplier_id: string | null;
   movement_type: StockMovementTypeDb;
   uom_code: string;
@@ -448,6 +452,7 @@ export interface StockLedgerEntriesTable {
   balance_before: string;
   balance_after: string;
   unit_cost: string;
+  total_cost_delta: Generated<string>;
   reference_type: string | null;
   reference_id: string | null;
   reversed_entry_id: string | null;
@@ -544,6 +549,8 @@ export interface SalesInvoiceLinesTable {
   line_total: string;
   tax_rate_snapshot: Generated<unknown>;
   unit_cost_snapshot: Generated<string>;
+  batch_id: string | null;
+  serial_id: string | null;
   created_at: Generated<Date>;
 }
 
@@ -562,6 +569,133 @@ export interface SalesPaymentsTable {
   notes: string | null;
   recorded_by_user_id: string;
   created_at: Generated<Date>;
+}
+
+// ============================================================================
+// Phase 4 Advanced Inventory Tables (Batches, Serials, Cost Layers, Stocktakes)
+// ============================================================================
+
+export interface InventoryBatchesTable {
+  id: string;
+  tenant_id: string;
+  product_id: string;
+  warehouse_id: string;
+  batch_number: string;
+  supplier_id: string | null;
+  status: Generated<'ACTIVE' | 'QUARANTINED' | 'DEPLETED'>;
+  received_date: ColumnType<Date, Date | string, Date | string>;
+  manufacturing_date: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  expiry_date: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  initial_quantity: string;
+  current_quantity: Generated<string>;
+  unit_cost: Generated<string>;
+  currency_code: string;
+  quarantine_reason: string | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export type SerialStatusDb =
+  | 'IN_STOCK'
+  | 'RESERVED'
+  | 'SOLD'
+  | 'RETURNED'
+  | 'QUARANTINED'
+  | 'DAMAGED'
+  | 'WRITTEN_OFF';
+
+export interface InventorySerialsTable {
+  id: string;
+  tenant_id: string;
+  product_id: string;
+  batch_id: string | null;
+  warehouse_id: string;
+  branch_id: string;
+  serial_number: string;
+  status: Generated<SerialStatusDb>;
+  unit_cost: Generated<string>;
+  currency_code: string;
+  received_at: Generated<Date>;
+  sold_at: Date | string | null;
+  last_movement_id: string | null;
+  last_sale_invoice_id: string | null;
+  notes: string | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface InventorySerialTransitionsTable {
+  id: string;
+  tenant_id: string;
+  serial_id: string;
+  from_status: string;
+  to_status: string;
+  reference_type: string | null;
+  reference_id: string | null;
+  actor_user_id: string;
+  notes: string | null;
+  occurred_at: Generated<Date>;
+}
+
+export interface InventoryCostLayersTable {
+  id: string;
+  tenant_id: string;
+  warehouse_id: string;
+  product_id: string;
+  batch_id: string | null;
+  ledger_entry_id: string;
+  layer_date: ColumnType<Date, Date | string, Date | string>;
+  received_qty: string;
+  remaining_qty: string;
+  unit_cost: string;
+  currency_code: string;
+  status: Generated<'OPEN' | 'DEPLETED'>;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export type StocktakeScopeDb = 'FULL_WAREHOUSE' | 'CATEGORY' | 'PARTIAL';
+export type StocktakeStatusDb =
+  | 'DRAFT'
+  | 'IN_PROGRESS'
+  | 'SUBMITTED'
+  | 'APPROVED'
+  | 'REJECTED'
+  | 'POSTED';
+
+export interface StocktakeSessionsTable {
+  id: string;
+  tenant_id: string;
+  count_number: string;
+  branch_id: string;
+  warehouse_id: string;
+  scope: StocktakeScopeDb;
+  category_id: string | null;
+  status: Generated<StocktakeStatusDb>;
+  started_at: Date | string | null;
+  completed_at: Date | string | null;
+  counted_by_user_id: string | null;
+  reviewed_by_user_id: string | null;
+  rejection_reason: string | null;
+  notes: string | null;
+  sync_version: Generated<string | number>;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface StocktakeLinesTable {
+  id: string;
+  tenant_id: string;
+  session_id: string;
+  product_id: string;
+  batch_id: string | null;
+  expected_qty: string;
+  counted_qty: string | null;
+  variance_qty: string | null;
+  unit_cost: Generated<string>;
+  variance_value: Generated<string>;
+  adjustment_movement_id: string | null;
+  notes: string | null;
 }
 
 export interface NexStockDatabase {
@@ -604,4 +738,10 @@ export interface NexStockDatabase {
   sales_invoices: SalesInvoicesTable;
   sales_invoice_lines: SalesInvoiceLinesTable;
   sales_payments: SalesPaymentsTable;
+  inventory_batches: InventoryBatchesTable;
+  inventory_serials: InventorySerialsTable;
+  inventory_serial_transitions: InventorySerialTransitionsTable;
+  inventory_cost_layers: InventoryCostLayersTable;
+  stocktake_sessions: StocktakeSessionsTable;
+  stocktake_lines: StocktakeLinesTable;
 }

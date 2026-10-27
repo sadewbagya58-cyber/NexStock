@@ -10,8 +10,22 @@ import type {
   StockMovementResponse,
   StockMovementType,
 } from '@nexstock/contracts';
-import { Money, Quantity } from '@nexstock/domain-core';
+import {
+  Money,
+  Quantity,
+  QUANTITY_SCALE_FACTOR,
+  divideAndRoundBigInt,
+  applyMacReceipt,
+  applyMacOutboundIssue,
+  consumeFifoCostLayers,
+  type FifoCostLayer,
+} from '@nexstock/domain-core';
 import { sql } from 'kysely';
+
+export * from './batch.service.js';
+export * from './serial.service.js';
+export * from './costing.service.js';
+export * from './stocktake.service.js';
 import {
   type CursorPaginatedResult,
   resolveProductForInventory,
@@ -58,6 +72,8 @@ function mapStockMovementRow(
     branch_id: string;
     warehouse_id: string;
     product_id: string;
+    batch_id?: string | null;
+    serial_id?: string | null;
     supplier_id: string | null;
     movement_type: StockMovementType;
     uom_code: string;
@@ -67,6 +83,7 @@ function mapStockMovementRow(
     balance_before: string;
     balance_after: string;
     unit_cost: string;
+    total_cost_delta?: string | null;
     reference_type: string | null;
     reference_id: string | null;
     reversed_entry_id: string | null;
@@ -85,6 +102,8 @@ function mapStockMovementRow(
     branchId: row.branch_id,
     warehouseId: row.warehouse_id,
     productId: row.product_id,
+    batchId: row.batch_id ?? null,
+    serialId: row.serial_id ?? null,
     supplierId: row.supplier_id,
     movementType: row.movement_type,
     uomCode: row.uom_code,
@@ -103,6 +122,14 @@ function mapStockMovementRow(
       String(row.unit_cost),
       baseCurrency,
     ).toDecimalString(),
+    ...(row.total_cost_delta
+      ? {
+          totalCostDelta: Money.fromDecimalString(
+            String(row.total_cost_delta),
+            baseCurrency,
+          ).toDecimalString(),
+        }
+      : {}),
     referenceType: row.reference_type,
     referenceId: row.reference_id,
     reversedEntryId: row.reversed_entry_id,
@@ -366,8 +393,104 @@ export async function postStockMovement(
     : Quantity.zero();
   const balanceAfter = balanceBefore.add(qtyDelta);
 
-  // Enforce server-side negative-stock policy
   let negativeStockOverrideApplied = false;
+
+  // Validate and handle Batch Tracking if applicable
+  const batchRow = input.batchId
+    ? await trx.db
+        .selectFrom('inventory_batches')
+        .selectAll()
+        .where('tenant_id', '=', trx.tenantId)
+        .where('id', '=', input.batchId)
+        .where('warehouse_id', '=', input.warehouseId)
+        .where('product_id', '=', input.productId)
+        .forUpdate()
+        .executeTakeFirst()
+    : undefined;
+
+  if (input.batchId) {
+    if (!batchRow) {
+      throw new AppError({
+        statusCode: 404,
+        errorCode: 'INV_BATCH_NOT_FOUND',
+        title: 'Batch Not Found',
+        detail: `Batch "${input.batchId}" not found for product "${product.sku}" in warehouse "${input.warehouseId}".`,
+      });
+    }
+
+    if (batchRow.status === 'QUARANTINED') {
+      throw new AppError({
+        statusCode: 409,
+        errorCode: 'INV_BATCH_QUARANTINED',
+        title: 'Batch Is Quarantined',
+        detail: `Cannot post movements for quarantined batch "${batchRow.batch_number}". Reason: ${batchRow.quarantine_reason ?? 'Under inspection'}.`,
+      });
+    }
+
+    if (qtyDelta.isNegative()) {
+      if (product.trackingMode === 'BATCH_EXPIRY' && batchRow.expiry_date) {
+        const expDateStr = new Date(batchRow.expiry_date).toISOString().slice(0, 10);
+        const todayStr = new Date().toISOString().slice(0, 10);
+        if (expDateStr < todayStr && !negativeStockOverrideApplied) {
+          throw new AppError({
+            statusCode: 409,
+            errorCode: 'INV_BATCH_EXPIRED',
+            title: 'Batch Has Expired',
+            detail: `Cannot issue from expired batch "${batchRow.batch_number}" (expiry date: ${expDateStr}).`,
+          });
+        }
+      }
+
+      const currentBatchQty = Quantity.fromDecimalString(
+        String(batchRow.current_quantity),
+      );
+      const needed = qtyDelta.abs();
+      if (currentBatchQty.compare(needed) < 0 && !negativeStockOverrideApplied) {
+        throw new AppError({
+          statusCode: 409,
+          errorCode: 'INV_INSUFFICIENT_BATCH_STOCK',
+          title: 'Insufficient Batch Stock',
+          detail: `Batch "${batchRow.batch_number}" has ${currentBatchQty.toDecimalString()} available, but ${needed.toDecimalString()} requested.`,
+        });
+      }
+    }
+  }
+
+  // Validate and handle Serial Tracking if applicable
+  const serialRow = input.serialId
+    ? await trx.db
+        .selectFrom('inventory_serials')
+        .selectAll()
+        .where('tenant_id', '=', trx.tenantId)
+        .where('id', '=', input.serialId)
+        .where('product_id', '=', input.productId)
+        .forUpdate()
+        .executeTakeFirst()
+    : undefined;
+
+  if (input.serialId) {
+    if (!serialRow) {
+      throw new AppError({
+        statusCode: 404,
+        errorCode: 'INV_SERIAL_NOT_FOUND',
+        title: 'Serial Number Not Found',
+        detail: `Serial "${input.serialId}" not found for product "${product.sku}".`,
+      });
+    }
+
+    if (qtyDelta.isNegative()) {
+      if (serialRow.status !== 'IN_STOCK' && !negativeStockOverrideApplied) {
+        throw new AppError({
+          statusCode: 409,
+          errorCode: 'INV_SERIAL_NOT_AVAILABLE',
+          title: 'Serial Number Not Available',
+          detail: `Serial "${serialRow.serial_number}" is currently "${serialRow.status}" and cannot be issued.`,
+        });
+      }
+    }
+  }
+
+  // Enforce server-side negative-stock policy
   if (qtyDelta.isNegative() && balanceAfter.isNegative()) {
     if (!warehouseMeta.allowNegativeStock) {
       if (!input.allowNegativeStockOverride) {
@@ -413,6 +536,134 @@ export async function postStockMovement(
   const reason =
     input.overrideReason?.trim() || input.reason?.trim() || null;
 
+  // Costing & Valuation computation (FIFO vs Moving Average Cost)
+  let unitCostSnapshot = unitCostMoney;
+  let totalCostDelta = unitCostMoney.multiplyByQuantity(qtyDelta);
+  let nextMovingAvgCost = unitCostMoney;
+  let nextTotalInventoryValue = unitCostMoney.multiplyByQuantity(
+    balanceAfter.isNegative() ? Quantity.zero() : balanceAfter,
+  );
+  let updatedFifoLayers: readonly FifoCostLayer[] = [];
+
+  if (product.valuationMethod === 'FIFO') {
+    if (qtyDelta.isPositive()) {
+      totalCostDelta = unitCostMoney.multiplyByQuantity(qtyDelta);
+      const existingTotalVal = existingBalance
+        ? Money.fromDecimalString(
+            String(existingBalance.total_inventory_value),
+            baseCurrency,
+          )
+        : Money.zero(baseCurrency);
+      nextTotalInventoryValue = existingTotalVal.add(totalCostDelta);
+      nextMovingAvgCost = balanceAfter.isPositive()
+        ? Money.fromScaledUnits(
+            divideAndRoundBigInt(
+              nextTotalInventoryValue.scaledUnits * QUANTITY_SCALE_FACTOR,
+              balanceAfter.microUnits,
+              'HALF_EVEN',
+            ),
+            baseCurrency,
+          )
+        : unitCostMoney;
+    } else {
+      const openLayers = await trx.db
+        .selectFrom('inventory_cost_layers')
+        .selectAll()
+        .where('tenant_id', '=', trx.tenantId)
+        .where('warehouse_id', '=', input.warehouseId)
+        .where('product_id', '=', input.productId)
+        .where('status', '=', 'OPEN')
+        .orderBy('layer_date', 'asc')
+        .orderBy('created_at', 'asc')
+        .forUpdate()
+        .execute();
+
+      const fifoLayers: FifoCostLayer[] = openLayers.map((l) => ({
+        layerId: l.id,
+        batchId: l.batch_id ?? '',
+        remainingQty: Quantity.fromDecimalString(String(l.remaining_qty)),
+        unitCost: Money.fromDecimalString(String(l.unit_cost), baseCurrency),
+      }));
+
+      const consumption = consumeFifoCostLayers({
+        layers: fifoLayers,
+        qtyToConsume: qtyDelta.abs(),
+        fallbackUnitCost: unitCostMoney,
+        allowNegativeStock:
+          warehouseMeta.allowNegativeStock || negativeStockOverrideApplied,
+      });
+
+      updatedFifoLayers = consumption.updatedLayers;
+      totalCostDelta = consumption.totalCogs.negate();
+      unitCostSnapshot = consumption.effectiveUnitCostSnapshot;
+
+      const existingTotalVal = existingBalance
+        ? Money.fromDecimalString(
+            String(existingBalance.total_inventory_value),
+            baseCurrency,
+          )
+        : Money.zero(baseCurrency);
+      nextTotalInventoryValue = existingTotalVal.subtract(consumption.totalCogs);
+      if (nextTotalInventoryValue.isNegative()) {
+        nextTotalInventoryValue = Money.zero(baseCurrency);
+      }
+      nextMovingAvgCost = balanceAfter.isPositive()
+        ? Money.fromScaledUnits(
+            divideAndRoundBigInt(
+              nextTotalInventoryValue.scaledUnits * QUANTITY_SCALE_FACTOR,
+              balanceAfter.microUnits,
+              'HALF_EVEN',
+            ),
+            baseCurrency,
+          )
+        : unitCostMoney;
+    }
+  } else {
+    // MOVING_AVG
+    const currentMac = existingBalance
+      ? Money.fromDecimalString(
+          String(existingBalance.moving_avg_cost),
+          baseCurrency,
+        )
+      : unitCostMoney;
+    const currentTotalVal = existingBalance
+      ? Money.fromDecimalString(
+          String(existingBalance.total_inventory_value),
+          baseCurrency,
+        )
+      : Money.zero(baseCurrency);
+
+    if (qtyDelta.isPositive()) {
+      const macResult = applyMacReceipt({
+        currentState: {
+          qtyOnHand: balanceBefore,
+          movingAvgCost: currentMac,
+          totalInventoryValue: currentTotalVal,
+        },
+        qtyReceived: qtyDelta,
+        receiptUnitCost: unitCostMoney,
+      });
+      nextMovingAvgCost = macResult.newState.movingAvgCost;
+      nextTotalInventoryValue = macResult.newState.totalInventoryValue;
+      totalCostDelta = macResult.inventoryAssetCostDelta;
+    } else {
+      const issueResult = applyMacOutboundIssue({
+        currentState: {
+          qtyOnHand: balanceBefore,
+          movingAvgCost: currentMac,
+          totalInventoryValue: currentTotalVal,
+        },
+        qtyIssued: qtyDelta.abs(),
+        allowNegativeStock:
+          warehouseMeta.allowNegativeStock || negativeStockOverrideApplied,
+      });
+      nextMovingAvgCost = issueResult.newState.movingAvgCost;
+      nextTotalInventoryValue = issueResult.newState.totalInventoryValue;
+      totalCostDelta = issueResult.inventoryAssetCostDelta;
+      unitCostSnapshot = issueResult.unitCostSnapshot;
+    }
+  }
+
   // 1. Insert immutable ledger entry FIRST so `inventory_balances_ledger_integrity_trg` succeeds
   await trx.db
     .insertInto('stock_ledger_entries')
@@ -422,6 +673,8 @@ export async function postStockMovement(
       branch_id: input.branchId,
       warehouse_id: input.warehouseId,
       product_id: input.productId,
+      batch_id: input.batchId ?? null,
+      serial_id: input.serialId ?? null,
       supplier_id: supplierId,
       movement_type: input.movementType,
       uom_code: uomCode,
@@ -430,7 +683,8 @@ export async function postStockMovement(
       qty_delta: qtyDelta.toDecimalString(),
       balance_before: balanceBefore.toDecimalString(),
       balance_after: balanceAfter.toDecimalString(),
-      unit_cost: unitCostMoney.toDecimalString(),
+      unit_cost: unitCostSnapshot.toDecimalString(),
+      total_cost_delta: totalCostDelta.toDecimalString(),
       reference_type: input.referenceType?.trim() || null,
       reference_id: input.referenceId?.trim() || null,
       reversed_entry_id: null,
@@ -448,18 +702,14 @@ export async function postStockMovement(
     .execute();
 
   // 2. Atomically maintain `inventory_balances` row
-  const totalValue = unitCostMoney.multiplyByQuantity(
-    balanceAfter.isNegative() ? Quantity.zero() : balanceAfter,
-  );
-
   if (existingBalance) {
     const nextSyncVersion = Number(existingBalance.sync_version) + 1;
     await trx.db
       .updateTable('inventory_balances')
       .set({
         qty_on_hand: balanceAfter.toDecimalString(),
-        moving_avg_cost: unitCostMoney.toDecimalString(),
-        total_inventory_value: totalValue.toDecimalString(),
+        moving_avg_cost: nextMovingAvgCost.toDecimalString(),
+        total_inventory_value: nextTotalInventoryValue.toDecimalString(),
         last_ledger_entry_id: movementId,
         last_movement_at: occurredAt,
         sync_version: nextSyncVersion,
@@ -482,14 +732,150 @@ export async function postStockMovement(
         qty_reserved: Quantity.zero().toDecimalString(),
         qty_in_transit: Quantity.zero().toDecimalString(),
         qty_damaged: Quantity.zero().toDecimalString(),
-        moving_avg_cost: unitCostMoney.toDecimalString(),
-        total_inventory_value: totalValue.toDecimalString(),
+        moving_avg_cost: nextMovingAvgCost.toDecimalString(),
+        total_inventory_value: nextTotalInventoryValue.toDecimalString(),
         last_ledger_entry_id: movementId,
         last_movement_at: occurredAt,
         sync_version: 1,
         updated_at: now,
       })
       .execute();
+  }
+
+  // 3. Update FIFO cost layers
+  if (product.valuationMethod === 'FIFO') {
+    if (qtyDelta.isPositive()) {
+      await trx.db
+        .insertInto('inventory_cost_layers')
+        .values({
+          id: generateUuidV7(),
+          tenant_id: trx.tenantId,
+          warehouse_id: input.warehouseId,
+          product_id: input.productId,
+          batch_id: input.batchId ?? null,
+          ledger_entry_id: movementId,
+          layer_date: occurredAt,
+          received_qty: qtyDelta.toDecimalString(),
+          remaining_qty: qtyDelta.toDecimalString(),
+          unit_cost: unitCostMoney.toDecimalString(),
+          currency_code: baseCurrency,
+          status: 'OPEN',
+          created_at: now,
+          updated_at: now,
+        })
+        .execute();
+    } else {
+      for (const layer of updatedFifoLayers) {
+        await trx.db
+          .updateTable('inventory_cost_layers')
+          .set({
+            remaining_qty: layer.remainingQty.toDecimalString(),
+            status: layer.remainingQty.isZero() ? 'DEPLETED' : 'OPEN',
+            updated_at: now,
+          })
+          .where('tenant_id', '=', trx.tenantId)
+          .where('id', '=', layer.layerId)
+          .execute();
+      }
+    }
+  }
+
+  // 4. Update Batch current_quantity
+  if (batchRow) {
+    if (qtyDelta.isPositive()) {
+      const currentBatchQty = Quantity.fromDecimalString(
+        String(batchRow.current_quantity),
+      );
+      const newBatchQty = currentBatchQty.add(qtyDelta);
+      await trx.db
+        .updateTable('inventory_batches')
+        .set({
+          current_quantity: newBatchQty.toDecimalString(),
+          status: 'ACTIVE',
+          updated_at: now,
+        })
+        .where('tenant_id', '=', trx.tenantId)
+        .where('id', '=', batchRow.id)
+        .execute();
+    } else {
+      const currentBatchQty = Quantity.fromDecimalString(
+        String(batchRow.current_quantity),
+      );
+      const newBatchQty = currentBatchQty.subtract(qtyDelta.abs());
+      const finalQty = newBatchQty.isNegative() ? Quantity.zero() : newBatchQty;
+      await trx.db
+        .updateTable('inventory_batches')
+        .set({
+          current_quantity: finalQty.toDecimalString(),
+          status: finalQty.isZero() ? 'DEPLETED' : 'ACTIVE',
+          updated_at: now,
+        })
+        .where('tenant_id', '=', trx.tenantId)
+        .where('id', '=', batchRow.id)
+        .execute();
+    }
+  }
+
+  // 5. Update Serial status and audit transition
+  if (serialRow) {
+    if (qtyDelta.isNegative()) {
+      const nextStatus =
+        input.movementType === 'STOCK_OUT' ? 'SOLD' : 'WRITTEN_OFF';
+      await trx.db
+        .updateTable('inventory_serials')
+        .set({
+          status: nextStatus,
+          sold_at: nextStatus === 'SOLD' ? now : serialRow.sold_at,
+          last_movement_id: movementId,
+          updated_at: now,
+        })
+        .where('tenant_id', '=', trx.tenantId)
+        .where('id', '=', serialRow.id)
+        .execute();
+
+      await trx.db
+        .insertInto('inventory_serial_transitions')
+        .values({
+          id: generateUuidV7(),
+          tenant_id: trx.tenantId,
+          serial_id: serialRow.id,
+          from_status: serialRow.status,
+          to_status: nextStatus,
+          reference_type: 'STOCK_MOVEMENT',
+          reference_id: movementId,
+          actor_user_id: trx.userId,
+          notes: reason ?? `Movement ${input.movementType}`,
+          occurred_at: now,
+        })
+        .execute();
+    } else {
+      await trx.db
+        .updateTable('inventory_serials')
+        .set({
+          status: 'IN_STOCK',
+          last_movement_id: movementId,
+          updated_at: now,
+        })
+        .where('tenant_id', '=', trx.tenantId)
+        .where('id', '=', serialRow.id)
+        .execute();
+
+      await trx.db
+        .insertInto('inventory_serial_transitions')
+        .values({
+          id: generateUuidV7(),
+          tenant_id: trx.tenantId,
+          serial_id: serialRow.id,
+          from_status: serialRow.status,
+          to_status: 'IN_STOCK',
+          reference_type: 'STOCK_MOVEMENT',
+          reference_id: movementId,
+          actor_user_id: trx.userId,
+          notes: reason ?? `Movement ${input.movementType}`,
+          occurred_at: now,
+        })
+        .execute();
+    }
   }
 
   await appendAuditLog(trx, {
@@ -666,6 +1052,8 @@ export async function reverseStockMovement(
       branch_id: original.branch_id,
       warehouse_id: original.warehouse_id,
       product_id: original.product_id,
+      batch_id: original.batch_id ?? null,
+      serial_id: original.serial_id ?? null,
       supplier_id: original.supplier_id,
       movement_type: 'CORRECTION_REVERSAL',
       uom_code: original.uom_code,
@@ -675,6 +1063,14 @@ export async function reverseStockMovement(
       balance_before: balanceBefore.toDecimalString(),
       balance_after: balanceAfter.toDecimalString(),
       unit_cost: unitCostMoney.toDecimalString(),
+      total_cost_delta: original.total_cost_delta
+        ? Money.fromDecimalString(
+            String(original.total_cost_delta),
+            baseCurrency,
+          )
+            .negate()
+            .toDecimalString()
+        : '0.0000',
       reference_type: 'REVERSAL',
       reference_id: original.id,
       reversed_entry_id: original.id,
@@ -710,6 +1106,75 @@ export async function reverseStockMovement(
       .where('tenant_id', '=', trx.tenantId)
       .where('id', '=', existingBalance.id)
       .execute();
+  }
+
+  // Restore Batch quantity on reversal if batch_id was present
+  if (original.batch_id) {
+    const bRow = await trx.db
+      .selectFrom('inventory_batches')
+      .select(['id', 'current_quantity'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('id', '=', original.batch_id)
+      .forUpdate()
+      .executeTakeFirst();
+
+    if (bRow) {
+      const cur = Quantity.fromDecimalString(String(bRow.current_quantity));
+      const nextBatchQty = cur.add(reversalQtyDelta);
+      const finalQty = nextBatchQty.isNegative() ? Quantity.zero() : nextBatchQty;
+      await trx.db
+        .updateTable('inventory_batches')
+        .set({
+          current_quantity: finalQty.toDecimalString(),
+          status: finalQty.isZero() ? 'DEPLETED' : 'ACTIVE',
+          updated_at: now,
+        })
+        .where('tenant_id', '=', trx.tenantId)
+        .where('id', '=', bRow.id)
+        .execute();
+    }
+  }
+
+  // Restore Serial status on reversal if serial_id was present
+  if (original.serial_id) {
+    const sRow = await trx.db
+      .selectFrom('inventory_serials')
+      .select(['id', 'status'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('id', '=', original.serial_id)
+      .forUpdate()
+      .executeTakeFirst();
+
+    if (sRow) {
+      const restoredStatus = reversalQtyDelta.isPositive() ? 'IN_STOCK' : 'SOLD';
+      await trx.db
+        .updateTable('inventory_serials')
+        .set({
+          status: restoredStatus,
+          last_movement_id: reversalId,
+          sold_at: restoredStatus === 'IN_STOCK' ? null : now,
+          updated_at: now,
+        })
+        .where('tenant_id', '=', trx.tenantId)
+        .where('id', '=', sRow.id)
+        .execute();
+
+      await trx.db
+        .insertInto('inventory_serial_transitions')
+        .values({
+          id: generateUuidV7(),
+          tenant_id: trx.tenantId,
+          serial_id: sRow.id,
+          from_status: sRow.status,
+          to_status: restoredStatus,
+          reference_type: 'MOVEMENT_REVERSAL',
+          reference_id: reversalId,
+          actor_user_id: trx.userId,
+          notes: `Reversal of movement ${original.id}`,
+          occurred_at: now,
+        })
+        .execute();
+    }
   }
 
   await appendAuditLog(trx, {

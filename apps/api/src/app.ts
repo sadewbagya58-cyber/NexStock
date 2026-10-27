@@ -6,30 +6,40 @@ import {
 import {
   AuthenticatedIdempotentHeadersSchema,
   AuthenticatedTenantHeadersSchema,
+  BatchResponseSchema,
   BranchResponseSchema,
   CategoryResponseSchema,
   ClosePosShiftRequestSchema,
+  CreateBatchRequestSchema,
   CreateBranchRequestSchema,
   CreateCategoryRequestSchema,
   CreateExchangeRateRequestSchema,
   CreatePosSaleRequestSchema,
   CreateProductRequestSchema,
+  CreateStocktakeSessionRequestSchema,
   CreateSupplierRequestSchema,
   CreateWarehouseRequestSchema,
   CurrencyCodeSchema,
   DecimalMoneyStringSchema,
+  DecimalQuantityStringSchema,
+  FefoSelectionResponseSchema,
+  FifoCostLayerResponseSchema,
   GetActivePosShiftQuerySchema,
   HealthStatusResponseSchema,
   IdempotentMutationHeadersSchema,
   InventoryBalanceResponseSchema,
   InventoryReconciliationResponseSchema,
+  InventoryValuationResponseSchema,
   LinkSupplierProductRequestSchema,
+  ListBatchesQuerySchema,
   ListCategoriesQuerySchema,
   ListInventoryBalancesQuerySchema,
   ListPosRegistersQuerySchema,
   ListProductsQuerySchema,
   ListSalesQuerySchema,
+  ListSerialsQuerySchema,
   ListStockMovementsQuerySchema,
+  ListStocktakeSessionsQuerySchema,
   ListSuppliersQuerySchema,
   OpenPosShiftRequestSchema,
   PosProductItemResponseSchema,
@@ -39,17 +49,24 @@ import {
   PostStockMovementRequestSchema,
   ProblemDetailsSchema,
   ProductResponseSchema,
+  QuarantineBatchRequestSchema,
   ReceiptResponseSchema,
+  RecordStocktakeCountRequestSchema,
   RecordSubscriptionPaymentRequestSchema,
+  RegisterSerialStockRequestSchema,
   ReverseStockMovementRequestSchema,
+  ReviewStocktakeRequestSchema,
   SalesInvoiceResponseSchema,
+  SerialResponseSchema,
   StockMovementResponseSchema,
+  StocktakeSessionResponseSchema,
   SubscriptionStatusSchema,
   SupplierProductResponseSchema,
   SupplierResponseSchema,
   SyncPushBatchRequestSchema,
   SyncPushBatchResponseSchema,
   TenantContextHeadersSchema,
+  TransitionSerialStatusRequestSchema,
   UpdateCategoryRequestSchema,
   UpdateProductRequestSchema,
   UpdateSupplierRequestSchema,
@@ -89,12 +106,31 @@ import {
   verifySupabaseJwt,
 } from './modules/iam/index.js';
 import {
+  createBatch,
+  createStocktakeSession,
+  getBatchById,
+  getInventoryValuation,
+  getSerialById,
   getStockMovementById,
+  getStocktakeSessionById,
+  listBatches,
+  listFifoCostLayers,
   listInventoryBalances,
+  listSerials,
   listStockMovements,
+  listStocktakeSessions,
   postStockMovement,
+  postStocktakeAdjustments,
+  quarantineBatch,
   reconcileInventoryBalances,
+  recordStocktakeCounts,
+  registerSerialStock,
+  releaseBatch,
   reverseStockMovement,
+  reviewStocktakeSession,
+  selectFefoBatches,
+  submitStocktakeSession,
+  transitionSerialStatus,
 } from './modules/inv/index.js';
 import {
   createBranch,
@@ -1947,6 +1983,656 @@ export async function buildApp(
         options.db,
         { tenantId, userId: principal.userId, traceId },
         (trx) => reconcileInventoryBalances(trx, request.query),
+      );
+    },
+  );
+
+  // ============================================================================
+  // PHASE 4: ADVANCED INVENTORY (BATCHES, SERIALS, COSTING, STOCKTAKES)
+  // ============================================================================
+
+  // 1. Batches / Lots
+  app.post(
+    '/v1/inventory/batches',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        body: CreateBatchRequestSchema,
+        response: {
+          201: BatchResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+          422: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      const result = await withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => createBatch(trx, request.body),
+      );
+
+      reply.status(201);
+      return result;
+    },
+  );
+
+  app.get(
+    '/v1/inventory/batches',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        querystring: ListBatchesQuerySchema,
+        response: {
+          200: createCursorPageResponseSchema(BatchResponseSchema),
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => listBatches(trx, request.query),
+      );
+    },
+  );
+
+  app.get(
+    '/v1/inventory/batches/:batchId',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ batchId: UuidSchema }),
+        response: {
+          200: BatchResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => getBatchById(trx, request.params.batchId),
+      );
+    },
+  );
+
+  app.post(
+    '/v1/inventory/batches/:batchId/quarantine',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ batchId: UuidSchema }),
+        body: QuarantineBatchRequestSchema,
+        response: {
+          200: BatchResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          quarantineBatch(trx, request.params.batchId, request.body.reason),
+      );
+    },
+  );
+
+  app.post(
+    '/v1/inventory/batches/:batchId/release',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ batchId: UuidSchema }),
+        body: Type.Optional(
+          Type.Object(
+            { reason: Type.Optional(Type.String()) },
+            { additionalProperties: false },
+          ),
+        ),
+        response: {
+          200: BatchResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => releaseBatch(trx, request.params.batchId, request.body?.reason),
+      );
+    },
+  );
+
+  app.post(
+    '/v1/inventory/batches/fefo-select',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        body: Type.Object(
+          {
+            warehouseId: UuidSchema,
+            productId: UuidSchema,
+            requiredQuantity: DecimalQuantityStringSchema,
+            allowExpiringSoon: Type.Optional(Type.Boolean()),
+          },
+          { additionalProperties: false },
+        ),
+        response: {
+          200: FefoSelectionResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => selectFefoBatches(trx, request.body),
+      );
+    },
+  );
+
+  // 2. Serial Numbers
+  app.post(
+    '/v1/inventory/serials',
+    {
+      schema: {
+        headers: AuthenticatedIdempotentHeadersSchema,
+        body: RegisterSerialStockRequestSchema,
+        response: {
+          201: Type.Array(SerialResponseSchema),
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+          422: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const idempotencyKey = request.headers['idempotency-key'];
+      const traceId = String(request.id);
+
+      const result = await withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => registerSerialStock(trx, idempotencyKey, request.body),
+      );
+
+      reply.status(201);
+      return result;
+    },
+  );
+
+  app.get(
+    '/v1/inventory/serials',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        querystring: ListSerialsQuerySchema,
+        response: {
+          200: createCursorPageResponseSchema(SerialResponseSchema),
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => listSerials(trx, request.query),
+      );
+    },
+  );
+
+  app.get(
+    '/v1/inventory/serials/:serialId',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ serialId: UuidSchema }),
+        response: {
+          200: SerialResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => getSerialById(trx, request.params.serialId),
+      );
+    },
+  );
+
+  app.post(
+    '/v1/inventory/serials/:serialId/transition',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ serialId: UuidSchema }),
+        body: TransitionSerialStatusRequestSchema,
+        response: {
+          200: SerialResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          transitionSerialStatus(trx, request.params.serialId, request.body),
+      );
+    },
+  );
+
+  // 3. Inventory Costing & Valuation
+  app.get(
+    '/v1/inventory/valuation',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        querystring: Type.Object(
+          { warehouseId: UuidSchema },
+          { additionalProperties: false },
+        ),
+        response: {
+          200: InventoryValuationResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => getInventoryValuation(trx, request.query.warehouseId),
+      );
+    },
+  );
+
+  app.get(
+    '/v1/inventory/cost-layers',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        querystring: Type.Object(
+          {
+            warehouseId: UuidSchema,
+            productId: UuidSchema,
+          },
+          { additionalProperties: false },
+        ),
+        response: {
+          200: Type.Array(FifoCostLayerResponseSchema),
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => listFifoCostLayers(trx, request.query),
+      );
+    },
+  );
+
+  // 4. Stocktake Sessions & Counts
+  app.post(
+    '/v1/inventory/stocktakes',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        body: CreateStocktakeSessionRequestSchema,
+        response: {
+          201: StocktakeSessionResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          422: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      const result = await withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => createStocktakeSession(trx, request.body),
+      );
+
+      reply.status(201);
+      return result;
+    },
+  );
+
+  app.get(
+    '/v1/inventory/stocktakes',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        querystring: ListStocktakeSessionsQuerySchema,
+        response: {
+          200: createCursorPageResponseSchema(StocktakeSessionResponseSchema),
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => listStocktakeSessions(trx, request.query),
+      );
+    },
+  );
+
+  app.get(
+    '/v1/inventory/stocktakes/:sessionId',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ sessionId: UuidSchema }),
+        response: {
+          200: StocktakeSessionResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => getStocktakeSessionById(trx, request.params.sessionId),
+      );
+    },
+  );
+
+  app.post(
+    '/v1/inventory/stocktakes/:sessionId/counts',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ sessionId: UuidSchema }),
+        body: RecordStocktakeCountRequestSchema,
+        response: {
+          200: StocktakeSessionResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          recordStocktakeCounts(trx, request.params.sessionId, request.body),
+      );
+    },
+  );
+
+  app.post(
+    '/v1/inventory/stocktakes/:sessionId/submit',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ sessionId: UuidSchema }),
+        response: {
+          200: StocktakeSessionResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => submitStocktakeSession(trx, request.params.sessionId),
+      );
+    },
+  );
+
+  app.post(
+    '/v1/inventory/stocktakes/:sessionId/review',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ sessionId: UuidSchema }),
+        body: ReviewStocktakeRequestSchema,
+        response: {
+          200: StocktakeSessionResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          reviewStocktakeSession(trx, request.params.sessionId, request.body),
+      );
+    },
+  );
+
+  app.post(
+    '/v1/inventory/stocktakes/:sessionId/post-adjustments',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ sessionId: UuidSchema }),
+        response: {
+          200: StocktakeSessionResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => postStocktakeAdjustments(trx, request.params.sessionId),
       );
     },
   );

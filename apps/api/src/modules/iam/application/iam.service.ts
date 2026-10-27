@@ -48,7 +48,17 @@ export type PermissionKey =
   | 'pos:sale:create'
   | 'pos:sale:read'
   | 'pos:sale:void'
-  | 'pos:payment:create';
+  | 'pos:payment:create'
+  | 'inv:batch:read'
+  | 'inv:batch:manage'
+  | 'inv:serial:read'
+  | 'inv:serial:manage'
+  | 'inv:costing:read'
+  | 'inv:count:read'
+  | 'inv:count:create'
+  | 'inv:count:submit'
+  | 'inv:count:approve'
+  | 'inv:count:post';
 
 const ALL_MILESTONE1_PERMISSIONS: readonly PermissionKey[] = [
   'org:tenant:manage',
@@ -85,6 +95,16 @@ const ALL_MILESTONE1_PERMISSIONS: readonly PermissionKey[] = [
   'pos:sale:read',
   'pos:sale:void',
   'pos:payment:create',
+  'inv:batch:read',
+  'inv:batch:manage',
+  'inv:serial:read',
+  'inv:serial:manage',
+  'inv:costing:read',
+  'inv:count:read',
+  'inv:count:create',
+  'inv:count:submit',
+  'inv:count:approve',
+  'inv:count:post',
 ];
 
 export const SYSTEM_ROLE_DEFINITIONS: Readonly<
@@ -131,6 +151,16 @@ export const SYSTEM_ROLE_DEFINITIONS: Readonly<
       'pos:sale:read',
       'pos:sale:void',
       'pos:payment:create',
+      'inv:batch:read',
+      'inv:batch:manage',
+      'inv:serial:read',
+      'inv:serial:manage',
+      'inv:costing:read',
+      'inv:count:read',
+      'inv:count:create',
+      'inv:count:submit',
+      'inv:count:approve',
+      'inv:count:post',
     ],
   },
   CASHIER: {
@@ -148,6 +178,8 @@ export const SYSTEM_ROLE_DEFINITIONS: Readonly<
       'pos:sale:create',
       'pos:sale:read',
       'pos:payment:create',
+      'inv:batch:read',
+      'inv:serial:read',
     ],
   },
   WAREHOUSE_CLERK: {
@@ -162,6 +194,13 @@ export const SYSTEM_ROLE_DEFINITIONS: Readonly<
       'inv:balance:read',
       'inv:movement:read',
       'inv:movement:post',
+      'inv:batch:read',
+      'inv:batch:manage',
+      'inv:serial:read',
+      'inv:serial:manage',
+      'inv:count:read',
+      'inv:count:create',
+      'inv:count:submit',
     ],
   },
   PURCHASER: {
@@ -178,6 +217,10 @@ export const SYSTEM_ROLE_DEFINITIONS: Readonly<
       'pur:supplier:manage',
       'inv:balance:read',
       'inv:movement:read',
+      'inv:batch:read',
+      'inv:batch:manage',
+      'inv:serial:read',
+      'inv:costing:read',
     ],
   },
   ACCOUNTANT: {
@@ -195,6 +238,11 @@ export const SYSTEM_ROLE_DEFINITIONS: Readonly<
       'pur:supplier:read',
       'inv:balance:read',
       'inv:movement:read',
+      'inv:batch:read',
+      'inv:serial:read',
+      'inv:costing:read',
+      'inv:count:read',
+      'inv:count:approve',
     ],
   },
 };

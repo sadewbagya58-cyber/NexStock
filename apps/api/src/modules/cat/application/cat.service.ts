@@ -10,8 +10,10 @@ import type {
   ProductType,
   ProductUnitConversionResponse,
   RecordLifecycleStatus,
+  TrackingMode,
   UpdateCategoryRequest,
   UpdateProductRequest,
+  ValuationMethod,
 } from '@nexstock/contracts';
 import { Money, Quantity } from '@nexstock/domain-core';
 import {
@@ -587,6 +589,8 @@ async function hydrateProductDetails(
     selling_price: string;
     tax_group_id: string | null;
     track_inventory: boolean;
+    tracking_mode?: TrackingMode | null;
+    valuation_method?: ValuationMethod | null;
     reorder_point: string;
     reorder_qty: string;
     image_url: string | null;
@@ -655,6 +659,8 @@ async function hydrateProductDetails(
     ).toDecimalString(),
     taxGroupId: row.tax_group_id,
     trackInventory: row.track_inventory,
+    trackingMode: (row.tracking_mode ?? 'NONE') as TrackingMode,
+    valuationMethod: (row.valuation_method ?? 'MOVING_AVG') as ValuationMethod,
     reorderPoint: Quantity.fromDecimalString(
       String(row.reorder_point),
     ).toDecimalString(),
@@ -941,6 +947,8 @@ export async function createProduct(
       selling_price: sellingPrice,
       tax_group_id: taxGroupId,
       track_inventory: trackInventory,
+      tracking_mode: input.trackingMode ?? 'NONE',
+      valuation_method: input.valuationMethod ?? 'MOVING_AVG',
       reorder_point: reorderPoint,
       reorder_qty: reorderQty,
       image_url: input.imageUrl?.trim() ?? null,
@@ -1379,6 +1387,14 @@ export async function updateProduct(
       tax_group_id: nextTaxGroupId,
       reorder_point: nextReorderPoint,
       reorder_qty: nextReorderQty,
+      tracking_mode:
+        input.trackingMode !== undefined
+          ? input.trackingMode
+          : existing.tracking_mode,
+      valuation_method:
+        input.valuationMethod !== undefined
+          ? input.valuationMethod
+          : existing.valuation_method,
       image_url:
         input.imageUrl !== undefined
           ? (input.imageUrl?.trim() ?? null)
@@ -1585,6 +1601,8 @@ export async function resolveProductForInventory(
   readonly status: RecordLifecycleStatus;
   readonly productType: ProductType;
   readonly trackInventory: boolean;
+  readonly trackingMode: TrackingMode;
+  readonly valuationMethod: ValuationMethod;
   readonly baseUom: string;
   readonly purchaseCost: string;
   readonly reorderPoint: string;
@@ -1600,6 +1618,8 @@ export async function resolveProductForInventory(
       'status',
       'product_type',
       'track_inventory',
+      'tracking_mode',
+      'valuation_method',
       'base_uom',
       'purchase_cost',
       'reorder_point',
@@ -1643,6 +1663,8 @@ export async function resolveProductForInventory(
     status: row.status,
     productType: row.product_type,
     trackInventory: row.track_inventory,
+    trackingMode: (row.tracking_mode ?? 'NONE') as TrackingMode,
+    valuationMethod: (row.valuation_method ?? 'MOVING_AVG') as ValuationMethod,
     baseUom: row.base_uom,
     purchaseCost: String(row.purchase_cost),
     reorderPoint: String(row.reorder_point),
