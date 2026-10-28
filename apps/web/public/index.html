@@ -642,6 +642,101 @@
       .pos-layout { grid-template-columns: 1fr; height: auto; }
       main.main-content { padding: 16px; }
     }
+
+    /* Phase 5.0 Authentication & Business Onboarding Styles */
+    .auth-wrapper {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: calc(100vh - var(--header-height) - 80px);
+      padding: 32px 16px;
+    }
+    .auth-card {
+      background: var(--surface-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      box-shadow: var(--shadow-lg);
+      width: 100%;
+      max-width: 440px;
+      padding: 32px;
+    }
+    .auth-card-wide {
+      max-width: 580px;
+    }
+    .auth-brand {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      margin-bottom: 24px;
+      font-size: 24px;
+      font-weight: 700;
+      color: var(--accent-primary);
+    }
+    .auth-title {
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--text-primary);
+      text-align: center;
+      margin-bottom: 8px;
+    }
+    .auth-subtitle {
+      font-size: 14px;
+      color: var(--text-secondary);
+      text-align: center;
+      margin-bottom: 24px;
+      line-height: 1.5;
+    }
+    .auth-alert {
+      padding: 12px 16px;
+      border-radius: var(--radius);
+      font-size: 13px;
+      margin-bottom: 20px;
+      display: none;
+      line-height: 1.4;
+    }
+    .auth-alert-error {
+      background: #FEE2E2;
+      color: #991B1B;
+      border: 1px solid #FCA5A5;
+    }
+    .auth-alert-success {
+      background: #DCFCE7;
+      color: #166534;
+      border: 1px solid #86EFAC;
+    }
+    .auth-footer {
+      margin-top: 24px;
+      text-align: center;
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+    .auth-link {
+      color: var(--accent-primary);
+      text-decoration: none;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .auth-link:hover {
+      text-decoration: underline;
+    }
+    .tenant-card {
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius);
+      padding: 16px 20px;
+      margin-bottom: 12px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: var(--surface-card);
+    }
+    .tenant-card:hover {
+      border-color: var(--accent-primary);
+      background: var(--accent-light);
+    }
   </style>
 </head>
 <body data-theme="light">
@@ -649,39 +744,42 @@
   <!-- Top Bar -->
   <header class="topbar">
     <div class="brand-section">
-      <a href="#dashboard" class="brand-logo">
+      <a href="#dashboard" class="brand-logo" id="brandLogoBtn">
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
         NexStock
       </a>
-      <span class="badge-pill badge-blue">v0.1.0 Phase 3</span>
+      <span class="badge-pill badge-blue">v0.1.0 Phase 5</span>
     </div>
 
-    <div class="topbar-context">
-      <div class="context-selector" id="topbarTenantContext">
-        <span>Org:</span> <strong id="topbarTenantName">NexStock Global Retail Ltd</strong>
-        <span class="badge-pill badge-green" id="topbarPlanBadge">GROWTH</span>
+    <div class="topbar-context" id="topbarContext">
+      <div class="context-selector" id="topbarTenantContext" style="cursor: pointer;" title="Click to switch organization">
+        <span>Org:</span> <strong id="topbarTenantName">—</strong>
+        <span class="badge-pill badge-green" id="topbarPlanBadge">TRIAL</span>
       </div>
 
-      <div class="context-selector">
-        <span>Branch:</span> <strong id="topbarBranchName">Manhattan Store</strong>
+      <div class="context-selector" id="topbarBranchContext">
+        <span>Branch:</span> <strong id="topbarBranchName">—</strong>
       </div>
 
-      <div class="context-selector">
-        <span>Role:</span> <strong id="topbarUserRole">OWNER</strong>
+      <div class="context-selector" id="topbarRoleContext">
+        <span>Role:</span> <strong id="topbarUserRole">—</strong>
       </div>
     </div>
 
     <div class="topbar-actions">
-      <button class="btn btn-secondary btn-sm" id="btnSwitchRole" title="Toggle between Owner &amp; Cashier demo sessions">
-        Switch User
-      </button>
+      <div id="topbarAuthActions" style="display: flex; align-items: center; gap: 8px;">
+        <span id="topbarUserName" style="font-size: 13px; font-weight: 500; color: var(--text-secondary);"></span>
+        <button class="btn btn-secondary btn-sm" id="btnSignOut" title="Sign out of your account">
+          Sign Out
+        </button>
+      </div>
 
       <button class="btn-icon" id="btnThemeToggle" title="Toggle Dark/Light Mode">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
       </button>
 
       <div class="badge-pill badge-green" id="topbarSyncStatus" title="System Status">
-        ● Online
+        ● Connected
       </div>
     </div>
   </header>
@@ -807,17 +905,22 @@
       return 'https://nexstock-vu5i.onrender.com';
     }
 
-    // State Store
+    // State Store (Phase 5.0 Authentication & Tenant Scoped)
     const state = {
       apiBaseUrl: resolveApiBaseUrl(),
       token: '',
-      tenantId: '0192b4c0-1111-7000-8000-000000000001',
-      branchId: '0192b4c0-3333-7000-8000-000000000001',
-      warehouseId: '0192b4c0-4444-7000-8000-000000000001',
-      registerId: '0192b4c0-5555-7000-8000-000000000001',
-      userRole: 'OWNER',
-      userEmail: 'owner@demo.nexstock.local',
-      fullName: 'Demo Store Owner',
+      tenantId: '',
+      tenantName: '',
+      currency: 'USD',
+      plan: 'TRIAL',
+      branchId: '',
+      branchName: '',
+      warehouseId: '',
+      registerId: '',
+      userRole: '',
+      userEmail: '',
+      fullName: '',
+      memberships: [],
       activeView: 'dashboard',
       theme: 'light',
       activeShift: null,
@@ -846,7 +949,7 @@
     async function apiFetch(endpoint, options = {}) {
       const headers = {
         'Content-Type': 'application/json',
-        'x-tenant-id': state.tenantId,
+        ...(state.tenantId ? { 'x-tenant-id': state.tenantId } : {}),
         ...(state.token ? { 'Authorization': `Bearer ${state.token}` } : {}),
         ...(options.headers || {})
       };
@@ -867,13 +970,20 @@
         const data = contentType.includes('application/json') ? await res.json() : null;
 
         if (!res.ok) {
-          const detail = data?.detail || data?.title || `HTTP ${res.status}`;
+          if (res.status === 401 && !endpoint.startsWith('/v1/auth/login') && !endpoint.startsWith('/v1/auth/signup')) {
+            showToast('Session expired. Please sign in again.', 'warning');
+            handleSignOut();
+            return null;
+          }
+          const detail = data?.detail || data?.title || data?.message || `HTTP ${res.status}`;
           throw new Error(detail);
         }
 
         return data;
       } catch (err) {
-        showToast(err.message, 'error');
+        if (!options.silent) {
+          showToast(err.message, 'error');
+        }
         throw err;
       }
     }
@@ -909,34 +1019,149 @@
 
     document.getElementById('btnThemeToggle').onclick = toggleTheme;
 
-    // Switch Role (Demo Admin vs Demo Cashier)
-    async function switchRole() {
-      const targetRole = state.userRole === 'OWNER' ? 'CASHIER' : 'OWNER';
+    // =========================================================================
+    // Phase 5.0 Authentication & Session Management
+    // =========================================================================
+
+    const AUTH_VIEWS = ['welcome', 'login', 'signup', 'forgot-password', 'onboard-business', 'tenant-select'];
+
+    // Select Active Tenant Membership
+    async function selectActiveTenant(membership) {
+      state.tenantId = membership.tenantId;
+      state.tenantName = membership.businessName || membership.tenantName || 'My Business';
+      state.currency = membership.baseCurrency || membership.currency || 'USD';
+      state.plan = membership.status || membership.plan || 'TRIAL';
+      state.userRole = membership.role || membership.roleName || 'MEMBER';
+      localStorage.setItem('nexstock_active_tenant_id', membership.tenantId);
+
+      const hq = (membership.branches || []).find(b => b.isHeadquarters) || (membership.branches || [])[0];
+      if (hq) {
+        state.branchId = hq.id;
+        state.branchName = hq.name;
+      } else {
+        state.branchId = '';
+        state.branchName = 'Default Branch';
+      }
+
+      // Update Topbar context
+      const tenantEl = document.getElementById('topbarTenantName');
+      if (tenantEl) tenantEl.innerText = state.tenantName;
+      const planEl = document.getElementById('topbarPlanBadge');
+      if (planEl) planEl.innerText = state.plan;
+      const branchEl = document.getElementById('topbarBranchName');
+      if (branchEl) branchEl.innerText = state.branchName;
+      const roleEl = document.getElementById('topbarUserRole');
+      if (roleEl) roleEl.innerText = state.userRole;
+
+      // Pre-load active warehouse and POS register for this branch
       try {
-        const session = await fetch(`${state.apiBaseUrl}/v1/auth/demo-session`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ role: targetRole })
-        }).then(r => r.json());
-
-        state.token = session.token;
-        state.userRole = session.role;
-        state.fullName = session.fullName;
-        state.userEmail = session.email;
-
-        document.getElementById('topbarUserRole').innerText = session.role;
-        showToast(`Switched active session to ${session.fullName} (${session.role})`, 'success');
-        renderView(state.activeView);
-      } catch (err) {
-        showToast('Failed to switch demo session', 'error');
+        const [whRes, regRes] = await Promise.all([
+          apiFetch(`/v1/inventory/warehouses?branchId=${state.branchId}`, { silent: true }).catch(() => ({ data: [] })),
+          apiFetch(`/v1/pos/registers?branchId=${state.branchId}`, { silent: true }).catch(() => [])
+        ]);
+        const whList = whRes?.data || (Array.isArray(whRes) ? whRes : []);
+        if (whList.length > 0) {
+          state.warehouseId = whList[0].id;
+        }
+        const regList = Array.isArray(regRes) ? regRes : (regRes?.data || []);
+        if (regList.length > 0) {
+          state.registerId = regList[0].id;
+        }
+      } catch {
+        // Non-critical fallback
       }
     }
 
-    document.getElementById('btnSwitchRole').onclick = switchRole;
+    // Sign Out Handler
+    async function handleSignOut() {
+      if (state.token) {
+        try {
+          await fetch(`${state.apiBaseUrl}/v1/auth/logout`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${state.token}`,
+              'Content-Type': 'application/json'
+            }
+          });
+        } catch {
+          // Best effort
+        }
+      }
+      localStorage.removeItem('nexstock_session_token');
+      localStorage.removeItem('nexstock_refresh_token');
+      localStorage.removeItem('nexstock_active_tenant_id');
+      state.token = '';
+      state.tenantId = '';
+      state.tenantName = '';
+      state.branchId = '';
+      state.branchName = '';
+      state.warehouseId = '';
+      state.registerId = '';
+      state.user = null;
+      state.memberships = [];
+
+      const userNameEl = document.getElementById('topbarUserName');
+      if (userNameEl) userNameEl.innerText = '';
+      const tenantEl = document.getElementById('topbarTenantName');
+      if (tenantEl) tenantEl.innerText = '—';
+      const branchEl = document.getElementById('topbarBranchName');
+      if (branchEl) branchEl.innerText = '—';
+      const roleEl = document.getElementById('topbarUserRole');
+      if (roleEl) roleEl.innerText = '—';
+
+      showToast('You have been signed out.', 'info');
+      renderView('login');
+    }
+
+    const btnSignOut = document.getElementById('btnSignOut');
+    if (btnSignOut) btnSignOut.onclick = handleSignOut;
+
+    const topbarTenantContext = document.getElementById('topbarTenantContext');
+    if (topbarTenantContext) {
+      topbarTenantContext.onclick = () => {
+        if (state.token && state.memberships && state.memberships.length > 0) {
+          renderView('tenant-select');
+        }
+      };
+    }
+
+    const brandLogoBtn = document.getElementById('brandLogoBtn');
+    if (brandLogoBtn) {
+      brandLogoBtn.onclick = (e) => {
+        e.preventDefault();
+        if (state.token && state.tenantId) {
+          renderView('dashboard');
+        } else if (state.token) {
+          renderView('onboard-business');
+        } else {
+          renderView('login');
+        }
+      };
+    }
 
     // View Navigation Router
     function renderView(viewName) {
       state.activeView = viewName;
+
+      const isAuthView = AUTH_VIEWS.includes(viewName);
+      const sidebar = document.querySelector('aside.sidebar');
+      const topbarContext = document.getElementById('topbarContext');
+      const topbarAuthActions = document.getElementById('topbarAuthActions');
+
+      if (isAuthView) {
+        if (sidebar) sidebar.style.display = 'none';
+        if (topbarContext) topbarContext.style.display = 'none';
+        if (viewName === 'onboard-business' || viewName === 'tenant-select') {
+          if (topbarAuthActions) topbarAuthActions.style.display = 'flex';
+        } else {
+          if (topbarAuthActions) topbarAuthActions.style.display = 'none';
+        }
+      } else {
+        if (sidebar) sidebar.style.display = 'flex';
+        if (topbarContext) topbarContext.style.display = 'flex';
+        if (topbarAuthActions) topbarAuthActions.style.display = 'flex';
+      }
+
       document.querySelectorAll('.nav-link').forEach(el => {
         el.classList.toggle('active', el.getAttribute('data-view') === viewName);
       });
@@ -945,6 +1170,12 @@
       container.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-secondary);">Loading...</div>';
 
       switch (viewName) {
+        case 'welcome': renderWelcomeView(); break;
+        case 'login': renderLoginView(); break;
+        case 'signup': renderSignUpView(); break;
+        case 'forgot-password': renderForgotPasswordView(); break;
+        case 'onboard-business': renderOnboardBusinessView(); break;
+        case 'tenant-select': renderTenantSelectView(); break;
         case 'dashboard': renderDashboardView(); break;
         case 'products': renderProductsView(); break;
         case 'categories': renderCategoriesView(); break;
@@ -967,10 +1198,574 @@
     document.querySelectorAll('.nav-link').forEach(el => {
       el.onclick = (e) => {
         e.preventDefault();
+        if (!state.token) {
+          renderView('login');
+          return;
+        }
+        if (!state.tenantId) {
+          renderView('onboard-business');
+          return;
+        }
         const view = el.getAttribute('data-view');
         renderView(view);
       };
     });
+
+    // =========================================================================
+    // Auth & Onboarding View Renderers
+    // =========================================================================
+
+    function renderWelcomeView() {
+      const container = document.getElementById('mainContainer');
+      container.innerHTML = `
+        <div class="auth-wrapper">
+          <div class="auth-card auth-card-wide" style="text-align: center;">
+            <div class="auth-brand" style="margin-bottom: 12px;">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+              <span>NexStock</span>
+            </div>
+            <h1 class="auth-title">Universal Inventory + Point of Sale SaaS</h1>
+            <p class="auth-subtitle" style="max-width: 480px; margin: 0 auto 28px;">
+              Enterprise-grade real-time inventory management, multi-branch operations, and ultra-fast POS checkout built with strict tenant isolation.
+            </p>
+            <div style="display: flex; gap: 12px; justify-content: center; margin-bottom: 32px;">
+              <button class="btn btn-primary" onclick="renderView('signup')" style="padding: 10px 24px; font-size: 15px;">
+                Create Free Account
+              </button>
+              <button class="btn btn-secondary" onclick="renderView('login')" style="padding: 10px 24px; font-size: 15px;">
+                Sign In
+              </button>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; text-align: left; border-top: 1px solid var(--border-subtle); padding-top: 24px;">
+              <div>
+                <strong style="color: var(--text-primary); font-size: 14px;">Real-Time Stock</strong>
+                <p style="color: var(--text-secondary); font-size: 12px; margin-top: 4px;">Track warehouse balances, lot batches, and movements instantly.</p>
+              </div>
+              <div>
+                <strong style="color: var(--text-primary); font-size: 14px;">Multi-Branch POS</strong>
+                <p style="color: var(--text-secondary); font-size: 12px; margin-top: 4px;">Fast cashier shifts, split payments, barcode scanning &amp; receipt printing.</p>
+              </div>
+              <div>
+                <strong style="color: var(--text-primary); font-size: 14px;">Bank-Grade RLS</strong>
+                <p style="color: var(--text-secondary); font-size: 12px; margin-top: 4px;">PostgreSQL Row-Level Security ensures 100% tenant data separation.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderLoginView() {
+      const container = document.getElementById('mainContainer');
+      container.innerHTML = `
+        <div class="auth-wrapper">
+          <div class="auth-card">
+            <div class="auth-brand">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+              <span>NexStock</span>
+            </div>
+            <h2 class="auth-title">Welcome Back</h2>
+            <p class="auth-subtitle">Sign in with your email and password to access your businesses.</p>
+            
+            <div id="loginAlert" class="auth-alert auth-alert-error"></div>
+
+            <form id="loginForm" onsubmit="handleLoginSubmit(event)">
+              <div class="form-group">
+                <label class="form-label" for="loginEmail">Email Address</label>
+                <input class="form-input" id="loginEmail" type="email" required autocomplete="email" placeholder="name@business.com">
+              </div>
+              <div class="form-group">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                  <label class="form-label" for="loginPassword" style="margin-bottom: 0;">Password</label>
+                  <a class="auth-link" style="font-size: 12px;" onclick="renderView('forgot-password')">Forgot password?</a>
+                </div>
+                <input class="form-input" id="loginPassword" type="password" required autocomplete="current-password" placeholder="••••••••">
+              </div>
+              <button class="btn btn-primary" id="loginSubmitBtn" type="submit" style="width: 100%; justify-content: center; padding: 10px; margin-top: 8px;">
+                Sign In
+              </button>
+            </form>
+
+            <div class="auth-footer">
+              Don't have an account? <a class="auth-link" onclick="renderView('signup')">Create an account</a>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    async function handleLoginSubmit(event) {
+      event.preventDefault();
+      const email = document.getElementById('loginEmail').value.trim();
+      const password = document.getElementById('loginPassword').value;
+      const alertEl = document.getElementById('loginAlert');
+      const submitBtn = document.getElementById('loginSubmitBtn');
+
+      alertEl.style.display = 'none';
+      submitBtn.disabled = true;
+      submitBtn.innerText = 'Signing in...';
+
+      try {
+        const res = await fetch(`${state.apiBaseUrl}/v1/auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password })
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data?.detail || data?.title || 'Invalid email or password.');
+        }
+
+        state.token = data.accessToken;
+        localStorage.setItem('nexstock_session_token', data.accessToken);
+        if (data.refreshToken) {
+          localStorage.setItem('nexstock_refresh_token', data.refreshToken);
+        }
+
+        state.user = data.user;
+        state.fullName = data.user.fullName || data.user.email;
+        state.userEmail = data.user.email;
+        state.memberships = data.memberships || [];
+
+        const userNameEl = document.getElementById('topbarUserName');
+        if (userNameEl) userNameEl.innerText = state.fullName;
+
+        showToast('Signed in successfully!', 'success');
+
+        if (state.memberships.length === 0) {
+          renderView('onboard-business');
+        } else if (state.memberships.length === 1) {
+          await selectActiveTenant(state.memberships[0]);
+          renderView('dashboard');
+        } else {
+          renderView('tenant-select');
+        }
+      } catch (err) {
+        alertEl.innerText = err.message;
+        alertEl.style.display = 'block';
+        submitBtn.disabled = false;
+        submitBtn.innerText = 'Sign In';
+      }
+    }
+
+    function renderSignUpView() {
+      const container = document.getElementById('mainContainer');
+      container.innerHTML = `
+        <div class="auth-wrapper">
+          <div class="auth-card">
+            <div class="auth-brand">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+              <span>NexStock</span>
+            </div>
+            <h2 class="auth-title">Create your Account</h2>
+            <p class="auth-subtitle">Get started with NexStock. Start your 14-day free trial today.</p>
+            
+            <div id="signupAlert" class="auth-alert auth-alert-error"></div>
+
+            <form id="signupForm" onsubmit="handleSignUpSubmit(event)">
+              <div class="form-group">
+                <label class="form-label" for="signupFullName">Full Name</label>
+                <input class="form-input" id="signupFullName" type="text" autocomplete="name" placeholder="Alex Morgan">
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="signupEmail">Email Address</label>
+                <input class="form-input" id="signupEmail" type="email" required autocomplete="email" placeholder="alex@mycompany.com">
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="signupPassword">Password</label>
+                <input class="form-input" id="signupPassword" type="password" required autocomplete="new-password" minlength="8" placeholder="At least 8 characters">
+                <span style="font-size: 11px; color: var(--text-secondary); margin-top: 4px; display: block;">Must be at least 8 characters.</span>
+              </div>
+              <button class="btn btn-primary" id="signupSubmitBtn" type="submit" style="width: 100%; justify-content: center; padding: 10px; margin-top: 8px;">
+                Create Account &amp; Continue
+              </button>
+            </form>
+
+            <div class="auth-footer">
+              Already have an account? <a class="auth-link" onclick="renderView('login')">Sign In</a>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    async function handleSignUpSubmit(event) {
+      event.preventDefault();
+      const fullName = document.getElementById('signupFullName').value.trim();
+      const email = document.getElementById('signupEmail').value.trim();
+      const password = document.getElementById('signupPassword').value;
+      const alertEl = document.getElementById('signupAlert');
+      const submitBtn = document.getElementById('signupSubmitBtn');
+
+      alertEl.style.display = 'none';
+      submitBtn.disabled = true;
+      submitBtn.innerText = 'Creating account...';
+
+      try {
+        const res = await fetch(`${state.apiBaseUrl}/v1/auth/signup`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password, fullName: fullName || undefined })
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data?.detail || data?.title || 'Registration failed. Please check your information.');
+        }
+
+        if (data.accessToken) {
+          state.token = data.accessToken;
+          localStorage.setItem('nexstock_session_token', data.accessToken);
+          if (data.refreshToken) {
+            localStorage.setItem('nexstock_refresh_token', data.refreshToken);
+          }
+          state.user = data.user;
+          state.fullName = data.user.fullName || data.user.email;
+          state.userEmail = data.user.email;
+          state.memberships = [];
+
+          const userNameEl = document.getElementById('topbarUserName');
+          if (userNameEl) userNameEl.innerText = state.fullName;
+
+          showToast('Account created! Welcome to NexStock.', 'success');
+          renderView('onboard-business');
+        } else if (data.emailConfirmationRequired) {
+          const container = document.getElementById('mainContainer');
+          container.innerHTML = `
+            <div class="auth-wrapper">
+              <div class="auth-card" style="text-align: center;">
+                <div class="auth-brand">
+                  <span>✉️</span>
+                </div>
+                <h2 class="auth-title">Confirm Your Email</h2>
+                <p class="auth-subtitle" style="margin-bottom: 24px;">
+                  We have sent a verification email to <strong>${email}</strong>. Please click the confirmation link to activate your account.
+                </p>
+                <button class="btn btn-primary" onclick="renderView('login')" style="width: 100%; justify-content: center; padding: 10px;">
+                  Proceed to Sign In
+                </button>
+              </div>
+            </div>
+          `;
+        } else {
+          showToast('Account created! Please sign in.', 'success');
+          renderView('login');
+        }
+      } catch (err) {
+        alertEl.innerText = err.message;
+        alertEl.style.display = 'block';
+        submitBtn.disabled = false;
+        submitBtn.innerText = 'Create Account & Continue';
+      }
+    }
+
+    function renderForgotPasswordView() {
+      const container = document.getElementById('mainContainer');
+      container.innerHTML = `
+        <div class="auth-wrapper">
+          <div class="auth-card">
+            <div class="auth-brand">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+              <span>NexStock</span>
+            </div>
+            <h2 class="auth-title">Reset Password</h2>
+            <p class="auth-subtitle">Enter your account email to receive instructions to reset your password.</p>
+            
+            <div id="recoverAlert" class="auth-alert"></div>
+
+            <form id="recoverForm" onsubmit="handleRecoverSubmit(event)">
+              <div class="form-group">
+                <label class="form-label" for="recoverEmail">Email Address</label>
+                <input class="form-input" id="recoverEmail" type="email" required autocomplete="email" placeholder="name@business.com">
+              </div>
+              <button class="btn btn-primary" id="recoverSubmitBtn" type="submit" style="width: 100%; justify-content: center; padding: 10px; margin-top: 8px;">
+                Send Recovery Instructions
+              </button>
+            </form>
+
+            <div class="auth-footer">
+              Remember your password? <a class="auth-link" onclick="renderView('login')">Return to Sign In</a>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    async function handleRecoverSubmit(event) {
+      event.preventDefault();
+      const email = document.getElementById('recoverEmail').value.trim();
+      const alertEl = document.getElementById('recoverAlert');
+      const submitBtn = document.getElementById('recoverSubmitBtn');
+
+      submitBtn.disabled = true;
+      submitBtn.innerText = 'Sending...';
+
+      try {
+        await fetch(`${state.apiBaseUrl}/v1/auth/recover`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email })
+        });
+
+        alertEl.className = 'auth-alert auth-alert-success';
+        alertEl.innerText = 'If an account exists with this email address, password reset instructions have been sent.';
+        alertEl.style.display = 'block';
+        submitBtn.innerText = 'Instructions Sent';
+      } catch {
+        alertEl.className = 'auth-alert auth-alert-error';
+        alertEl.innerText = 'Unable to send recovery instructions. Please try again.';
+        alertEl.style.display = 'block';
+        submitBtn.disabled = false;
+        submitBtn.innerText = 'Send Recovery Instructions';
+      }
+    }
+
+    function renderOnboardBusinessView() {
+      const container = document.getElementById('mainContainer');
+      container.innerHTML = `
+        <div class="auth-wrapper">
+          <div class="auth-card auth-card-wide">
+            <div class="auth-brand">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+              <span>NexStock</span>
+            </div>
+            <h2 class="auth-title">Set Up Your Business</h2>
+            <p class="auth-subtitle">Create your business organization and launch your first branch to start managing inventory and sales.</p>
+            
+            <div id="onboardAlert" class="auth-alert auth-alert-error"></div>
+
+            <form id="onboardForm" onsubmit="handleOnboardSubmit(event)">
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                <div class="form-group" style="grid-column: span 2;">
+                  <label class="form-label" for="onboardBusinessName">Business / Company Legal Name *</label>
+                  <input class="form-input" id="onboardBusinessName" type="text" required placeholder="e.g. Apex Retail Goods Inc.">
+                </div>
+                <div class="form-group">
+                  <label class="form-label" for="onboardBusinessType">Business Sector *</label>
+                  <select class="form-select" id="onboardBusinessType" required>
+                    <option value="RETAIL" selected>Retail &amp; Storefront</option>
+                    <option value="RESTAURANT">Restaurant &amp; Cafe</option>
+                    <option value="WHOLESALE">Wholesale &amp; Distribution</option>
+                    <option value="SERVICES">Services &amp; Repair</option>
+                    <option value="DISTRIBUTION">Logistics &amp; Fulfillment</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label class="form-label" for="onboardCountryCode">Country *</label>
+                  <select class="form-select" id="onboardCountryCode" required>
+                    <option value="US" selected>United States (US)</option>
+                    <option value="LK">Sri Lanka (LK)</option>
+                    <option value="GB">United Kingdom (GB)</option>
+                    <option value="AE">United Arab Emirates (AE)</option>
+                    <option value="IN">India (IN)</option>
+                    <option value="SG">Singapore (SG)</option>
+                    <option value="AU">Australia (AU)</option>
+                    <option value="JP">Japan (JP)</option>
+                    <option value="CA">Canada (CA)</option>
+                    <option value="DE">Germany (DE)</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label class="form-label" for="onboardCurrency">Primary Currency *</label>
+                  <select class="form-select" id="onboardCurrency" required>
+                    <option value="USD" selected>USD — United States Dollar ($)</option>
+                    <option value="LKR">LKR — Sri Lankan Rupee (Rs)</option>
+                    <option value="EUR">EUR — Euro (€)</option>
+                    <option value="GBP">GBP — British Pound (£)</option>
+                    <option value="INR">INR — Indian Rupee (₹)</option>
+                    <option value="AED">AED — UAE Dirham (AED)</option>
+                    <option value="SGD">SGD — Singapore Dollar (S$)</option>
+                    <option value="AUD">AUD — Australian Dollar (A$)</option>
+                    <option value="JPY">JPY — Japanese Yen (¥)</option>
+                    <option value="CAD">CAD — Canadian Dollar (C$)</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label class="form-label" for="onboardTimezone">Operating Timezone *</label>
+                  <select class="form-select" id="onboardTimezone" required>
+                    <option value="UTC" selected>UTC — Coordinated Universal Time</option>
+                    <option value="America/New_York">America/New_York (EST/EDT)</option>
+                    <option value="America/Chicago">America/Chicago (CST/CDT)</option>
+                    <option value="America/Los_Angeles">America/Los_Angeles (PST/PDT)</option>
+                    <option value="Europe/London">Europe/London (GMT/BST)</option>
+                    <option value="Europe/Paris">Europe/Paris (CET/CEST)</option>
+                    <option value="Asia/Colombo">Asia/Colombo (+05:30)</option>
+                    <option value="Asia/Kolkata">Asia/Kolkata (+05:30)</option>
+                    <option value="Asia/Dubai">Asia/Dubai (+04:00)</option>
+                    <option value="Asia/Singapore">Asia/Singapore (+08:00)</option>
+                    <option value="Asia/Tokyo">Asia/Tokyo (+09:00)</option>
+                    <option value="Australia/Sydney">Australia/Sydney (AEST)</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label class="form-label" for="onboardBranchName">First Branch / Store Name *</label>
+                  <input class="form-input" id="onboardBranchName" type="text" required value="Main Store / HQ" placeholder="Main Store">
+                </div>
+                <div class="form-group">
+                  <label class="form-label" for="onboardBranchCode">Branch Code *</label>
+                  <input class="form-input" id="onboardBranchCode" type="text" required value="MAIN-01" placeholder="MAIN-01">
+                </div>
+              </div>
+
+              <div style="background: var(--bg-primary); border: 1px solid var(--border-subtle); border-radius: var(--radius); padding: 12px 16px; margin: 8px 0 20px; font-size: 12px; color: var(--text-secondary); line-height: 1.5;">
+                ✨ <strong>Automatic Provisioning:</strong> Setting up this business automatically configures your default main stockroom warehouse, initial checkout POS register, starter trial subscription, and founder Owner permissions.
+              </div>
+
+              <button class="btn btn-primary" id="onboardSubmitBtn" type="submit" style="width: 100%; justify-content: center; padding: 12px; font-size: 15px;">
+                Launch Business Dashboard
+              </button>
+            </form>
+
+            ${state.memberships && state.memberships.length > 0 ? `
+              <div class="auth-footer">
+                <a class="auth-link" onclick="renderView('tenant-select')">&larr; Back to My Businesses</a>
+              </div>
+            ` : ''}
+          </div>
+        </div>
+      `;
+    }
+
+    async function handleOnboardSubmit(event) {
+      event.preventDefault();
+      const businessName = document.getElementById('onboardBusinessName').value.trim();
+      const businessType = document.getElementById('onboardBusinessType').value;
+      const countryCode = document.getElementById('onboardCountryCode').value;
+      const currency = document.getElementById('onboardCurrency').value;
+      const timezone = document.getElementById('onboardTimezone').value;
+      const branchName = document.getElementById('onboardBranchName').value.trim();
+      const branchCode = document.getElementById('onboardBranchCode').value.trim();
+      const alertEl = document.getElementById('onboardAlert');
+      const submitBtn = document.getElementById('onboardSubmitBtn');
+
+      alertEl.style.display = 'none';
+      submitBtn.disabled = true;
+      submitBtn.innerText = 'Provisioning Business & First Branch...';
+
+      try {
+        const res = await fetch(`${state.apiBaseUrl}/v1/org/onboard`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${state.token}`
+          },
+          body: JSON.stringify({
+            businessName,
+            businessType,
+            currency,
+            countryCode,
+            timezone,
+            firstBranchName: branchName,
+            firstBranchCode: branchCode || undefined,
+          })
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data?.detail || data?.title || 'Failed to onboard business.');
+        }
+
+        // Apply newly provisioned context
+        state.tenantId = data.tenant.id;
+        state.tenantName = data.tenant.legalName || data.tenant.name;
+        state.currency = data.tenant.baseCurrency || data.tenant.currency;
+        state.plan = 'TRIAL';
+        state.userRole = 'TENANT_OWNER';
+        state.branchId = data.branch.id;
+        state.branchName = data.branch.name;
+        state.warehouseId = data.warehouse.id;
+        state.registerId = data.register.id;
+
+        localStorage.setItem('nexstock_active_tenant_id', data.tenant.id);
+
+        // Update memberships list
+        try {
+          const meRes = await fetch(`${state.apiBaseUrl}/v1/auth/me`, {
+            headers: { 'Authorization': `Bearer ${state.token}` }
+          });
+          if (meRes.ok) {
+            const meData = await meRes.json();
+            state.memberships = meData.memberships || [];
+          }
+        } catch {
+          // Non-critical background refresh
+        }
+
+        // Update Topbar
+        const tenantEl = document.getElementById('topbarTenantName');
+        if (tenantEl) tenantEl.innerText = state.tenantName;
+        const planEl = document.getElementById('topbarPlanBadge');
+        if (planEl) planEl.innerText = state.plan;
+        const branchEl = document.getElementById('topbarBranchName');
+        if (branchEl) branchEl.innerText = state.branchName;
+        const roleEl = document.getElementById('topbarUserRole');
+        if (roleEl) roleEl.innerText = state.userRole;
+
+        showToast(`Business "${data.tenant.name}" created successfully!`, 'success');
+        renderView('dashboard');
+      } catch (err) {
+        alertEl.innerText = err.message;
+        alertEl.style.display = 'block';
+        submitBtn.disabled = false;
+        submitBtn.innerText = 'Launch Business Dashboard';
+      }
+    }
+
+    function renderTenantSelectView() {
+      const container = document.getElementById('mainContainer');
+      const memberships = state.memberships || [];
+
+      container.innerHTML = `
+        <div class="auth-wrapper">
+          <div class="auth-card auth-card-wide">
+            <div class="auth-brand">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+              <span>NexStock</span>
+            </div>
+            <h2 class="auth-title">Select Business</h2>
+            <p class="auth-subtitle">Select the organization you wish to manage, or set up a new one.</p>
+
+            <div style="margin-bottom: 24px;">
+              ${memberships.length === 0 ? `
+                <div style="text-align: center; padding: 24px; color: var(--text-secondary);">
+                  No businesses found for your account.
+                </div>
+              ` : memberships.map(m => `
+                <div class="tenant-card" onclick="handleSelectTenant('${m.tenantId}')">
+                  <div>
+                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                      <strong style="font-size: 15px; color: var(--text-primary);">${m.businessName || m.tenantName || 'Business'}</strong>
+                      <span class="badge-pill badge-green">${m.status || m.plan || 'ACTIVE'}</span>
+                      <span class="badge-pill badge-blue">${m.businessType || 'RETAIL'}</span>
+                    </div>
+                    <div style="font-size: 12px; color: var(--text-secondary);">
+                      Role: <strong>${m.role || m.roleName || 'MEMBER'}</strong> &bull; Currency: <strong>${m.baseCurrency || m.currency || 'USD'}</strong> &bull; ${(m.branches || []).length} ${(m.branches || []).length === 1 ? 'Branch' : 'Branches'}
+                    </div>
+                  </div>
+                  <div>
+                    <button class="btn btn-primary btn-sm">Open &rarr;</button>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+
+            <button class="btn btn-secondary" onclick="renderView('onboard-business')" style="width: 100%; justify-content: center; padding: 10px;">
+              + Create Another Business
+            </button>
+          </div>
+        </div>
+      `;
+    }
+
+    async function handleSelectTenant(tenantId) {
+      const match = (state.memberships || []).find(m => m.tenantId === tenantId);
+      if (match) {
+        await selectActiveTenant(match);
+        showToast(`Switched to business: ${match.tenantName}`, 'info');
+        renderView('dashboard');
+      }
+    }
 
     // =========================================================================
     // 1. DASHBOARD VIEW
@@ -3460,34 +4255,56 @@
         document.body.setAttribute('data-theme', savedTheme);
       }
 
-      // 1. Obtain demo session token from backend
+      // Check for stored session token
+      const storedToken = localStorage.getItem('nexstock_session_token');
+      if (!storedToken) {
+        renderView('login');
+        return;
+      }
+
       try {
-        const session = await fetch(`${state.apiBaseUrl}/v1/auth/demo-session`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ role: 'OWNER' })
-        }).then(r => r.json());
+        const res = await fetch(`${state.apiBaseUrl}/v1/auth/me`, {
+          headers: {
+            'Authorization': `Bearer ${storedToken}`,
+            'Content-Type': 'application/json'
+          }
+        });
 
-        state.token = session.token;
-        state.userRole = session.role;
-        state.fullName = session.fullName;
-        state.userEmail = session.email;
-        state.tenantId = session.tenantId;
-        state.branchId = session.branchId;
-        state.warehouseId = session.warehouseId;
-        state.registerId = session.registerId;
+        if (!res.ok) {
+          localStorage.removeItem('nexstock_session_token');
+          localStorage.removeItem('nexstock_refresh_token');
+          state.token = '';
+          renderView('login');
+          return;
+        }
 
-        document.getElementById('topbarUserRole').innerText = session.role;
+        const data = await res.json();
+        state.token = storedToken;
+        state.user = data.user;
+        state.fullName = data.user.fullName || data.user.email;
+        state.userEmail = data.user.email;
+        state.memberships = data.memberships || [];
+
+        const userNameEl = document.getElementById('topbarUserName');
+        if (userNameEl) userNameEl.innerText = state.fullName;
+
         document.getElementById('topbarSyncStatus').innerText = '● Connected';
         document.getElementById('topbarSyncStatus').className = 'badge-pill badge-green';
+
+        if (state.memberships.length === 0) {
+          renderView('onboard-business');
+          return;
+        }
+
+        const savedTenantId = localStorage.getItem('nexstock_active_tenant_id');
+        const activeMembership = state.memberships.find(m => m.tenantId === savedTenantId) || state.memberships[0];
+        await selectActiveTenant(activeMembership);
+        renderView('dashboard');
       } catch (err) {
         document.getElementById('topbarSyncStatus').innerText = '● Offline / Disconnected';
         document.getElementById('topbarSyncStatus').className = 'badge-pill badge-red';
-        showToast('Could not reach API at ' + state.apiBaseUrl + '. Ensure the API service is online and accessible.', 'error');
+        renderView('login');
       }
-
-      // 2. Render initial view
-      renderView('dashboard');
     }
 
     window.onload = initApp;

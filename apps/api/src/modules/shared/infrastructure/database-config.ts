@@ -439,6 +439,13 @@ export function loadPhase4MigrationSql(): string {
   return sqlText;
 }
 
+export function loadPhase5MigrationSql(): string {
+  const filename = '0006_phase5_auth_and_user_tenants.sql';
+  const sqlText = readFileSync(resolve(migrationsDir, filename), 'utf-8');
+  assertPostgresMigrationSqlCompatible(sqlText, filename);
+  return sqlText;
+}
+
 export function getOrderedPostgresMigrations(): readonly PostgresMigrationSpec[] {
   return [
     {
@@ -475,6 +482,13 @@ export function getOrderedPostgresMigrations(): readonly PostgresMigrationSpec[]
       name: '0005_phase4_advanced_inventory',
       filename: '0005_phase4_advanced_inventory.sql',
       sql: loadPhase4MigrationSql(),
+    },
+    {
+      dialect: 'postgres',
+      version: 6,
+      name: '0006_phase5_auth_and_user_tenants',
+      filename: '0006_phase5_auth_and_user_tenants.sql',
+      sql: loadPhase5MigrationSql(),
     },
   ];
 }

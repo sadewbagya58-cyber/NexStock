@@ -260,6 +260,11 @@ describe('@nexstock/api — Milestone 0 Foundation, RLS, Idempotency & Sync Inva
           name: '0005_phase4_advanced_inventory',
           filename: '0005_phase4_advanced_inventory.sql',
         },
+        {
+          version: 6,
+          name: '0006_phase5_auth_and_user_tenants',
+          filename: '0006_phase5_auth_and_user_tenants.sql',
+        },
       ]);
     });
 
@@ -323,6 +328,7 @@ describe('@nexstock/api — Milestone 0 Foundation, RLS, Idempotency & Sync Inva
         '0003_phase2_core_inventory.sql',
         '0004_phase3_pos_and_billing.sql',
         '0005_phase4_advanced_inventory.sql',
+        '0006_phase5_auth_and_user_tenants.sql',
       ]);
 
       await expect(

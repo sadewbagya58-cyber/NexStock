@@ -110,6 +110,14 @@ export const ErrorCodeSchema = Type.Union([
   Type.Literal('INV_STOCKTAKE_SELF_APPROVAL_FORBIDDEN'),
   Type.Literal('INV_STOCKTAKE_REJECTED'),
   Type.Literal('SYNC_COMMAND_QUARANTINED'),
+  Type.Literal('AUTH_INVALID_CREDENTIALS'),
+  Type.Literal('AUTH_EMAIL_ALREADY_EXISTS'),
+  Type.Literal('AUTH_USER_NOT_FOUND'),
+  Type.Literal('AUTH_WEAK_PASSWORD'),
+  Type.Literal('AUTH_RATE_LIMITED'),
+  Type.Literal('ORG_DUPLICATE_SLUG'),
+  Type.Literal('ORG_DUPLICATE_BRANCH_CODE'),
+  Type.Literal('ORG_TENANT_NOT_FOUND'),
   Type.Literal('ERR_INTERNAL_SERVER_ERROR'),
 ]);
 export type ErrorCode = Static<typeof ErrorCodeSchema>;
@@ -1626,4 +1634,160 @@ export const ReviewStocktakeRequestSchema = Type.Object(
 export type ReviewStocktakeRequest = Static<
   typeof ReviewStocktakeRequestSchema
 >;
+
+// ============================================================================
+// Phase 5.0 Schemas: Authentication & Business Foundation
+// ============================================================================
+
+export const SignUpRequestSchema = Type.Object(
+  {
+    email: Type.String({ minLength: 3, maxLength: 255 }),
+    password: Type.String({ minLength: 8, maxLength: 128 }),
+    fullName: Type.String({ minLength: 2, maxLength: 160 }),
+  },
+  { additionalProperties: false },
+);
+export type SignUpRequest = Static<typeof SignUpRequestSchema>;
+
+export const SignUpResponseSchema = Type.Object({
+  userId: UuidSchema,
+  email: Type.String(),
+  fullName: Type.String(),
+  token: Type.Optional(Type.String()),
+  refreshToken: Type.Optional(Type.String()),
+  requiresEmailVerification: Type.Boolean(),
+  message: Type.String(),
+});
+export type SignUpResponse = Static<typeof SignUpResponseSchema>;
+
+export const LoginRequestSchema = Type.Object(
+  {
+    email: Type.String({ minLength: 3, maxLength: 255 }),
+    password: Type.String({ minLength: 1, maxLength: 128 }),
+  },
+  { additionalProperties: false },
+);
+export type LoginRequest = Static<typeof LoginRequestSchema>;
+
+export const BranchSummarySchema = Type.Object({
+  id: UuidSchema,
+  code: Type.String(),
+  name: Type.String(),
+  defaultWarehouseId: Type.Union([UuidSchema, Type.Null()]),
+});
+export type BranchSummary = Static<typeof BranchSummarySchema>;
+
+export const TenantMembershipSummarySchema = Type.Object({
+  tenantId: UuidSchema,
+  businessName: Type.String(),
+  slug: Type.String(),
+  baseCurrency: CurrencyCodeSchema,
+  status: Type.String(),
+  role: Type.String(),
+  branches: Type.Array(BranchSummarySchema),
+});
+export type TenantMembershipSummary = Static<
+  typeof TenantMembershipSummarySchema
+>;
+
+export const AuthUserSummarySchema = Type.Object({
+  id: UuidSchema,
+  email: Type.String(),
+  fullName: Type.String(),
+});
+export type AuthUserSummary = Static<typeof AuthUserSummarySchema>;
+
+export const LoginResponseSchema = Type.Object({
+  token: Type.String(),
+  refreshToken: Type.Optional(Type.String()),
+  expiresIn: Type.Optional(Type.Integer()),
+  user: AuthUserSummarySchema,
+  memberships: Type.Array(TenantMembershipSummarySchema),
+});
+export type LoginResponse = Static<typeof LoginResponseSchema>;
+
+export const RefreshTokenRequestSchema = Type.Object(
+  {
+    refreshToken: Type.String({ minLength: 1 }),
+  },
+  { additionalProperties: false },
+);
+export type RefreshTokenRequest = Static<typeof RefreshTokenRequestSchema>;
+
+export const PasswordResetRequestSchema = Type.Object(
+  {
+    email: Type.String({ minLength: 3, maxLength: 255 }),
+  },
+  { additionalProperties: false },
+);
+export type PasswordResetRequest = Static<typeof PasswordResetRequestSchema>;
+
+export const PasswordResetConfirmSchema = Type.Object(
+  {
+    password: Type.String({ minLength: 8, maxLength: 128 }),
+  },
+  { additionalProperties: false },
+);
+export type PasswordResetConfirm = Static<typeof PasswordResetConfirmSchema>;
+
+export const UserMeResponseSchema = Type.Object({
+  user: AuthUserSummarySchema,
+  memberships: Type.Array(TenantMembershipSummarySchema),
+});
+export type UserMeResponse = Static<typeof UserMeResponseSchema>;
+
+export const BusinessTypeSchema = Type.Union([
+  Type.Literal('RETAIL'),
+  Type.Literal('RESTAURANT'),
+  Type.Literal('SERVICES'),
+  Type.Literal('DISTRIBUTION'),
+  Type.Literal('WHOLESALE'),
+]);
+export type BusinessType = Static<typeof BusinessTypeSchema>;
+
+export const OnboardBusinessRequestSchema = Type.Object(
+  {
+    businessName: Type.String({ minLength: 2, maxLength: 160 }),
+    businessType: BusinessTypeSchema,
+    currency: CurrencyCodeSchema,
+    firstBranchName: Type.String({ minLength: 2, maxLength: 160 }),
+    firstBranchCode: Type.Optional(Type.String({ minLength: 1, maxLength: 32 })),
+    timezone: Type.Optional(Type.String({ minLength: 1, maxLength: 80 })),
+    countryCode: Type.Optional(Type.String({ pattern: '^[A-Z]{2}$' })),
+  },
+  { additionalProperties: false },
+);
+export type OnboardBusinessRequest = Static<
+  typeof OnboardBusinessRequestSchema
+>;
+
+export const OnboardBusinessResponseSchema = Type.Object({
+  tenant: Type.Object({
+    id: UuidSchema,
+    slug: Type.String(),
+    legalName: Type.String(),
+    baseCurrency: CurrencyCodeSchema,
+    status: Type.String(),
+  }),
+  branch: Type.Object({
+    id: UuidSchema,
+    code: Type.String(),
+    name: Type.String(),
+  }),
+  warehouse: Type.Object({
+    id: UuidSchema,
+    code: Type.String(),
+    name: Type.String(),
+  }),
+  register: Type.Object({
+    id: UuidSchema,
+    code: Type.String(),
+    name: Type.String(),
+  }),
+  ownerMembershipId: UuidSchema,
+});
+export type OnboardBusinessResponse = Static<
+  typeof OnboardBusinessResponseSchema
+>;
+
 

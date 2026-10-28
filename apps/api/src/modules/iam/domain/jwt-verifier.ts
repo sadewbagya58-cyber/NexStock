@@ -1,7 +1,10 @@
 import {
   type JsonWebKey,
+  type KeyObject,
   createHmac,
   createPublicKey,
+  generateKeyPairSync,
+  sign,
   timingSafeEqual,
   verify,
 } from 'node:crypto';
@@ -9,6 +12,8 @@ import { AppError } from '../../shared/index.js';
 
 export type AllowedAsymmetricJwtAlg = 'ES256' | 'RS256';
 export type AllowedJwtAlg = AllowedAsymmetricJwtAlg | 'HS256';
+
+export const DEFAULT_SUPABASE_URL = 'https://tokylhdgzyoxiqwvncis.supabase.co';
 
 export interface SupabaseJwk extends JsonWebKey {
   readonly kty: string;
@@ -473,3 +478,80 @@ export async function verifySupabaseJwt(
     algorithm: alg as AllowedJwtAlg,
   };
 }
+
+export interface DevKeyMaterial {
+  readonly kid: string;
+  readonly privateKey: KeyObject;
+  readonly publicJwk: SupabaseJwk;
+}
+
+let sharedDevKeyMaterial: DevKeyMaterial | null = null;
+
+export function getOrCreateDevKeyMaterial(): DevKeyMaterial {
+  if (!sharedDevKeyMaterial) {
+    const { publicKey, privateKey } = generateKeyPairSync('ec', {
+      namedCurve: 'P-256',
+    });
+    const exported = publicKey.export({ format: 'jwk' });
+    const kid = 'nexstock-local-dev-key';
+    sharedDevKeyMaterial = {
+      kid,
+      privateKey,
+      publicJwk: {
+        ...exported,
+        kty: 'EC',
+        crv: 'P-256',
+        alg: 'ES256',
+        use: 'sig',
+        kid,
+      },
+    };
+  }
+  return sharedDevKeyMaterial;
+}
+
+export function signDevJwt(payload: {
+  readonly userId: string;
+  readonly email?: string | undefined;
+  readonly issuer?: string | undefined;
+  readonly audience?: string | undefined;
+  readonly expiresInSeconds?: number | undefined;
+  readonly appMetadata?: Record<string, unknown> | undefined;
+  readonly userMetadata?: Record<string, unknown> | undefined;
+}): string {
+  const keys = getOrCreateDevKeyMaterial();
+  const header = {
+    alg: 'ES256',
+    typ: 'JWT',
+    kid: keys.kid,
+  };
+  const nowSec = Math.floor(Date.now() / 1000);
+  const jwtPayload = {
+    iss:
+      payload.issuer ??
+      'https://tokylhdgzyoxiqwvncis.supabase.co/auth/v1',
+    aud: payload.audience ?? 'authenticated',
+    sub: payload.userId,
+    ...(payload.email ? { email: payload.email } : {}),
+    iat: nowSec,
+    exp: nowSec + (payload.expiresInSeconds ?? 86400 * 7),
+    app_metadata: payload.appMetadata ?? {},
+    user_metadata: payload.userMetadata ?? {},
+  };
+
+  const headerB64 = Buffer.from(JSON.stringify(header), 'utf-8').toString(
+    'base64url',
+  );
+  const payloadB64 = Buffer.from(JSON.stringify(jwtPayload), 'utf-8').toString(
+    'base64url',
+  );
+  const signingInput = Buffer.from(`${headerB64}.${payloadB64}`, 'utf-8');
+  const signature = sign('sha256', signingInput, {
+    key: keys.privateKey,
+    dsaEncoding: 'ieee-p1363',
+  });
+  const signatureB64 = signature.toString('base64url');
+
+  return `${headerB64}.${payloadB64}.${signatureB64}`;
+}
+

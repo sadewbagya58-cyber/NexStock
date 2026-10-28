@@ -13,6 +13,7 @@ import {
   getWebConnectionBanner,
   getWebInventoryBadge,
   getWebThemeTokens,
+  isSessionAuthenticated,
   resolveWebApiClientUrl,
 } from '../src/index.js';
 
@@ -127,6 +128,43 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       expect(pattern.test('/assets/logo.png')).toBe(false);
       expect(pattern.test('/styles/app.css')).toBe(false);
       expect(pattern.test('/scripts/main.js')).toBe(false);
+    });
+  });
+
+  describe('4. Phase 5.0 Authentication & Business Onboarding Integration', () => {
+    it('verifies session authentication helper correctly assesses tokens', () => {
+      expect(isSessionAuthenticated('valid.jwt.token')).toBe(true);
+      expect(isSessionAuthenticated('   token   ')).toBe(true);
+      expect(isSessionAuthenticated('')).toBe(false);
+      expect(isSessionAuthenticated('   ')).toBe(false);
+      expect(isSessionAuthenticated(null)).toBe(false);
+      expect(isSessionAuthenticated(undefined)).toBe(false);
+    });
+
+    it('verifies public/index.html includes complete auth & onboarding views and no demo overrides', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // Verifies presence of Phase 5 view renderers
+      expect(html).toContain('function renderLoginView()');
+      expect(html).toContain('function renderSignUpView()');
+      expect(html).toContain('function renderForgotPasswordView()');
+      expect(html).toContain('function renderOnboardBusinessView()');
+      expect(html).toContain('function renderTenantSelectView()');
+      expect(html).toContain('function selectActiveTenant(');
+      expect(html).toContain('function handleSignOut()');
+
+      // Verifies real API auth calls are configured
+      expect(html).toContain('/v1/auth/login');
+      expect(html).toContain('/v1/auth/signup');
+      expect(html).toContain('/v1/auth/logout');
+      expect(html).toContain('/v1/auth/recover');
+      expect(html).toContain('/v1/auth/me');
+      expect(html).toContain('/v1/org/onboard');
+
+      // Confirms demo-session endpoint is completely eliminated
+      expect(html).not.toContain('/v1/auth/demo-session');
+      expect(html).not.toContain('switchRole()');
     });
   });
 });

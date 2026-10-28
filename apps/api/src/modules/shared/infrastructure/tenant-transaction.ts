@@ -85,3 +85,50 @@ export async function withTenantTransaction<T>(
     return fn(brandedTrx);
   });
 }
+
+export interface UserExecutionContext {
+  readonly userId: string;
+  readonly traceId: string;
+}
+
+export function assertValidUserExecutionContext(
+  ctx: UserExecutionContext,
+): void {
+  if (!ctx.userId || !UUID_REGEX.test(ctx.userId)) {
+    throw new AppError({
+      statusCode: 401,
+      errorCode: 'ERR_UNAUTHORIZED',
+      title: 'Missing or Invalid Actor User ID',
+      detail: 'A valid UUID userId is required to open a user transaction.',
+    });
+  }
+}
+
+/**
+ * Executes `fn` inside an atomic PostgreSQL transaction with user-scoped
+ * Row Level Security (`SET LOCAL ROLE nexstock_app_user` + `app.current_user_id` set, `app.current_tenant_id` cleared).
+ * Used for user-centric queries across tenants (e.g. listing authorized memberships).
+ */
+export async function withUserTransaction<T>(
+  db: Kysely<NexStockDatabase>,
+  ctx: UserExecutionContext,
+  fn: (trx: Transaction<NexStockDatabase>) => Promise<T>,
+): Promise<T> {
+  assertValidUserExecutionContext(ctx);
+
+  return db.transaction().execute(async (trx) => {
+    // 1. Switch transaction-local role to nexstock_app_user (NOSUPERUSER NOBYPASSRLS)
+    await sql`SET LOCAL ROLE nexstock_app_user`.execute(trx);
+
+    // 2. Set user context and clear tenant context
+    await sql`
+      SELECT
+        set_config('app.current_user_id', ${ctx.userId}, true),
+        set_config('app.current_tenant_id', '', true),
+        set_config('app.is_platform_admin', 'false', true)
+    `.execute(trx);
+
+    return fn(trx);
+  });
+}
+

@@ -151,3 +151,17 @@ export {
   BarcodeScannerBuffer,
   createPosShiftStatusDescriptor,
 } from '@nexstock/ui';
+
+// ============================================================================
+// PHASE 5: AUTHENTICATION & BUSINESS FOUNDATION (UD-01 & UD-02)
+// ============================================================================
+
+export interface WebAuthState {
+  readonly isAuthenticated: boolean;
+  readonly token: string | null;
+  readonly activeTenantId: string | null;
+}
+
+export function isSessionAuthenticated(token: string | null | undefined): boolean {
+  return typeof token === 'string' && token.trim().length > 0;
+}

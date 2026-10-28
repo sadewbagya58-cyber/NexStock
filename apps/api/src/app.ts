@@ -41,7 +41,12 @@ import {
   ListStockMovementsQuerySchema,
   ListStocktakeSessionsQuerySchema,
   ListSuppliersQuerySchema,
+  LoginRequestSchema,
+  LoginResponseSchema,
+  OnboardBusinessRequestSchema,
+  OnboardBusinessResponseSchema,
   OpenPosShiftRequestSchema,
+  PasswordResetRequestSchema,
   PosProductItemResponseSchema,
   PosProductSearchQuerySchema,
   PosRegisterSummaryResponseSchema,
@@ -53,11 +58,14 @@ import {
   ReceiptResponseSchema,
   RecordStocktakeCountRequestSchema,
   RecordSubscriptionPaymentRequestSchema,
+  RefreshTokenRequestSchema,
   RegisterSerialStockRequestSchema,
   ReverseStockMovementRequestSchema,
   ReviewStocktakeRequestSchema,
   SalesInvoiceResponseSchema,
   SerialResponseSchema,
+  SignUpRequestSchema,
+  SignUpResponseSchema,
   StockMovementResponseSchema,
   StocktakeSessionResponseSchema,
   SubscriptionStatusSchema,
@@ -66,11 +74,13 @@ import {
   SyncPushBatchRequestSchema,
   SyncPushBatchResponseSchema,
   TenantContextHeadersSchema,
+  TenantMembershipSummarySchema,
   TransitionSerialStatusRequestSchema,
   UpdateCategoryRequestSchema,
   UpdateProductRequestSchema,
   UpdateSupplierRequestSchema,
   UpsertLocalizationSettingsRequestSchema,
+  UserMeResponseSchema,
   UuidSchema,
   VoidSaleRequestSchema,
   WarehouseResponseSchema,
@@ -97,11 +107,19 @@ import {
   upsertTenantLocalizationSettings,
 } from './modules/i18n/index.js';
 import {
+  type AuthServiceConfig,
+  DEFAULT_SUPABASE_URL,
   type JwksKeyProvider,
   type JwtVerificationOptions,
   RemoteJwksProvider,
   type SystemRoleCode,
   assertAuthorized,
+  getUserProfileAndMemberships,
+  handleLogin,
+  handleLogout,
+  handlePasswordResetRequest,
+  handleRefreshToken,
+  handleSignUp,
   provisionTenantMember,
   verifySupabaseJwt,
 } from './modules/iam/index.js';
@@ -137,6 +155,7 @@ import {
   createWarehouse,
   getBranchById,
   listBranches,
+  onboardBusinessAtomic,
   onboardTenantOrganization,
   updateBranchName,
 } from './modules/org/index.js';
@@ -182,7 +201,7 @@ import {
   updateSubscriptionLifecycleAndOverride,
 } from './modules/sub/index.js';
 
-export const DEFAULT_SUPABASE_URL = 'https://tokylhdgzyoxiqwvncis.supabase.co';
+export { DEFAULT_SUPABASE_URL };
 export const DEFAULT_SUPABASE_JWKS_URL = `${DEFAULT_SUPABASE_URL}/auth/v1/.well-known/jwks.json`;
 export const DEFAULT_SUPABASE_JWT_ISSUER = `${DEFAULT_SUPABASE_URL}/auth/v1`;
 export const DEFAULT_SUPABASE_JWT_AUDIENCE = 'authenticated';
@@ -191,6 +210,7 @@ export interface BuildAppOptions {
   readonly db: Kysely<NexStockDatabase>;
   readonly jwksProvider?: JwksKeyProvider | undefined;
   readonly jwtVerificationOptions?: Partial<JwtVerificationOptions> | undefined;
+  readonly authServiceConfig?: AuthServiceConfig | undefined;
 }
 
 const KernelAuditMutationBodySchema = Type.Object(
@@ -455,6 +475,224 @@ export async function buildApp(
   app.get('/v1/openapi.json', async () => {
     return app.swagger();
   });
+
+  const authConfig: AuthServiceConfig = {
+    supabaseUrl:
+      options.authServiceConfig?.supabaseUrl ??
+      process.env['SUPABASE_URL'] ??
+      DEFAULT_SUPABASE_URL,
+    supabaseAnonKey:
+      options.authServiceConfig?.supabaseAnonKey ??
+      process.env['SUPABASE_ANON_KEY'] ??
+      process.env['SUPABASE_PUBLISHABLE_KEY'],
+    isDevOrTestMode: options.authServiceConfig?.isDevOrTestMode,
+  };
+
+  // ==========================================================================
+  // Phase 5.0 Authentication & User Profile Endpoints
+  // ==========================================================================
+
+  // Auth 1: Sign Up
+  app.post(
+    '/v1/auth/signup',
+    {
+      schema: {
+        body: SignUpRequestSchema,
+        response: {
+          201: SignUpResponseSchema,
+          400: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const result = await handleSignUp(options.db, authConfig, request.body);
+      return reply.status(201).send(result);
+    },
+  );
+
+  // Auth 2: Log In
+  app.post(
+    '/v1/auth/login',
+    {
+      schema: {
+        body: LoginRequestSchema,
+        response: {
+          200: LoginResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const traceId = String(request.id);
+      const result = await handleLogin(
+        options.db,
+        authConfig,
+        request.body,
+        traceId,
+      );
+      return reply.send(result);
+    },
+  );
+
+  // Auth 3: Log Out
+  app.post(
+    '/v1/auth/logout',
+    {
+      schema: {
+        response: {
+          200: Type.Object({
+            success: Type.Boolean(),
+            message: Type.String(),
+          }),
+        },
+      },
+    },
+    async (request, reply) => {
+      const token = request.headers.authorization?.replace(/^Bearer\s+/i, '');
+      const result = await handleLogout(authConfig, token);
+      return reply.send(result);
+    },
+  );
+
+  // Auth 4: Refresh Token
+  app.post(
+    '/v1/auth/refresh',
+    {
+      schema: {
+        body: RefreshTokenRequestSchema,
+        response: {
+          200: Type.Object({
+            token: Type.String(),
+            refreshToken: Type.Optional(Type.String()),
+            expiresIn: Type.Optional(Type.Integer()),
+          }),
+          401: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const result = await handleRefreshToken(authConfig, request.body);
+      return reply.send(result);
+    },
+  );
+
+  // Auth 5: Password Recovery Request
+  app.post(
+    '/v1/auth/recover',
+    {
+      schema: {
+        body: PasswordResetRequestSchema,
+        response: {
+          200: Type.Object({
+            message: Type.String(),
+          }),
+        },
+      },
+    },
+    async (request, reply) => {
+      const result = await handlePasswordResetRequest(authConfig, request.body);
+      return reply.send(result);
+    },
+  );
+
+  // Auth 6: Get Current User Profile & Memberships
+  app.get(
+    '/v1/auth/me',
+    {
+      schema: {
+        headers: Type.Object({
+          authorization: Type.Optional(Type.String()),
+        }),
+        response: {
+          200: UserMeResponseSchema,
+          401: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const traceId = String(request.id);
+      const result = await getUserProfileAndMemberships(
+        options.db,
+        principal.userId,
+        traceId,
+      );
+      return reply.send(result);
+    },
+  );
+
+  // ==========================================================================
+  // Phase 5.0 Business Onboarding Endpoints
+  // ==========================================================================
+
+  // Onboard 1: Atomic Business Setup (Tenant + First Branch + Stockroom + POS Register)
+  app.post(
+    '/v1/org/onboard',
+    {
+      schema: {
+        headers: Type.Object({
+          authorization: Type.Optional(Type.String()),
+        }),
+        body: OnboardBusinessRequestSchema,
+        response: {
+          201: OnboardBusinessResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const traceId = String(request.id);
+      const result = await onboardBusinessAtomic(options.db, {
+        userId: principal.userId,
+        userEmail: principal.email,
+        request: request.body,
+        traceId,
+      });
+      return reply.status(201).send(result);
+    },
+  );
+
+  // Onboard 2: List My Tenants / Businesses
+  app.get(
+    '/v1/org/my-tenants',
+    {
+      schema: {
+        headers: Type.Object({
+          authorization: Type.Optional(Type.String()),
+        }),
+        response: {
+          200: Type.Array(TenantMembershipSummarySchema),
+          401: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const traceId = String(request.id);
+      const result = await getUserProfileAndMemberships(
+        options.db,
+        principal.userId,
+        traceId,
+      );
+      return reply.send(result.memberships);
+    },
+  );
 
   // 4. Tenant-Scoped Idempotent Kernel Mutation Endpoint
   app.post(
