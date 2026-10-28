@@ -3,10 +3,13 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
+  BarcodeScannerBuffer,
   DEFAULT_LOCAL_API_URL,
   DEFAULT_PRODUCTION_API_URL,
   PHASE2_INVENTORY_NAV_ITEMS,
   PHASE3_POS_NAV_ITEMS,
+  POS_THERMAL_PRINT_CSS,
+  createPosShiftStatusDescriptor,
   getWebConnectionBanner,
   getWebInventoryBadge,
   getWebThemeTokens,
@@ -85,6 +88,12 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
 
       const badge = getWebInventoryBadge('OK');
       expect(badge.label).toBe('In Stock');
+
+      // Verify re-exported UI utilities from @nexstock/ui
+      expect(POS_THERMAL_PRINT_CSS.length).toBeGreaterThan(0);
+      expect(typeof createPosShiftStatusDescriptor).toBe('function');
+      const scanner = new BarcodeScannerBuffer();
+      expect(scanner).toBeDefined();
     });
   });
 
