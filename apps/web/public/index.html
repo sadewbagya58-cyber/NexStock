@@ -787,9 +787,29 @@
 
   <!-- Application Logic -->
   <script>
+    // Resolves API base URL: preserves local development while defaulting production to Render
+    function resolveApiBaseUrl() {
+      if (typeof window !== 'undefined') {
+        if (window.__NEXSTOCK_API_URL__) {
+          return window.__NEXSTOCK_API_URL__;
+        }
+        try {
+          const stored = localStorage.getItem('nexstock_api_url');
+          if (stored) return stored;
+        } catch {
+          // Ignore localStorage security/privacy restrictions if restricted
+        }
+        const hostname = window.location.hostname ? window.location.hostname.toLowerCase() : '';
+        if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '0.0.0.0' || hostname === '') {
+          return 'http://localhost:4000';
+        }
+      }
+      return 'https://nexstock-vu5i.onrender.com';
+    }
+
     // State Store
     const state = {
-      apiBaseUrl: 'http://localhost:4000',
+      apiBaseUrl: resolveApiBaseUrl(),
       token: '',
       tenantId: '0192b4c0-1111-7000-8000-000000000001',
       branchId: '0192b4c0-3333-7000-8000-000000000001',
@@ -3463,7 +3483,7 @@
       } catch (err) {
         document.getElementById('topbarSyncStatus').innerText = '● Offline / Disconnected';
         document.getElementById('topbarSyncStatus').className = 'badge-pill badge-red';
-        showToast('Could not reach API at ' + state.apiBaseUrl + '. Ensure API server is running on port 4000.', 'error');
+        showToast('Could not reach API at ' + state.apiBaseUrl + '. Ensure the API service is online and accessible.', 'error');
       }
 
       // 2. Render initial view

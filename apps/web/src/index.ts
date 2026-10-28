@@ -13,6 +13,33 @@ import {
  * @nexstock/web — Online-First Browser Shell (UD-02 & UD-04).
  * Consumes @nexstock/ui and @nexstock/contracts. All business logic lives in @nexstock/api.
  */
+export const DEFAULT_LOCAL_API_URL = 'http://localhost:4000';
+export const DEFAULT_PRODUCTION_API_URL = 'https://nexstock-vu5i.onrender.com';
+
+/**
+ * Resolves the backend API base URL based on runtime hostname or explicit override.
+ * Preserves local development on localhost/127.0.0.1 (http://localhost:4000) while routing
+ * production/staging environments to the deployed Fastify API on Render (https://nexstock-vu5i.onrender.com).
+ */
+export function resolveWebApiClientUrl(options?: {
+  readonly hostname?: string | undefined;
+  readonly customOverride?: string | undefined;
+}): string {
+  if (options?.customOverride && options.customOverride.trim() !== '') {
+    return options.customOverride.trim();
+  }
+  const hostname = options?.hostname?.toLowerCase().trim() ?? '';
+  if (
+    hostname === 'localhost' ||
+    hostname === '127.0.0.1' ||
+    hostname === '0.0.0.0' ||
+    hostname === ''
+  ) {
+    return DEFAULT_LOCAL_API_URL;
+  }
+  return DEFAULT_PRODUCTION_API_URL;
+}
+
 export function getWebConnectionBanner(
   isOnline: boolean,
 ): StatusBannerDescriptor {
