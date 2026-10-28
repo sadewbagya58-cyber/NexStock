@@ -25,6 +25,7 @@ import {
   type NexStockDatabase,
   generateUuidV7,
   runPostgresMigrations,
+  sanitizeLogMessage,
   validateEnvironmentConfig,
 } from './modules/shared/index.js';
 import { withTenantTransaction } from './modules/shared/infrastructure/tenant-transaction.js';
@@ -605,7 +606,36 @@ export async function startServer(): Promise<void> {
   if (process.env['APP_DATABASE_URL']) {
     console.log('[NexStock API] Initializing with remote PostgreSQL database...');
     const validated = validateEnvironmentConfig(process.env);
-    const pool = new pg.Pool({ connectionString: validated.appDatabaseUrl });
+    const pool = new pg.Pool({
+      connectionString: validated.appDatabaseUrl,
+      connectionTimeoutMillis: 10000,
+      idleTimeoutMillis: 30000,
+      max: 10,
+    });
+    pool.on('error', (err) => {
+      const errObj = err as unknown as Record<string, unknown>;
+      console.error('[NexStock DB Pool Error]', {
+        name: err.name,
+        code: errObj?.['code'],
+        message: sanitizeLogMessage(err.message),
+      });
+    });
+
+    // Non-blocking initial connectivity verification ping
+    pool
+      .query('SELECT 1 as alive')
+      .then(() => {
+        console.log('[NexStock API] Remote PostgreSQL connection verified successfully.');
+      })
+      .catch((err) => {
+        const errObj = err as unknown as Record<string, unknown>;
+        console.error('[NexStock API] Remote PostgreSQL connection failed during startup check:', {
+          name: err instanceof Error ? err.name : typeof err,
+          code: errObj?.['code'],
+          message: sanitizeLogMessage(err instanceof Error ? err.message : String(err)),
+        });
+      });
+
     const dialect = new PostgresDialect({ pool });
     db = new Kysely<NexStockDatabase>({ dialect });
     jwksProvider = new RemoteJwksProvider({ jwksUrl: validated.supabaseJwksUrl });

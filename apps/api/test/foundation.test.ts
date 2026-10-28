@@ -2,9 +2,10 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PGlite } from '@electric-sql/pglite';
-import { sql } from 'kysely';
+import { type Kysely, sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
+  type NexStockDatabase,
   type PostgresMigrationSpec,
   assertActiveRoleEnforcesRls,
   assertPostgresMigrationSqlCompatible,
@@ -15,6 +16,7 @@ import {
   loadMilestone1MigrationSql,
   loadPhase2MigrationSql,
   runPostgresMigrations,
+  sanitizeLogMessage,
   validateDatabaseCredentialSeparation,
   validateEnvironmentConfig,
   withTenantTransaction,
@@ -378,6 +380,47 @@ describe('@nexstock/api — Milestone 0 Foundation, RLS, Idempotency & Sync Inva
       expect(openApiRes.json().openapi).toBe('3.1.0');
 
       await app.close();
+    });
+
+    it('returns 503 Service Unavailable when the database readiness check fails and sanitizes logs', async () => {
+      const brokenDb = {
+        transaction: () => ({
+          execute: async () => {
+            throw new Error('connect ECONNREFUSED 127.0.0.1:5432');
+          },
+        }),
+      } as unknown as Kysely<NexStockDatabase>;
+
+      const app = await buildApp({ db: brokenDb });
+
+      const liveRes = await app.inject({
+        method: 'GET',
+        url: '/v1/health/live',
+      });
+      expect(liveRes.statusCode).toBe(200);
+      expect(liveRes.json().status).toBe('ok');
+
+      const readyRes = await app.inject({
+        method: 'GET',
+        url: '/v1/health/ready',
+      });
+      expect(readyRes.statusCode).toBe(503);
+      const readyJson = readyRes.json();
+      expect(readyJson.status).toBe(503);
+      expect(readyJson.title).toBe('Service Unavailable');
+      expect(readyJson.detail).toBe('Database readiness check failed.');
+      expect(readyJson.errorCode).toBe('ERR_INTERNAL_SERVER_ERROR');
+      expect(readyJson.traceId).toBeDefined();
+
+      await app.close();
+
+      const rawUrl = 'postgresql://nexstock_app_user:super_secret_pw123@db.supabase.co:5432/postgres';
+      const sanitized = sanitizeLogMessage(`Failed to connect to ${rawUrl}`);
+      expect(sanitized).not.toContain('super_secret_pw123');
+      expect(sanitized).toContain('postgresql://nexstock_app_user:***@db.supabase.co:5432/postgres');
+
+      const rawAuth = 'Error with Bearer eyJhbGciOiJIUzI1NiJ9.secret';
+      expect(sanitizeLogMessage(rawAuth)).toBe('Error with Bearer ***');
     });
 
     it('rejects float numbers on monetary string fields (coerceTypes: false) with RFC 9457 Problem Details', async () => {

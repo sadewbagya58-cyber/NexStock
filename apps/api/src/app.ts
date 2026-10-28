@@ -170,6 +170,7 @@ import {
   executeIdempotentMutation,
   generateUuidV7,
   processSyncCommandBatch,
+  sanitizeLogMessage,
   withTenantTransaction,
 } from './modules/shared/index.js';
 import {
@@ -336,6 +337,22 @@ export async function buildApp(
         });
     }
 
+    const errObj = error as Record<string, unknown>;
+    request.log.error(
+      {
+        traceId,
+        url: request.url,
+        method: request.method,
+        errName: error instanceof Error ? error.name : typeof error,
+        errCode: errObj?.['code'],
+        errMessage:
+          error instanceof Error
+            ? sanitizeLogMessage(error.message)
+            : String(error),
+      },
+      '[NexStock Unhandled Error]',
+    );
+
     return reply
       .status(500)
       .header('content-type', 'application/problem+json')
@@ -376,29 +393,61 @@ export async function buildApp(
         response: {
           200: HealthStatusResponseSchema,
           500: ProblemDetailsSchema,
+          503: ProblemDetailsSchema,
         },
       },
     },
-    async (request) => {
-      const probeTenantId = '00000000-0000-7000-8000-000000000000';
-      const probeUserId = '00000000-0000-7000-8000-000000000000';
-      await withTenantTransaction(
-        options.db,
-        {
-          tenantId: probeTenantId,
-          userId: probeUserId,
-          traceId: String(request.id),
-        },
-        async (trx) => {
-          await assertActiveRoleEnforcesRls(trx);
-        },
-      );
-      return {
-        status: 'ok' as const,
-        service: 'nexstock-api' as const,
-        version: '0.1.0',
-        timestamp: new Date().toISOString(),
-      };
+    async (request, reply) => {
+      const traceId = String(request.id);
+      try {
+        const probeTenantId = '00000000-0000-7000-8000-000000000000';
+        const probeUserId = '00000000-0000-7000-8000-000000000000';
+        await withTenantTransaction(
+          options.db,
+          {
+            tenantId: probeTenantId,
+            userId: probeUserId,
+            traceId,
+          },
+          async (trx) => {
+            await assertActiveRoleEnforcesRls(trx);
+          },
+        );
+        return {
+          status: 'ok' as const,
+          service: 'nexstock-api' as const,
+          version: '0.1.0',
+          timestamp: new Date().toISOString(),
+        };
+      } catch (err) {
+        const errObj = err as Record<string, unknown>;
+        request.log.error(
+          {
+            probe: 'readiness',
+            traceId,
+            errName: err instanceof Error ? err.name : typeof err,
+            errCode: errObj?.['code'],
+            errMessage:
+              err instanceof Error
+                ? sanitizeLogMessage(err.message)
+                : String(err),
+          },
+          '[NexStock Readiness Probe Failed]',
+        );
+
+        return reply
+          .status(503)
+          .header('content-type', 'application/problem+json')
+          .send({
+            type: 'https://api.nexstock.io/errors/err-internal-server-error',
+            title: 'Service Unavailable',
+            status: 503,
+            detail: 'Database readiness check failed.',
+            instance: request.url,
+            errorCode: 'ERR_INTERNAL_SERVER_ERROR',
+            traceId,
+          });
+      }
     },
   );
 

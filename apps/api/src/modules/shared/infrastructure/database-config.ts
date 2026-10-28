@@ -51,6 +51,17 @@ function assertNonEmptyEnvVar(
 }
 
 /**
+ * Sanitizes log messages to ensure connection strings, passwords, or credentials
+ * embedded in error messages or URLs are masked before logging.
+ */
+export function sanitizeLogMessage(message: string): string {
+  if (!message) return '';
+  return message
+    .replace(/(postgres(?:ql)?:\/\/[^:]+:)([^@]+)(@)/gi, '$1***$3')
+    .replace(/(bearer\s+)[a-zA-Z0-9._-]+/gi, '$1***');
+}
+
+/**
  * Validates required runtime and optional migration environment variables without
  * printing or logging any secret/password values (Phase 1 Section 8).
  */
