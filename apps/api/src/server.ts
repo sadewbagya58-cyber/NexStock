@@ -24,6 +24,7 @@ import {
 import {
   type NexStockDatabase,
   generateUuidV7,
+  resolveDatabaseSslConfig,
   runPostgresMigrations,
   sanitizeLogMessage,
   validateEnvironmentConfig,
@@ -606,8 +607,14 @@ export async function startServer(): Promise<void> {
   if (process.env['APP_DATABASE_URL']) {
     console.log('[NexStock API] Initializing with remote PostgreSQL database...');
     const validated = validateEnvironmentConfig(process.env);
-    const pool = new pg.Pool({
+    const { ssl, sanitizedConnectionString } = resolveDatabaseSslConfig({
       connectionString: validated.appDatabaseUrl,
+      sslCa: validated.appDatabaseSslCa,
+      sslCaPath: validated.appDatabaseSslCaPath,
+    });
+    const pool = new pg.Pool({
+      connectionString: sanitizedConnectionString,
+      ssl,
       connectionTimeoutMillis: 10000,
       idleTimeoutMillis: 30000,
       max: 10,

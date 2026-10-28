@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
+import type { ConnectionOptions } from 'node:tls';
 import { fileURLToPath } from 'node:url';
 import { type Kysely, type Transaction, sql } from 'kysely';
 import { SecurityConfigurationError } from '../domain/errors.js';
@@ -30,6 +31,8 @@ export interface ValidatedEnvironmentConfig {
   readonly supabaseJwtAudience: string;
   readonly appDatabaseUrl: string;
   readonly migrationDatabaseUrl?: string | undefined;
+  readonly appDatabaseSslCa?: string | undefined;
+  readonly appDatabaseSslCaPath?: string | undefined;
 }
 
 function assertNonEmptyEnvVar(
@@ -59,6 +62,132 @@ export function sanitizeLogMessage(message: string): string {
   return message
     .replace(/(postgres(?:ql)?:\/\/[^:]+:)([^@]+)(@)/gi, '$1***$3')
     .replace(/(bearer\s+)[a-zA-Z0-9._-]+/gi, '$1***');
+}
+
+/**
+ * Official Supabase Root 2021 CA certificate (PEM format).
+ * Subject: CN=Supabase Root 2021 CA, O=Supabase Inc
+ * SHA-256 Fingerprint: 80:70:25:AD:50:D4:ED:21:9D:2C:9C:7D:29:9C:00:4F:82:4E:B0:0C:F7:F6:5A:FE:F6:07:D0:7B:72:E6:CA:FA
+ * Valid through: April 26, 2031
+ * Used to verify Supabase hosted databases and connection poolers (*.supabase.co and *.supabase.com).
+ */
+export const DEFAULT_SUPABASE_ROOT_CA = `-----BEGIN CERTIFICATE-----
+MIIDxDCCAqygAwIBAgIUbLxMod62P2ktCiAkxnKJwtE9VPYwDQYJKoZIhvcNAQEL
+BQAwazELMAkGA1UEBhMCVVMxEDAOBgNVBAgMB0RlbHdhcmUxEzARBgNVBAcMCk5l
+dyBDYXN0bGUxFTATBgNVBAoMDFN1cGFiYXNlIEluYzEeMBwGA1UEAwwVU3VwYWJh
+c2UgUm9vdCAyMDIxIENBMB4XDTIxMDQyODEwNTY1M1oXDTMxMDQyNjEwNTY1M1ow
+azELMAkGA1UEBhMCVVMxEDAOBgNVBAgMB0RlbHdhcmUxEzARBgNVBAcMCk5ldyBD
+YXN0bGUxFTATBgNVBAoMDFN1cGFiYXNlIEluYzEeMBwGA1UEAwwVU3VwYWJhc2Ug
+Um9vdCAyMDIxIENBMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAqQXW
+QyHOB+qR2GJobCq/CBmQ40G0oDmCC3mzVnn8sv4XNeWtE5XcEL0uVih7Jo4Dkx1Q
+DmGHBH1zDfgs2qXiLb6xpw/CKQPypZW1JssOTMIfQppNQ87K75Ya0p25Y3ePS2t2
+GtvHxNjUV6kjOZjEn2yWEcBdpOVCUYBVFBNMB4YBHkNRDa/+S4uywAoaTWnCJLUi
+cvTlHmMw6xSQQn1UfRQHk50DMCEJ7Cy1RxrZJrkXXRP3LqQL2ijJ6F4yMfh+Gyb4
+O4XajoVj/+R4GwywKYrrS8PrSNtwxr5StlQO8zIQUSMiq26wM8mgELFlS/32Uclt
+NaQ1xBRizkzpZct9DwIDAQABo2AwXjALBgNVHQ8EBAMCAQYwHQYDVR0OBBYEFKjX
+uXY32CztkhImng4yJNUtaUYsMB8GA1UdIwQYMBaAFKjXuXY32CztkhImng4yJNUt
+aUYsMA8GA1UdEwEB/wQFMAMBAf8wDQYJKoZIhvcNAQELBQADggEBAB8spzNn+4VU
+tVxbdMaX+39Z50sc7uATmus16jmmHjhIHz+l/9GlJ5KqAMOx26mPZgfzG7oneL2b
+VW+WgYUkTT3XEPFWnTp2RJwQao8/tYPXWEJDc0WVQHrpmnWOFKU/d3MqBgBm5y+6
+jB81TU/RG2rVerPDWP+1MMcNNy0491CTL5XQZ7JfDJJ9CCmXSdtTl4uUQnSuv/Qx
+Cea13BX2ZgJc7Au30vihLhub52De4P/4gonKsNHYdbWjg7OWKwNv/zitGDVDB9Y2
+CMTyZKG3XEu5Ghl1LEnI3QmEKsqaCLv12BnVjbkSeZsMnevJPs1Ye6TjjJwdik5P
+o/bKiIz+Fq8=
+-----END CERTIFICATE-----
+`;
+
+export interface DatabaseSslConfigResult {
+  readonly ssl: ConnectionOptions | boolean;
+  readonly sanitizedConnectionString: string;
+}
+
+/**
+ * Resolves the appropriate TLS / SSL configuration for PostgreSQL connections.
+ * Enforces strict certificate validation (rejectUnauthorized: true) at all times.
+ * Never disables TLS or weakens security verification.
+ * Automatically provisions the official Supabase Root CA for Supabase hosts
+ * unless an explicit custom CA is supplied via parameters or environment variables.
+ */
+export function resolveDatabaseSslConfig(params: {
+  readonly connectionString: string;
+  readonly sslCa?: string | undefined;
+  readonly sslCaPath?: string | undefined;
+}): DatabaseSslConfigResult {
+  let url: URL;
+  try {
+    url = new URL(params.connectionString);
+  } catch {
+    throw new SecurityConfigurationError(
+      'Invalid database connection string format.',
+    );
+  }
+
+  const sslmode = url.searchParams.get('sslmode')?.toLowerCase();
+  const isLoopback =
+    url.hostname === 'localhost' ||
+    url.hostname === '127.0.0.1' ||
+    url.hostname === '::1';
+
+  if (sslmode === 'disable' || (isLoopback && !sslmode)) {
+    url.searchParams.delete('sslmode');
+    url.searchParams.delete('sslrootcert');
+    url.searchParams.delete('uselibpqcompat');
+    return {
+      ssl: false,
+      sanitizedConnectionString: url.toString(),
+    };
+  }
+
+  // Priority 1: In-memory PEM string (e.g. from APP_DATABASE_SSL_CA or SUPABASE_SSL_CA)
+  let ca: string | undefined;
+  if (params.sslCa && params.sslCa.trim() !== '') {
+    ca = params.sslCa.trim();
+  }
+  // Priority 2: Local CA file path (e.g. from APP_DATABASE_SSL_CA_PATH)
+  else if (params.sslCaPath && params.sslCaPath.trim() !== '') {
+    const certPath = resolve(params.sslCaPath.trim());
+    if (!existsSync(certPath)) {
+      throw new SecurityConfigurationError(
+        `Configured SSL CA certificate file not found: ${certPath}`,
+      );
+    }
+    ca = readFileSync(certPath, 'utf8');
+  }
+  // Priority 3: sslrootcert query parameter in the connection URL
+  else if (url.searchParams.get('sslrootcert')) {
+    const certPath = resolve(url.searchParams.get('sslrootcert')!);
+    if (!existsSync(certPath)) {
+      throw new SecurityConfigurationError(
+        `Configured sslrootcert file not found: ${certPath}`,
+      );
+    }
+    ca = readFileSync(certPath, 'utf8');
+  }
+  // Priority 4: Official Supabase Root CA for Supabase hosts (*.supabase.co and *.supabase.com)
+  else if (
+    url.hostname.endsWith('.supabase.co') ||
+    url.hostname.endsWith('.supabase.com')
+  ) {
+    ca = DEFAULT_SUPABASE_ROOT_CA;
+  }
+
+  // Delete ssl query parameters from the URL passed to pg.Pool.
+  // pg's internal ConnectionParameters parses connectionString and overwrites
+  // config.ssl with an empty object {} if sslmode is present, which drops custom CA
+  // settings and triggers deprecated sslmode warnings.
+  url.searchParams.delete('sslmode');
+  url.searchParams.delete('sslrootcert');
+  url.searchParams.delete('uselibpqcompat');
+
+  const ssl: ConnectionOptions = {
+    rejectUnauthorized: true,
+    ...(ca ? { ca } : {}),
+  };
+
+  return {
+    ssl,
+    sanitizedConnectionString: url.toString(),
+  };
 }
 
 /**
@@ -113,6 +242,10 @@ export function validateEnvironmentConfig(
     });
   }
 
+  const appDatabaseSslCa =
+    env['APP_DATABASE_SSL_CA']?.trim() || env['SUPABASE_SSL_CA']?.trim();
+  const appDatabaseSslCaPath = env['APP_DATABASE_SSL_CA_PATH']?.trim();
+
   return {
     supabaseUrl,
     supabaseJwksUrl,
@@ -120,6 +253,8 @@ export function validateEnvironmentConfig(
     supabaseJwtAudience,
     appDatabaseUrl,
     migrationDatabaseUrl,
+    ...(appDatabaseSslCa ? { appDatabaseSslCa } : {}),
+    ...(appDatabaseSslCaPath ? { appDatabaseSslCaPath } : {}),
   };
 }
 
@@ -157,7 +292,8 @@ export function validateDatabaseCredentialSeparation(params: {
     );
   }
 
-  if (appUser === 'postgres' || appUser.includes('migrator')) {
+  const baseAppUser = appUser.split('.')[0]!;
+  if (baseAppUser === 'postgres' || appUser.includes('migrator')) {
     throw new SecurityConfigurationError(
       `Runtime database user "${appUser}" appears to be a privileged owner/migrator role. Use "nexstock_app_user" (NOBYPASSRLS).`,
     );

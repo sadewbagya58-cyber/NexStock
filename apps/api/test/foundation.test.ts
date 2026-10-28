@@ -12,9 +12,11 @@ import {
   buildApp,
   generateUuidV7,
   getOrderedPostgresMigrations,
+  DEFAULT_SUPABASE_ROOT_CA,
   loadFoundationMigrationSql,
   loadMilestone1MigrationSql,
   loadPhase2MigrationSql,
+  resolveDatabaseSslConfig,
   runPostgresMigrations,
   sanitizeLogMessage,
   validateDatabaseCredentialSeparation,
@@ -111,7 +113,94 @@ describe('@nexstock/api — Milestone 0 Foundation, RLS, Idempotency & Sync Inva
           ...validEnv,
           SUPABASE_URL: 'http://insecure.supabase.co',
         }),
-      ).toThrow(/must be valid HTTPS URLs/);
+            ).toThrow(/must be valid HTTPS URLs/);
+    });
+
+    it('verifies TLS configuration, pooler username formats, and Supabase CA resolution', () => {
+      // 1. Supabase pooler username format (username.project_ref)
+      expect(() =>
+        validateDatabaseCredentialSeparation({
+          appDatabaseUrl:
+            'postgresql://nexstock_app_user.tokylhdgzyoxiqwvncis:secret@aws-0-ap-northeast-1.pooler.supabase.com:5432/postgres',
+          migrationDatabaseUrl:
+            'postgresql://nexstock_migrator:secret@localhost:5432/nexstock',
+        }),
+      ).not.toThrow();
+
+      expect(() =>
+        validateDatabaseCredentialSeparation({
+          appDatabaseUrl:
+            'postgresql://nexstock_login_user.tokylhdgzyoxiqwvncis:secret@aws-0-ap-northeast-1.pooler.supabase.com:5432/postgres',
+          migrationDatabaseUrl:
+            'postgresql://nexstock_migrator:secret@localhost:5432/nexstock',
+        }),
+      ).not.toThrow();
+
+      // Privileged postgres user with pooler suffix -> must fail
+      expect(() =>
+        validateDatabaseCredentialSeparation({
+          appDatabaseUrl:
+            'postgresql://postgres.tokylhdgzyoxiqwvncis:secret@aws-0-ap-northeast-1.pooler.supabase.com:5432/postgres',
+          migrationDatabaseUrl:
+            'postgresql://nexstock_migrator:secret@localhost:5432/nexstock',
+        }),
+      ).toThrow(/privileged owner/);
+
+      // 2. Resolve SSL for Supabase Pooler endpoint
+      const poolerRes = resolveDatabaseSslConfig({
+        connectionString:
+          'postgresql://nexstock_app_user:secret@aws-0-ap-northeast-1.pooler.supabase.com:5432/postgres?sslmode=require&uselibpqcompat=true',
+      });
+      expect(poolerRes.ssl).toBeTypeOf('object');
+      const poolerSsl = poolerRes.ssl as { rejectUnauthorized: boolean; ca?: string };
+      expect(poolerSsl.rejectUnauthorized).toBe(true);
+      expect(poolerSsl.ca).toBe(DEFAULT_SUPABASE_ROOT_CA);
+      expect(poolerRes.sanitizedConnectionString).not.toContain('sslmode');
+      expect(poolerRes.sanitizedConnectionString).not.toContain('uselibpqcompat');
+
+      // 3. Resolve SSL for direct Supabase endpoint
+      const directRes = resolveDatabaseSslConfig({
+        connectionString:
+          'postgresql://nexstock_app_user:secret@db.tokylhdgzyoxiqwvncis.supabase.co:5432/postgres?sslmode=require',
+      });
+      const directSsl = directRes.ssl as { rejectUnauthorized: boolean; ca?: string };
+      expect(directSsl.rejectUnauthorized).toBe(true);
+      expect(directSsl.ca).toBe(DEFAULT_SUPABASE_ROOT_CA);
+
+      // 4. Custom CA via in-memory PEM string takes precedence
+      const customPem = '-----BEGIN CERTIFICATE-----\nCUSTOM_CA_PEM\n-----END CERTIFICATE-----';
+      const customRes = resolveDatabaseSslConfig({
+        connectionString:
+          'postgresql://nexstock_app_user:secret@aws-0-ap-northeast-1.pooler.supabase.com:5432/postgres',
+        sslCa: customPem,
+      });
+      const customSsl = customRes.ssl as { rejectUnauthorized: boolean; ca?: string };
+      expect(customSsl.rejectUnauthorized).toBe(true);
+      expect(customSsl.ca).toBe(customPem);
+
+      // 5. Custom CA via file path
+      const certPath = resolve(dirname(fileURLToPath(import.meta.url)), '../certs/prod-ca-2021.crt');
+      const fileRes = resolveDatabaseSslConfig({
+        connectionString:
+          'postgresql://nexstock_app_user:secret@custom-host.example.com:5432/postgres',
+        sslCaPath: certPath,
+      });
+      const fileSsl = fileRes.ssl as { rejectUnauthorized: boolean; ca?: string };
+      expect(fileSsl.rejectUnauthorized).toBe(true);
+      expect(fileSsl.ca).toBe(DEFAULT_SUPABASE_ROOT_CA);
+
+      // 6. sslmode=disable or local development
+      const disabledRes = resolveDatabaseSslConfig({
+        connectionString:
+          'postgresql://nexstock_app_user:secret@custom-host.example.com:5432/postgres?sslmode=disable',
+      });
+      expect(disabledRes.ssl).toBe(false);
+
+      const localRes = resolveDatabaseSslConfig({
+        connectionString:
+          'postgresql://nexstock_app_user:secret@localhost:5432/nexstock',
+      });
+      expect(localRes.ssl).toBe(false);
     });
 
     it('is safe to rerun 0001_shared_foundation_rls.sql idempotently and enforces NOBYPASSRLS inside withTenantTransaction', async () => {
