@@ -635,12 +635,508 @@
       margin-bottom: 4px;
     }
 
-    /* Responsive */
-    @media (max-width: 900px) {
-      .app-container { flex-direction: column; }
-      aside.sidebar { width: 100%; border-right: none; border-bottom: 1px solid var(--border-subtle); }
-      .pos-layout { grid-template-columns: 1fr; height: auto; }
-      main.main-content { padding: 16px; }
+    /* ========================================================================= */
+    /* Responsive Navigation, Mobile Drawer & Tablet Layouts                     */
+    /* ========================================================================= */
+    .mobile-menu-toggle {
+      display: none;
+      background: none;
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius);
+      width: 36px;
+      height: 36px;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-primary);
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    .sidebar-overlay {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(15, 23, 42, 0.45);
+      backdrop-filter: blur(2px);
+      z-index: 80;
+      opacity: 0;
+      transition: opacity 0.25s ease;
+    }
+
+    .sidebar-overlay.active {
+      display: block;
+      opacity: 1;
+    }
+
+    .sidebar-mobile-header {
+      display: none;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 14px;
+      margin-bottom: 8px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .dashboard-split-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin-top: 24px;
+    }
+
+    /* POS Mobile Tab Navigation */
+    .pos-mobile-nav {
+      display: none;
+      gap: 8px;
+      margin-bottom: 16px;
+      background: var(--surface-card);
+      padding: 6px;
+      border-radius: var(--radius);
+      border: 1px solid var(--border-subtle);
+    }
+
+    .pos-tab-btn {
+      flex: 1;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 10px 14px;
+      border-radius: var(--radius);
+      border: none;
+      background: transparent;
+      color: var(--text-secondary);
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .pos-tab-btn.active {
+      background: var(--accent-light);
+      color: var(--accent-primary);
+    }
+
+    .pos-mobile-floating-cart {
+      display: none;
+      position: sticky;
+      bottom: 16px;
+      z-index: 30;
+      margin-top: 16px;
+      background: var(--accent-primary);
+      color: #FFFFFF;
+      padding: 14px 20px;
+      border-radius: 12px;
+      box-shadow: var(--shadow-lg);
+      font-weight: 700;
+      font-size: 15px;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      transition: background 0.15s ease;
+    }
+    .pos-mobile-floating-cart:hover {
+      background: var(--accent-hover);
+    }
+
+    /* ========================================================================= */
+    /* SaaS Marketing Landing Page Styles                                        */
+    /* ========================================================================= */
+    .landing-wrapper {
+      width: 100%;
+      max-width: 1140px;
+      margin: 0 auto;
+      padding: 24px 16px 80px;
+    }
+
+    .landing-hero {
+      text-align: center;
+      padding: 48px 12px 40px;
+    }
+
+    .landing-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--accent-light);
+      color: var(--accent-primary);
+      padding: 6px 14px;
+      border-radius: 9999px;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      margin-bottom: 20px;
+      border: 1px solid rgba(37, 99, 235, 0.25);
+    }
+
+    .landing-title {
+      font-size: clamp(28px, 5vw, 50px);
+      font-weight: 800;
+      color: var(--text-primary);
+      line-height: 1.15;
+      letter-spacing: -0.02em;
+      max-width: 860px;
+      margin: 0 auto 20px;
+    }
+
+    .landing-title-accent {
+      background: linear-gradient(135deg, var(--accent-primary) 0%, #7C3AED 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .landing-subtitle {
+      font-size: clamp(15px, 2.2vw, 18px);
+      color: var(--text-secondary);
+      max-width: 700px;
+      margin: 0 auto 32px;
+      line-height: 1.6;
+    }
+
+    .landing-cta-row {
+      display: flex;
+      gap: 14px;
+      justify-content: center;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-bottom: 24px;
+    }
+
+    .landing-cta-row .btn {
+      padding: 12px 28px;
+      font-size: 15px;
+      font-weight: 600;
+      border-radius: 8px;
+    }
+
+    .landing-trust-row {
+      display: flex;
+      gap: 20px;
+      justify-content: center;
+      align-items: center;
+      flex-wrap: wrap;
+      color: var(--text-secondary);
+      font-size: 13px;
+    }
+
+    .landing-trust-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .landing-preview-card {
+      background: var(--surface-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: 16px;
+      box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.1);
+      overflow: hidden;
+      margin: 40px 0 64px;
+    }
+
+    .landing-preview-header {
+      background: var(--bg-primary);
+      padding: 12px 20px;
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .landing-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+    }
+
+    .landing-preview-body {
+      padding: 24px;
+    }
+
+    .landing-features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 24px;
+      margin-bottom: 64px;
+    }
+
+    .landing-feature-box {
+      background: var(--surface-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      padding: 24px;
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .landing-feature-box:hover {
+      transform: translateY(-2px);
+      box-shadow: var(--shadow);
+    }
+
+    .landing-feature-icon {
+      width: 44px;
+      height: 44px;
+      border-radius: 10px;
+      background: var(--accent-light);
+      color: var(--accent-primary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 16px;
+    }
+
+    .landing-feature-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text-primary);
+      margin-bottom: 8px;
+    }
+
+    .landing-feature-desc {
+      font-size: 13px;
+      color: var(--text-secondary);
+      line-height: 1.5;
+    }
+
+    .landing-currencies-banner {
+      background: var(--surface-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      padding: 24px 28px;
+      margin-bottom: 64px;
+      text-align: center;
+    }
+
+    .landing-currencies-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: center;
+      margin-top: 16px;
+    }
+
+    .landing-currency-tag {
+      background: var(--bg-primary);
+      border: 1px solid var(--border-subtle);
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .landing-pricing-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 24px;
+      margin-bottom: 64px;
+    }
+
+    .landing-pricing-card {
+      background: var(--surface-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: 14px;
+      padding: 32px 24px;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+    }
+
+    .landing-pricing-card.featured {
+      border-color: var(--accent-primary);
+      box-shadow: 0 0 0 1px var(--accent-primary), var(--shadow-lg);
+    }
+
+    .landing-pricing-badge {
+      position: absolute;
+      top: -12px;
+      right: 20px;
+      background: var(--accent-primary);
+      color: #FFFFFF;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 3px 10px;
+      border-radius: 9999px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .landing-pricing-price {
+      font-size: 36px;
+      font-weight: 800;
+      color: var(--text-primary);
+      margin: 16px 0 8px;
+    }
+
+    .landing-pricing-price span {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--text-secondary);
+    }
+
+    .landing-pricing-features {
+      list-style: none;
+      margin: 20px 0 28px;
+      flex: 1;
+    }
+
+    .landing-pricing-features li {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: var(--text-secondary);
+      margin-bottom: 10px;
+    }
+
+    .landing-pricing-features li svg {
+      color: var(--status-success);
+      flex-shrink: 0;
+    }
+
+    .landing-footer {
+      border-top: 1px solid var(--border-subtle);
+      padding: 36px 0 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 16px;
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+
+    /* Tablet Screen Media Query */
+    @media (min-width: 769px) and (max-width: 1024px) {
+      :root {
+        --sidebar-width: 210px;
+      }
+      .kpi-grid {
+        grid-template-columns: repeat(2, 1fr) !important;
+      }
+      .dashboard-split-grid {
+        grid-template-columns: 1fr !important;
+      }
+      .pos-layout {
+        grid-template-columns: 1fr 340px !important;
+      }
+    }
+
+    /* Mobile Screen Media Query */
+    @media (max-width: 768px) {
+      .mobile-menu-toggle {
+        display: flex;
+      }
+
+      .sidebar-mobile-header {
+        display: flex;
+      }
+
+      header.topbar {
+        padding: 0 12px;
+        height: 56px;
+      }
+
+      .topbar-context {
+        gap: 6px;
+      }
+
+      #topbarBranchContext,
+      #topbarRoleContext,
+      #topbarVersionBadge,
+      #topbarUserName {
+        display: none !important;
+      }
+
+      #topbarTenantContext {
+        padding: 4px 8px;
+        font-size: 12px;
+      }
+
+      aside.sidebar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        bottom: 0;
+        width: 280px;
+        max-width: 85vw;
+        background: var(--surface-card);
+        border-right: 1px solid var(--border-subtle);
+        box-shadow: var(--shadow-lg);
+        transform: translateX(-100%);
+        transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        z-index: 100;
+        overflow-y: auto;
+      }
+
+      aside.sidebar.open {
+        transform: translateX(0);
+      }
+
+      main.main-content {
+        padding: 16px 12px;
+      }
+
+      .view-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 12px;
+      }
+
+      .dashboard-split-grid {
+        grid-template-columns: 1fr !important;
+        gap: 16px !important;
+      }
+
+      .kpi-grid {
+        grid-template-columns: 1fr !important;
+        gap: 12px !important;
+      }
+
+      .pos-mobile-nav {
+        display: flex;
+      }
+
+      .pos-mobile-floating-cart {
+        display: flex;
+      }
+
+      .pos-layout {
+        grid-template-columns: 1fr !important;
+        height: auto !important;
+        gap: 16px !important;
+      }
+
+      .modal-box {
+        width: 95vw !important;
+        max-width: 95vw !important;
+        margin: 12px !important;
+      }
+    }
+
+    /* Small Mobile Screen Media Query */
+    @media (max-width: 480px) {
+      .auth-card {
+        padding: 24px 16px;
+      }
+      .btn {
+        padding: 10px 14px;
+        font-size: 13px;
+      }
+      .nav-link {
+        padding: 12px 14px;
+        font-size: 15px;
+      }
+      .landing-title {
+        font-size: 28px;
+      }
+      .landing-preview-body {
+        padding: 16px;
+      }
     }
 
     /* Phase 5.0 Authentication & Business Onboarding Styles */
@@ -744,11 +1240,14 @@
   <!-- Top Bar -->
   <header class="topbar">
     <div class="brand-section">
+      <button class="mobile-menu-toggle" id="mobileMenuToggle" aria-label="Toggle navigation menu">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+      </button>
       <a href="#dashboard" class="brand-logo" id="brandLogoBtn">
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
         NexStock
       </a>
-      <span class="badge-pill badge-blue">v0.1.0 Phase 5</span>
+      <span class="badge-pill badge-blue" id="topbarVersionBadge">v0.1.0 Phase 5</span>
     </div>
 
     <div class="topbar-context" id="topbarContext">
@@ -786,8 +1285,16 @@
 
   <!-- App Body Layout -->
   <div class="app-container">
+    <div class="sidebar-overlay" id="sidebarOverlay"></div>
     <!-- Sidebar -->
-    <aside class="sidebar">
+    <aside class="sidebar" id="appSidebar">
+      <div class="sidebar-mobile-header" id="sidebarMobileHeader">
+        <div style="display: flex; align-items: center; gap: 8px; font-weight: 700; color: var(--accent-primary);">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path></svg>
+          NexStock Menu
+        </div>
+        <button class="btn-icon btn-sm" id="sidebarCloseBtn" aria-label="Close menu">&times;</button>
+      </div>
       <div class="nav-section-title">Overview</div>
       <a class="nav-link active" data-view="dashboard">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
@@ -926,19 +1433,22 @@
       tenantId: '',
       tenantName: '',
       currency: 'USD',
+      countryCode: 'US',
       plan: 'TRIAL',
       branchId: '',
       branchName: '',
       warehouseId: '',
       registerId: '',
+      registerCode: '',
       userRole: '',
       userEmail: '',
       fullName: '',
       memberships: [],
-      activeView: 'dashboard',
+      activeView: 'welcome',
       theme: 'light',
       activeShift: null,
       cart: [],
+      taxRate: 0,
       orderDiscount: 0,
       cachedProducts: [],
       cachedCategories: [],
@@ -1044,6 +1554,7 @@
       state.tenantId = membership.tenantId;
       state.tenantName = membership.businessName || membership.tenantName || 'My Business';
       state.currency = membership.baseCurrency || membership.currency || 'USD';
+      state.countryCode = membership.countryCode || membership.country || 'US';
       state.plan = membership.status || membership.plan || 'TRIAL';
       state.userRole = membership.role || membership.roleName || 'MEMBER';
       localStorage.setItem('nexstock_active_tenant_id', membership.tenantId);
@@ -1052,9 +1563,11 @@
       if (hq) {
         state.branchId = hq.id;
         state.branchName = hq.name;
+        state.warehouseId = hq.defaultWarehouseId || '';
       } else {
         state.branchId = '';
         state.branchName = 'Default Branch';
+        state.warehouseId = '';
       }
 
       // Update Topbar context
@@ -1067,22 +1580,34 @@
       const roleEl = document.getElementById('topbarUserRole');
       if (roleEl) roleEl.innerText = state.userRole;
 
-      // Pre-load active warehouse and POS register for this branch
-      try {
-        const [whRes, regRes] = await Promise.all([
-          apiFetch(`/v1/inventory/warehouses?branchId=${state.branchId}`, { silent: true }).catch(() => ({ data: [] })),
-          apiFetch(`/v1/pos/registers?branchId=${state.branchId}`, { silent: true }).catch(() => [])
-        ]);
-        const whList = whRes?.data || (Array.isArray(whRes) ? whRes : []);
-        if (whList.length > 0) {
-          state.warehouseId = whList[0].id;
+      // If defaultWarehouseId was not in membership, resolve from branches API
+      if (!state.warehouseId && state.tenantId) {
+        try {
+          const branchRes = await apiFetch('/v1/org/branches', { silent: true }).catch(() => ({ items: [] }));
+          const branches = branchRes?.items || (Array.isArray(branchRes) ? branchRes : []);
+          const activeBranch = branches.find(b => b.id === state.branchId) || branches[0];
+          if (activeBranch) {
+            state.branchId = activeBranch.id;
+            state.branchName = activeBranch.name;
+            state.warehouseId = activeBranch.defaultWarehouseId || '';
+          }
+        } catch {
+          // Non-critical fallback
         }
-        const regList = Array.isArray(regRes) ? regRes : (regRes?.data || []);
-        if (regList.length > 0) {
-          state.registerId = regList[0].id;
+      }
+
+      // Pre-load active POS register for this branch safely
+      if (state.branchId) {
+        try {
+          const regRes = await apiFetch(`/v1/pos/registers?branchId=${encodeURIComponent(state.branchId)}`, { silent: true }).catch(() => []);
+          const regList = Array.isArray(regRes) ? regRes : (regRes?.data || []);
+          if (regList.length > 0) {
+            state.registerId = regList[0].id;
+            state.registerCode = regList[0].code || 'REG-01';
+          }
+        } catch {
+          // Non-critical fallback
         }
-      } catch {
-        // Non-critical fallback
       }
     }
 
@@ -1111,6 +1636,7 @@
       state.branchName = '';
       state.warehouseId = '';
       state.registerId = '';
+      state.registerCode = '';
       state.user = null;
       state.memberships = [];
 
@@ -1124,7 +1650,7 @@
       if (roleEl) roleEl.innerText = '—';
 
       showToast('You have been signed out.', 'info');
-      renderView('login');
+      renderView('welcome');
     }
 
     const btnSignOut = document.getElementById('btnSignOut');
@@ -1148,7 +1674,7 @@
         } else if (state.token) {
           renderView('onboard-business');
         } else {
-          renderView('login');
+          renderView('welcome');
         }
       };
     }
@@ -1166,14 +1692,34 @@
         if (sidebar) sidebar.style.display = 'none';
         if (topbarContext) topbarContext.style.display = 'none';
         if (viewName === 'onboard-business' || viewName === 'tenant-select') {
-          if (topbarAuthActions) topbarAuthActions.style.display = 'flex';
+          if (topbarAuthActions) {
+            topbarAuthActions.style.display = 'flex';
+            topbarAuthActions.innerHTML = `
+              <span id="topbarUserName" style="font-size: 13px; font-weight: 500; color: var(--text-secondary);">${escapeHtml(state.fullName || '')}</span>
+              <button class="btn btn-secondary btn-sm" id="btnSignOut" onclick="handleSignOut()" title="Sign out of your account">Sign Out</button>
+            `;
+          }
+        } else if (viewName === 'welcome') {
+          if (topbarAuthActions) {
+            topbarAuthActions.style.display = 'flex';
+            topbarAuthActions.innerHTML = `
+              <button class="btn btn-secondary btn-sm" onclick="renderView('login')">Sign In</button>
+              <button class="btn btn-primary btn-sm" onclick="renderView('signup')">Get Started</button>
+            `;
+          }
         } else {
           if (topbarAuthActions) topbarAuthActions.style.display = 'none';
         }
       } else {
         if (sidebar) sidebar.style.display = 'flex';
         if (topbarContext) topbarContext.style.display = 'flex';
-        if (topbarAuthActions) topbarAuthActions.style.display = 'flex';
+        if (topbarAuthActions) {
+          topbarAuthActions.style.display = 'flex';
+          topbarAuthActions.innerHTML = `
+            <span id="topbarUserName" style="font-size: 13px; font-weight: 500; color: var(--text-secondary);">${escapeHtml(state.fullName || '')}</span>
+            <button class="btn btn-secondary btn-sm" id="btnSignOut" onclick="handleSignOut()" title="Sign out of your account">Sign Out</button>
+          `;
+        }
       }
 
       document.querySelectorAll('.nav-link').forEach(el => {
@@ -1212,8 +1758,13 @@
     document.querySelectorAll('.nav-link').forEach(el => {
       el.onclick = (e) => {
         e.preventDefault();
+        const sidebar = document.getElementById('appSidebar');
+        if (sidebar) sidebar.classList.remove('open');
+        const overlay = document.getElementById('sidebarOverlay');
+        if (overlay) overlay.classList.remove('active');
+
         if (!state.token) {
-          renderView('login');
+          renderView('welcome');
           return;
         }
         if (!state.tenantId) {
@@ -1232,39 +1783,292 @@
     function renderWelcomeView() {
       const container = document.getElementById('mainContainer');
       container.innerHTML = `
-        <div class="auth-wrapper">
-          <div class="auth-card auth-card-wide" style="text-align: center;">
-            <div class="auth-brand" style="margin-bottom: 12px;">
-              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
-              <span>NexStock</span>
+        <div class="landing-wrapper">
+          <!-- Hero Section -->
+          <div class="landing-hero">
+            <div class="landing-pill">
+              ⚡ Next-Generation Universal Inventory &amp; POS SaaS
             </div>
-            <h1 class="auth-title">Universal Inventory + Point of Sale SaaS</h1>
-            <p class="auth-subtitle" style="max-width: 480px; margin: 0 auto 28px;">
-              Enterprise-grade real-time inventory management, multi-branch operations, and ultra-fast POS checkout built with strict tenant isolation.
+            <h1 class="landing-title">
+              Universal Real-Time Inventory &amp; Multi-Branch <span class="landing-title-accent">Point of Sale</span>
+            </h1>
+            <p class="landing-subtitle">
+              Enterprise-grade real-time inventory management, multi-warehouse double-entry stock ledger, ultra-fast touch POS checkout, batch &amp; serial traceability, and multi-currency billing — built with strict PostgreSQL Row-Level Security.
             </p>
-            <div style="display: flex; gap: 12px; justify-content: center; margin-bottom: 32px;">
-              <button class="btn btn-primary" onclick="renderView('signup')" style="padding: 10px 24px; font-size: 15px;">
-                Create Free Account
+            <div class="landing-cta-row">
+              <button class="btn btn-primary" onclick="renderView('signup')">
+                Start 14-Day Free Trial
               </button>
-              <button class="btn btn-secondary" onclick="renderView('login')" style="padding: 10px 24px; font-size: 15px;">
-                Sign In
+              <button class="btn btn-secondary" onclick="renderView('login')">
+                Sign In to Your Store
               </button>
             </div>
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; text-align: left; border-top: 1px solid var(--border-subtle); padding-top: 24px;">
-              <div>
-                <strong style="color: var(--text-primary); font-size: 14px;">Real-Time Stock</strong>
-                <p style="color: var(--text-secondary); font-size: 12px; margin-top: 4px;">Track warehouse balances, lot batches, and movements instantly.</p>
+            <div class="landing-trust-row">
+              <div class="landing-trust-item">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                No credit card required
               </div>
-              <div>
-                <strong style="color: var(--text-primary); font-size: 14px;">Multi-Branch POS</strong>
-                <p style="color: var(--text-secondary); font-size: 12px; margin-top: 4px;">Fast cashier shifts, split payments, barcode scanning &amp; receipt printing.</p>
+              <div class="landing-trust-item">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                Instant tenant onboarding
               </div>
-              <div>
-                <strong style="color: var(--text-primary); font-size: 14px;">Bank-Grade RLS</strong>
-                <p style="color: var(--text-secondary); font-size: 12px; margin-top: 4px;">PostgreSQL Row-Level Security ensures 100% tenant data separation.</p>
+              <div class="landing-trust-item">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                Bank-grade Row-Level Security
               </div>
             </div>
           </div>
+
+          <!-- Live UI Showcase Mockup -->
+          <div class="landing-preview-card">
+            <div class="landing-preview-header">
+              <span class="landing-dot" style="background: #EF4444;"></span>
+              <span class="landing-dot" style="background: #F59E0B;"></span>
+              <span class="landing-dot" style="background: #10B981;"></span>
+              <span style="font-size: 12px; color: var(--text-secondary); margin-left: 12px; font-weight: 500;">
+                NexStock Unified Operations Console &bull; Live Multi-Tenant Session
+              </span>
+            </div>
+            <div class="landing-preview-body">
+              <div class="kpi-grid" style="margin-bottom: 24px;">
+                <div class="kpi-card">
+                  <div class="kpi-label">Today's POS Sales</div>
+                  <div class="kpi-value" style="color: var(--accent-primary);">$28,450.00</div>
+                  <div class="kpi-trend" style="color: var(--status-success);">+14.2% vs yesterday</div>
+                </div>
+                <div class="kpi-card">
+                  <div class="kpi-label">Units on Hand</div>
+                  <div class="kpi-value">12,840 PCS</div>
+                  <div class="kpi-trend">Double-Entry Ledger Verified</div>
+                </div>
+                <div class="kpi-card">
+                  <div class="kpi-label">Active Registers</div>
+                  <div class="kpi-value">4 Online</div>
+                  <div class="kpi-trend">0 Cash Variances</div>
+                </div>
+                <div class="kpi-card">
+                  <div class="kpi-label">Low Stock Alerts</div>
+                  <div class="kpi-value">0 Items</div>
+                  <div class="kpi-trend" style="color: var(--status-success);">Healthy Inventory</div>
+                </div>
+              </div>
+
+              <div class="dashboard-split-grid">
+                <div class="card" style="margin: 0;">
+                  <div class="card-title">
+                    <span>Recent Completed Sales</span>
+                    <span class="badge-pill badge-green">Live Real-Time Feed</span>
+                  </div>
+                  <div class="table-responsive">
+                    <table class="data-table">
+                      <thead>
+                        <tr>
+                          <th>Invoice</th>
+                          <th>Customer</th>
+                          <th>Total</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr>
+                          <td><strong>INV-2026-00421</strong></td>
+                          <td>Walk-in Retail</td>
+                          <td>$184.50</td>
+                          <td><span class="badge-pill badge-green">COMPLETED</span></td>
+                        </tr>
+                        <tr>
+                          <td><strong>INV-2026-00420</strong></td>
+                          <td>Apex Logistics</td>
+                          <td>$1,240.00</td>
+                          <td><span class="badge-pill badge-green">COMPLETED</span></td>
+                        </tr>
+                        <tr>
+                          <td><strong>INV-2026-00419</strong></td>
+                          <td>Global Traders Ltd</td>
+                          <td>$520.00</td>
+                          <td><span class="badge-pill badge-green">COMPLETED</span></td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div class="card" style="margin: 0;">
+                  <div class="card-title">
+                    <span>Warehouse Inventory Balances</span>
+                    <span class="badge-pill badge-blue">Multi-Bin Synced</span>
+                  </div>
+                  <div class="table-responsive">
+                    <table class="data-table">
+                      <thead>
+                        <tr>
+                          <th>SKU</th>
+                          <th>On Hand</th>
+                          <th>Available</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr>
+                          <td><strong>SKU-ELEC-9001</strong></td>
+                          <td>450 PCS</td>
+                          <td>440 PCS</td>
+                          <td><span class="badge-pill badge-green">In Stock</span></td>
+                        </tr>
+                        <tr>
+                          <td><strong>SKU-FOOD-4022</strong></td>
+                          <td>1,200 PCS</td>
+                          <td>1,180 PCS</td>
+                          <td><span class="badge-pill badge-green">In Stock</span></td>
+                        </tr>
+                        <tr>
+                          <td><strong>SKU-TOOL-1088</strong></td>
+                          <td>88 PCS</td>
+                          <td>85 PCS</td>
+                          <td><span class="badge-pill badge-green">In Stock</span></td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 4 Core Capabilities Grid -->
+          <div class="landing-features-grid">
+            <div class="landing-feature-box">
+              <div class="landing-feature-icon">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path></svg>
+              </div>
+              <h3 class="landing-feature-title">Multi-Branch &amp; Multi-Warehouse</h3>
+              <p class="landing-feature-desc">
+                Coordinate central stockrooms, regional warehouses, and front-counter branch locations with atomic cross-location stock transfers and real-time ledger sync.
+              </p>
+            </div>
+
+            <div class="landing-feature-box">
+              <div class="landing-feature-icon">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="21" r="1"></circle><circle cx="20" cy="21" r="1"></circle><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path></svg>
+              </div>
+              <h3 class="landing-feature-title">High-Speed Touch POS</h3>
+              <p class="landing-feature-desc">
+                Fast barcode scanning, cashier shifts, float management, multi-tender split payments (Cash, Card, QR), and instant 80mm ESC/POS thermal receipt printing.
+              </p>
+            </div>
+
+            <div class="landing-feature-box">
+              <div class="landing-feature-icon">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+              </div>
+              <h3 class="landing-feature-title">Batches, Serials &amp; Valuation</h3>
+              <p class="landing-feature-desc">
+                Complete lot expiry tracking with FEFO picking, individual piece serialization, cycle counts, and real-time FIFO and Moving Average Cost (MAC) valuation.
+              </p>
+            </div>
+
+            <div class="landing-feature-box">
+              <div class="landing-feature-icon">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+              </div>
+              <h3 class="landing-feature-title">Bank-Grade PostgreSQL RLS</h3>
+              <p class="landing-feature-desc">
+                Supabase cryptographic JWTs, 3D granular RBAC (role, branch, warehouse scopes), and database-enforced Row-Level Security ensuring strict zero-cross-tenant leakage.
+              </p>
+            </div>
+          </div>
+
+          <!-- Global Multi-Currency Banner -->
+          <div class="landing-currencies-banner">
+            <h3 style="font-size: 18px; font-weight: 700; color: var(--text-primary); margin-bottom: 6px;">
+              Global Multi-Currency &amp; Localization Architecture
+            </h3>
+            <p style="font-size: 14px; color: var(--text-secondary); max-width: 680px; margin: 0 auto;">
+              Operate seamlessly in any supported global jurisdiction with native rounding precision, timezone localization, and exchange rate synchronization.
+            </p>
+            <div class="landing-currencies-tags">
+              <span class="landing-currency-tag">USD &bull; United States ($)</span>
+              <span class="landing-currency-tag">EUR &bull; Eurozone (€)</span>
+              <span class="landing-currency-tag">GBP &bull; United Kingdom (£)</span>
+              <span class="landing-currency-tag">LKR &bull; Sri Lanka (Rs)</span>
+              <span class="landing-currency-tag">INR &bull; India (₹)</span>
+              <span class="landing-currency-tag">AED &bull; United Arab Emirates</span>
+              <span class="landing-currency-tag">SGD &bull; Singapore (S$)</span>
+              <span class="landing-currency-tag">AUD &bull; Australia (A$)</span>
+              <span class="landing-currency-tag">JPY &bull; Japan (¥)</span>
+              <span class="landing-currency-tag">KWD &bull; Kuwait (KD)</span>
+              <span class="landing-currency-tag">BHD &bull; Bahrain (BD)</span>
+            </div>
+          </div>
+
+          <!-- Transparent Pricing Tiers -->
+          <div style="text-align: center; margin-bottom: 32px;">
+            <h2 style="font-size: 26px; font-weight: 800; color: var(--text-primary);">
+              Simple, Transparent Plans Built to Scale
+            </h2>
+            <p style="font-size: 15px; color: var(--text-secondary); margin-top: 6px;">
+              Start free today with no obligations. Upgrade as your store network expands.
+            </p>
+          </div>
+
+          <div class="landing-pricing-grid">
+            <div class="landing-pricing-card">
+              <h3 style="font-size: 18px; font-weight: 700;">Starter</h3>
+              <p style="font-size: 13px; color: var(--text-secondary);">For single retail stores and pop-up boutiques</p>
+              <div class="landing-pricing-price">$29 <span>/ month</span></div>
+              <ul class="landing-pricing-features">
+                <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg> 1 Store Branch Location</li>
+                <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg> 2 POS Registers</li>
+                <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg> Up to 500 Active SKUs</li>
+                <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg> Double-Entry Inventory Ledger</li>
+                <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg> Digital &amp; Thermal Receipts</li>
+              </ul>
+              <button class="btn btn-secondary" onclick="renderView('signup')" style="width: 100%; justify-content: center;">Get Started Free</button>
+            </div>
+
+            <div class="landing-pricing-card featured">
+              <div class="landing-pricing-badge">Most Popular</div>
+              <h3 style="font-size: 18px; font-weight: 700; color: var(--accent-primary);">Growth</h3>
+              <p style="font-size: 13px; color: var(--text-secondary);">For growing businesses with multiple branch outlets</p>
+              <div class="landing-pricing-price">$79 <span>/ month</span></div>
+              <ul class="landing-pricing-features">
+                <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg> Up to 5 Branch Locations</li>
+                <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg> 10 POS Registers</li>
+                <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg> Up to 10,000 SKUs</li>
+                <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg> Batches, Expiry &amp; Serial Registry</li>
+                <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg> FIFO / Moving Avg Asset Costing</li>
+              </ul>
+              <button class="btn btn-primary" onclick="renderView('signup')" style="width: 100%; justify-content: center;">Start 14-Day Free Trial</button>
+            </div>
+
+            <div class="landing-pricing-card">
+              <h3 style="font-size: 18px; font-weight: 700;">Enterprise</h3>
+              <p style="font-size: 13px; color: var(--text-secondary);">For large wholesale, distribution and multi-store chains</p>
+              <div class="landing-pricing-price">$199 <span>/ month</span></div>
+              <ul class="landing-pricing-features">
+                <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg> Unlimited Branches &amp; Warehouses</li>
+                <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg> Unlimited Registers &amp; Users</li>
+                <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg> Custom Quota Allocations</li>
+                <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg> 3D RBAC Custom Security Scopes</li>
+                <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg> 24/7 Dedicated Support &amp; SLA</li>
+              </ul>
+              <button class="btn btn-secondary" onclick="renderView('signup')" style="width: 100%; justify-content: center;">Contact Enterprise Sales</button>
+            </div>
+          </div>
+
+          <!-- Footer -->
+          <footer class="landing-footer">
+            <div style="display: flex; align-items: center; gap: 8px; font-weight: 700; color: var(--accent-primary);">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path></svg>
+              <span>NexStock SaaS</span>
+            </div>
+            <div>
+              &copy; 2026 NexStock Universal Retail Technologies. All rights reserved.
+            </div>
+            <div class="badge-pill badge-green">
+              ● All Systems Operational
+            </div>
+          </footer>
         </div>
       `;
     }
@@ -1845,16 +2649,18 @@
     async function renderDashboardView() {
       const container = document.getElementById('mainContainer');
       try {
+        const whParam = state.warehouseId ? `&warehouseId=${encodeURIComponent(state.warehouseId)}` : '';
+        const regParam = state.branchId ? `?branchId=${encodeURIComponent(state.branchId)}` : '';
         const [products, balances, sales, registers] = await Promise.all([
-          apiFetch('/v1/products?limit=100').catch(() => ({ data: [] })),
-          apiFetch(`/v1/inventory/balances?warehouseId=${state.warehouseId}&limit=100`).catch(() => ({ data: [] })),
-          apiFetch('/v1/pos/sales?limit=10').catch(() => ({ data: [] })),
-          apiFetch(`/v1/pos/registers?branchId=${state.branchId}`).catch(() => [])
+          apiFetch('/v1/products?limit=100', { silent: true }).catch(() => ({ data: [] })),
+          apiFetch(`/v1/inventory/balances?limit=100${whParam}`, { silent: true }).catch(() => ({ data: [] })),
+          apiFetch('/v1/pos/sales?limit=10', { silent: true }).catch(() => []),
+          state.branchId ? apiFetch(`/v1/pos/registers${regParam}`, { silent: true }).catch(() => []) : Promise.resolve([])
         ]);
 
-        const prodList = products.data || [];
-        const balList = balances.data || [];
-        const saleList = sales.data || [];
+        const prodList = products?.data || (Array.isArray(products) ? products : []);
+        const balList = balances?.data || (Array.isArray(balances) ? balances : []);
+        const saleList = Array.isArray(sales) ? sales : (sales?.data || []);
 
         const totalProducts = prodList.length;
         const totalOnHand = balList.reduce((acc, b) => acc + parseFloat(b.qtyOnHand || '0'), 0);
@@ -1865,7 +2671,7 @@
           <div class="view-header">
             <div>
               <h1 class="view-title">Store Operations Dashboard</h1>
-              <div class="view-subtitle">Live status for Manhattan Flagship Branch (WH-NYC-01)</div>
+              <div class="view-subtitle">Live status for ${escapeHtml(state.branchName || 'Main Branch')} &bull; ${escapeHtml(state.tenantName || 'Business Operations')}</div>
             </div>
           </div>
 
@@ -1887,18 +2693,18 @@
             </div>
             <div class="kpi-card">
               <div class="kpi-label">Today's POS Sales</div>
-              <div class="kpi-value">$${totalSalesRevenue.toFixed(2)}</div>
+              <div class="kpi-value">${escapeHtml(state.currency || 'USD')} ${totalSalesRevenue.toFixed(2)}</div>
               <div class="kpi-trend">${saleList.length} transactions recorded</div>
             </div>
           </div>
 
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
-            <div class="card">
+          <div class="dashboard-split-grid">
+            <div class="card" style="margin: 0;">
               <div class="card-title">
                 <span>Recent Completed Sales</span>
                 <button class="btn btn-secondary btn-sm" onclick="renderView('pos-sales')">View All</button>
               </div>
-              ${saleList.length === 0 ? '<div class="empty-state"><div class="empty-state-title">No sales recorded yet</div></div>' : `
+              ${saleList.length === 0 ? '<div class="empty-state"><div class="empty-state-title">No sales recorded yet</div><p style="font-size: 13px; color: var(--text-secondary); margin-top: 4px;">Transactions completed at the POS checkout register will appear here in real time.</p></div>' : `
                 <div class="table-responsive">
                   <table class="data-table">
                     <thead>
@@ -1912,7 +2718,7 @@
                       ${saleList.slice(0, 5).map(s => `
                         <tr>
                           <td><strong>${s.invoiceNumber}</strong></td>
-                          <td>$${parseFloat(s.grandTotal).toFixed(2)}</td>
+                          <td>${escapeHtml(state.currency || '$')} ${parseFloat(s.grandTotal).toFixed(2)}</td>
                           <td><span class="badge-pill ${s.status === 'COMPLETED' ? 'badge-green' : 'badge-red'}">${s.status}</span></td>
                         </tr>
                       `).join('')}
@@ -1922,12 +2728,12 @@
               `}
             </div>
 
-            <div class="card">
+            <div class="card" style="margin: 0;">
               <div class="card-title">
                 <span>Inventory Levels &amp; Balances</span>
                 <button class="btn btn-secondary btn-sm" onclick="renderView('balances')">Inspect Stock</button>
               </div>
-              ${balList.length === 0 ? '<div class="empty-state"><div class="empty-state-title">No inventory recorded</div></div>' : `
+              ${balList.length === 0 ? '<div class="empty-state"><div class="empty-state-title">No inventory recorded</div><p style="font-size: 13px; color: var(--text-secondary); margin-top: 4px;">Record an opening stock movement or purchase order to see stock balances.</p></div>' : `
                 <div class="table-responsive">
                   <table class="data-table">
                     <thead>
@@ -2345,7 +3151,8 @@
     async function renderMovementsView() {
       const container = document.getElementById('mainContainer');
       try {
-        const movementsRes = await apiFetch(`/v1/inventory/movements?warehouseId=${state.warehouseId}&limit=50`);
+        const whParam = state.warehouseId ? `warehouseId=${encodeURIComponent(state.warehouseId)}&` : '';
+        const movementsRes = await apiFetch(`/v1/inventory/movements?${whParam}limit=50`);
         const movements = movementsRes.data || [];
 
         container.innerHTML = `
@@ -2495,7 +3302,8 @@
     async function renderBalancesView() {
       const container = document.getElementById('mainContainer');
       try {
-        const res = await apiFetch(`/v1/inventory/balances?warehouseId=${state.warehouseId}&limit=100`);
+        const whParam = state.warehouseId ? `warehouseId=${encodeURIComponent(state.warehouseId)}&` : '';
+        const res = await apiFetch(`/v1/inventory/balances?${whParam}limit=100`);
         const balances = res.data || [];
 
         container.innerHTML = `
@@ -2553,37 +3361,71 @@
     // =========================================================================
     // 6. POS CHECKOUT VIEW & SCANNER BUFFER
     // =========================================================================
+    function switchPosMobileTab(tab) {
+      const catalogEl = document.querySelector('.pos-catalog-panel');
+      const cartEl = document.querySelector('.pos-cart-panel');
+      const catBtn = document.getElementById('posTabCatalogBtn');
+      const cartBtn = document.getElementById('posTabCartBtn');
+
+      if (tab === 'catalog') {
+        if (catalogEl) catalogEl.style.display = 'block';
+        if (cartEl) cartEl.style.display = 'none';
+        if (catBtn) catBtn.classList.add('active');
+        if (cartBtn) cartBtn.classList.remove('active');
+      } else {
+        if (catalogEl) catalogEl.style.display = 'none';
+        if (cartEl) cartEl.style.display = 'block';
+        if (catBtn) catBtn.classList.remove('active');
+        if (cartBtn) cartBtn.classList.add('active');
+      }
+    }
+
     async function renderPosCheckoutView() {
       const container = document.getElementById('mainContainer');
       try {
         // 1. Check for open shift
         let activeShift = null;
-        try {
-          activeShift = await apiFetch(`/v1/pos/shifts/active?registerId=${state.registerId}`);
-          state.activeShift = activeShift;
-        } catch (e) {
-          state.activeShift = null;
+        if (state.registerId) {
+          try {
+            activeShift = await apiFetch(`/v1/pos/shifts/active?registerId=${encodeURIComponent(state.registerId)}`, { silent: true });
+            state.activeShift = activeShift;
+          } catch (e) {
+            state.activeShift = null;
+          }
         }
 
         // 2. Fetch catalog products
-        const productsRes = await apiFetch(`/v1/pos/products/search?warehouseId=${state.warehouseId}&limit=50`);
-        const products = productsRes || [];
+        let products = [];
+        if (state.warehouseId) {
+          const productsRes = await apiFetch(`/v1/pos/products/search?warehouseId=${encodeURIComponent(state.warehouseId)}&limit=50`, { silent: true }).catch(() => []);
+          products = productsRes || [];
+        }
 
         container.innerHTML = `
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 12px;">
             <div>
               <h1 class="view-title">Point of Sale (POS)</h1>
-              <div class="view-subtitle">Front Counter Terminal (Register REG-01)</div>
+              <div class="view-subtitle">${escapeHtml(state.branchName || 'Main Store')} &bull; Register ${escapeHtml(state.registerCode || 'POS-01')}</div>
             </div>
-            <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
               ${state.activeShift ? `
-                <div class="badge-pill badge-green">● Shift Open (Opened: $${parseFloat(state.activeShift.openingCashFloat).toFixed(2)})</div>
+                <div class="badge-pill badge-green">● Shift Open (Opened: ${escapeHtml(state.currency || '$')} ${parseFloat(state.activeShift.openingCashFloat).toFixed(2)})</div>
                 <button class="btn btn-secondary btn-sm" onclick="openCloseShiftModal('${state.activeShift.id}')">Close Shift</button>
               ` : `
                 <div class="badge-pill badge-yellow">Shift Closed</div>
                 <button class="btn btn-primary btn-sm" onclick="openShiftModal()">Open Shift to Sell</button>
               `}
             </div>
+          </div>
+
+          <!-- POS Mobile Tab Switcher -->
+          <div class="pos-mobile-nav" id="posMobileNav">
+            <button class="pos-tab-btn active" id="posTabCatalogBtn" onclick="switchPosMobileTab('catalog')">
+              📦 Product Catalog
+            </button>
+            <button class="pos-tab-btn" id="posTabCartBtn" onclick="switchPosMobileTab('cart')">
+              🛒 Cart (<span id="mobileCartItemCount">${state.cart.length}</span>)
+            </button>
           </div>
 
           <div class="pos-layout">
@@ -2594,19 +3436,36 @@
                 <button class="btn btn-secondary" onclick="handlePosManualSearch()">Find</button>
               </div>
 
-              <div class="pos-product-grid" id="posProductGrid">
-                ${products.map(p => `
-                  <div class="pos-product-card" onclick="addToCart('${p.id}', '${p.sku}', '${p.name}', '${p.sellingPrice}', '${p.baseUom}', ${p.trackInventory}, '${p.availableQuantity}')">
-                    <div>
-                      <div class="pos-product-name">${p.name}</div>
-                      <div class="pos-product-sku">${p.sku}</div>
-                      <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">
-                        ${p.trackInventory ? `Stock: <strong>${parseFloat(p.availableQuantity).toFixed(0)}</strong>` : 'Service (No Stock)'}
-                      </div>
+              ${!state.warehouseId ? `
+                <div class="card" style="text-align: center; padding: 36px 16px; color: var(--text-secondary);">
+                  <div style="font-weight: 600; color: var(--text-primary); margin-bottom: 6px;">Warehouse Location Connecting</div>
+                  <div>Syncing active branch and warehouse parameters. Please ensure your branch has an active warehouse configured.</div>
+                </div>
+              ` : `
+                <div class="pos-product-grid" id="posProductGrid">
+                  ${products.length === 0 ? `
+                    <div style="grid-column: 1 / -1; text-align: center; padding: 40px 16px; color: var(--text-secondary);">
+                      No active products found in this branch's catalog. Add products in the Inventory menu to begin sales.
                     </div>
-                    <div class="pos-product-price">$${parseFloat(p.sellingPrice).toFixed(2)}</div>
-                  </div>
-                `).join('')}
+                  ` : products.map(p => `
+                    <div class="pos-product-card" onclick="addToCart('${p.id}', '${p.sku}', '${p.name}', '${p.sellingPrice}', '${p.baseUom}', ${p.trackInventory}, '${p.availableQuantity}')">
+                      <div>
+                        <div class="pos-product-name">${escapeHtml(p.name)}</div>
+                        <div class="pos-product-sku">${escapeHtml(p.sku)}</div>
+                        <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">
+                          ${p.trackInventory ? `Stock: <strong>${parseFloat(p.availableQuantity).toFixed(0)}</strong>` : 'Service (No Stock)'}
+                        </div>
+                      </div>
+                      <div class="pos-product-price">${escapeHtml(state.currency || '$')} ${parseFloat(p.sellingPrice).toFixed(2)}</div>
+                    </div>
+                  `).join('')}
+                </div>
+              `}
+
+              <!-- Floating Mobile Cart Pill -->
+              <div class="pos-mobile-floating-cart" id="posMobileFloatingCart" onclick="switchPosMobileTab('cart')" style="display: ${state.cart.length > 0 ? 'flex' : 'none'};">
+                <span>🛒 Cart (${state.cart.length} items)</span>
+                <span>${escapeHtml(state.currency || '$')} ${calculateCartGrandTotal().toFixed(2)} &rarr;</span>
               </div>
             </div>
 
@@ -2626,8 +3485,8 @@
                 ` : state.cart.map((line, idx) => `
                   <div class="cart-line">
                     <div class="cart-line-info">
-                      <div class="cart-line-name">${line.name}</div>
-                      <div class="cart-line-sub">$${parseFloat(line.unitPrice).toFixed(2)} / ${line.uomCode}</div>
+                      <div class="cart-line-name">${escapeHtml(line.name)}</div>
+                      <div class="cart-line-sub">${escapeHtml(state.currency || '$')} ${parseFloat(line.unitPrice).toFixed(2)} / ${escapeHtml(line.uomCode)}</div>
                     </div>
                     <div class="cart-line-controls">
                       <button class="qty-btn" onclick="updateCartQty(${idx}, -1)">-</button>
@@ -2635,7 +3494,7 @@
                       <button class="qty-btn" onclick="updateCartQty(${idx}, 1)">+</button>
                     </div>
                     <div style="min-width: 65px; text-align: right; font-weight: 700; color: var(--text-primary); margin-left: 12px;">
-                      $${(line.qty * parseFloat(line.unitPrice)).toFixed(2)}
+                      ${escapeHtml(state.currency || '$')} ${(line.qty * parseFloat(line.unitPrice)).toFixed(2)}
                     </div>
                   </div>
                 `).join('')}
@@ -2644,19 +3503,19 @@
               <div class="pos-cart-summary">
                 <div class="summary-row">
                   <span>Subtotal</span>
-                  <span id="cartSubtotalText">$${calculateCartSubtotal().toFixed(2)}</span>
+                  <span id="cartSubtotalText">${escapeHtml(state.currency || '$')} ${calculateCartSubtotal().toFixed(2)}</span>
                 </div>
                 <div class="summary-row">
-                  <span>NYC Sales Tax (8.875%)</span>
-                  <span id="cartTaxText">$${calculateCartTax().toFixed(2)}</span>
+                  <span>Standard Tax (0.00%)</span>
+                  <span id="cartTaxText">${escapeHtml(state.currency || '$')} ${calculateCartTax().toFixed(2)}</span>
                 </div>
                 <div class="summary-row summary-total">
                   <span>Grand Total</span>
-                  <span id="cartGrandTotalText" style="color: var(--accent-primary);">$${calculateCartGrandTotal().toFixed(2)}</span>
+                  <span id="cartGrandTotalText" style="color: var(--accent-primary);">${escapeHtml(state.currency || '$')} ${calculateCartGrandTotal().toFixed(2)}</span>
                 </div>
 
                 <button class="btn btn-primary" style="width: 100%; margin-top: 14px; justify-content: center; font-size: 16px; padding: 12px;" onclick="openPaymentDrawer()" ${state.cart.length === 0 ? 'disabled' : ''}>
-                  Checkout &amp; Pay ($${calculateCartGrandTotal().toFixed(2)})
+                  Checkout &amp; Pay (${escapeHtml(state.currency || '$')} ${calculateCartGrandTotal().toFixed(2)})
                 </button>
               </div>
             </div>
@@ -2683,15 +3542,19 @@
     }
 
     async function executeBarcodeScan(barcodeOrSku) {
+      if (!state.warehouseId) {
+        showToast('Please select a branch and warehouse before searching products', 'warning');
+        return;
+      }
       try {
-        const results = await apiFetch(`/v1/pos/products/search?warehouseId=${state.warehouseId}&barcode=${encodeURIComponent(barcodeOrSku)}`);
+        const results = await apiFetch(`/v1/pos/products/search?warehouseId=${encodeURIComponent(state.warehouseId)}&barcode=${encodeURIComponent(barcodeOrSku)}`, { silent: true }).catch(() => []);
         if (results && results.length > 0) {
           const p = results[0];
           addToCart(p.id, p.sku, p.name, p.sellingPrice, p.baseUom, p.trackInventory, p.availableQuantity);
           showToast(`Scanned: ${p.name}`, 'success');
         } else {
           // Fallback to text query
-          const textResults = await apiFetch(`/v1/pos/products/search?warehouseId=${state.warehouseId}&q=${encodeURIComponent(barcodeOrSku)}`);
+          const textResults = await apiFetch(`/v1/pos/products/search?warehouseId=${encodeURIComponent(state.warehouseId)}&q=${encodeURIComponent(barcodeOrSku)}`, { silent: true }).catch(() => []);
           if (textResults && textResults.length > 0) {
             const p = textResults[0];
             addToCart(p.id, p.sku, p.name, p.sellingPrice, p.baseUom, p.trackInventory, p.availableQuantity);
@@ -2750,7 +3613,7 @@
 
     function calculateCartTax() {
       const sub = calculateCartSubtotal();
-      return Math.round(sub * 0.08875 * 100) / 100;
+      return Math.round(sub * (state.taxRate || 0) * 100) / 100;
     }
 
     function calculateCartGrandTotal() {
@@ -2772,8 +3635,8 @@
         ` : state.cart.map((line, idx) => `
           <div class="cart-line">
             <div class="cart-line-info">
-              <div class="cart-line-name">${line.name}</div>
-              <div class="cart-line-sub">$${parseFloat(line.unitPrice).toFixed(2)} / ${line.uomCode}</div>
+              <div class="cart-line-name">${escapeHtml(line.name)}</div>
+              <div class="cart-line-sub">${escapeHtml(state.currency || '$')} ${parseFloat(line.unitPrice).toFixed(2)} / ${escapeHtml(line.uomCode)}</div>
             </div>
             <div class="cart-line-controls">
               <button class="qty-btn" onclick="updateCartQty(${idx}, -1)">-</button>
@@ -2781,20 +3644,29 @@
               <button class="qty-btn" onclick="updateCartQty(${idx}, 1)">+</button>
             </div>
             <div style="min-width: 65px; text-align: right; font-weight: 700; color: var(--text-primary); margin-left: 12px;">
-              $${(line.qty * parseFloat(line.unitPrice)).toFixed(2)}
+              ${escapeHtml(state.currency || '$')} ${(line.qty * parseFloat(line.unitPrice)).toFixed(2)}
             </div>
           </div>
         `).join('');
       }
 
       const subEl = document.getElementById('cartSubtotalText');
-      if (subEl) subEl.innerText = `$${subtotal.toFixed(2)}`;
+      if (subEl) subEl.innerText = `${escapeHtml(state.currency || '$')} ${subtotal.toFixed(2)}`;
 
       const taxEl = document.getElementById('cartTaxText');
-      if (taxEl) taxEl.innerText = `$${tax.toFixed(2)}`;
+      if (taxEl) taxEl.innerText = `${escapeHtml(state.currency || '$')} ${tax.toFixed(2)}`;
 
       const totalEl = document.getElementById('cartGrandTotalText');
-      if (totalEl) totalEl.innerText = `$${grandTotal.toFixed(2)}`;
+      if (totalEl) totalEl.innerText = `${escapeHtml(state.currency || '$')} ${grandTotal.toFixed(2)}`;
+
+      const mobileCountEl = document.getElementById('mobileCartItemCount');
+      if (mobileCountEl) mobileCountEl.innerText = state.cart.length;
+
+      const floatCart = document.getElementById('posMobileFloatingCart');
+      if (floatCart) {
+        floatCart.style.display = state.cart.length > 0 ? 'flex' : 'none';
+        floatCart.innerHTML = `<span>🛒 Cart (${state.cart.length} items)</span><span>${escapeHtml(state.currency || '$')} ${grandTotal.toFixed(2)} &rarr;</span>`;
+      }
     }
 
     // Checkout & Payment Modal
@@ -2954,9 +3826,9 @@
           bodyHtml: `
             <div class="receipt-container" id="printableReceipt">
               <div class="receipt-center">
-                <div class="receipt-bold" style="font-size: 15px;">${receipt.businessName || 'NexStock Retail'}</div>
-                <div style="font-size: 11px;">${receipt.branchName || 'Flagship Store'}</div>
-                <div style="font-size: 11px;">Register: ${receipt.registerCode} | Cashier: ${receipt.cashierName}</div>
+                <div class="receipt-bold" style="font-size: 15px;">${escapeHtml(receipt.businessName || state.tenantName || 'NexStock Retail')}</div>
+                <div style="font-size: 11px;">${escapeHtml(receipt.branchName || state.branchName || 'Main Store')}</div>
+                <div style="font-size: 11px;">Register: ${escapeHtml(receipt.registerCode || state.registerCode || 'REG-01')} | Cashier: ${escapeHtml(receipt.cashierName || state.fullName || 'Cashier')}</div>
               </div>
               <div class="receipt-divider"></div>
               <div class="receipt-row">
@@ -3020,7 +3892,8 @@
     async function renderPosRegistersView() {
       const container = document.getElementById('mainContainer');
       try {
-        const registers = await apiFetch(`/v1/pos/registers?branchId=${state.branchId}`);
+        const regParam = state.branchId ? `?branchId=${encodeURIComponent(state.branchId)}` : '';
+        const registers = await apiFetch(`/v1/pos/registers${regParam}`);
         state.cachedRegisters = registers || [];
 
         container.innerHTML = `
@@ -3311,25 +4184,25 @@
             </div>
           </div>
 
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+          <div class="dashboard-split-grid">
             <div class="card">
               <div class="card-title">Tenant Profile</div>
               <div class="form-group">
                 <label class="form-label">Legal Name</label>
-                <input type="text" class="form-input" value="NexStock Global Retail Ltd (Demo Store)" readonly>
+                <input type="text" class="form-input" value="${escapeHtml(state.tenantName || 'My Business')}" readonly>
               </div>
               <div class="form-group">
                 <label class="form-label">Tenant ID</label>
-                <input type="text" class="form-input" value="${state.tenantId}" readonly style="font-family: monospace; font-size: 12px;">
+                <input type="text" class="form-input" value="${escapeHtml(state.tenantId)}" readonly style="font-family: monospace; font-size: 12px;">
               </div>
               <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
                 <div class="form-group">
                   <label class="form-label">Base Currency</label>
-                  <input type="text" class="form-input" value="USD" readonly>
+                  <input type="text" class="form-input" value="${escapeHtml(state.currency || 'USD')}" readonly>
                 </div>
                 <div class="form-group">
                   <label class="form-label">Default Country</label>
-                  <input type="text" class="form-input" value="US" readonly>
+                  <input type="text" class="form-input" value="${escapeHtml(state.countryCode || 'US')}" readonly>
                 </div>
               </div>
             </div>
@@ -3372,9 +4245,10 @@
     async function renderBatchesView() {
       const container = document.getElementById('mainContainer');
       try {
+        const whParam = state.warehouseId ? `warehouseId=${encodeURIComponent(state.warehouseId)}&` : '';
         const [batchesRes, prodsRes] = await Promise.all([
-          apiFetch(`/v1/inventory/batches?warehouseId=${state.warehouseId}&limit=100`).catch(() => ({ data: [] })),
-          apiFetch('/v1/products?limit=100').catch(() => ({ data: [] }))
+          apiFetch(`/v1/inventory/batches?${whParam}limit=100`, { silent: true }).catch(() => ({ data: [] })),
+          apiFetch('/v1/products?limit=100', { silent: true }).catch(() => ({ data: [] }))
         ]);
 
         const batches = batchesRes.data || [];
@@ -3594,9 +4468,10 @@
     async function renderSerialsView() {
       const container = document.getElementById('mainContainer');
       try {
+        const whParam = state.warehouseId ? `warehouseId=${encodeURIComponent(state.warehouseId)}&` : '';
         const [serialsRes, prodsRes] = await Promise.all([
-          apiFetch(`/v1/inventory/serials?warehouseId=${state.warehouseId}&limit=100`).catch(() => ({ data: [] })),
-          apiFetch('/v1/products?limit=100').catch(() => ({ data: [] }))
+          apiFetch(`/v1/inventory/serials?${whParam}limit=100`, { silent: true }).catch(() => ({ data: [] })),
+          apiFetch('/v1/products?limit=100', { silent: true }).catch(() => ({ data: [] }))
         ]);
 
         const serials = serialsRes.data || [];
@@ -3817,9 +4692,10 @@
     async function renderValuationView() {
       const container = document.getElementById('mainContainer');
       try {
-        const valRes = await apiFetch(`/v1/inventory/valuation?warehouseId=${state.warehouseId}`).catch(() => ({
+        const whParam = state.warehouseId ? `?warehouseId=${encodeURIComponent(state.warehouseId)}` : '';
+        const valRes = await apiFetch(`/v1/inventory/valuation${whParam}`, { silent: true }).catch(() => ({
           totalAssetValue: '0.0000',
-          currencyCode: 'USD',
+          currencyCode: state.currency || 'USD',
           items: []
         }));
 
@@ -3907,7 +4783,8 @@
 
     async function drilldownFifoLayers(productId, sku) {
       try {
-        const layers = await apiFetch(`/v1/inventory/cost-layers?warehouseId=${state.warehouseId}&productId=${productId}`).catch(() => []);
+        const whParam = state.warehouseId ? `&warehouseId=${encodeURIComponent(state.warehouseId)}` : '';
+        const layers = await apiFetch(`/v1/inventory/cost-layers?productId=${encodeURIComponent(productId)}${whParam}`, { silent: true }).catch(() => []);
 
         const html = `
           <div style="font-size: 18px; font-weight: 700; margin-bottom: 16px;">FIFO Cost Layers for ${sku}</div>
@@ -3952,7 +4829,8 @@
     async function renderStocktakesView() {
       const container = document.getElementById('mainContainer');
       try {
-        const res = await apiFetch(`/v1/inventory/stocktakes?warehouseId=${state.warehouseId}&limit=50`).catch(() => ({ data: [] }));
+        const whParam = state.warehouseId ? `warehouseId=${encodeURIComponent(state.warehouseId)}&` : '';
+        const res = await apiFetch(`/v1/inventory/stocktakes?${whParam}limit=50`, { silent: true }).catch(() => ({ data: [] }));
         const sessions = res.data || [];
 
         const total = sessions.length;
@@ -4319,8 +5197,31 @@
       }
     }
 
+    function setupMobileNavigation() {
+      const toggle = document.getElementById('mobileMenuToggle');
+      const sidebar = document.getElementById('appSidebar');
+      const overlay = document.getElementById('sidebarOverlay');
+      const closeBtn = document.getElementById('sidebarCloseBtn');
+
+      function openDrawer() {
+        if (sidebar) sidebar.classList.add('open');
+        if (overlay) overlay.classList.add('active');
+      }
+
+      function closeDrawer() {
+        if (sidebar) sidebar.classList.remove('open');
+        if (overlay) overlay.classList.remove('active');
+      }
+
+      if (toggle) toggle.onclick = openDrawer;
+      if (overlay) overlay.onclick = closeDrawer;
+      if (closeBtn) closeBtn.onclick = closeDrawer;
+    }
+
     // Initialize Application
     async function initApp() {
+      setupMobileNavigation();
+
       const savedTheme = localStorage.getItem('nexstock_theme');
       if (savedTheme) {
         state.theme = savedTheme;
@@ -4330,7 +5231,7 @@
       // Check for stored session token
       const storedToken = localStorage.getItem('nexstock_session_token');
       if (!storedToken) {
-        renderView('login');
+        renderView('welcome');
         return;
       }
 
@@ -4346,7 +5247,7 @@
           localStorage.removeItem('nexstock_session_token');
           localStorage.removeItem('nexstock_refresh_token');
           state.token = '';
-          renderView('login');
+          renderView('welcome');
           return;
         }
 
@@ -4375,7 +5276,7 @@
       } catch (err) {
         document.getElementById('topbarSyncStatus').innerText = '● Offline / Disconnected';
         document.getElementById('topbarSyncStatus').className = 'badge-pill badge-red';
-        renderView('login');
+        renderView('welcome');
       }
     }
 

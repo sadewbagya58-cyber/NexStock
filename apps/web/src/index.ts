@@ -162,6 +162,38 @@ export interface WebAuthState {
   readonly activeTenantId: string | null;
 }
 
+export const AUTH_VIEW_IDS = [
+  'welcome',
+  'login',
+  'signup',
+  'forgot-password',
+  'onboard-business',
+  'tenant-select',
+] as const;
+
+export type AuthViewId = (typeof AUTH_VIEW_IDS)[number];
+
+export const ALL_SPA_VIEW_IDS = [
+  ...AUTH_VIEW_IDS,
+  'dashboard',
+  'products',
+  'categories',
+  'suppliers',
+  'movements',
+  'balances',
+  'batches',
+  'serials',
+  'valuation',
+  'stocktakes',
+  'pos-checkout',
+  'pos-registers',
+  'pos-shifts',
+  'pos-sales',
+  'org-settings',
+] as const;
+
+export type SpaViewId = (typeof ALL_SPA_VIEW_IDS)[number];
+
 export function isSessionAuthenticated(token: string | null | undefined): boolean {
   return typeof token === 'string' && token.trim().length > 0;
 }
@@ -177,4 +209,30 @@ export function escapeHtml(str: unknown): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+/**
+ * Safely formats monetary amounts with standard 2 decimal places and currency code.
+ */
+export function formatCurrency(
+  amount: number | string | null | undefined,
+  currencyCode = 'USD',
+): string {
+  const numeric = typeof amount === 'number' ? amount : parseFloat(String(amount ?? '0'));
+  const safe = Number.isFinite(numeric) ? numeric : 0;
+  return `${currencyCode.toUpperCase()} ${safe.toFixed(2)}`;
+}
+
+/**
+ * Construct safe query string parameter, omitting empty/whitespace values.
+ */
+export function buildSafeQueryParam(
+  key: string,
+  value: string | null | undefined,
+  prefix = '&',
+): string {
+  if (typeof value !== 'string' || value.trim() === '') {
+    return '';
+  }
+  return `${prefix}${encodeURIComponent(key)}=${encodeURIComponent(value.trim())}`;
 }

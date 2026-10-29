@@ -16,6 +16,10 @@ import {
   isSessionAuthenticated,
   resolveWebApiClientUrl,
   escapeHtml,
+  formatCurrency,
+  buildSafeQueryParam,
+  AUTH_VIEW_IDS,
+  ALL_SPA_VIEW_IDS,
 } from '../src/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -242,6 +246,129 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
 
       // Verifies unsupported currencies are excluded
       expect(html).not.toContain('<option value="CAD">');
+    });
+  });
+
+  describe('5. Phase 5.1 Production Readiness, Mobile UX & Real Business Hardening', () => {
+    it('verifies formatCurrency and buildSafeQueryParam utilities operate reliably', () => {
+      expect(formatCurrency(124.5, 'USD')).toBe('USD 124.50');
+      expect(formatCurrency('250.999', 'LKR')).toBe('LKR 251.00');
+      expect(formatCurrency(0, 'EUR')).toBe('EUR 0.00');
+      expect(formatCurrency(null, 'GBP')).toBe('GBP 0.00');
+      expect(formatCurrency(undefined, 'AED')).toBe('AED 0.00');
+
+      expect(buildSafeQueryParam('warehouseId', '11111111-2222-3333-4444-555555555555')).toBe(
+        '&warehouseId=11111111-2222-3333-4444-555555555555',
+      );
+      expect(buildSafeQueryParam('branchId', '11111111-2222-3333-4444-555555555555', '?')).toBe(
+        '?branchId=11111111-2222-3333-4444-555555555555',
+      );
+      expect(buildSafeQueryParam('warehouseId', '')).toBe('');
+      expect(buildSafeQueryParam('warehouseId', '   ')).toBe('');
+      expect(buildSafeQueryParam('warehouseId', null)).toBe('');
+      expect(buildSafeQueryParam('warehouseId', undefined)).toBe('');
+
+      expect(AUTH_VIEW_IDS).toContain('welcome');
+      expect(ALL_SPA_VIEW_IDS).toContain('welcome');
+      expect(ALL_SPA_VIEW_IDS).toContain('dashboard');
+      expect(ALL_SPA_VIEW_IDS).toContain('pos-checkout');
+    });
+
+    it('verifies public/index.html includes complete SaaS marketing landing page (welcome view)', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // Verifies presence of landing page structure
+      expect(html).toContain('function renderWelcomeView()');
+      expect(html).toContain('Universal Real-Time Inventory &amp; Multi-Branch');
+      expect(html).toContain('Start 14-Day Free Trial');
+      expect(html).toContain('Sign In to Your Store');
+      expect(html).toContain('No credit card required');
+      expect(html).toContain('Instant tenant onboarding');
+      expect(html).toContain('Bank-grade Row-Level Security');
+
+      // Verifies preview card and 4 core capabilities
+      expect(html).toContain('Multi-Branch &amp; Multi-Warehouse');
+      expect(html).toContain('High-Speed Touch POS');
+      expect(html).toContain('Batches, Serials &amp; Valuation');
+      expect(html).toContain('Bank-Grade PostgreSQL RLS');
+
+      // Verifies pricing tiers and currency support banner
+      expect(html).toContain('Global Multi-Currency &amp; Localization Architecture');
+      expect(html).toContain('Simple, Transparent Plans Built to Scale');
+      expect(html).toContain('Starter');
+      expect(html).toContain('Growth');
+      expect(html).toContain('Enterprise');
+    });
+
+    it('verifies public/index.html routes unauthenticated visitors and signout to welcome view', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // Verifies unauthenticated visitors land on welcome view
+      expect(html).toContain("if (!storedToken) {\n        renderView('welcome');");
+      expect(html).toContain("renderView('welcome');\n          return;");
+
+      // Verifies signout redirects to welcome view
+      expect(html).toContain("showToast('You have been signed out.', 'info');\n      renderView('welcome');");
+
+      // Verifies unauthenticated logo click leads to welcome
+      expect(html).toContain("} else {\n          renderView('welcome');\n        }");
+    });
+
+    it('verifies elimination of all hardcoded demo and location strings', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // Confirms all demo strings are removed
+      expect(html).not.toContain('Manhattan Flagship Branch');
+      expect(html).not.toContain('WH-NYC-01');
+      expect(html).not.toContain('NYC Sales Tax');
+      expect(html).not.toContain('Flagship Store');
+      expect(html).not.toContain('NexStock Global Retail Ltd (Demo Store)');
+
+      // Confirms dynamic bindings are in place
+      expect(html).toContain('${escapeHtml(state.branchName ||');
+      expect(html).toContain('${escapeHtml(state.tenantName ||');
+      expect(html).toContain('${escapeHtml(state.currency ||');
+      expect(html).toContain('Standard Tax (0.00%)');
+    });
+
+    it('verifies elimination of non-existent warehouse endpoint and bad empty query parameters', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // Confirms non-existent endpoint is completely removed
+      expect(html).not.toContain('/v1/inventory/warehouses');
+
+      // Confirms warehouseId query params are conditionally guarded
+      expect(html).toContain("state.warehouseId ? `&warehouseId=${encodeURIComponent(state.warehouseId)}` : ''");
+      expect(html).toContain("state.warehouseId ? `warehouseId=${encodeURIComponent(state.warehouseId)}&` : ''");
+      expect(html).not.toContain('balances?warehouseId=${state.warehouseId}&');
+      expect(html).not.toContain('movements?warehouseId=${state.warehouseId}&');
+    });
+
+    it('verifies mobile-responsive navigation drawer, overlay and breakpoints', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // Confirms hamburger button and overlay elements exist
+      expect(html).toContain('id="mobileMenuToggle"');
+      expect(html).toContain('id="sidebarOverlay"');
+      expect(html).toContain('id="sidebarCloseBtn"');
+      expect(html).toContain('id="sidebarMobileHeader"');
+
+      // Confirms responsive CSS rules exist
+      expect(html).toContain('.mobile-menu-toggle');
+      expect(html).toContain('.sidebar-overlay');
+      expect(html).toContain('aside.sidebar.open');
+      expect(html).toContain('@media (max-width: 768px)');
+      expect(html).toContain('.pos-mobile-nav');
+      expect(html).toContain('.pos-mobile-floating-cart');
+
+      // Confirms setupMobileNavigation is invoked during app initialization
+      expect(html).toContain('function setupMobileNavigation()');
+      expect(html).toContain('setupMobileNavigation();');
     });
   });
 });
