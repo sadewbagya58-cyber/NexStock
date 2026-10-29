@@ -480,6 +480,13 @@ export function loadPhase5UsersRlsMigrationSql(): string {
   return sqlText;
 }
 
+export function loadPhase5CurrenciesRlsMigrationSql(): string {
+  const filename = '0008_phase5_currencies_rls_and_seeds.sql';
+  const sqlText = readFileSync(resolve(migrationsDir, filename), 'utf-8');
+  assertPostgresMigrationSqlCompatible(sqlText, filename);
+  return sqlText;
+}
+
 export function getOrderedPostgresMigrations(): readonly PostgresMigrationSpec[] {
   return [
     {
@@ -530,6 +537,13 @@ export function getOrderedPostgresMigrations(): readonly PostgresMigrationSpec[]
       name: '0007_phase5_users_rls_policies',
       filename: '0007_phase5_users_rls_policies.sql',
       sql: loadPhase5UsersRlsMigrationSql(),
+    },
+    {
+      dialect: 'postgres',
+      version: 8,
+      name: '0008_phase5_currencies_rls_and_seeds',
+      filename: '0008_phase5_currencies_rls_and_seeds.sql',
+      sql: loadPhase5CurrenciesRlsMigrationSql(),
     },
   ];
 }

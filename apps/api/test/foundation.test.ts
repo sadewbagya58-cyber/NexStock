@@ -270,6 +270,11 @@ describe('@nexstock/api — Milestone 0 Foundation, RLS, Idempotency & Sync Inva
           name: '0007_phase5_users_rls_policies',
           filename: '0007_phase5_users_rls_policies.sql',
         },
+        {
+          version: 8,
+          name: '0008_phase5_currencies_rls_and_seeds',
+          filename: '0008_phase5_currencies_rls_and_seeds.sql',
+        },
       ]);
     });
 
@@ -335,6 +340,7 @@ describe('@nexstock/api — Milestone 0 Foundation, RLS, Idempotency & Sync Inva
         '0005_phase4_advanced_inventory.sql',
         '0006_phase5_auth_and_user_tenants.sql',
         '0007_phase5_users_rls_policies.sql',
+        '0008_phase5_currencies_rls_and_seeds.sql',
       ]);
 
       await expect(

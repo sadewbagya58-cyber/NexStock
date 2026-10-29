@@ -222,5 +222,26 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       expect(html).toContain('if (alertEl)');
       expect(html).toContain('if (submitBtn)');
     });
+
+    it('verifies public/index.html onboardCurrency includes LKR and all supported currencies, and excludes CAD', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // Verifies presence of LKR and other supported currencies
+      expect(html).toContain('<option value="LKR">LKR — Sri Lankan Rupee (Rs)</option>');
+      expect(html).toContain('<option value="USD" selected>USD — United States Dollar ($)</option>');
+      expect(html).toContain('<option value="EUR">EUR — Euro (€)</option>');
+      expect(html).toContain('<option value="GBP">GBP — British Pound (£)</option>');
+      expect(html).toContain('<option value="INR">INR — Indian Rupee (₹)</option>');
+      expect(html).toContain('<option value="AED">AED — UAE Dirham (AED)</option>');
+      expect(html).toContain('<option value="SGD">SGD — Singapore Dollar (S$)</option>');
+      expect(html).toContain('<option value="AUD">AUD — Australian Dollar (A$)</option>');
+      expect(html).toContain('<option value="JPY">JPY — Japanese Yen (¥)</option>');
+      expect(html).toContain('<option value="KWD">KWD — Kuwaiti Dinar (KD)</option>');
+      expect(html).toContain('<option value="BHD">BHD — Bahraini Dinar (BD)</option>');
+
+      // Verifies unsupported currencies are excluded
+      expect(html).not.toContain('<option value="CAD">');
+    });
   });
 });

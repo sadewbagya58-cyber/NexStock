@@ -583,7 +583,7 @@ describe('Phase 5.0 — Authentication & Business Foundation Integration Suite',
       const founderEmail = `founder_rollback_${generateUuidV7()}@test.com`;
       const token = signDevJwt({ userId: founderId, email: founderEmail });
 
-      // Attempt 1: Unsupported currency code
+      // Attempt 1: Unsupported currency code (XYZ)
       const resBadCurrency = await app.inject({
         method: 'POST',
         url: '/v1/org/onboard',
@@ -596,6 +596,28 @@ describe('Phase 5.0 — Authentication & Business Foundation Integration Suite',
         },
       });
       expect(resBadCurrency.statusCode).toBe(400);
+      const badCurrencyBody = resBadCurrency.json();
+      expect(badCurrencyBody.errorCode).toBe('ERR_VALIDATION_FAILED');
+      expect(badCurrencyBody.title).toBe('Invalid Currency');
+      expect(badCurrencyBody.detail).toContain('Currency code "XYZ" is not supported');
+      expect(badCurrencyBody.detail).toContain('LKR');
+      expect(badCurrencyBody.detail).toContain('USD');
+
+      // Attempt 1b: Unsupported currency code (CAD - not in supported DB/domain list)
+      const resBadCad = await app.inject({
+        method: 'POST',
+        url: '/v1/org/onboard',
+        headers: { authorization: `Bearer ${token}` },
+        payload: {
+          businessName: 'Rollback Store CAD',
+          businessType: 'RETAIL',
+          currency: 'CAD',
+          firstBranchName: 'Main Store',
+        },
+      });
+      expect(resBadCad.statusCode).toBe(400);
+      const badCadBody = resBadCad.json();
+      expect(badCadBody.detail).toContain('Currency code "CAD" is not supported');
 
       // Verify no tenant record was created for "Rollback Store Currency"
       const tenantCurrency = await harness.db
@@ -627,6 +649,47 @@ describe('Phase 5.0 — Authentication & Business Foundation Integration Suite',
         .where('legal_name', '=', 'Rollback Store Branch')
         .executeTakeFirst();
       expect(tenantBranch).toBeUndefined();
+
+      await app.close();
+    });
+
+    it('verifies all supported currencies (LKR, KWD, BHD, JPY, EUR, USD) succeed without substitution or RLS failure', async () => {
+      const app = await buildApp({
+        db: harness.db,
+        jwksProvider: devJwksProvider,
+      });
+
+      const testCurrencies = ['LKR', 'KWD', 'BHD', 'JPY', 'EUR', 'USD'] as const;
+
+      for (const curr of testCurrencies) {
+        const founderId = generateUuidV7();
+        const founderEmail = `founder_${curr.toLowerCase()}_${generateUuidV7()}@multicurrency.com`;
+        const token = signDevJwt({ userId: founderId, email: founderEmail });
+
+        const res = await app.inject({
+          method: 'POST',
+          url: '/v1/org/onboard',
+          headers: { authorization: `Bearer ${token}` },
+          payload: {
+            businessName: `Store in ${curr}`,
+            businessType: 'RETAIL',
+            currency: curr,
+            firstBranchName: `Branch ${curr}`,
+          },
+        });
+
+        expect(res.statusCode).toBe(201);
+        const body = res.json();
+        expect(body.tenant.baseCurrency).toBe(curr);
+
+        // Verify database persistence matches exact currency without substitution
+        const dbTenant = await harness.db
+          .selectFrom('tenants')
+          .select(['id', 'base_currency'])
+          .where('id', '=', body.tenant.id)
+          .executeTakeFirst();
+        expect(dbTenant?.base_currency.trim()).toBe(curr);
+      }
 
       await app.close();
     });
