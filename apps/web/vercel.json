@@ -3,6 +3,10 @@
   "cleanUrls": true,
   "rewrites": [
     {
+      "source": "/v1/:path*",
+      "destination": "https://nexstock-vu5i.onrender.com/v1/:path*"
+    },
+    {
       "source": "/((?!.*\\.[a-zA-Z0-9]+$).*)",
       "destination": "/index.html"
     }

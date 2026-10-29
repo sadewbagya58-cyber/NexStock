@@ -1026,6 +1026,122 @@
       color: var(--text-secondary);
     }
 
+    /* Desktop vs Mobile Responsive Containers */
+    .desktop-table-container {
+      display: block;
+      width: 100%;
+    }
+    .mobile-cards-container {
+      display: none;
+      width: 100%;
+    }
+
+    /* Entity Cards for Touch-Friendly Mobile Layout */
+    .entity-card {
+      background: var(--surface-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 14px 16px;
+      margin-bottom: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      box-shadow: var(--shadow-sm);
+      box-sizing: border-box;
+      width: 100%;
+    }
+    .entity-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .entity-card-code {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+    .entity-card-title {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text-primary);
+      line-height: 1.3;
+    }
+    .entity-card-details {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      background: var(--bg-primary);
+      border-radius: var(--radius-sm);
+      padding: 10px 12px;
+    }
+    .detail-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      font-size: 13px;
+    }
+    .detail-label {
+      color: var(--text-secondary);
+      font-weight: 500;
+      flex-shrink: 0;
+    }
+    .detail-value {
+      color: var(--text-primary);
+      font-weight: 500;
+      text-align: right;
+      word-break: break-word;
+    }
+    .entity-card-footer {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 4px;
+      flex-wrap: wrap;
+    }
+    .entity-card-footer .btn {
+      flex: 1 1 auto;
+      min-height: 40px;
+      justify-content: center;
+    }
+
+    /* Centered Empty State Card */
+    .empty-state-card {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 36px 20px;
+      background: var(--surface-card);
+      border-radius: var(--radius-md);
+      border: 1px dashed var(--border-subtle);
+      margin: 12px 0;
+      width: 100%;
+      box-sizing: border-box;
+    }
+    .empty-state-icon {
+      width: 44px;
+      height: 44px;
+      color: var(--text-secondary);
+      margin-bottom: 12px;
+      opacity: 0.7;
+    }
+    .empty-state-title {
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--text-primary);
+      margin-bottom: 6px;
+    }
+    .empty-state-desc {
+      font-size: 13px;
+      color: var(--text-secondary);
+      max-width: 360px;
+      line-height: 1.5;
+      margin-bottom: 16px;
+    }
+
     /* Tablet Screen Media Query */
     @media (min-width: 769px) and (max-width: 1024px) {
       :root {
@@ -1211,9 +1327,35 @@
         gap: 16px !important;
       }
 
+      .desktop-table-container {
+        display: none !important;
+      }
+
+      .mobile-cards-container {
+        display: flex !important;
+        flex-direction: column;
+        gap: 12px;
+      }
+
       .kpi-grid {
-        grid-template-columns: 1fr !important;
-        gap: 12px !important;
+        grid-template-columns: repeat(2, 1fr) !important;
+        gap: 10px !important;
+      }
+
+      .kpi-card {
+        padding: 12px 14px !important;
+      }
+
+      .kpi-label {
+        font-size: 11px !important;
+      }
+
+      .kpi-value {
+        font-size: 20px !important;
+      }
+
+      .kpi-trend {
+        font-size: 11px !important;
       }
 
       .pos-mobile-nav {
@@ -1256,6 +1398,23 @@
       .landing-preview-body {
         padding: 16px;
       }
+      .kpi-grid {
+        grid-template-columns: repeat(2, 1fr) !important;
+        gap: 8px !important;
+      }
+      .kpi-card {
+        padding: 10px 12px !important;
+      }
+      .kpi-value {
+        font-size: 18px !important;
+      }
+      .empty-state-card {
+        padding: 24px 12px;
+      }
+      #btnLandingSignIn, #btnLandingGetStarted {
+        padding: 6px 10px;
+        font-size: 12px;
+      }
     }
 
     /* Ultra-compact Mobile Screen Media Query (320px - 360px) */
@@ -1278,6 +1437,12 @@
       }
       .subbar-branch-name {
         max-width: 75px;
+      }
+      .kpi-grid {
+        grid-template-columns: 1fr !important;
+      }
+      #btnLandingSignIn {
+        display: none;
       }
     }
 
@@ -1591,6 +1756,7 @@
 
     // State Store (Phase 5.0 Authentication & Tenant Scoped)
     const state = {
+      sessionEpoch: 0,
       apiBaseUrl: resolveApiBaseUrl(),
       token: '',
       tenantId: '',
@@ -1619,21 +1785,34 @@
       cachedRegisters: []
     };
 
-    // Helper: Toast Notifications
+    // Helper: Toast Notifications with deduplication and throttling
+    const activeToastMessages = new Set();
     function showToast(message, type = 'info') {
+      if (!message) return;
+      const msgStr = String(message).trim();
+      if (!msgStr) return;
+      if (activeToastMessages.has(msgStr)) return;
+
+      activeToastMessages.add(msgStr);
       const container = document.getElementById('toastContainer');
+      if (!container) return;
+
       const toast = document.createElement('div');
       toast.className = `toast ${type}`;
-      toast.innerText = message;
+      toast.innerText = msgStr;
       container.appendChild(toast);
       setTimeout(() => {
         toast.style.opacity = '0';
-        setTimeout(() => toast.remove(), 200);
-      }, 4000);
+        setTimeout(() => {
+          toast.remove();
+          activeToastMessages.delete(msgStr);
+        }, 200);
+      }, 3500);
     }
 
     // API Client with automatic auth, tenant header, and idempotency key
     async function apiFetch(endpoint, options = {}) {
+      const requestEpoch = state.sessionEpoch || 0;
       const rawBase = (state.apiBaseUrl && typeof state.apiBaseUrl === 'string' && state.apiBaseUrl.trim() !== '')
         ? state.apiBaseUrl.trim()
         : resolveApiBaseUrl();
@@ -1661,6 +1840,11 @@
           headers
         });
 
+        // Guard against stale in-flight responses if session changed or user signed out
+        if ((state.sessionEpoch || 0) !== requestEpoch) {
+          return null;
+        }
+
         const contentType = res.headers.get('content-type') || '';
         const data = contentType.includes('application/json') ? await res.json() : null;
 
@@ -1676,6 +1860,9 @@
 
         return data;
       } catch (err) {
+        if ((state.sessionEpoch || 0) !== requestEpoch) {
+          return null;
+        }
         if (!options.silent) {
           showToast(err.message, 'error');
         }
@@ -1810,23 +1997,32 @@
     }
 
     // Sign Out Handler
-    async function handleSignOut() {
-      if (state.token) {
-        try {
-          await fetch(`${state.apiBaseUrl}/v1/auth/logout`, {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${state.token}`,
-              'Content-Type': 'application/json'
-            }
-          });
-        } catch {
-          // Best effort
-        }
-      }
-      localStorage.removeItem('nexstock_session_token');
-      localStorage.removeItem('nexstock_refresh_token');
-      localStorage.removeItem('nexstock_active_tenant_id');
+    function handleSignOut() {
+      // Optimistic visual feedback: disable logout buttons
+      const logoutBtns = document.querySelectorAll('#btnSignOut, .btn-logout');
+      logoutBtns.forEach(b => {
+        b.setAttribute('disabled', 'true');
+        b.innerText = 'Signing out...';
+      });
+
+      // Invalidate all in-flight API requests immediately
+      state.sessionEpoch = (state.sessionEpoch || 0) + 1;
+
+      // Capture token and apiBaseUrl for background revocation
+      const tokenToRevoke = state.token;
+      const rawBase = (state.apiBaseUrl && typeof state.apiBaseUrl === 'string' && state.apiBaseUrl.trim() !== '')
+        ? state.apiBaseUrl.trim()
+        : resolveApiBaseUrl();
+      const apiBase = rawBase.replace(/\/+$/, '');
+
+      // Synchronously clear localStorage
+      try {
+        localStorage.removeItem('nexstock_session_token');
+        localStorage.removeItem('nexstock_refresh_token');
+        localStorage.removeItem('nexstock_active_tenant_id');
+      } catch {}
+
+      // Synchronously reset state
       state.token = '';
       state.tenantId = '';
       state.tenantName = '';
@@ -1837,6 +2033,12 @@
       state.registerCode = '';
       state.user = null;
       state.memberships = [];
+      state.cachedProducts = [];
+      state.cachedCategories = [];
+      state.cachedSuppliers = [];
+      state.cachedRegisters = [];
+      state.activeShift = null;
+      state.cart = [];
 
       const userNameEl = document.getElementById('topbarUserName');
       if (userNameEl) userNameEl.innerText = '';
@@ -1856,6 +2058,28 @@
 
       showToast('You have been signed out.', 'info');
       renderView('welcome');
+
+      // Non-blocking fire-and-forget background logout call with AbortController timeout
+      if (tokenToRevoke) {
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 2000);
+          fetch(`${apiBase}/v1/auth/logout`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${tokenToRevoke}`,
+              'Content-Type': 'application/json'
+            },
+            signal: controller.signal
+          }).catch(() => {
+            // Best effort background revocation
+          }).finally(() => {
+            clearTimeout(timeoutId);
+          });
+        } catch {
+          // Best effort
+        }
+      }
     }
 
     const btnSignOut = document.getElementById('btnSignOut');
@@ -1902,6 +2126,11 @@
       const topbarContext = document.getElementById('topbarContext');
       const topbarAuthActions = document.getElementById('topbarAuthActions');
       const mobileSubbar = document.getElementById('topbarMobileSubbar');
+      const mobileMenuToggle = document.getElementById('mobileMenuToggle');
+
+      if (mobileMenuToggle) {
+        mobileMenuToggle.style.display = isAuthView ? 'none' : '';
+      }
 
       if (mobileSubbar) {
         mobileSubbar.style.display = (!isAuthView && state.tenantId) ? 'flex' : 'none';
@@ -1922,8 +2151,8 @@
           if (topbarAuthActions) {
             topbarAuthActions.style.display = 'flex';
             topbarAuthActions.innerHTML = `
-              <button class="btn btn-secondary btn-sm" onclick="renderView('login')">Sign In</button>
-              <button class="btn btn-primary btn-sm" onclick="renderView('signup')">Get Started</button>
+              <button class="btn btn-secondary btn-sm" id="btnLandingSignIn" onclick="renderView('login')">Sign In</button>
+              <button class="btn btn-primary btn-sm" id="btnLandingGetStarted" onclick="renderView('signup')">Get Started</button>
             `;
           }
         } else {
@@ -2038,116 +2267,68 @@
             </div>
           </div>
 
-          <!-- Live UI Showcase Mockup -->
+          <!-- Illustrative Architecture Showcase -->
           <div class="landing-preview-card">
             <div class="landing-preview-header">
               <span class="landing-dot" style="background: #EF4444;"></span>
               <span class="landing-dot" style="background: #F59E0B;"></span>
               <span class="landing-dot" style="background: #10B981;"></span>
               <span style="font-size: 12px; color: var(--text-secondary); margin-left: 12px; font-weight: 500;">
-                NexStock Unified Operations Console &bull; Live Multi-Tenant Session
+                Illustrative Preview &bull; Unified Multi-Branch Inventory &amp; POS Engine
               </span>
             </div>
             <div class="landing-preview-body">
               <div class="kpi-grid" style="margin-bottom: 24px;">
                 <div class="kpi-card">
-                  <div class="kpi-label">Today's POS Sales</div>
-                  <div class="kpi-value" style="color: var(--accent-primary);">$28,450.00</div>
-                  <div class="kpi-trend" style="color: var(--status-success);">+14.2% vs yesterday</div>
+                  <div class="kpi-label">Ledger Integrity</div>
+                  <div class="kpi-value" style="color: var(--accent-primary);">Double-Entry</div>
+                  <div class="kpi-trend" style="color: var(--status-success);">Strict debit/credit conservation</div>
                 </div>
                 <div class="kpi-card">
-                  <div class="kpi-label">Units on Hand</div>
-                  <div class="kpi-value">12,840 PCS</div>
-                  <div class="kpi-trend">Double-Entry Ledger Verified</div>
+                  <div class="kpi-label">Multi-Branch Sync</div>
+                  <div class="kpi-value">Enterprise</div>
+                  <div class="kpi-trend">Partitioned warehouse routing</div>
                 </div>
                 <div class="kpi-card">
-                  <div class="kpi-label">Active Registers</div>
-                  <div class="kpi-value">4 Online</div>
-                  <div class="kpi-trend">0 Cash Variances</div>
+                  <div class="kpi-label">POS Register Engine</div>
+                  <div class="kpi-value">Shift-Gated</div>
+                  <div class="kpi-trend">Atomic cash variance tracking</div>
                 </div>
                 <div class="kpi-card">
-                  <div class="kpi-label">Low Stock Alerts</div>
-                  <div class="kpi-value">0 Items</div>
-                  <div class="kpi-trend" style="color: var(--status-success);">Healthy Inventory</div>
+                  <div class="kpi-label">Tenant Isolation</div>
+                  <div class="kpi-value">PostgreSQL RLS</div>
+                  <div class="kpi-trend" style="color: var(--status-success);">Row-level security enforcement</div>
                 </div>
               </div>
 
               <div class="dashboard-split-grid">
                 <div class="card" style="margin: 0;">
                   <div class="card-title">
-                    <span>Recent Completed Sales</span>
-                    <span class="badge-pill badge-green">Live Real-Time Feed</span>
+                    <span>Point of Sale Engine</span>
+                    <span class="badge-pill badge-blue">Shift &amp; Cash Managed</span>
                   </div>
-                  <div class="table-responsive">
-                    <table class="data-table">
-                      <thead>
-                        <tr>
-                          <th>Invoice</th>
-                          <th>Customer</th>
-                          <th>Total</th>
-                          <th>Status</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        <tr>
-                          <td><strong>INV-2026-00421</strong></td>
-                          <td>Walk-in Retail</td>
-                          <td>$184.50</td>
-                          <td><span class="badge-pill badge-green">COMPLETED</span></td>
-                        </tr>
-                        <tr>
-                          <td><strong>INV-2026-00420</strong></td>
-                          <td>Apex Logistics</td>
-                          <td>$1,240.00</td>
-                          <td><span class="badge-pill badge-green">COMPLETED</span></td>
-                        </tr>
-                        <tr>
-                          <td><strong>INV-2026-00419</strong></td>
-                          <td>Global Traders Ltd</td>
-                          <td>$520.00</td>
-                          <td><span class="badge-pill badge-green">COMPLETED</span></td>
-                        </tr>
-                      </tbody>
-                    </table>
+                  <p style="font-size: 13px; color: var(--text-secondary); line-height: 1.6; margin-bottom: 12px;">
+                    Registers operate with strict opening floats, multi-tender transactions (Cash, Card, QR), and blind cash drawer reconciliations to prevent till discrepancies.
+                  </p>
+                  <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                    <span class="badge-pill badge-gray">Auto Tax Computation</span>
+                    <span class="badge-pill badge-gray">Barcode Scanning</span>
+                    <span class="badge-pill badge-gray">Sequential Invoicing</span>
                   </div>
                 </div>
 
                 <div class="card" style="margin: 0;">
                   <div class="card-title">
-                    <span>Warehouse Inventory Balances</span>
-                    <span class="badge-pill badge-blue">Multi-Bin Synced</span>
+                    <span>Double-Entry Inventory Ledger</span>
+                    <span class="badge-pill badge-green">Real-Time Valuation</span>
                   </div>
-                  <div class="table-responsive">
-                    <table class="data-table">
-                      <thead>
-                        <tr>
-                          <th>SKU</th>
-                          <th>On Hand</th>
-                          <th>Available</th>
-                          <th>Status</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        <tr>
-                          <td><strong>SKU-ELEC-9001</strong></td>
-                          <td>450 PCS</td>
-                          <td>440 PCS</td>
-                          <td><span class="badge-pill badge-green">In Stock</span></td>
-                        </tr>
-                        <tr>
-                          <td><strong>SKU-FOOD-4022</strong></td>
-                          <td>1,200 PCS</td>
-                          <td>1,180 PCS</td>
-                          <td><span class="badge-pill badge-green">In Stock</span></td>
-                        </tr>
-                        <tr>
-                          <td><strong>SKU-TOOL-1088</strong></td>
-                          <td>88 PCS</td>
-                          <td>85 PCS</td>
-                          <td><span class="badge-pill badge-green">In Stock</span></td>
-                        </tr>
-                      </tbody>
-                    </table>
+                  <p style="font-size: 13px; color: var(--text-secondary); line-height: 1.6; margin-bottom: 12px;">
+                    Stock movements balance across supplier inbound, transfer, wastage, and retail issue accounts with exact FIFO/Weighted-Average valuation.
+                  </p>
+                  <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                    <span class="badge-pill badge-gray">Batch &amp; Expiry Control</span>
+                    <span class="badge-pill badge-gray">Serial Number Registry</span>
+                    <span class="badge-pill badge-gray">Bin Location Tracking</span>
                   </div>
                 </div>
               </div>
@@ -3015,59 +3196,110 @@
               <input type="text" class="form-input search-input" id="productSearchInput" placeholder="Search by SKU, Name or Barcode..." oninput="filterProductsTable()">
             </div>
 
-            <div class="table-responsive">
-              <table class="data-table" id="productsTable">
-                <thead>
-                  <tr>
-                    <th>SKU</th>
-                    <th>Product Name</th>
-                    <th>Base UoM</th>
-                    <th>Cost</th>
-                    <th>Selling Price</th>
-                    <th>Primary Barcode</th>
-                    <th>Inventory Tracked</th>
-                    <th>Status</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${state.cachedProducts.length === 0 ? `
-                    <tr>
-                      <td colspan="9" style="text-align: center; padding: 32px; color: var(--text-secondary);">
-                        No products found. Click "+ Add Product" to create your first SKU.
-                      </td>
-                    </tr>
-                  ` : state.cachedProducts.map(p => {
-                    const sku = escapeHtml(p.sku);
-                    const name = escapeHtml(p.name);
-                    const barcode = escapeHtml(p.primaryBarcode || '—');
-                    const uom = escapeHtml(p.baseUom || 'UNIT');
-                    const cost = parseFloat(p.purchaseCost || 0).toFixed(2);
-                    const price = parseFloat(p.sellingPrice || 0).toFixed(2);
-                    const isTracked = p.trackInventory !== false;
-                    const isActive = p.status === 'ACTIVE' || p.isActive === true;
-
-                    return `
-                      <tr data-sku="${sku.toLowerCase()}" data-name="${name.toLowerCase()}" data-barcode="${barcode.toLowerCase()}">
-                        <td><strong>${sku}</strong></td>
-                        <td>${name}</td>
-                        <td><span class="badge-pill badge-blue">${uom}</span></td>
-                        <td>$${cost}</td>
-                        <td><strong style="color: var(--accent-primary);">$${price}</strong></td>
-                        <td><code>${barcode}</code></td>
-                        <td>${isTracked ? '<span class="badge-pill badge-green">Tracked</span>' : '<span class="badge-pill badge-yellow">Non-Tracked</span>'}</td>
-                        <td><span class="badge-pill ${isActive ? 'badge-green' : 'badge-red'}">${isActive ? 'ACTIVE' : 'ARCHIVED'}</span></td>
-                        <td>
-                          ${isActive ? `
-                            <button class="btn btn-secondary btn-sm" onclick="archiveProduct('${p.id}', '${sku}')">Archive</button>
-                          ` : '—'}
-                        </td>
+            ${state.cachedProducts.length === 0 ? `
+              <div class="empty-state-card">
+                <svg class="empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+                <div class="empty-state-title">No products found</div>
+                <p class="empty-state-desc">No products found. Click "+ Add Product" to create your first SKU.</p>
+                <button class="btn btn-primary" onclick="openCreateProductModal()">+ Add Product</button>
+              </div>
+            ` : `
+              <div class="desktop-table-container">
+                <div class="table-responsive">
+                  <table class="data-table" id="productsTable">
+                    <thead>
+                      <tr>
+                        <th>SKU</th>
+                        <th>Product Name</th>
+                        <th>Base UoM</th>
+                        <th>Cost</th>
+                        <th>Selling Price</th>
+                        <th>Primary Barcode</th>
+                        <th>Inventory Tracked</th>
+                        <th>Status</th>
+                        <th>Actions</th>
                       </tr>
-                    `;
-                  }).join('')}
-                </tbody>
-              </table>
-            </div>
+                    </thead>
+                    <tbody>
+                      ${state.cachedProducts.map(p => {
+                        const sku = escapeHtml(p.sku);
+                        const name = escapeHtml(p.name);
+                        const barcode = escapeHtml(p.primaryBarcode || '—');
+                        const uom = escapeHtml(p.baseUom || 'UNIT');
+                        const cost = parseFloat(p.purchaseCost || 0).toFixed(2);
+                        const price = parseFloat(p.sellingPrice || 0).toFixed(2);
+                        const isTracked = p.trackInventory !== false;
+                        const isActive = p.status === 'ACTIVE' || p.isActive === true;
+
+                        return `
+                          <tr data-sku="${sku.toLowerCase()}" data-name="${name.toLowerCase()}" data-barcode="${barcode.toLowerCase()}">
+                            <td><strong>${sku}</strong></td>
+                            <td>${name}</td>
+                            <td><span class="badge-pill badge-blue">${uom}</span></td>
+                            <td>$${cost}</td>
+                            <td><strong style="color: var(--accent-primary);">$${price}</strong></td>
+                            <td><code>${barcode}</code></td>
+                            <td>${isTracked ? '<span class="badge-pill badge-green">Tracked</span>' : '<span class="badge-pill badge-yellow">Non-Tracked</span>'}</td>
+                            <td><span class="badge-pill ${isActive ? 'badge-green' : 'badge-red'}">${isActive ? 'ACTIVE' : 'ARCHIVED'}</span></td>
+                            <td>
+                              ${isActive ? `
+                                <button class="btn btn-secondary btn-sm" onclick="archiveProduct('${p.id}', '${sku}')">Archive</button>
+                              ` : '—'}
+                            </td>
+                          </tr>
+                        `;
+                      }).join('')}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div class="mobile-cards-container" id="productsMobileList">
+                ${state.cachedProducts.map(p => {
+                  const sku = escapeHtml(p.sku);
+                  const name = escapeHtml(p.name);
+                  const barcode = escapeHtml(p.primaryBarcode || '—');
+                  const uom = escapeHtml(p.baseUom || 'UNIT');
+                  const cost = parseFloat(p.purchaseCost || 0).toFixed(2);
+                  const price = parseFloat(p.sellingPrice || 0).toFixed(2);
+                  const isTracked = p.trackInventory !== false;
+                  const isActive = p.status === 'ACTIVE' || p.isActive === true;
+
+                  return `
+                    <div class="entity-card" data-sku="${sku.toLowerCase()}" data-name="${name.toLowerCase()}" data-barcode="${barcode.toLowerCase()}">
+                      <div class="entity-card-header">
+                        <span class="entity-card-code"><strong>${sku}</strong></span>
+                        <span class="badge-pill ${isActive ? 'badge-green' : 'badge-red'}">${isActive ? 'ACTIVE' : 'ARCHIVED'}</span>
+                      </div>
+                      <div class="entity-card-title">${name}</div>
+                      <div class="entity-card-details">
+                        <div class="detail-row">
+                          <span class="detail-label">Selling Price</span>
+                          <span class="detail-value" style="color: var(--accent-primary); font-weight: 700;">$${price}</span>
+                        </div>
+                        <div class="detail-row">
+                          <span class="detail-label">Cost / UoM</span>
+                          <span class="detail-value">$${cost} / ${uom}</span>
+                        </div>
+                        <div class="detail-row">
+                          <span class="detail-label">Barcode</span>
+                          <span class="detail-value"><code>${barcode}</code></span>
+                        </div>
+                        <div class="detail-row">
+                          <span class="detail-label">Tracking</span>
+                          <span class="detail-value">${isTracked ? 'Tracked' : 'Non-Tracked'}</span>
+                        </div>
+                      </div>
+                      ${isActive ? `
+                        <div class="entity-card-footer">
+                          <button class="btn btn-secondary btn-sm" style="width: 100%;" onclick="archiveProduct('${p.id}', '${sku}')">Archive Product</button>
+                        </div>
+                      ` : ''}
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            `}
           </div>
         `;
       } catch (err) {
@@ -3078,11 +3310,19 @@
     function filterProductsTable() {
       const q = (document.getElementById('productSearchInput')?.value || '').toLowerCase().trim();
       document.querySelectorAll('#productsTable tbody tr').forEach(tr => {
+        if (!tr.hasAttribute('data-sku')) return;
         const sku = tr.getAttribute('data-sku') || '';
         const name = tr.getAttribute('data-name') || '';
         const barcode = tr.getAttribute('data-barcode') || '';
         const match = sku.includes(q) || name.includes(q) || barcode.includes(q);
         tr.style.display = match ? '' : 'none';
+      });
+      document.querySelectorAll('#productsMobileList .entity-card').forEach(card => {
+        const sku = card.getAttribute('data-sku') || '';
+        const name = card.getAttribute('data-name') || '';
+        const barcode = card.getAttribute('data-barcode') || '';
+        const match = sku.includes(q) || name.includes(q) || barcode.includes(q);
+        card.style.display = match ? '' : 'none';
       });
     }
 
@@ -3204,41 +3444,74 @@
           </div>
 
           <div class="card">
-            <div class="table-responsive">
-              <table class="data-table">
-                <thead>
-                  <tr>
-                    <th>Category Name</th>
-                    <th>Description</th>
-                    <th>Status</th>
-                    <th>Created At</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${state.cachedCategories.length === 0 ? `
-                    <tr>
-                      <td colspan="4" style="text-align: center; padding: 32px; color: var(--text-secondary);">
-                        No categories found. Click "+ Add Category" to create your first category.
-                      </td>
-                    </tr>
-                  ` : state.cachedCategories.map(c => {
-                    const name = escapeHtml(c.name);
-                    const desc = escapeHtml(c.description || '—');
-                    const isActive = c.status === 'ACTIVE' || c.isActive === true;
-                    const dateStr = c.createdAt ? new Date(c.createdAt).toLocaleDateString() : '—';
-
-                    return `
+            ${state.cachedCategories.length === 0 ? `
+              <div class="empty-state-card">
+                <svg class="empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path><line x1="7" y1="7" x2="7.01" y2="7"></line></svg>
+                <div class="empty-state-title">No categories found</div>
+                <p class="empty-state-desc">Click "+ Add Category" to create your first category.</p>
+                <button class="btn btn-primary" onclick="openCreateCategoryModal()">+ Add Category</button>
+              </div>
+            ` : `
+              <div class="desktop-table-container">
+                <div class="table-responsive">
+                  <table class="data-table">
+                    <thead>
                       <tr>
-                        <td><strong>${name}</strong></td>
-                        <td>${desc}</td>
-                        <td><span class="badge-pill ${isActive ? 'badge-green' : 'badge-red'}">${isActive ? 'ACTIVE' : 'ARCHIVED'}</span></td>
-                        <td>${dateStr}</td>
+                        <th>Category Name</th>
+                        <th>Description</th>
+                        <th>Status</th>
+                        <th>Created At</th>
                       </tr>
-                    `;
-                  }).join('')}
-                </tbody>
-              </table>
-            </div>
+                    </thead>
+                    <tbody>
+                      ${state.cachedCategories.map(c => {
+                        const name = escapeHtml(c.name);
+                        const desc = escapeHtml(c.description || '—');
+                        const isActive = c.status === 'ACTIVE' || c.isActive === true;
+                        const dateStr = c.createdAt ? new Date(c.createdAt).toLocaleDateString() : '—';
+
+                        return `
+                          <tr>
+                            <td><strong>${name}</strong></td>
+                            <td>${desc}</td>
+                            <td><span class="badge-pill ${isActive ? 'badge-green' : 'badge-red'}">${isActive ? 'ACTIVE' : 'ARCHIVED'}</span></td>
+                            <td>${dateStr}</td>
+                          </tr>
+                        `;
+                      }).join('')}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div class="mobile-cards-container">
+                ${state.cachedCategories.map(c => {
+                  const name = escapeHtml(c.name);
+                  const desc = escapeHtml(c.description || '—');
+                  const isActive = c.status === 'ACTIVE' || c.isActive === true;
+                  const dateStr = c.createdAt ? new Date(c.createdAt).toLocaleDateString() : '—';
+
+                  return `
+                    <div class="entity-card">
+                      <div class="entity-card-header">
+                        <span class="entity-card-code"><strong>${name}</strong></span>
+                        <span class="badge-pill ${isActive ? 'badge-green' : 'badge-red'}">${isActive ? 'ACTIVE' : 'ARCHIVED'}</span>
+                      </div>
+                      <div class="entity-card-details">
+                        <div class="detail-row">
+                          <span class="detail-label">Description</span>
+                          <span class="detail-value">${desc}</span>
+                        </div>
+                        <div class="detail-row">
+                          <span class="detail-label">Created At</span>
+                          <span class="detail-value">${dateStr}</span>
+                        </div>
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            `}
           </div>
         `;
       } catch (err) {
@@ -3301,50 +3574,95 @@
           </div>
 
           <div class="card">
-            <div class="table-responsive">
-              <table class="data-table">
-                <thead>
-                  <tr>
-                    <th>Supplier Code</th>
-                    <th>Vendor Name</th>
-                    <th>Contact Person</th>
-                    <th>Email</th>
-                    <th>Phone</th>
-                    <th>Currency</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${state.cachedSuppliers.length === 0 ? `
-                    <tr>
-                      <td colspan="7" style="text-align: center; padding: 32px; color: var(--text-secondary);">
-                        No suppliers found. Click "+ Add Supplier" to register your first procurement partner.
-                      </td>
-                    </tr>
-                  ` : state.cachedSuppliers.map(s => {
-                    const code = escapeHtml(s.code);
-                    const name = escapeHtml(s.name);
-                    const contact = escapeHtml(s.contactPerson || '—');
-                    const email = escapeHtml(s.email || '');
-                    const phone = escapeHtml(s.phone || '—');
-                    const curr = escapeHtml(s.currencyCode || state.currency || 'USD');
-                    const isActive = s.isActive ?? (s.status === 'ACTIVE');
-
-                    return `
+            ${state.cachedSuppliers.length === 0 ? `
+              <div class="empty-state-card">
+                <svg class="empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+                <div class="empty-state-title">No suppliers found</div>
+                <p class="empty-state-desc">Click "+ Add Supplier" to register your first procurement partner.</p>
+                <button class="btn btn-primary" onclick="openCreateSupplierModal()">+ Add Supplier</button>
+              </div>
+            ` : `
+              <div class="desktop-table-container">
+                <div class="table-responsive">
+                  <table class="data-table">
+                    <thead>
                       <tr>
-                        <td><strong>${code}</strong></td>
-                        <td>${name}</td>
-                        <td>${contact}</td>
-                        <td>${email ? `<a href="mailto:${email}">${email}</a>` : '—'}</td>
-                        <td>${phone}</td>
-                        <td><span class="badge-pill badge-blue">${curr}</span></td>
-                        <td><span class="badge-pill ${isActive ? 'badge-green' : 'badge-red'}">${isActive ? 'ACTIVE' : 'INACTIVE'}</span></td>
+                        <th>Supplier Code</th>
+                        <th>Vendor Name</th>
+                        <th>Contact Person</th>
+                        <th>Email</th>
+                        <th>Phone</th>
+                        <th>Currency</th>
+                        <th>Status</th>
                       </tr>
-                    `;
-                  }).join('')}
-                </tbody>
-              </table>
-            </div>
+                    </thead>
+                    <tbody>
+                      ${state.cachedSuppliers.map(s => {
+                        const code = escapeHtml(s.code);
+                        const name = escapeHtml(s.name);
+                        const contact = escapeHtml(s.contactPerson || '—');
+                        const email = escapeHtml(s.email || '');
+                        const phone = escapeHtml(s.phone || '—');
+                        const curr = escapeHtml(s.currencyCode || state.currency || 'USD');
+                        const isActive = s.isActive ?? (s.status === 'ACTIVE');
+
+                        return `
+                          <tr>
+                            <td><strong>${code}</strong></td>
+                            <td>${name}</td>
+                            <td>${contact}</td>
+                            <td>${email ? `<a href="mailto:${email}">${email}</a>` : '—'}</td>
+                            <td>${phone}</td>
+                            <td><span class="badge-pill badge-blue">${curr}</span></td>
+                            <td><span class="badge-pill ${isActive ? 'badge-green' : 'badge-red'}">${isActive ? 'ACTIVE' : 'INACTIVE'}</span></td>
+                          </tr>
+                        `;
+                      }).join('')}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div class="mobile-cards-container">
+                ${state.cachedSuppliers.map(s => {
+                  const code = escapeHtml(s.code);
+                  const name = escapeHtml(s.name);
+                  const contact = escapeHtml(s.contactPerson || '—');
+                  const email = escapeHtml(s.email || '');
+                  const phone = escapeHtml(s.phone || '—');
+                  const curr = escapeHtml(s.currencyCode || state.currency || 'USD');
+                  const isActive = s.isActive ?? (s.status === 'ACTIVE');
+
+                  return `
+                    <div class="entity-card">
+                      <div class="entity-card-header">
+                        <span class="entity-card-code"><strong>${code}</strong></span>
+                        <span class="badge-pill ${isActive ? 'badge-green' : 'badge-red'}">${isActive ? 'ACTIVE' : 'INACTIVE'}</span>
+                      </div>
+                      <div class="entity-card-title">${name}</div>
+                      <div class="entity-card-details">
+                        <div class="detail-row">
+                          <span class="detail-label">Contact</span>
+                          <span class="detail-value">${contact}</span>
+                        </div>
+                        <div class="detail-row">
+                          <span class="detail-label">Email</span>
+                          <span class="detail-value">${email ? `<a href="mailto:${email}">${email}</a>` : '—'}</span>
+                        </div>
+                        <div class="detail-row">
+                          <span class="detail-label">Phone</span>
+                          <span class="detail-value">${phone}</span>
+                        </div>
+                        <div class="detail-row">
+                          <span class="detail-label">Currency</span>
+                          <span class="detail-value"><span class="badge-pill badge-blue">${curr}</span></span>
+                        </div>
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            `}
           </div>
         `;
       } catch (err) {
@@ -3436,60 +3754,115 @@
           </div>
 
           <div class="card">
-            <div class="table-responsive">
-              <table class="data-table">
-                <thead>
-                  <tr>
-                    <th>Date / Time</th>
-                    <th>Movement Type</th>
-                    <th>Product</th>
-                    <th>Delta Qty</th>
-                    <th>Unit Cost</th>
-                    <th>Balance After</th>
-                    <th>Reference</th>
-                    <th>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${movements.length === 0 ? `
-                    <tr>
-                      <td colspan="8" style="text-align: center; padding: 32px; color: var(--text-secondary);">
-                        No stock movements recorded yet. Click "+ Post Movement" to record stock changes.
-                      </td>
-                    </tr>
-                  ` : movements.map(m => {
-                    const mType = escapeHtml(m.movementType);
-                    const sku = escapeHtml(m.productSku);
-                    const pName = escapeHtml(m.productName);
-                    const uom = escapeHtml(m.uomCode || 'UNIT');
-                    const qty = parseFloat(m.quantity || 0);
-                    const unitCost = parseFloat(m.unitCost || 0).toFixed(2);
-                    const balAfter = parseFloat(m.balanceAfter || 0).toFixed(0);
-                    const refType = escapeHtml(m.referenceType || 'MANUAL');
-                    const dateStr = m.createdAt ? new Date(m.createdAt).toLocaleString() : '—';
-
-                    return `
+            ${movements.length === 0 ? `
+              <div class="empty-state-card">
+                <svg class="empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline><polyline points="17 6 23 6 23 12"></polyline></svg>
+                <div class="empty-state-title">No stock movements recorded yet</div>
+                <p class="empty-state-desc">Click "+ Post Movement" to record stock changes.</p>
+                <button class="btn btn-primary" onclick="openRecordStockMovementModal()">+ Post Movement</button>
+              </div>
+            ` : `
+              <div class="desktop-table-container">
+                <div class="table-responsive">
+                  <table class="data-table">
+                    <thead>
                       <tr>
-                        <td>${dateStr}</td>
-                        <td><span class="badge-pill ${mType.includes('IN') || mType.includes('RETURN') ? 'badge-green' : 'badge-yellow'}">${mType}</span></td>
-                        <td><strong>${sku}</strong> (${pName})</td>
-                        <td style="font-weight: 700; color: ${qty >= 0 ? 'var(--status-success)' : 'var(--status-danger)'};">
-                          ${qty > 0 ? '+' : ''}${qty.toFixed(0)} ${uom}
-                        </td>
-                        <td>$${unitCost}</td>
-                        <td><strong>${balAfter}</strong></td>
-                        <td><code>${refType}</code></td>
-                        <td>
-                          ${!m.reversedEntryId && m.movementType !== 'CUSTOMER_RETURN_RESTOCK' ? `
-                            <button class="btn btn-secondary btn-sm" onclick="reverseStockMovement('${m.id}', '${sku}')">Reverse</button>
-                          ` : '—'}
-                        </td>
+                        <th>Date / Time</th>
+                        <th>Movement Type</th>
+                        <th>Product</th>
+                        <th>Delta Qty</th>
+                        <th>Unit Cost</th>
+                        <th>Balance After</th>
+                        <th>Reference</th>
+                        <th>Action</th>
                       </tr>
-                    `;
-                  }).join('')}
-                </tbody>
-              </table>
-            </div>
+                    </thead>
+                    <tbody>
+                      ${movements.map(m => {
+                        const mType = escapeHtml(m.movementType);
+                        const sku = escapeHtml(m.productSku);
+                        const pName = escapeHtml(m.productName);
+                        const uom = escapeHtml(m.uomCode || 'UNIT');
+                        const qty = parseFloat(m.quantity || 0);
+                        const unitCost = parseFloat(m.unitCost || 0).toFixed(2);
+                        const balAfter = parseFloat(m.balanceAfter || 0).toFixed(0);
+                        const refType = escapeHtml(m.referenceType || 'MANUAL');
+                        const dateStr = m.createdAt ? new Date(m.createdAt).toLocaleString() : '—';
+
+                        return `
+                          <tr>
+                            <td>${dateStr}</td>
+                            <td><span class="badge-pill ${mType.includes('IN') || mType.includes('RETURN') ? 'badge-green' : 'badge-yellow'}">${mType}</span></td>
+                            <td><strong>${sku}</strong> (${pName})</td>
+                            <td style="font-weight: 700; color: ${qty >= 0 ? 'var(--status-success)' : 'var(--status-danger)'};">
+                              ${qty > 0 ? '+' : ''}${qty.toFixed(0)} ${uom}
+                            </td>
+                            <td>$${unitCost}</td>
+                            <td><strong>${balAfter}</strong></td>
+                            <td><code>${refType}</code></td>
+                            <td>
+                              ${!m.reversedEntryId && m.movementType !== 'CUSTOMER_RETURN_RESTOCK' ? `
+                                <button class="btn btn-secondary btn-sm" onclick="reverseStockMovement('${m.id}', '${sku}')">Reverse</button>
+                              ` : '—'}
+                            </td>
+                          </tr>
+                        `;
+                      }).join('')}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div class="mobile-cards-container">
+                ${movements.map(m => {
+                  const mType = escapeHtml(m.movementType);
+                  const sku = escapeHtml(m.productSku);
+                  const pName = escapeHtml(m.productName);
+                  const uom = escapeHtml(m.uomCode || 'UNIT');
+                  const qty = parseFloat(m.quantity || 0);
+                  const unitCost = parseFloat(m.unitCost || 0).toFixed(2);
+                  const balAfter = parseFloat(m.balanceAfter || 0).toFixed(0);
+                  const refType = escapeHtml(m.referenceType || 'MANUAL');
+                  const dateStr = m.createdAt ? new Date(m.createdAt).toLocaleString() : '—';
+                  const canReverse = !m.reversedEntryId && m.movementType !== 'CUSTOMER_RETURN_RESTOCK';
+
+                  return `
+                    <div class="entity-card">
+                      <div class="entity-card-header">
+                        <span class="entity-card-code"><strong>${sku}</strong></span>
+                        <span class="badge-pill ${mType.includes('IN') || mType.includes('RETURN') ? 'badge-green' : 'badge-yellow'}">${mType}</span>
+                      </div>
+                      <div class="entity-card-title">${pName}</div>
+                      <div class="entity-card-details">
+                        <div class="detail-row">
+                          <span class="detail-label">Delta Qty</span>
+                          <span class="detail-value" style="font-weight: 700; color: ${qty >= 0 ? 'var(--status-success)' : 'var(--status-danger)'};">
+                            ${qty > 0 ? '+' : ''}${qty.toFixed(0)} ${uom}
+                          </span>
+                        </div>
+                        <div class="detail-row">
+                          <span class="detail-label">Balance After</span>
+                          <span class="detail-value"><strong>${balAfter} ${uom}</strong></span>
+                        </div>
+                        <div class="detail-row">
+                          <span class="detail-label">Unit Cost</span>
+                          <span class="detail-value">$${unitCost}</span>
+                        </div>
+                        <div class="detail-row">
+                          <span class="detail-label">Date / Reference</span>
+                          <span class="detail-value">${dateStr} &bull; <code>${refType}</code></span>
+                        </div>
+                      </div>
+                      ${canReverse ? `
+                        <div class="entity-card-footer">
+                          <button class="btn btn-secondary btn-sm" style="width: 100%;" onclick="reverseStockMovement('${m.id}', '${sku}')">Reverse Movement</button>
+                        </div>
+                      ` : ''}
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            `}
           </div>
         `;
       } catch (err) {
@@ -3604,50 +3977,94 @@
           </div>
 
           <div class="card">
-            <div class="table-responsive">
-              <table class="data-table">
-                <thead>
-                  <tr>
-                    <th>SKU</th>
-                    <th>Product Name</th>
-                    <th>On Hand</th>
-                    <th>Reserved</th>
-                    <th>Available</th>
-                    <th>Reorder Pt</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${balances.length === 0 ? `
-                    <tr>
-                      <td colspan="7" style="text-align: center; padding: 32px; color: var(--text-secondary);">
-                        No inventory balances on record for this warehouse.
-                      </td>
-                    </tr>
-                  ` : balances.map(b => {
-                    const sku = escapeHtml(b.sku);
-                    const name = escapeHtml(b.productName);
-                    const avail = parseFloat(b.availableQty ?? b.availableQuantity ?? '0');
-                    const ro = parseFloat(b.reorderPoint || '0');
-                    let badge = '<span class="badge-pill badge-green">In Stock</span>';
-                    if (avail <= 0) badge = '<span class="badge-pill badge-red">Out of Stock</span>';
-                    else if (avail <= ro) badge = '<span class="badge-pill badge-yellow">Low Stock</span>';
-
-                    return `
+            ${balances.length === 0 ? `
+              <div class="empty-state-card">
+                <svg class="empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"></rect><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path></svg>
+                <div class="empty-state-title">No inventory balances on record</div>
+                <p class="empty-state-desc">No inventory balances on record for this warehouse.</p>
+              </div>
+            ` : `
+              <div class="desktop-table-container">
+                <div class="table-responsive">
+                  <table class="data-table">
+                    <thead>
                       <tr>
-                        <td><strong>${sku}</strong></td>
-                        <td>${name}</td>
-                        <td><strong>${formatQty(b.qtyOnHand)}</strong></td>
-                        <td>${formatQty(b.qtyReserved)}</td>
-                        <td style="color: var(--accent-primary); font-weight: 700;">${formatQty(avail)}</td>
-                        <td>${formatQty(ro)}</td>
-                        <td>${badge}</td>
+                        <th>SKU</th>
+                        <th>Product Name</th>
+                        <th>On Hand</th>
+                        <th>Reserved</th>
+                        <th>Available</th>
+                        <th>Reorder Pt</th>
+                        <th>Status</th>
                       </tr>
-                    `;
-                  }).join('')}
-                </tbody>
-              </table>
-            </div>
+                    </thead>
+                    <tbody>
+                      ${balances.map(b => {
+                        const sku = escapeHtml(b.sku);
+                        const name = escapeHtml(b.productName);
+                        const avail = parseFloat(b.availableQty ?? b.availableQuantity ?? '0');
+                        const ro = parseFloat(b.reorderPoint || '0');
+                        let badge = '<span class="badge-pill badge-green">In Stock</span>';
+                        if (avail <= 0) badge = '<span class="badge-pill badge-red">Out of Stock</span>';
+                        else if (avail <= ro) badge = '<span class="badge-pill badge-yellow">Low Stock</span>';
+
+                        return `
+                          <tr>
+                            <td><strong>${sku}</strong></td>
+                            <td>${name}</td>
+                            <td><strong>${formatQty(b.qtyOnHand)}</strong></td>
+                            <td>${formatQty(b.qtyReserved)}</td>
+                            <td style="color: var(--accent-primary); font-weight: 700;">${formatQty(avail)}</td>
+                            <td>${formatQty(ro)}</td>
+                            <td>${badge}</td>
+                          </tr>
+                        `;
+                      }).join('')}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div class="mobile-cards-container">
+                ${balances.map(b => {
+                  const sku = escapeHtml(b.sku);
+                  const name = escapeHtml(b.productName);
+                  const avail = parseFloat(b.availableQty ?? b.availableQuantity ?? '0');
+                  const ro = parseFloat(b.reorderPoint || '0');
+                  let badge = '<span class="badge-pill badge-green">In Stock</span>';
+                  if (avail <= 0) badge = '<span class="badge-pill badge-red">Out of Stock</span>';
+                  else if (avail <= ro) badge = '<span class="badge-pill badge-yellow">Low Stock</span>';
+
+                  return `
+                    <div class="entity-card">
+                      <div class="entity-card-header">
+                        <span class="entity-card-code"><strong>${sku}</strong></span>
+                        ${badge}
+                      </div>
+                      <div class="entity-card-title">${name}</div>
+                      <div class="entity-card-details">
+                        <div class="detail-row">
+                          <span class="detail-label">Available Qty</span>
+                          <span class="detail-value" style="color: var(--accent-primary); font-weight: 700;">${formatQty(avail)}</span>
+                        </div>
+                        <div class="detail-row">
+                          <span class="detail-label">On Hand</span>
+                          <span class="detail-value"><strong>${formatQty(b.qtyOnHand)}</strong></span>
+                        </div>
+                        <div class="detail-row">
+                          <span class="detail-label">Reserved</span>
+                          <span class="detail-value">${formatQty(b.qtyReserved)}</span>
+                        </div>
+                        <div class="detail-row">
+                          <span class="detail-label">Reorder Point</span>
+                          <span class="detail-value">${formatQty(ro)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            `}
           </div>
         `;
       } catch (err) {
@@ -4203,47 +4620,81 @@
           </div>
 
           <div class="card">
-            <div class="table-responsive">
-              <table class="data-table">
-                <thead>
-                  <tr>
-                    <th>Register Code</th>
-                    <th>Terminal Name</th>
-                    <th>Status</th>
-                    <th>Last Invoice #</th>
-                    <th>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${registers.length === 0 ? `
-                    <tr>
-                      <td colspan="5" style="text-align: center; padding: 32px; color: var(--text-secondary);">
-                        No POS registers found for this branch. Contact administrator to configure registers.
-                      </td>
-                    </tr>
-                  ` : registers.map(r => {
-                    const code = escapeHtml(r.code);
-                    const name = escapeHtml(r.name);
-                    const isActive = r.isActive ?? (r.status === 'ACTIVE');
-                    const lastInvoice = (r.lastInvoiceSeq != null)
-                      ? `${code}-${String(r.lastInvoiceSeq).padStart(6, '0')}`
-                      : '—';
-
-                    return `
+            ${registers.length === 0 ? `
+              <div class="empty-state-card">
+                <svg class="empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+                <div class="empty-state-title">No POS Registers</div>
+                <p class="empty-state-desc">No POS registers found for this branch. Contact administrator to configure registers.</p>
+              </div>
+            ` : `
+              <div class="desktop-table-container">
+                <div class="table-responsive">
+                  <table class="data-table">
+                    <thead>
                       <tr>
-                        <td><strong>${code}</strong></td>
-                        <td>${name}</td>
-                        <td><span class="badge-pill ${isActive ? 'badge-green' : 'badge-red'}">${isActive ? 'ACTIVE' : 'INACTIVE'}</span></td>
-                        <td><code>${lastInvoice}</code></td>
-                        <td>
-                          <button class="btn btn-primary btn-sm" onclick="selectRegister('${r.id}', '${code}')">Use for POS</button>
-                        </td>
+                        <th>Register Code</th>
+                        <th>Terminal Name</th>
+                        <th>Status</th>
+                        <th>Last Invoice #</th>
+                        <th>Action</th>
                       </tr>
-                    `;
-                  }).join('')}
-                </tbody>
-              </table>
-            </div>
+                    </thead>
+                    <tbody>
+                      ${registers.map(r => {
+                        const code = escapeHtml(r.code);
+                        const name = escapeHtml(r.name);
+                        const isActive = r.isActive ?? (r.status === 'ACTIVE');
+                        const lastInvoice = (r.lastInvoiceSeq != null)
+                          ? `${code}-${String(r.lastInvoiceSeq).padStart(6, '0')}`
+                          : '—';
+
+                        return `
+                          <tr>
+                            <td><strong>${code}</strong></td>
+                            <td>${name}</td>
+                            <td><span class="badge-pill ${isActive ? 'badge-green' : 'badge-red'}">${isActive ? 'ACTIVE' : 'INACTIVE'}</span></td>
+                            <td><code>${lastInvoice}</code></td>
+                            <td>
+                              <button class="btn btn-primary btn-sm" onclick="selectRegister('${r.id}', '${code}')">Use for POS</button>
+                            </td>
+                          </tr>
+                        `;
+                      }).join('')}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div class="mobile-cards-container">
+                ${registers.map(r => {
+                  const code = escapeHtml(r.code);
+                  const name = escapeHtml(r.name);
+                  const isActive = r.isActive ?? (r.status === 'ACTIVE');
+                  const lastInvoice = (r.lastInvoiceSeq != null)
+                    ? `${code}-${String(r.lastInvoiceSeq).padStart(6, '0')}`
+                    : '—';
+
+                  return `
+                    <div class="entity-card">
+                      <div class="entity-card-header">
+                        <span class="entity-card-code"><strong>${code}</strong></span>
+                        <span class="badge-pill ${isActive ? 'badge-green' : 'badge-red'}">${isActive ? 'ACTIVE' : 'INACTIVE'}</span>
+                      </div>
+                      <div class="entity-card-title">${name}</div>
+                      <div class="entity-card-details">
+                        <div class="detail-row">
+                          <span class="detail-label">Last Invoice #</span>
+                          <span class="detail-value"><code>${lastInvoice}</code></span>
+                        </div>
+                      </div>
+                      <div class="entity-card-footer">
+                        <button class="btn btn-primary btn-sm" style="width: 100%;" onclick="selectRegister('${r.id}', '${code}')">Use for POS</button>
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            `}
           </div>
         `;
       } catch (err) {
@@ -4413,43 +4864,93 @@
           </div>
 
           <div class="card">
-            <div class="table-responsive">
-              <table class="data-table">
-                <thead>
-                  <tr>
-                    <th>Invoice #</th>
-                    <th>Date / Time</th>
-                    <th>Customer</th>
-                    <th>Subtotal</th>
-                    <th>Tax</th>
-                    <th>Grand Total</th>
-                    <th>Status</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${sales.map(s => `
-                    <tr>
-                      <td><strong>${s.invoiceNumber}</strong></td>
-                      <td>${new Date(s.soldAt).toLocaleString()}</td>
-                      <td>${s.customerName || 'Walk-in Customer'}</td>
-                      <td>$${parseFloat(s.subtotalAmount).toFixed(2)}</td>
-                      <td>$${parseFloat(s.taxAmount).toFixed(2)}</td>
-                      <td style="font-weight: 700; color: var(--accent-primary);">$${parseFloat(s.grandTotal).toFixed(2)}</td>
-                      <td><span class="badge-pill ${s.status === 'COMPLETED' ? 'badge-green' : 'badge-red'}">${s.status}</span></td>
-                      <td>
+            ${sales.length === 0 ? `
+              <div class="empty-state-card">
+                <svg class="empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"></rect><line x1="1" y1="10" x2="23" y2="10"></line></svg>
+                <div class="empty-state-title">No completed sales yet</div>
+                <p class="empty-state-desc">Transactions completed at POS checkout will appear here in chronological order.</p>
+              </div>
+            ` : `
+              <div class="desktop-table-container">
+                <div class="table-responsive">
+                  <table class="data-table">
+                    <thead>
+                      <tr>
+                        <th>Invoice #</th>
+                        <th>Date / Time</th>
+                        <th>Customer</th>
+                        <th>Subtotal</th>
+                        <th>Tax</th>
+                        <th>Grand Total</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${sales.map(s => `
+                        <tr>
+                          <td><strong>${s.invoiceNumber}</strong></td>
+                          <td>${new Date(s.soldAt).toLocaleString()}</td>
+                          <td>${s.customerName || 'Walk-in Customer'}</td>
+                          <td>$${parseFloat(s.subtotalAmount).toFixed(2)}</td>
+                          <td>$${parseFloat(s.taxAmount).toFixed(2)}</td>
+                          <td style="font-weight: 700; color: var(--accent-primary);">$${parseFloat(s.grandTotal).toFixed(2)}</td>
+                          <td><span class="badge-pill ${s.status === 'COMPLETED' ? 'badge-green' : 'badge-red'}">${s.status}</span></td>
+                          <td>
+                            <button class="btn btn-secondary btn-sm" onclick="openReceiptModal('${s.id}')">Receipt</button>
+                            ${s.status === 'COMPLETED' ? `
+                              <button class="btn btn-danger btn-sm" onclick="voidSalePrompt('${s.id}', '${s.invoiceNumber}')" ${state.userRole === 'CASHIER' ? 'disabled title="Cashiers cannot void sales. Requires Owner/Admin."' : ''}>
+                                Void
+                              </button>
+                            ` : ''}
+                          </td>
+                        </tr>
+                      `).join('')}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div class="mobile-cards-container">
+                ${sales.map(s => {
+                  const inv = escapeHtml(s.invoiceNumber);
+                  const dateStr = s.soldAt ? new Date(s.soldAt).toLocaleString() : '—';
+                  const cust = escapeHtml(s.customerName || 'Walk-in Customer');
+                  const subtotal = parseFloat(s.subtotalAmount || 0).toFixed(2);
+                  const tax = parseFloat(s.taxAmount || 0).toFixed(2);
+                  const total = parseFloat(s.grandTotal || 0).toFixed(2);
+                  const isCompleted = s.status === 'COMPLETED';
+
+                  return `
+                    <div class="entity-card">
+                      <div class="entity-card-header">
+                        <span class="entity-card-code"><strong>${inv}</strong></span>
+                        <span class="badge-pill ${isCompleted ? 'badge-green' : 'badge-red'}">${s.status}</span>
+                      </div>
+                      <div class="entity-card-title">$${total} &bull; <span style="font-size: 13px; font-weight: normal; color: var(--text-secondary);">${cust}</span></div>
+                      <div class="entity-card-details">
+                        <div class="detail-row">
+                          <span class="detail-label">Subtotal / Tax</span>
+                          <span class="detail-value">$${subtotal} + $${tax}</span>
+                        </div>
+                        <div class="detail-row">
+                          <span class="detail-label">Completed At</span>
+                          <span class="detail-value">${dateStr}</span>
+                        </div>
+                      </div>
+                      <div class="entity-card-footer">
                         <button class="btn btn-secondary btn-sm" onclick="openReceiptModal('${s.id}')">Receipt</button>
-                        ${s.status === 'COMPLETED' ? `
-                          <button class="btn btn-danger btn-sm" onclick="voidSalePrompt('${s.id}', '${s.invoiceNumber}')" ${state.userRole === 'CASHIER' ? 'disabled title="Cashiers cannot void sales. Requires Owner/Admin."' : ''}>
-                            Void
+                        ${isCompleted ? `
+                          <button class="btn btn-danger btn-sm" onclick="voidSalePrompt('${s.id}', '${inv}')" ${state.userRole === 'CASHIER' ? 'disabled title="Cashiers cannot void sales. Requires Owner/Admin."' : ''}>
+                            Void Sale
                           </button>
                         ` : ''}
-                      </td>
-                    </tr>
-                  `).join('')}
-                </tbody>
-              </table>
-            </div>
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            `}
           </div>
         `;
       } catch (err) {
@@ -4608,58 +5109,121 @@
 
           <div class="card">
             <div class="card-title">Batch Inventory Registry</div>
-            <div class="table-responsive">
-              <table class="data-table">
-                <thead>
-                  <tr>
-                    <th>Batch #</th>
-                    <th>Product SKU &amp; Name</th>
-                    <th>Received Date</th>
-                    <th>Expiry Date</th>
-                    <th>Initial Qty</th>
-                    <th>Current Qty</th>
-                    <th>Unit Cost</th>
-                    <th>Expiry Status</th>
-                    <th>Batch Status</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${batches.length === 0 ? '<tr><td colspan="10" style="text-align: center; color: var(--text-secondary);">No batches found for this warehouse. Click "Register New Batch" above.</td></tr>' : ''}
-                  ${batches.map(b => {
-                    const prod = prodMap.get(b.productId);
-                    let expBadge = '<span class="badge-pill badge-green">VALID</span>';
-                    if (b.expiryStatus === 'EXPIRING_SOON') expBadge = '<span class="badge-pill badge-yellow">EXPIRING SOON</span>';
-                    else if (b.expiryStatus === 'EXPIRED') expBadge = '<span class="badge-pill badge-red">EXPIRED</span>';
-
-                    let statusBadge = '<span class="badge-pill badge-green">ACTIVE</span>';
-                    if (b.status === 'QUARANTINED') statusBadge = '<span class="badge-pill badge-red">QUARANTINED</span>';
-                    else if (b.status === 'DEPLETED') statusBadge = '<span class="badge-pill">DEPLETED</span>';
-
-                    return `
+            ${batches.length === 0 ? `
+              <div class="empty-state-card">
+                <svg class="empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path></svg>
+                <div class="empty-state-title">No batches found</div>
+                <p class="empty-state-desc">No batches found for this warehouse. Click "Register New Batch" above.</p>
+              </div>
+            ` : `
+              <div class="desktop-table-container">
+                <div class="table-responsive">
+                  <table class="data-table">
+                    <thead>
                       <tr>
-                        <td><strong>${b.batchNumber}</strong></td>
-                        <td>${prod ? `${prod.sku} - ${prod.name}` : b.productId}</td>
-                        <td>${b.receivedDate}</td>
-                        <td>${b.expiryDate || '—'}</td>
-                        <td>${formatQty(b.initialQuantity)}</td>
-                        <td><strong>${formatQty(b.currentQuantity)}</strong></td>
-                        <td>$${parseFloat(b.unitCost).toFixed(2)}</td>
-                        <td>${expBadge}</td>
-                        <td>${statusBadge}</td>
-                        <td>
-                          ${b.status === 'ACTIVE' ? `
-                            <button class="btn btn-secondary btn-sm" onclick="quarantineBatchAction('${b.id}', '${b.batchNumber}')" style="color: var(--status-danger);">Quarantine</button>
-                          ` : b.status === 'QUARANTINED' ? `
-                            <button class="btn btn-secondary btn-sm" onclick="releaseBatchAction('${b.id}', '${b.batchNumber}')" style="color: var(--status-success);">Release</button>
-                          ` : '—'}
-                        </td>
+                        <th>Batch #</th>
+                        <th>Product SKU &amp; Name</th>
+                        <th>Received Date</th>
+                        <th>Expiry Date</th>
+                        <th>Initial Qty</th>
+                        <th>Current Qty</th>
+                        <th>Unit Cost</th>
+                        <th>Expiry Status</th>
+                        <th>Batch Status</th>
+                        <th>Actions</th>
                       </tr>
-                    `;
-                  }).join('')}
-                </tbody>
-              </table>
-            </div>
+                    </thead>
+                    <tbody>
+                      ${batches.map(b => {
+                        const prod = prodMap.get(b.productId);
+                        let expBadge = '<span class="badge-pill badge-green">VALID</span>';
+                        if (b.expiryStatus === 'EXPIRING_SOON') expBadge = '<span class="badge-pill badge-yellow">EXPIRING SOON</span>';
+                        else if (b.expiryStatus === 'EXPIRED') expBadge = '<span class="badge-pill badge-red">EXPIRED</span>';
+
+                        let statusBadge = '<span class="badge-pill badge-green">ACTIVE</span>';
+                        if (b.status === 'QUARANTINED') statusBadge = '<span class="badge-pill badge-red">QUARANTINED</span>';
+                        else if (b.status === 'DEPLETED') statusBadge = '<span class="badge-pill">DEPLETED</span>';
+
+                        return `
+                          <tr>
+                            <td><strong>${b.batchNumber}</strong></td>
+                            <td>${prod ? `${prod.sku} - ${prod.name}` : b.productId}</td>
+                            <td>${b.receivedDate}</td>
+                            <td>${b.expiryDate || '—'}</td>
+                            <td>${formatQty(b.initialQuantity)}</td>
+                            <td><strong>${formatQty(b.currentQuantity)}</strong></td>
+                            <td>$${parseFloat(b.unitCost).toFixed(2)}</td>
+                            <td>${expBadge}</td>
+                            <td>${statusBadge}</td>
+                            <td>
+                              ${b.status === 'ACTIVE' ? `
+                                <button class="btn btn-secondary btn-sm" onclick="quarantineBatchAction('${b.id}', '${b.batchNumber}')" style="color: var(--status-danger);">Quarantine</button>
+                              ` : b.status === 'QUARANTINED' ? `
+                                <button class="btn btn-secondary btn-sm" onclick="releaseBatchAction('${b.id}', '${b.batchNumber}')" style="color: var(--status-success);">Release</button>
+                              ` : '—'}
+                            </td>
+                          </tr>
+                        `;
+                      }).join('')}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div class="mobile-cards-container">
+                ${batches.map(b => {
+                  const prod = prodMap.get(b.productId);
+                  const prodTitle = prod ? `${escapeHtml(prod.sku)} - ${escapeHtml(prod.name)}` : escapeHtml(b.productId);
+                  let expBadge = '<span class="badge-pill badge-green">VALID</span>';
+                  if (b.expiryStatus === 'EXPIRING_SOON') expBadge = '<span class="badge-pill badge-yellow">EXPIRING SOON</span>';
+                  else if (b.expiryStatus === 'EXPIRED') expBadge = '<span class="badge-pill badge-red">EXPIRED</span>';
+
+                  let statusBadge = '<span class="badge-pill badge-green">ACTIVE</span>';
+                  if (b.status === 'QUARANTINED') statusBadge = '<span class="badge-pill badge-red">QUARANTINED</span>';
+                  else if (b.status === 'DEPLETED') statusBadge = '<span class="badge-pill">DEPLETED</span>';
+
+                  return `
+                    <div class="entity-card">
+                      <div class="entity-card-header">
+                        <span class="entity-card-code"><strong>${escapeHtml(b.batchNumber)}</strong></span>
+                        <div style="display: flex; gap: 4px;">
+                          ${expBadge}
+                          ${statusBadge}
+                        </div>
+                      </div>
+                      <div class="entity-card-title">${prodTitle}</div>
+                      <div class="entity-card-details">
+                        <div class="detail-row">
+                          <span class="detail-label">Current / Initial Qty</span>
+                          <span class="detail-value"><strong>${formatQty(b.currentQuantity)}</strong> / ${formatQty(b.initialQuantity)}</span>
+                        </div>
+                        <div class="detail-row">
+                          <span class="detail-label">Expiry Date</span>
+                          <span class="detail-value">${escapeHtml(b.expiryDate || '—')}</span>
+                        </div>
+                        <div class="detail-row">
+                          <span class="detail-label">Unit Cost</span>
+                          <span class="detail-value">$${parseFloat(b.unitCost).toFixed(2)}</span>
+                        </div>
+                        <div class="detail-row">
+                          <span class="detail-label">Received</span>
+                          <span class="detail-value">${escapeHtml(b.receivedDate)}</span>
+                        </div>
+                      </div>
+                      ${b.status === 'ACTIVE' ? `
+                        <div class="entity-card-footer">
+                          <button class="btn btn-secondary btn-sm" style="width: 100%; color: var(--status-danger);" onclick="quarantineBatchAction('${b.id}', '${escapeHtml(b.batchNumber)}')">Quarantine Batch</button>
+                        </div>
+                      ` : b.status === 'QUARANTINED' ? `
+                        <div class="entity-card-footer">
+                          <button class="btn btn-secondary btn-sm" style="width: 100%; color: var(--status-success);" onclick="releaseBatchAction('${b.id}', '${escapeHtml(b.batchNumber)}')">Release from Quarantine</button>
+                        </div>
+                      ` : ''}
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            `}
           </div>
         `;
 
@@ -4834,45 +5398,92 @@
               <span>Tracked Serials</span>
               <input type="text" id="serialSearchInput" class="form-input" placeholder="Quick search serial #..." style="width: 240px; padding: 4px 8px; font-size: 13px;">
             </div>
-            <div class="table-responsive">
-              <table class="data-table" id="serialsDataTable">
-                <thead>
-                  <tr>
-                    <th>Serial Number</th>
-                    <th>Product</th>
-                    <th>Lifecycle Status</th>
-                    <th>Unit Cost</th>
-                    <th>Received At</th>
-                    <th>Sold At</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${serials.length === 0 ? '<tr><td colspan="7" style="text-align: center; color: var(--text-secondary);">No serials found. Click "Register Serial Numbers" to intake items.</td></tr>' : ''}
-                  ${serials.map(s => {
-                    const prod = prodMap.get(s.productId);
-                    let badgeClass = 'badge-green';
-                    if (s.status === 'SOLD') badgeClass = 'badge-blue';
-                    else if (s.status === 'QUARANTINED') badgeClass = 'badge-yellow';
-                    else if (s.status === 'DAMAGED' || s.status === 'WRITTEN_OFF') badgeClass = 'badge-red';
-
-                    return `
-                      <tr class="serial-row" data-sn="${s.serialNumber.toLowerCase()}">
-                        <td><strong style="font-family: monospace; font-size: 13px;">${s.serialNumber}</strong></td>
-                        <td>${prod ? `${prod.sku} - ${prod.name}` : s.productId}</td>
-                        <td><span class="badge-pill ${badgeClass}">${s.status}</span></td>
-                        <td>$${parseFloat(s.unitCost).toFixed(2)}</td>
-                        <td>${new Date(s.receivedAt).toLocaleDateString()}</td>
-                        <td>${s.soldAt ? new Date(s.soldAt).toLocaleDateString() : '—'}</td>
-                        <td>
-                          <button class="btn btn-secondary btn-sm" onclick="openSerialTransitionModal('${s.id}', '${s.serialNumber}', '${s.status}')">Transition Status</button>
-                        </td>
+            ${serials.length === 0 ? `
+              <div class="empty-state-card">
+                <svg class="empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="4" width="18" height="16" rx="2"></rect><line x1="7" y1="8" x2="17" y2="8"></line><line x1="7" y1="12" x2="12" y2="12"></line><line x1="7" y1="16" x2="12" y2="16"></line></svg>
+                <div class="empty-state-title">No serial numbers found</div>
+                <p class="empty-state-desc">No serials found. Click "Register Serial Numbers" to intake items.</p>
+              </div>
+            ` : `
+              <div class="desktop-table-container">
+                <div class="table-responsive">
+                  <table class="data-table" id="serialsDataTable">
+                    <thead>
+                      <tr>
+                        <th>Serial Number</th>
+                        <th>Product</th>
+                        <th>Lifecycle Status</th>
+                        <th>Unit Cost</th>
+                        <th>Received At</th>
+                        <th>Sold At</th>
+                        <th>Actions</th>
                       </tr>
-                    `;
-                  }).join('')}
-                </tbody>
-              </table>
-            </div>
+                    </thead>
+                    <tbody>
+                      ${serials.map(s => {
+                        const prod = prodMap.get(s.productId);
+                        let badgeClass = 'badge-green';
+                        if (s.status === 'SOLD') badgeClass = 'badge-blue';
+                        else if (s.status === 'QUARANTINED') badgeClass = 'badge-yellow';
+                        else if (s.status === 'DAMAGED' || s.status === 'WRITTEN_OFF') badgeClass = 'badge-red';
+
+                        return `
+                          <tr class="serial-row" data-sn="${s.serialNumber.toLowerCase()}">
+                            <td><strong style="font-family: monospace; font-size: 13px;">${s.serialNumber}</strong></td>
+                            <td>${prod ? `${prod.sku} - ${prod.name}` : s.productId}</td>
+                            <td><span class="badge-pill ${badgeClass}">${s.status}</span></td>
+                            <td>$${parseFloat(s.unitCost).toFixed(2)}</td>
+                            <td>${new Date(s.receivedAt).toLocaleDateString()}</td>
+                            <td>${s.soldAt ? new Date(s.soldAt).toLocaleDateString() : '—'}</td>
+                            <td>
+                              <button class="btn btn-secondary btn-sm" onclick="openSerialTransitionModal('${s.id}', '${s.serialNumber}', '${s.status}')">Transition Status</button>
+                            </td>
+                          </tr>
+                        `;
+                      }).join('')}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div class="mobile-cards-container">
+                ${serials.map(s => {
+                  const prod = prodMap.get(s.productId);
+                  const prodTitle = prod ? `${escapeHtml(prod.sku)} - ${escapeHtml(prod.name)}` : escapeHtml(s.productId);
+                  let badgeClass = 'badge-green';
+                  if (s.status === 'SOLD') badgeClass = 'badge-blue';
+                  else if (s.status === 'QUARANTINED') badgeClass = 'badge-yellow';
+                  else if (s.status === 'DAMAGED' || s.status === 'WRITTEN_OFF') badgeClass = 'badge-red';
+
+                  return `
+                    <div class="entity-card serial-row" data-sn="${s.serialNumber.toLowerCase()}">
+                      <div class="entity-card-header">
+                        <span class="entity-card-code"><strong style="font-family: monospace;">${escapeHtml(s.serialNumber)}</strong></span>
+                        <span class="badge-pill ${badgeClass}">${s.status}</span>
+                      </div>
+                      <div class="entity-card-title">${prodTitle}</div>
+                      <div class="entity-card-details">
+                        <div class="detail-row">
+                          <span class="detail-label">Unit Cost</span>
+                          <span class="detail-value">$${parseFloat(s.unitCost).toFixed(2)}</span>
+                        </div>
+                        <div class="detail-row">
+                          <span class="detail-label">Received At</span>
+                          <span class="detail-value">${new Date(s.receivedAt).toLocaleDateString()}</span>
+                        </div>
+                        <div class="detail-row">
+                          <span class="detail-label">Sold At</span>
+                          <span class="detail-value">${s.soldAt ? new Date(s.soldAt).toLocaleDateString() : '—'}</span>
+                        </div>
+                      </div>
+                      <div class="entity-card-footer">
+                        <button class="btn btn-secondary btn-sm" style="width: 100%;" onclick="openSerialTransitionModal('${s.id}', '${s.serialNumber}', '${s.status}')">Transition Status</button>
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            `}
           </div>
         `;
 
@@ -5068,49 +5679,101 @@
 
           <div class="card">
             <div class="card-title">Product Valuation Breakdown</div>
-            <div class="table-responsive">
-              <table class="data-table">
-                <thead>
-                  <tr>
-                    <th>SKU</th>
-                    <th>Product Name</th>
-                    <th>Valuation Method</th>
-                    <th>On Hand</th>
-                    <th>Unit / MAC Cost</th>
-                    <th>Total Inventory Value</th>
-                    <th>Open FIFO Layers</th>
-                    <th>Active Batches</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${items.length === 0 ? '<tr><td colspan="9" style="text-align: center; padding: 32px; color: var(--text-secondary);">No inventory balances recorded yet.</td></tr>' : ''}
-                  ${items.map(i => {
-                    const sku = escapeHtml(i.sku);
-                    const name = escapeHtml(i.productName);
-                    const methodBadge = i.valuationMethod === 'FIFO'
-                      ? '<span class="badge-pill badge-blue">FIFO</span>'
-                      : '<span class="badge-pill badge-green">MOVING_AVG</span>';
-
-                    return `
+            ${items.length === 0 ? `
+              <div class="empty-state-card">
+                <svg class="empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+                <div class="empty-state-title">No inventory valuation records</div>
+                <p class="empty-state-desc">No inventory balances recorded yet.</p>
+              </div>
+            ` : `
+              <div class="desktop-table-container">
+                <div class="table-responsive">
+                  <table class="data-table">
+                    <thead>
                       <tr>
-                        <td><strong>${sku}</strong></td>
-                        <td>${name}</td>
-                        <td>${methodBadge}</td>
-                        <td>${formatQty(i.qtyOnHand)}</td>
-                        <td>$${parseFloat(i.movingAvgCost || 0).toFixed(2)}</td>
-                        <td><strong>$${parseFloat(i.totalInventoryValue || 0).toFixed(2)}</strong></td>
-                        <td>${i.openLayersCount || 0}</td>
-                        <td>${i.activeBatchesCount || 0}</td>
-                        <td>
-                          <button class="btn btn-secondary btn-sm" onclick="drilldownFifoLayers('${i.productId}', '${sku}')">Inspect Layers</button>
-                        </td>
+                        <th>SKU</th>
+                        <th>Product Name</th>
+                        <th>Valuation Method</th>
+                        <th>On Hand</th>
+                        <th>Unit / MAC Cost</th>
+                        <th>Total Inventory Value</th>
+                        <th>Open FIFO Layers</th>
+                        <th>Active Batches</th>
+                        <th>Actions</th>
                       </tr>
-                    `;
-                  }).join('')}
-                </tbody>
-              </table>
-            </div>
+                    </thead>
+                    <tbody>
+                      ${items.map(i => {
+                        const sku = escapeHtml(i.sku);
+                        const name = escapeHtml(i.productName);
+                        const methodBadge = i.valuationMethod === 'FIFO'
+                          ? '<span class="badge-pill badge-blue">FIFO</span>'
+                          : '<span class="badge-pill badge-green">MOVING_AVG</span>';
+
+                        return `
+                          <tr>
+                            <td><strong>${sku}</strong></td>
+                            <td>${name}</td>
+                            <td>${methodBadge}</td>
+                            <td>${formatQty(i.qtyOnHand)}</td>
+                            <td>$${parseFloat(i.movingAvgCost || 0).toFixed(2)}</td>
+                            <td><strong>$${parseFloat(i.totalInventoryValue || 0).toFixed(2)}</strong></td>
+                            <td>${i.openLayersCount || 0}</td>
+                            <td>${i.activeBatchesCount || 0}</td>
+                            <td>
+                              <button class="btn btn-secondary btn-sm" onclick="drilldownFifoLayers('${i.productId}', '${sku}')">Inspect Layers</button>
+                            </td>
+                          </tr>
+                        `;
+                      }).join('')}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div class="mobile-cards-container">
+                ${items.map(i => {
+                  const sku = escapeHtml(i.sku);
+                  const name = escapeHtml(i.productName);
+                  const methodBadge = i.valuationMethod === 'FIFO'
+                    ? '<span class="badge-pill badge-blue">FIFO</span>'
+                    : '<span class="badge-pill badge-green">MOVING_AVG</span>';
+                  const totalVal = parseFloat(i.totalInventoryValue || 0).toFixed(2);
+                  const mac = parseFloat(i.movingAvgCost || 0).toFixed(2);
+
+                  return `
+                    <div class="entity-card">
+                      <div class="entity-card-header">
+                        <span class="entity-card-code"><strong>${sku}</strong></span>
+                        ${methodBadge}
+                      </div>
+                      <div class="entity-card-title">${name}</div>
+                      <div class="entity-card-details">
+                        <div class="detail-row">
+                          <span class="detail-label">Total Value</span>
+                          <span class="detail-value" style="font-weight: 700; color: var(--accent-primary);">$${totalVal}</span>
+                        </div>
+                        <div class="detail-row">
+                          <span class="detail-label">Qty on Hand</span>
+                          <span class="detail-value"><strong>${formatQty(i.qtyOnHand)}</strong></span>
+                        </div>
+                        <div class="detail-row">
+                          <span class="detail-label">Unit / MAC Cost</span>
+                          <span class="detail-value">$${mac}</span>
+                        </div>
+                        <div class="detail-row">
+                          <span class="detail-label">Layers / Batches</span>
+                          <span class="detail-value">${i.openLayersCount || 0} open &bull; ${i.activeBatchesCount || 0} batches</span>
+                        </div>
+                      </div>
+                      <div class="entity-card-footer">
+                        <button class="btn btn-secondary btn-sm" style="width: 100%;" onclick="drilldownFifoLayers('${i.productId}', '${sku}')">Inspect FIFO Layers</button>
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            `}
           </div>
         `;
       } catch (err) {
@@ -5209,57 +5872,115 @@
 
           <div class="card">
             <div class="card-title">Stocktake Counting Sessions</div>
-            <div class="table-responsive">
-              <table class="data-table">
-                <thead>
-                  <tr>
-                    <th>Count #</th>
-                    <th>Scope</th>
-                    <th>Status</th>
-                    <th>Total Lines</th>
-                    <th>Discrepant Lines</th>
-                    <th>Net Variance Value</th>
-                    <th>Started At</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${sessions.length === 0 ? '<tr><td colspan="8" style="text-align: center; color: var(--text-secondary);">No stocktake sessions found. Click "Start New Stocktake" above.</td></tr>' : ''}
-                  ${sessions.map(s => {
-                    let statusBadge = '<span class="badge-pill">DRAFT</span>';
-                    if (s.status === 'IN_PROGRESS') statusBadge = '<span class="badge-pill badge-blue">IN PROGRESS</span>';
-                    else if (s.status === 'SUBMITTED') statusBadge = '<span class="badge-pill badge-yellow">SUBMITTED</span>';
-                    else if (s.status === 'APPROVED') statusBadge = '<span class="badge-pill badge-green">APPROVED</span>';
-                    else if (s.status === 'REJECTED') statusBadge = '<span class="badge-pill badge-red">REJECTED</span>';
-                    else if (s.status === 'POSTED') statusBadge = '<span class="badge-pill badge-green">POSTED</span>';
-
-                    return `
+            ${sessions.length === 0 ? `
+              <div class="empty-state-card">
+                <svg class="empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+                <div class="empty-state-title">No stocktake sessions found</div>
+                <p class="empty-state-desc">No stocktake sessions found. Click "Start New Stocktake" above.</p>
+              </div>
+            ` : `
+              <div class="desktop-table-container">
+                <div class="table-responsive">
+                  <table class="data-table">
+                    <thead>
                       <tr>
-                        <td><strong>${s.countNumber}</strong></td>
-                        <td><span class="badge-pill">${s.scope}</span></td>
-                        <td>${statusBadge}</td>
-                        <td>${s.totalLinesCount}</td>
-                        <td>${s.discrepantLinesCount > 0 ? `<strong style="color: var(--status-warning);">${s.discrepantLinesCount}</strong>` : '0'}</td>
-                        <td><strong>$${parseFloat(s.totalVarianceValue).toFixed(2)}</strong></td>
-                        <td>${s.startedAt ? new Date(s.startedAt).toLocaleDateString() : '—'}</td>
-                        <td style="display: flex; gap: 6px;">
-                          ${s.status === 'DRAFT' || s.status === 'IN_PROGRESS' ? `
-                            <button class="btn btn-secondary btn-sm" onclick="openCountEntryModal('${s.id}')">Enter Counts</button>
-                            <button class="btn btn-primary btn-sm" onclick="submitStocktakeAction('${s.id}')">Submit</button>
-                          ` : s.status === 'SUBMITTED' ? `
-                            <button class="btn btn-secondary btn-sm" onclick="openReviewStocktakeModal('${s.id}')">Review &amp; Approve</button>
-                          ` : s.status === 'APPROVED' ? `
-                            <button class="btn btn-primary btn-sm" onclick="postStocktakeAdjustmentsAction('${s.id}')">Post Adjustments</button>
-                          ` : `
-                            <button class="btn btn-secondary btn-sm" onclick="openViewStocktakeDetailsModal('${s.id}')">View Details</button>
-                          `}
-                        </td>
+                        <th>Count #</th>
+                        <th>Scope</th>
+                        <th>Status</th>
+                        <th>Total Lines</th>
+                        <th>Discrepant Lines</th>
+                        <th>Net Variance Value</th>
+                        <th>Started At</th>
+                        <th>Actions</th>
                       </tr>
-                    `;
-                  }).join('')}
-                </tbody>
-              </table>
-            </div>
+                    </thead>
+                    <tbody>
+                      ${sessions.map(s => {
+                        let statusBadge = '<span class="badge-pill">DRAFT</span>';
+                        if (s.status === 'IN_PROGRESS') statusBadge = '<span class="badge-pill badge-blue">IN PROGRESS</span>';
+                        else if (s.status === 'SUBMITTED') statusBadge = '<span class="badge-pill badge-yellow">SUBMITTED</span>';
+                        else if (s.status === 'APPROVED') statusBadge = '<span class="badge-pill badge-green">APPROVED</span>';
+                        else if (s.status === 'REJECTED') statusBadge = '<span class="badge-pill badge-red">REJECTED</span>';
+                        else if (s.status === 'POSTED') statusBadge = '<span class="badge-pill badge-green">POSTED</span>';
+
+                        return `
+                          <tr>
+                            <td><strong>${s.countNumber}</strong></td>
+                            <td><span class="badge-pill">${s.scope}</span></td>
+                            <td>${statusBadge}</td>
+                            <td>${s.totalLinesCount}</td>
+                            <td>${s.discrepantLinesCount > 0 ? `<strong style="color: var(--status-warning);">${s.discrepantLinesCount}</strong>` : '0'}</td>
+                            <td><strong>$${parseFloat(s.totalVarianceValue).toFixed(2)}</strong></td>
+                            <td>${s.startedAt ? new Date(s.startedAt).toLocaleDateString() : '—'}</td>
+                            <td style="display: flex; gap: 6px;">
+                              ${s.status === 'DRAFT' || s.status === 'IN_PROGRESS' ? `
+                                <button class="btn btn-secondary btn-sm" onclick="openCountEntryModal('${s.id}')">Enter Counts</button>
+                                <button class="btn btn-primary btn-sm" onclick="submitStocktakeAction('${s.id}')">Submit</button>
+                              ` : s.status === 'SUBMITTED' ? `
+                                <button class="btn btn-secondary btn-sm" onclick="openReviewStocktakeModal('${s.id}')">Review &amp; Approve</button>
+                              ` : s.status === 'APPROVED' ? `
+                                <button class="btn btn-primary btn-sm" onclick="postStocktakeAdjustmentsAction('${s.id}')">Post Adjustments</button>
+                              ` : `
+                                <button class="btn btn-secondary btn-sm" onclick="openViewStocktakeDetailsModal('${s.id}')">View Details</button>
+                              `}
+                            </td>
+                          </tr>
+                        `;
+                      }).join('')}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div class="mobile-cards-container">
+                ${sessions.map(s => {
+                  let statusBadge = '<span class="badge-pill">DRAFT</span>';
+                  if (s.status === 'IN_PROGRESS') statusBadge = '<span class="badge-pill badge-blue">IN PROGRESS</span>';
+                  else if (s.status === 'SUBMITTED') statusBadge = '<span class="badge-pill badge-yellow">SUBMITTED</span>';
+                  else if (s.status === 'APPROVED') statusBadge = '<span class="badge-pill badge-green">APPROVED</span>';
+                  else if (s.status === 'REJECTED') statusBadge = '<span class="badge-pill badge-red">REJECTED</span>';
+                  else if (s.status === 'POSTED') statusBadge = '<span class="badge-pill badge-green">POSTED</span>';
+
+                  return `
+                    <div class="entity-card">
+                      <div class="entity-card-header">
+                        <span class="entity-card-code"><strong>${escapeHtml(s.countNumber)}</strong></span>
+                        <div style="display: flex; gap: 4px;">
+                          <span class="badge-pill">${escapeHtml(s.scope)}</span>
+                          ${statusBadge}
+                        </div>
+                      </div>
+                      <div class="entity-card-details">
+                        <div class="detail-row">
+                          <span class="detail-label">Variance Value</span>
+                          <span class="detail-value" style="font-weight: 700;">$${parseFloat(s.totalVarianceValue).toFixed(2)}</span>
+                        </div>
+                        <div class="detail-row">
+                          <span class="detail-label">Lines / Discrepant</span>
+                          <span class="detail-value">${s.totalLinesCount} total &bull; ${s.discrepantLinesCount > 0 ? `<strong style="color: var(--status-warning);">${s.discrepantLinesCount} disc.</strong>` : '0 disc.'}</span>
+                        </div>
+                        <div class="detail-row">
+                          <span class="detail-label">Started At</span>
+                          <span class="detail-value">${s.startedAt ? new Date(s.startedAt).toLocaleDateString() : '—'}</span>
+                        </div>
+                      </div>
+                      <div class="entity-card-footer">
+                        ${s.status === 'DRAFT' || s.status === 'IN_PROGRESS' ? `
+                          <button class="btn btn-secondary btn-sm" onclick="openCountEntryModal('${s.id}')">Enter Counts</button>
+                          <button class="btn btn-primary btn-sm" onclick="submitStocktakeAction('${s.id}')">Submit</button>
+                        ` : s.status === 'SUBMITTED' ? `
+                          <button class="btn btn-secondary btn-sm" style="width: 100%;" onclick="openReviewStocktakeModal('${s.id}')">Review &amp; Approve</button>
+                        ` : s.status === 'APPROVED' ? `
+                          <button class="btn btn-primary btn-sm" style="width: 100%;" onclick="postStocktakeAdjustmentsAction('${s.id}')">Post Adjustments</button>
+                        ` : `
+                          <button class="btn btn-secondary btn-sm" style="width: 100%;" onclick="openViewStocktakeDetailsModal('${s.id}')">View Details</button>
+                        `}
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            `}
           </div>
         `;
 

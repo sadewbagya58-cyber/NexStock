@@ -494,4 +494,111 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       expect(html).toContain('text-overflow: ellipsis;');
     });
   });
+
+  describe('7. Phase 5.1 Hardening: Mobile Cards, Fake Data Elimination, Fast Signout & 404 Edge Proxy', () => {
+    it('verifies total elimination of fabricated numbers, fake sales, fake customer names, fake SKUs, and fake real-time tags', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // Fabricated metrics
+      expect(html).not.toContain('12,840 PCS');
+      expect(html).not.toContain('$28,450.00');
+      expect(html).not.toContain('+14.2% vs yesterday');
+      expect(html).not.toContain('4 Online');
+      expect(html).not.toContain('0 Cash Variances');
+
+      // Fake sales & invoice numbers
+      expect(html).not.toContain('INV-2026-00421');
+      expect(html).not.toContain('INV-2026-00420');
+      expect(html).not.toContain('INV-2026-00419');
+
+      // Fake customer names
+      expect(html).not.toContain('Walk-in Retail');
+      expect(html).not.toContain('Apex Logistics');
+      expect(html).not.toContain('Global Traders Ltd');
+
+      // Fake SKUs
+      expect(html).not.toContain('SKU-ELEC-9001');
+      expect(html).not.toContain('SKU-FOOD-4022');
+      expect(html).not.toContain('SKU-TOOL-1088');
+
+      // Misleading demo labels
+      expect(html).not.toContain('Live Multi-Tenant Session');
+      expect(html).not.toContain('Live Real-Time Feed');
+
+      // Verify legitimate illustrative preview header
+      expect(html).toContain('Illustrative Preview &bull; Unified Multi-Branch Inventory &amp; POS Engine');
+    });
+
+    it('verifies apps/web/vercel.json includes edge proxy rewrite for /v1/:path*', () => {
+      const vercelConfigPath = resolve(WEB_ROOT, 'vercel.json');
+      const config = JSON.parse(readFileSync(vercelConfigPath, 'utf8'));
+
+      const v1Rewrite = config.rewrites.find(
+        (r: { source: string; destination: string }) => r.source === '/v1/:path*',
+      );
+      expect(v1Rewrite).toBeDefined();
+      expect(v1Rewrite.destination).toBe('https://nexstock-vu5i.onrender.com/v1/:path*');
+    });
+
+    it('verifies optimistic immediate sign out, sessionEpoch guard, background abort timeout, and toast deduplication', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // Session epoch in state and apiFetch
+      expect(html).toContain('sessionEpoch: 0');
+      expect(html).toContain('const requestEpoch = state.sessionEpoch || 0;');
+      expect(html).toContain('if ((state.sessionEpoch || 0) !== requestEpoch)');
+
+      // Optimistic button state & fast redirection
+      expect(html).toContain('b.innerText = \'Signing out...\';');
+      expect(html).toContain('state.sessionEpoch = (state.sessionEpoch || 0) + 1;');
+      expect(html).toContain("showToast('You have been signed out.', 'info');");
+      expect(html).toContain("renderView('welcome');");
+
+      // Non-blocking background logout with AbortController
+      expect(html).toContain('new AbortController()');
+      expect(html).toContain('setTimeout(() => controller.abort(), 2000)');
+      expect(html).toContain('signal: controller.signal');
+
+      // Toast deduplication via Set
+      expect(html).toContain('const activeToastMessages = new Set();');
+      expect(html).toContain('if (activeToastMessages.has(msgStr)) return;');
+      expect(html).toContain('activeToastMessages.add(msgStr);');
+      expect(html).toContain('activeToastMessages.delete(msgStr);');
+    });
+
+    it('verifies responsive dual-mode (.desktop-table-container and .mobile-cards-container) across core views', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // CSS classes defined
+      expect(html).toContain('.desktop-table-container');
+      expect(html).toContain('.mobile-cards-container');
+      expect(html).toContain('.entity-card');
+      expect(html).toContain('.entity-card-header');
+      expect(html).toContain('.entity-card-title');
+      expect(html).toContain('.entity-card-details');
+      expect(html).toContain('.detail-row');
+      expect(html).toContain('.empty-state-card');
+
+      // Responsive media query switches
+      expect(html).toContain('.desktop-table-container {\n        display: none !important;\n      }');
+      expect(html).toContain('.mobile-cards-container {\n        display: flex !important;');
+
+      // Compact 2x2 KPI grids on mobile
+      expect(html).toContain('.kpi-grid {\n        grid-template-columns: repeat(2, 1fr) !important;');
+
+      // Dual search filtering in filterProductsTable
+      expect(html).toContain('document.querySelectorAll(\'#productsTable tbody tr\').forEach(');
+      expect(html).toContain('document.querySelectorAll(\'#productsMobileList .entity-card\').forEach(');
+
+      // Serial registry search filtering on .serial-row
+      expect(html).toContain('class="entity-card serial-row"');
+
+      // Landing button IDs for responsive sizing
+      expect(html).toContain('id="btnLandingSignIn"');
+      expect(html).toContain('id="btnLandingGetStarted"');
+    });
+  });
 });
