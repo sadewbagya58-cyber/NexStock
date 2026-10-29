@@ -18,6 +18,9 @@ import {
   escapeHtml,
   formatCurrency,
   buildSafeQueryParam,
+  formatInvoiceSequence,
+  sanitizeApiBaseUrl,
+  normalizeApiEndpoint,
   AUTH_VIEW_IDS,
   ALL_SPA_VIEW_IDS,
 } from '../src/index.js';
@@ -369,6 +372,126 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       // Confirms setupMobileNavigation is invoked during app initialization
       expect(html).toContain('function setupMobileNavigation()');
       expect(html).toContain('setupMobileNavigation();');
+    });
+  });
+
+  describe('6. Phase 5.1 Production Bug Fixes & Mobile Header Responsive UI', () => {
+    it('verifies formatInvoiceSequence formats numbers and safely handles null/undefined/missing values', () => {
+      expect(formatInvoiceSequence('REG-01', 42)).toBe('REG-01-000042');
+      expect(formatInvoiceSequence('REG-01', '105')).toBe('REG-01-000105');
+      expect(formatInvoiceSequence('REG-01', 0)).toBe('REG-01-000000');
+      expect(formatInvoiceSequence('REG-01', null)).toBe('—');
+      expect(formatInvoiceSequence('REG-01', undefined)).toBe('—');
+      expect(formatInvoiceSequence('REG-01', '')).toBe('—');
+      expect(formatInvoiceSequence('POS-WEST', 'INV-999')).toBe('POS-WEST-INV-999');
+    });
+
+    it('verifies sanitizeApiBaseUrl eliminates trailing slashes and handles invalid inputs', () => {
+      expect(sanitizeApiBaseUrl('https://nexstock-vu5i.onrender.com/')).toBe(
+        'https://nexstock-vu5i.onrender.com',
+      );
+      expect(sanitizeApiBaseUrl('https://nexstock-vu5i.onrender.com///')).toBe(
+        'https://nexstock-vu5i.onrender.com',
+      );
+      expect(sanitizeApiBaseUrl('http://localhost:4000/')).toBe('http://localhost:4000');
+      expect(sanitizeApiBaseUrl('')).toBe(DEFAULT_PRODUCTION_API_URL);
+      expect(sanitizeApiBaseUrl('   ')).toBe(DEFAULT_PRODUCTION_API_URL);
+      expect(sanitizeApiBaseUrl('undefined')).toBe(DEFAULT_PRODUCTION_API_URL);
+      expect(sanitizeApiBaseUrl('null')).toBe(DEFAULT_PRODUCTION_API_URL);
+      expect(sanitizeApiBaseUrl(null)).toBe(DEFAULT_PRODUCTION_API_URL);
+      expect(sanitizeApiBaseUrl(undefined)).toBe(DEFAULT_PRODUCTION_API_URL);
+    });
+
+    it('verifies normalizeApiEndpoint guarantees a single leading slash and avoids double slashes', () => {
+      expect(normalizeApiEndpoint('/v1/products')).toBe('/v1/products');
+      expect(normalizeApiEndpoint('v1/products')).toBe('/v1/products');
+      expect(normalizeApiEndpoint('//v1/products')).toBe('/v1/products');
+      expect(normalizeApiEndpoint('')).toBe('/');
+      expect(normalizeApiEndpoint('/v1/pos/registers?branchId=123')).toBe(
+        '/v1/pos/registers?branchId=123',
+      );
+    });
+
+    it('verifies public/index.html eliminates registers undefined toString error', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // Confirms r.lastInvoiceSeq.toString() is not called directly
+      expect(html).not.toContain('r.lastInvoiceSeq.toString()');
+
+      // Confirms safe check and fallback
+      expect(html).toContain('r.lastInvoiceSeq != null');
+      expect(html).toContain('String(r.lastInvoiceSeq).padStart(6, \'0\')');
+
+      // Confirms boolean isActive check
+      expect(html).toContain("r.isActive ?? (r.status === 'ACTIVE')");
+
+      // Confirms empty state rendering
+      expect(html).toContain('No POS registers found for this branch.');
+    });
+
+    it('verifies public/index.html products view is resilient and eliminates 404 URL bugs', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // Confirms apiFetch sanitizes trailing slashes and normalizes endpoints
+      expect(html).toContain('rawBase.replace(/\\/+$/, \'\')');
+      expect(html).toContain("rawEndpoint.startsWith('/') ? rawEndpoint : `/${rawEndpoint}`");
+
+      // Confirms renderProductsView catches errors gracefully
+      expect(html).toContain("apiFetch('/v1/products?limit=100').catch(");
+      expect(html).toContain("apiFetch('/v1/categories?limit=100').catch(");
+
+      // Confirms empty state handling
+      expect(html).toContain('No products found. Click "+ Add Product" to create your first SKU.');
+    });
+
+    it('verifies public/index.html warehouse requirement guards on valuation and cost-layers', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // Confirms renderValuationView checks state.warehouseId before calling API
+      expect(html).toContain('if (!state.warehouseId) {');
+      expect(html).toContain('Warehouse Assignment Required');
+
+      // Confirms drilldownFifoLayers checks state.warehouseId
+      expect(html).toContain('Please select a warehouse to inspect FIFO layers');
+
+      // Confirms drilldownFifoLayers calls openModal with structured object
+      expect(html).toContain('openModal({');
+      expect(html).toContain('FIFO Cost Layers:');
+    });
+
+    it('verifies public/index.html openModal supports both object and HTML string overloads', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // Confirms openModal handles string and object signatures
+      expect(html).toContain('function openModal(optionsOrHtml)');
+      expect(html).toContain("typeof optionsOrHtml === 'string'");
+      expect(html).toContain("optionsOrHtml && typeof optionsOrHtml === 'object'");
+    });
+
+    it('verifies public/index.html redesigned mobile header and touch targets', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // Confirms topbar primary row and mobile subbar layout elements
+      expect(html).toContain('class="topbar-primary-row"');
+      expect(html).toContain('class="topbar-mobile-subbar" id="topbarMobileSubbar"');
+      expect(html).toContain('id="topbarMobileTenantBtn"');
+      expect(html).toContain('id="topbarMobileTenantName"');
+      expect(html).toContain('id="topbarMobilePlanBadge"');
+      expect(html).toContain('id="topbarMobileBranchName"');
+
+      // Confirms WCAG AA min 44px touch targets on mobile
+      expect(html).toContain('min-width: 44px;');
+      expect(html).toContain('min-height: 44px;');
+
+      // Confirms media queries for 320px-360px viewports
+      expect(html).toContain('@media (max-width: 360px)');
+      expect(html).toContain('.subbar-tenant-name');
+      expect(html).toContain('text-overflow: ellipsis;');
     });
   });
 });

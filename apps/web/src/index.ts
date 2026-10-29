@@ -236,3 +236,46 @@ export function buildSafeQueryParam(
   }
   return `${prefix}${encodeURIComponent(key)}=${encodeURIComponent(value.trim())}`;
 }
+
+/**
+ * Safely formats register last invoice sequence string, avoiding TypeError on undefined or null.
+ */
+export function formatInvoiceSequence(
+  code: string,
+  seq: number | string | null | undefined,
+): string {
+  if (seq === null || seq === undefined || String(seq).trim() === '') {
+    return '—';
+  }
+  const numeric = parseInt(String(seq), 10);
+  const formattedSeq = Number.isNaN(numeric)
+    ? String(seq)
+    : numeric.toString().padStart(6, '0');
+  return `${code}-${formattedSeq}`;
+}
+
+/**
+ * Sanitizes and normalizes API base URL, eliminating trailing slashes, blank strings,
+ * or corrupted values.
+ */
+export function sanitizeApiBaseUrl(
+  rawUrl: string | null | undefined,
+  fallbackUrl: string = DEFAULT_PRODUCTION_API_URL,
+): string {
+  if (typeof rawUrl !== 'string') return fallbackUrl;
+  const trimmed = rawUrl.trim();
+  if (trimmed === '' || trimmed === 'undefined' || trimmed === 'null') {
+    return fallbackUrl;
+  }
+  return trimmed.replace(/\/+$/, '');
+}
+
+/**
+ * Normalizes an API route endpoint to ensure a single leading slash and no double slashes.
+ */
+export function normalizeApiEndpoint(endpoint: string): string {
+  const trimmed = endpoint.trim();
+  if (!trimmed) return '/';
+  const leading = trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+  return leading.replace(/^\/+/, '/');
+}

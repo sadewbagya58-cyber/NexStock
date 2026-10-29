@@ -54,18 +54,29 @@
       background: var(--surface-card);
       border-bottom: 1px solid var(--border-subtle);
       display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 0 24px;
+      flex-direction: column;
+      justify-content: center;
+      padding: 0;
       position: sticky;
       top: 0;
       z-index: 40;
+    }
+
+    .topbar-primary-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: 100%;
+      height: 100%;
+      padding: 0 24px;
+      box-sizing: border-box;
     }
 
     .brand-section {
       display: flex;
       align-items: center;
       gap: 12px;
+      min-width: 0;
     }
 
     .brand-logo {
@@ -76,6 +87,11 @@
       font-size: 18px;
       color: var(--accent-primary);
       text-decoration: none;
+      white-space: nowrap;
+    }
+
+    .topbar-mobile-subbar {
+      display: none;
     }
 
     .badge-pill {
@@ -1030,6 +1046,14 @@
     @media (max-width: 768px) {
       .mobile-menu-toggle {
         display: flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 44px;
+        min-height: 44px;
+        width: 44px;
+        height: 44px;
+        padding: 0;
+        cursor: pointer;
       }
 
       .sidebar-mobile-header {
@@ -1037,24 +1061,119 @@
       }
 
       header.topbar {
-        padding: 0 12px;
-        height: 56px;
+        padding: 0;
+        height: auto;
+        min-height: 56px;
       }
 
-      .topbar-context {
+      .topbar-primary-row {
+        height: 56px;
+        padding: 0 12px;
+      }
+
+      .brand-section {
+        gap: 8px;
+        flex-shrink: 0;
+      }
+
+      .brand-logo {
+        font-size: 17px;
         gap: 6px;
       }
 
+      /* Relocate cramped desktop context on mobile to dedicated subbar */
+      .topbar-context,
       #topbarBranchContext,
       #topbarRoleContext,
       #topbarVersionBadge,
-      #topbarUserName {
+      #topbarUserName,
+      #topbarSyncStatus {
         display: none !important;
       }
 
-      #topbarTenantContext {
-        padding: 4px 8px;
+      .topbar-actions {
+        gap: 8px;
+        flex-shrink: 0;
+      }
+
+      /* Enforce min 44px touch targets on mobile for WCAG AA compliance */
+      #btnThemeToggle {
+        min-width: 44px;
+        min-height: 44px;
+        width: 44px;
+        height: 44px;
+      }
+
+      #btnSignOut {
+        min-height: 44px;
+        min-width: 44px;
+        padding: 0 12px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      /* Clean mobile subbar for tenant and branch context */
+      .topbar-mobile-subbar {
+        display: none; /* toggled via JS based on tenant authentication */
+        height: 36px;
+        background: var(--bg-primary);
+        border-top: 1px solid var(--border-subtle);
+        padding: 0 12px;
+        align-items: center;
+        justify-content: space-between;
+        width: 100%;
+        box-sizing: border-box;
         font-size: 12px;
+      }
+
+      .mobile-subbar-tenant {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        cursor: pointer;
+        min-width: 0;
+        max-width: 65%;
+      }
+
+      .subbar-label {
+        color: var(--text-secondary);
+        font-size: 11px;
+        text-transform: uppercase;
+        font-weight: 600;
+        flex-shrink: 0;
+      }
+
+      .subbar-tenant-name {
+        color: var(--text-primary);
+        font-weight: 600;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 130px;
+      }
+
+      .mobile-subbar-branch {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        min-width: 0;
+        max-width: 35%;
+      }
+
+      .subbar-divider {
+        color: var(--text-secondary);
+        opacity: 0.6;
+        font-weight: 700;
+      }
+
+      .subbar-branch-name {
+        color: var(--text-secondary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
 
       aside.sidebar {
@@ -1136,6 +1255,29 @@
       }
       .landing-preview-body {
         padding: 16px;
+      }
+    }
+
+    /* Ultra-compact Mobile Screen Media Query (320px - 360px) */
+    @media (max-width: 360px) {
+      .topbar-primary-row {
+        padding: 0 8px;
+      }
+      .brand-section {
+        gap: 6px;
+      }
+      .brand-logo {
+        font-size: 16px;
+      }
+      #btnSignOut {
+        padding: 0 8px;
+        font-size: 12px;
+      }
+      .subbar-tenant-name {
+        max-width: 90px;
+      }
+      .subbar-branch-name {
+        max-width: 75px;
       }
     }
 
@@ -1239,46 +1381,61 @@
 
   <!-- Top Bar -->
   <header class="topbar">
-    <div class="brand-section">
-      <button class="mobile-menu-toggle" id="mobileMenuToggle" aria-label="Toggle navigation menu">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
-      </button>
-      <a href="#dashboard" class="brand-logo" id="brandLogoBtn">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
-        NexStock
-      </a>
-      <span class="badge-pill badge-blue" id="topbarVersionBadge">v0.1.0 Phase 5</span>
-    </div>
-
-    <div class="topbar-context" id="topbarContext">
-      <div class="context-selector" id="topbarTenantContext" style="cursor: pointer;" title="Click to switch organization">
-        <span>Org:</span> <strong id="topbarTenantName">—</strong>
-        <span class="badge-pill badge-green" id="topbarPlanBadge">TRIAL</span>
-      </div>
-
-      <div class="context-selector" id="topbarBranchContext">
-        <span>Branch:</span> <strong id="topbarBranchName">—</strong>
-      </div>
-
-      <div class="context-selector" id="topbarRoleContext">
-        <span>Role:</span> <strong id="topbarUserRole">—</strong>
-      </div>
-    </div>
-
-    <div class="topbar-actions">
-      <div id="topbarAuthActions" style="display: flex; align-items: center; gap: 8px;">
-        <span id="topbarUserName" style="font-size: 13px; font-weight: 500; color: var(--text-secondary);"></span>
-        <button class="btn btn-secondary btn-sm" id="btnSignOut" title="Sign out of your account">
-          Sign Out
+    <div class="topbar-primary-row">
+      <div class="brand-section">
+        <button class="mobile-menu-toggle" id="mobileMenuToggle" aria-label="Toggle navigation menu">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
         </button>
+        <a href="#dashboard" class="brand-logo" id="brandLogoBtn">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+          NexStock
+        </a>
+        <span class="badge-pill badge-blue" id="topbarVersionBadge">v0.1.0 Phase 5</span>
       </div>
 
-      <button class="btn-icon" id="btnThemeToggle" title="Toggle Dark/Light Mode">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
-      </button>
+      <div class="topbar-context" id="topbarContext">
+        <div class="context-selector" id="topbarTenantContext" style="cursor: pointer;" title="Click to switch organization">
+          <span>Org:</span> <strong id="topbarTenantName">—</strong>
+          <span class="badge-pill badge-green" id="topbarPlanBadge">TRIAL</span>
+        </div>
 
-      <div class="badge-pill badge-green" id="topbarSyncStatus" title="System Status">
-        ● Connected
+        <div class="context-selector" id="topbarBranchContext">
+          <span>Branch:</span> <strong id="topbarBranchName">—</strong>
+        </div>
+
+        <div class="context-selector" id="topbarRoleContext">
+          <span>Role:</span> <strong id="topbarUserRole">—</strong>
+        </div>
+      </div>
+
+      <div class="topbar-actions">
+        <div id="topbarAuthActions" style="display: flex; align-items: center; gap: 8px;">
+          <span id="topbarUserName" style="font-size: 13px; font-weight: 500; color: var(--text-secondary);"></span>
+          <button class="btn btn-secondary btn-sm" id="btnSignOut" title="Sign out of your account">
+            Sign Out
+          </button>
+        </div>
+
+        <button class="btn-icon" id="btnThemeToggle" title="Toggle Dark/Light Mode">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
+        </button>
+
+        <div class="badge-pill badge-green" id="topbarSyncStatus" title="System Status">
+          ● Connected
+        </div>
+      </div>
+    </div>
+
+    <!-- Mobile Context Subbar: displays active Tenant & Branch cleanly without cramping Row 1 -->
+    <div class="topbar-mobile-subbar" id="topbarMobileSubbar" style="display: none;">
+      <div class="mobile-subbar-tenant" id="topbarMobileTenantBtn" title="Switch Organization">
+        <span class="subbar-label">Org:</span>
+        <strong id="topbarMobileTenantName" class="subbar-tenant-name">—</strong>
+        <span class="badge-pill badge-green" id="topbarMobilePlanBadge">TRIAL</span>
+      </div>
+      <div class="mobile-subbar-branch" id="topbarMobileBranchContext">
+        <span class="subbar-divider">•</span>
+        <span id="topbarMobileBranchName" class="subbar-branch-name">—</span>
       </div>
     </div>
   </header>
@@ -1396,11 +1553,17 @@
     function resolveApiBaseUrl() {
       if (typeof window !== 'undefined') {
         if (window.__NEXSTOCK_API_URL__) {
-          return window.__NEXSTOCK_API_URL__;
+          const custom = String(window.__NEXSTOCK_API_URL__).trim().replace(/\/+$/, '');
+          if (custom && custom !== 'undefined' && custom !== 'null') return custom;
         }
         try {
           const stored = localStorage.getItem('nexstock_api_url');
-          if (stored) return stored;
+          if (stored && typeof stored === 'string') {
+            const trimmed = stored.trim().replace(/\/+$/, '');
+            if (trimmed !== '' && trimmed !== 'undefined' && trimmed !== 'null') {
+              return trimmed;
+            }
+          }
         } catch {
           // Ignore localStorage security/privacy restrictions if restricted
         }
@@ -1471,6 +1634,14 @@
 
     // API Client with automatic auth, tenant header, and idempotency key
     async function apiFetch(endpoint, options = {}) {
+      const rawBase = (state.apiBaseUrl && typeof state.apiBaseUrl === 'string' && state.apiBaseUrl.trim() !== '')
+        ? state.apiBaseUrl.trim()
+        : resolveApiBaseUrl();
+      const baseUrl = rawBase.replace(/\/+$/, '');
+      const rawEndpoint = String(endpoint || '').trim();
+      const normalizedEndpoint = rawEndpoint.startsWith('/') ? rawEndpoint : `/${rawEndpoint}`;
+      const url = `${baseUrl}${normalizedEndpoint}`;
+
       const headers = {
         'Content-Type': 'application/json',
         ...(state.tenantId ? { 'x-tenant-id': state.tenantId } : {}),
@@ -1485,7 +1656,7 @@
       }
 
       try {
-        const res = await fetch(`${state.apiBaseUrl}${endpoint}`, {
+        const res = await fetch(url, {
           ...options,
           headers
         });
@@ -1512,14 +1683,28 @@
       }
     }
 
-    // Modal Manager
-    function openModal({ title, bodyHtml, footerHtml }) {
-      document.getElementById('modalTitle').innerText = title;
-      document.getElementById('modalBody').innerHTML = bodyHtml;
-      document.getElementById('modalFooter').innerHTML = footerHtml || `
-        <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-      `;
-      document.getElementById('modalContainer').classList.add('active');
+    // Modal Manager: supports both object config { title, bodyHtml, footerHtml } and HTML string
+    function openModal(optionsOrHtml) {
+      const titleEl = document.getElementById('modalTitle');
+      const bodyEl = document.getElementById('modalBody');
+      const footerEl = document.getElementById('modalFooter');
+      const containerEl = document.getElementById('modalContainer');
+
+      if (typeof optionsOrHtml === 'string') {
+        if (titleEl) titleEl.innerText = '';
+        if (bodyEl) bodyEl.innerHTML = optionsOrHtml;
+        if (footerEl) footerEl.innerHTML = '';
+      } else if (optionsOrHtml && typeof optionsOrHtml === 'object') {
+        const { title = '', bodyHtml = '', footerHtml } = optionsOrHtml;
+        if (titleEl) titleEl.innerText = title;
+        if (bodyEl) bodyEl.innerHTML = bodyHtml;
+        if (footerEl) {
+          footerEl.innerHTML = footerHtml !== undefined ? footerHtml : `
+            <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          `;
+        }
+      }
+      if (containerEl) containerEl.classList.add('active');
     }
 
     function closeModal() {
@@ -1570,7 +1755,7 @@
         state.warehouseId = '';
       }
 
-      // Update Topbar context
+      // Update Topbar context (Desktop)
       const tenantEl = document.getElementById('topbarTenantName');
       if (tenantEl) tenantEl.innerText = state.tenantName;
       const planEl = document.getElementById('topbarPlanBadge');
@@ -1579,6 +1764,19 @@
       if (branchEl) branchEl.innerText = state.branchName;
       const roleEl = document.getElementById('topbarUserRole');
       if (roleEl) roleEl.innerText = state.userRole;
+
+      // Update Topbar context (Mobile Subbar)
+      const mobileTenantEl = document.getElementById('topbarMobileTenantName');
+      if (mobileTenantEl) mobileTenantEl.innerText = state.tenantName;
+      const mobilePlanEl = document.getElementById('topbarMobilePlanBadge');
+      if (mobilePlanEl) mobilePlanEl.innerText = state.plan;
+      const mobileBranchEl = document.getElementById('topbarMobileBranchName');
+      if (mobileBranchEl) mobileBranchEl.innerText = state.branchName;
+      const mobileSubbar = document.getElementById('topbarMobileSubbar');
+      if (mobileSubbar) {
+        const isAuthView = AUTH_VIEWS.includes(state.activeView);
+        mobileSubbar.style.display = (!isAuthView && state.tenantId) ? 'flex' : 'none';
+      }
 
       // If defaultWarehouseId was not in membership, resolve from branches API
       if (!state.warehouseId && state.tenantId) {
@@ -1649,6 +1847,13 @@
       const roleEl = document.getElementById('topbarUserRole');
       if (roleEl) roleEl.innerText = '—';
 
+      const mobileTenantEl = document.getElementById('topbarMobileTenantName');
+      if (mobileTenantEl) mobileTenantEl.innerText = '—';
+      const mobileBranchEl = document.getElementById('topbarMobileBranchName');
+      if (mobileBranchEl) mobileBranchEl.innerText = '—';
+      const mobileSubbar = document.getElementById('topbarMobileSubbar');
+      if (mobileSubbar) mobileSubbar.style.display = 'none';
+
       showToast('You have been signed out.', 'info');
       renderView('welcome');
     }
@@ -1659,6 +1864,15 @@
     const topbarTenantContext = document.getElementById('topbarTenantContext');
     if (topbarTenantContext) {
       topbarTenantContext.onclick = () => {
+        if (state.token && state.memberships && state.memberships.length > 0) {
+          renderView('tenant-select');
+        }
+      };
+    }
+
+    const topbarMobileTenantBtn = document.getElementById('topbarMobileTenantBtn');
+    if (topbarMobileTenantBtn) {
+      topbarMobileTenantBtn.onclick = () => {
         if (state.token && state.memberships && state.memberships.length > 0) {
           renderView('tenant-select');
         }
@@ -1687,6 +1901,11 @@
       const sidebar = document.querySelector('aside.sidebar');
       const topbarContext = document.getElementById('topbarContext');
       const topbarAuthActions = document.getElementById('topbarAuthActions');
+      const mobileSubbar = document.getElementById('topbarMobileSubbar');
+
+      if (mobileSubbar) {
+        mobileSubbar.style.display = (!isAuthView && state.tenantId) ? 'flex' : 'none';
+      }
 
       if (isAuthView) {
         if (sidebar) sidebar.style.display = 'none';
@@ -2770,11 +2989,17 @@
       const container = document.getElementById('mainContainer');
       try {
         const [productsRes, categoriesRes] = await Promise.all([
-          apiFetch('/v1/products?limit=100'),
-          apiFetch('/v1/categories?limit=100')
+          apiFetch('/v1/products?limit=100').catch(err => {
+            console.warn('Unable to load products from API:', err);
+            return { data: [] };
+          }),
+          apiFetch('/v1/categories?limit=100').catch(err => {
+            console.warn('Unable to load categories from API:', err);
+            return { data: [] };
+          })
         ]);
-        state.cachedProducts = productsRes.data || [];
-        state.cachedCategories = categoriesRes.data || [];
+        state.cachedProducts = productsRes?.data || (Array.isArray(productsRes) ? productsRes : []);
+        state.cachedCategories = categoriesRes?.data || (Array.isArray(categoriesRes) ? categoriesRes : []);
 
         container.innerHTML = `
           <div class="view-header">
@@ -2806,30 +3031,47 @@
                   </tr>
                 </thead>
                 <tbody>
-                  ${state.cachedProducts.map(p => `
-                    <tr data-sku="${p.sku.toLowerCase()}" data-name="${p.name.toLowerCase()}" data-barcode="${(p.primaryBarcode || '').toLowerCase()}">
-                      <td><strong>${p.sku}</strong></td>
-                      <td>${p.name}</td>
-                      <td><span class="badge-pill badge-blue">${p.baseUom}</span></td>
-                      <td>$${parseFloat(p.purchaseCost).toFixed(2)}</td>
-                      <td><strong style="color: var(--accent-primary);">$${parseFloat(p.sellingPrice).toFixed(2)}</strong></td>
-                      <td><code>${p.primaryBarcode || '—'}</code></td>
-                      <td>${p.trackInventory ? '<span class="badge-pill badge-green">Tracked</span>' : '<span class="badge-pill badge-yellow">Non-Tracked</span>'}</td>
-                      <td><span class="badge-pill ${p.status === 'ACTIVE' ? 'badge-green' : 'badge-red'}">${p.status}</span></td>
-                      <td>
-                        ${p.status === 'ACTIVE' ? `
-                          <button class="btn btn-secondary btn-sm" onclick="archiveProduct('${p.id}', '${p.name}')">Archive</button>
-                        ` : '—'}
+                  ${state.cachedProducts.length === 0 ? `
+                    <tr>
+                      <td colspan="9" style="text-align: center; padding: 32px; color: var(--text-secondary);">
+                        No products found. Click "+ Add Product" to create your first SKU.
                       </td>
                     </tr>
-                  `).join('')}
+                  ` : state.cachedProducts.map(p => {
+                    const sku = escapeHtml(p.sku);
+                    const name = escapeHtml(p.name);
+                    const barcode = escapeHtml(p.primaryBarcode || '—');
+                    const uom = escapeHtml(p.baseUom || 'UNIT');
+                    const cost = parseFloat(p.purchaseCost || 0).toFixed(2);
+                    const price = parseFloat(p.sellingPrice || 0).toFixed(2);
+                    const isTracked = p.trackInventory !== false;
+                    const isActive = p.status === 'ACTIVE' || p.isActive === true;
+
+                    return `
+                      <tr data-sku="${sku.toLowerCase()}" data-name="${name.toLowerCase()}" data-barcode="${barcode.toLowerCase()}">
+                        <td><strong>${sku}</strong></td>
+                        <td>${name}</td>
+                        <td><span class="badge-pill badge-blue">${uom}</span></td>
+                        <td>$${cost}</td>
+                        <td><strong style="color: var(--accent-primary);">$${price}</strong></td>
+                        <td><code>${barcode}</code></td>
+                        <td>${isTracked ? '<span class="badge-pill badge-green">Tracked</span>' : '<span class="badge-pill badge-yellow">Non-Tracked</span>'}</td>
+                        <td><span class="badge-pill ${isActive ? 'badge-green' : 'badge-red'}">${isActive ? 'ACTIVE' : 'ARCHIVED'}</span></td>
+                        <td>
+                          ${isActive ? `
+                            <button class="btn btn-secondary btn-sm" onclick="archiveProduct('${p.id}', '${sku}')">Archive</button>
+                          ` : '—'}
+                        </td>
+                      </tr>
+                    `;
+                  }).join('')}
                 </tbody>
               </table>
             </div>
           </div>
         `;
       } catch (err) {
-        container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load products: ${err.message}</div>`;
+        container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load products: ${escapeHtml(err.message)}</div>`;
       }
     }
 
@@ -2949,8 +3191,8 @@
     async function renderCategoriesView() {
       const container = document.getElementById('mainContainer');
       try {
-        const res = await apiFetch('/v1/categories?limit=100');
-        state.cachedCategories = res.data || [];
+        const res = await apiFetch('/v1/categories?limit=100').catch(() => ({ data: [] }));
+        state.cachedCategories = res?.data || (Array.isArray(res) ? res : []);
 
         container.innerHTML = `
           <div class="view-header">
@@ -2973,21 +3215,34 @@
                   </tr>
                 </thead>
                 <tbody>
-                  ${state.cachedCategories.map(c => `
+                  ${state.cachedCategories.length === 0 ? `
                     <tr>
-                      <td><strong>${c.name}</strong></td>
-                      <td>${c.description || '—'}</td>
-                      <td><span class="badge-pill ${c.status === 'ACTIVE' ? 'badge-green' : 'badge-red'}">${c.status}</span></td>
-                      <td>${new Date(c.createdAt).toLocaleDateString()}</td>
+                      <td colspan="4" style="text-align: center; padding: 32px; color: var(--text-secondary);">
+                        No categories found. Click "+ Add Category" to create your first category.
+                      </td>
                     </tr>
-                  `).join('')}
+                  ` : state.cachedCategories.map(c => {
+                    const name = escapeHtml(c.name);
+                    const desc = escapeHtml(c.description || '—');
+                    const isActive = c.status === 'ACTIVE' || c.isActive === true;
+                    const dateStr = c.createdAt ? new Date(c.createdAt).toLocaleDateString() : '—';
+
+                    return `
+                      <tr>
+                        <td><strong>${name}</strong></td>
+                        <td>${desc}</td>
+                        <td><span class="badge-pill ${isActive ? 'badge-green' : 'badge-red'}">${isActive ? 'ACTIVE' : 'ARCHIVED'}</span></td>
+                        <td>${dateStr}</td>
+                      </tr>
+                    `;
+                  }).join('')}
                 </tbody>
               </table>
             </div>
           </div>
         `;
       } catch (err) {
-        container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load categories: ${err.message}</div>`;
+        container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load categories: ${escapeHtml(err.message)}</div>`;
       }
     }
 
@@ -3033,8 +3288,8 @@
     async function renderSuppliersView() {
       const container = document.getElementById('mainContainer');
       try {
-        const res = await apiFetch('/v1/suppliers?limit=100');
-        state.cachedSuppliers = res.data || [];
+        const res = await apiFetch('/v1/suppliers?limit=100').catch(() => ({ data: [] }));
+        state.cachedSuppliers = res?.data || (Array.isArray(res) ? res : []);
 
         container.innerHTML = `
           <div class="view-header">
@@ -3060,24 +3315,40 @@
                   </tr>
                 </thead>
                 <tbody>
-                  ${state.cachedSuppliers.map(s => `
+                  ${state.cachedSuppliers.length === 0 ? `
                     <tr>
-                      <td><strong>${s.code}</strong></td>
-                      <td>${s.name}</td>
-                      <td>${s.contactPerson || '—'}</td>
-                      <td><a href="mailto:${s.email || ''}">${s.email || '—'}</a></td>
-                      <td>${s.phone || '—'}</td>
-                      <td><span class="badge-pill badge-blue">${s.currencyCode}</span></td>
-                      <td><span class="badge-pill ${s.isActive ? 'badge-green' : 'badge-red'}">${s.isActive ? 'ACTIVE' : 'INACTIVE'}</span></td>
+                      <td colspan="7" style="text-align: center; padding: 32px; color: var(--text-secondary);">
+                        No suppliers found. Click "+ Add Supplier" to register your first procurement partner.
+                      </td>
                     </tr>
-                  `).join('')}
+                  ` : state.cachedSuppliers.map(s => {
+                    const code = escapeHtml(s.code);
+                    const name = escapeHtml(s.name);
+                    const contact = escapeHtml(s.contactPerson || '—');
+                    const email = escapeHtml(s.email || '');
+                    const phone = escapeHtml(s.phone || '—');
+                    const curr = escapeHtml(s.currencyCode || state.currency || 'USD');
+                    const isActive = s.isActive ?? (s.status === 'ACTIVE');
+
+                    return `
+                      <tr>
+                        <td><strong>${code}</strong></td>
+                        <td>${name}</td>
+                        <td>${contact}</td>
+                        <td>${email ? `<a href="mailto:${email}">${email}</a>` : '—'}</td>
+                        <td>${phone}</td>
+                        <td><span class="badge-pill badge-blue">${curr}</span></td>
+                        <td><span class="badge-pill ${isActive ? 'badge-green' : 'badge-red'}">${isActive ? 'ACTIVE' : 'INACTIVE'}</span></td>
+                      </tr>
+                    `;
+                  }).join('')}
                 </tbody>
               </table>
             </div>
           </div>
         `;
       } catch (err) {
-        container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load suppliers: ${err.message}</div>`;
+        container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load suppliers: ${escapeHtml(err.message)}</div>`;
       }
     }
 
@@ -3135,8 +3406,8 @@
             contactPerson,
             email,
             phone,
-            countryCode: 'US',
-            currencyCode: 'USD'
+            countryCode: state.countryCode || 'US',
+            currencyCode: state.currency || 'USD'
           })
         });
         showToast(`Supplier ${code} created`, 'success');
@@ -3152,8 +3423,8 @@
       const container = document.getElementById('mainContainer');
       try {
         const whParam = state.warehouseId ? `warehouseId=${encodeURIComponent(state.warehouseId)}&` : '';
-        const movementsRes = await apiFetch(`/v1/inventory/movements?${whParam}limit=50`);
-        const movements = movementsRes.data || [];
+        const movementsRes = await apiFetch(`/v1/inventory/movements?${whParam}limit=50`).catch(() => ({ data: [] }));
+        const movements = movementsRes?.data || (Array.isArray(movementsRes) ? movementsRes : []);
 
         container.innerHTML = `
           <div class="view-header">
@@ -3180,31 +3451,49 @@
                   </tr>
                 </thead>
                 <tbody>
-                  ${movements.map(m => `
+                  ${movements.length === 0 ? `
                     <tr>
-                      <td>${new Date(m.createdAt).toLocaleString()}</td>
-                      <td><span class="badge-pill ${m.movementType.includes('IN') || m.movementType.includes('RETURN') ? 'badge-green' : 'badge-yellow'}">${m.movementType}</span></td>
-                      <td><strong>${m.productSku}</strong> (${m.productName})</td>
-                      <td style="font-weight: 700; color: ${parseFloat(m.quantity) >= 0 ? 'var(--status-success)' : 'var(--status-danger)'};">
-                        ${parseFloat(m.quantity) > 0 ? '+' : ''}${parseFloat(m.quantity).toFixed(0)} ${m.uomCode}
-                      </td>
-                      <td>$${parseFloat(m.unitCost).toFixed(2)}</td>
-                      <td><strong>${parseFloat(m.balanceAfter).toFixed(0)}</strong></td>
-                      <td><code>${m.referenceType || 'MANUAL'}</code></td>
-                      <td>
-                        ${!m.reversedEntryId && m.movementType !== 'CUSTOMER_RETURN_RESTOCK' ? `
-                          <button class="btn btn-secondary btn-sm" onclick="reverseStockMovement('${m.id}', '${m.productSku}')">Reverse</button>
-                        ` : '—'}
+                      <td colspan="8" style="text-align: center; padding: 32px; color: var(--text-secondary);">
+                        No stock movements recorded yet. Click "+ Post Movement" to record stock changes.
                       </td>
                     </tr>
-                  `).join('')}
+                  ` : movements.map(m => {
+                    const mType = escapeHtml(m.movementType);
+                    const sku = escapeHtml(m.productSku);
+                    const pName = escapeHtml(m.productName);
+                    const uom = escapeHtml(m.uomCode || 'UNIT');
+                    const qty = parseFloat(m.quantity || 0);
+                    const unitCost = parseFloat(m.unitCost || 0).toFixed(2);
+                    const balAfter = parseFloat(m.balanceAfter || 0).toFixed(0);
+                    const refType = escapeHtml(m.referenceType || 'MANUAL');
+                    const dateStr = m.createdAt ? new Date(m.createdAt).toLocaleString() : '—';
+
+                    return `
+                      <tr>
+                        <td>${dateStr}</td>
+                        <td><span class="badge-pill ${mType.includes('IN') || mType.includes('RETURN') ? 'badge-green' : 'badge-yellow'}">${mType}</span></td>
+                        <td><strong>${sku}</strong> (${pName})</td>
+                        <td style="font-weight: 700; color: ${qty >= 0 ? 'var(--status-success)' : 'var(--status-danger)'};">
+                          ${qty > 0 ? '+' : ''}${qty.toFixed(0)} ${uom}
+                        </td>
+                        <td>$${unitCost}</td>
+                        <td><strong>${balAfter}</strong></td>
+                        <td><code>${refType}</code></td>
+                        <td>
+                          ${!m.reversedEntryId && m.movementType !== 'CUSTOMER_RETURN_RESTOCK' ? `
+                            <button class="btn btn-secondary btn-sm" onclick="reverseStockMovement('${m.id}', '${sku}')">Reverse</button>
+                          ` : '—'}
+                        </td>
+                      </tr>
+                    `;
+                  }).join('')}
                 </tbody>
               </table>
             </div>
           </div>
         `;
       } catch (err) {
-        container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load movements: ${err.message}</div>`;
+        container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load movements: ${escapeHtml(err.message)}</div>`;
       }
     }
 
@@ -3303,8 +3592,8 @@
       const container = document.getElementById('mainContainer');
       try {
         const whParam = state.warehouseId ? `warehouseId=${encodeURIComponent(state.warehouseId)}&` : '';
-        const res = await apiFetch(`/v1/inventory/balances?${whParam}limit=100`);
-        const balances = res.data || [];
+        const res = await apiFetch(`/v1/inventory/balances?${whParam}limit=100`).catch(() => ({ data: [] }));
+        const balances = res?.data || (Array.isArray(res) ? res : []);
 
         container.innerHTML = `
           <div class="view-header">
@@ -3329,7 +3618,15 @@
                   </tr>
                 </thead>
                 <tbody>
-                  ${balances.map(b => {
+                  ${balances.length === 0 ? `
+                    <tr>
+                      <td colspan="7" style="text-align: center; padding: 32px; color: var(--text-secondary);">
+                        No inventory balances on record for this warehouse.
+                      </td>
+                    </tr>
+                  ` : balances.map(b => {
+                    const sku = escapeHtml(b.sku);
+                    const name = escapeHtml(b.productName);
                     const avail = parseFloat(b.availableQty ?? b.availableQuantity ?? '0');
                     const ro = parseFloat(b.reorderPoint || '0');
                     let badge = '<span class="badge-pill badge-green">In Stock</span>';
@@ -3338,8 +3635,8 @@
 
                     return `
                       <tr>
-                        <td><strong>${b.sku}</strong></td>
-                        <td>${b.productName}</td>
+                        <td><strong>${sku}</strong></td>
+                        <td>${name}</td>
                         <td><strong>${formatQty(b.qtyOnHand)}</strong></td>
                         <td>${formatQty(b.qtyReserved)}</td>
                         <td style="color: var(--accent-primary); font-weight: 700;">${formatQty(avail)}</td>
@@ -3354,7 +3651,7 @@
           </div>
         `;
       } catch (err) {
-        container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load balances: ${err.message}</div>`;
+        container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load balances: ${escapeHtml(err.message)}</div>`;
       }
     }
 
@@ -3893,8 +4190,9 @@
       const container = document.getElementById('mainContainer');
       try {
         const regParam = state.branchId ? `?branchId=${encodeURIComponent(state.branchId)}` : '';
-        const registers = await apiFetch(`/v1/pos/registers${regParam}`);
-        state.cachedRegisters = registers || [];
+        const res = await apiFetch(`/v1/pos/registers${regParam}`).catch(() => []);
+        const registers = Array.isArray(res) ? res : (res?.data || []);
+        state.cachedRegisters = registers;
 
         container.innerHTML = `
           <div class="view-header">
@@ -3917,24 +4215,39 @@
                   </tr>
                 </thead>
                 <tbody>
-                  ${registers.map(r => `
+                  ${registers.length === 0 ? `
                     <tr>
-                      <td><strong>${r.code}</strong></td>
-                      <td>${r.name}</td>
-                      <td><span class="badge-pill ${r.status === 'ACTIVE' ? 'badge-green' : 'badge-red'}">${r.status}</span></td>
-                      <td><code>${r.code}-${r.lastInvoiceSeq.toString().padStart(6, '0')}</code></td>
-                      <td>
-                        <button class="btn btn-primary btn-sm" onclick="selectRegister('${r.id}', '${r.code}')">Use for POS</button>
+                      <td colspan="5" style="text-align: center; padding: 32px; color: var(--text-secondary);">
+                        No POS registers found for this branch. Contact administrator to configure registers.
                       </td>
                     </tr>
-                  `).join('')}
+                  ` : registers.map(r => {
+                    const code = escapeHtml(r.code);
+                    const name = escapeHtml(r.name);
+                    const isActive = r.isActive ?? (r.status === 'ACTIVE');
+                    const lastInvoice = (r.lastInvoiceSeq != null)
+                      ? `${code}-${String(r.lastInvoiceSeq).padStart(6, '0')}`
+                      : '—';
+
+                    return `
+                      <tr>
+                        <td><strong>${code}</strong></td>
+                        <td>${name}</td>
+                        <td><span class="badge-pill ${isActive ? 'badge-green' : 'badge-red'}">${isActive ? 'ACTIVE' : 'INACTIVE'}</span></td>
+                        <td><code>${lastInvoice}</code></td>
+                        <td>
+                          <button class="btn btn-primary btn-sm" onclick="selectRegister('${r.id}', '${code}')">Use for POS</button>
+                        </td>
+                      </tr>
+                    `;
+                  }).join('')}
                 </tbody>
               </table>
             </div>
           </div>
         `;
       } catch (err) {
-        container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load registers: ${err.message}</div>`;
+        container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load registers: ${escapeHtml(err.message)}</div>`;
       }
     }
 
@@ -3948,9 +4261,11 @@
       const container = document.getElementById('mainContainer');
       try {
         let activeShift = null;
-        try {
-          activeShift = await apiFetch(`/v1/pos/shifts/active?registerId=${state.registerId}`);
-        } catch (e) {}
+        if (state.registerId) {
+          try {
+            activeShift = await apiFetch(`/v1/pos/shifts/active?registerId=${encodeURIComponent(state.registerId)}`, { silent: true });
+          } catch (e) {}
+        }
 
         container.innerHTML = `
           <div class="view-header">
@@ -4692,7 +5007,27 @@
     async function renderValuationView() {
       const container = document.getElementById('mainContainer');
       try {
-        const whParam = state.warehouseId ? `?warehouseId=${encodeURIComponent(state.warehouseId)}` : '';
+        if (!state.warehouseId) {
+          container.innerHTML = `
+            <div class="view-header">
+              <div>
+                <h1 class="view-title">Inventory Costing &amp; Asset Valuation</h1>
+                <div class="view-subtitle">Real-time asset balance sheet, Moving Average Cost, and FIFO chronological layers</div>
+              </div>
+            </div>
+            <div class="card" style="text-align: center; padding: 48px 24px;">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" stroke-width="1.5" style="margin-bottom: 12px;"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path></svg>
+              <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 8px;">Warehouse Assignment Required</h3>
+              <p style="color: var(--text-secondary); max-width: 480px; margin: 0 auto 16px;">
+                Asset valuation is strictly warehouse-scoped in NexStock. Please select or initialize a warehouse branch to view real-time valuation metrics.
+              </p>
+              <button class="btn btn-primary" onclick="renderView('dashboard')">Return to Dashboard</button>
+            </div>
+          `;
+          return;
+        }
+
+        const whParam = `?warehouseId=${encodeURIComponent(state.warehouseId)}`;
         const valRes = await apiFetch(`/v1/inventory/valuation${whParam}`, { silent: true }).catch(() => ({
           totalAssetValue: '0.0000',
           currencyCode: state.currency || 'USD',
@@ -4749,24 +5084,26 @@
                   </tr>
                 </thead>
                 <tbody>
-                  ${items.length === 0 ? '<tr><td colspan="9" style="text-align: center; color: var(--text-secondary);">No inventory balances recorded yet.</td></tr>' : ''}
+                  ${items.length === 0 ? '<tr><td colspan="9" style="text-align: center; padding: 32px; color: var(--text-secondary);">No inventory balances recorded yet.</td></tr>' : ''}
                   ${items.map(i => {
+                    const sku = escapeHtml(i.sku);
+                    const name = escapeHtml(i.productName);
                     const methodBadge = i.valuationMethod === 'FIFO'
                       ? '<span class="badge-pill badge-blue">FIFO</span>'
                       : '<span class="badge-pill badge-green">MOVING_AVG</span>';
 
                     return `
                       <tr>
-                        <td><strong>${i.sku}</strong></td>
-                        <td>${i.productName}</td>
+                        <td><strong>${sku}</strong></td>
+                        <td>${name}</td>
                         <td>${methodBadge}</td>
                         <td>${formatQty(i.qtyOnHand)}</td>
-                        <td>$${parseFloat(i.movingAvgCost).toFixed(2)}</td>
-                        <td><strong>$${parseFloat(i.totalInventoryValue).toFixed(2)}</strong></td>
-                        <td>${i.openLayersCount}</td>
-                        <td>${i.activeBatchesCount}</td>
+                        <td>$${parseFloat(i.movingAvgCost || 0).toFixed(2)}</td>
+                        <td><strong>$${parseFloat(i.totalInventoryValue || 0).toFixed(2)}</strong></td>
+                        <td>${i.openLayersCount || 0}</td>
+                        <td>${i.activeBatchesCount || 0}</td>
                         <td>
-                          <button class="btn btn-secondary btn-sm" onclick="drilldownFifoLayers('${i.productId}', '${i.sku}')">Inspect Layers</button>
+                          <button class="btn btn-secondary btn-sm" onclick="drilldownFifoLayers('${i.productId}', '${sku}')">Inspect Layers</button>
                         </td>
                       </tr>
                     `;
@@ -4777,47 +5114,53 @@
           </div>
         `;
       } catch (err) {
-        container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load valuation: ${err.message}</div>`;
+        container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load valuation: ${escapeHtml(err.message)}</div>`;
       }
     }
 
     async function drilldownFifoLayers(productId, sku) {
+      if (!state.warehouseId) {
+        showToast('Please select a warehouse to inspect FIFO layers', 'warning');
+        return;
+      }
       try {
-        const whParam = state.warehouseId ? `&warehouseId=${encodeURIComponent(state.warehouseId)}` : '';
+        const whParam = `&warehouseId=${encodeURIComponent(state.warehouseId)}`;
         const layers = await apiFetch(`/v1/inventory/cost-layers?productId=${encodeURIComponent(productId)}${whParam}`, { silent: true }).catch(() => []);
+        const layerList = Array.isArray(layers) ? layers : (layers?.data || []);
 
-        const html = `
-          <div style="font-size: 18px; font-weight: 700; margin-bottom: 16px;">FIFO Cost Layers for ${sku}</div>
-          <div class="table-responsive">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th>Layer Date</th>
-                  <th>Received Qty</th>
-                  <th>Remaining Qty</th>
-                  <th>Layer Unit Cost</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${layers.length === 0 ? '<tr><td colspan="5" style="text-align: center; color: var(--text-secondary);">No FIFO layers found for this product.</td></tr>' : ''}
-                ${layers.map(l => `
+        openModal({
+          title: `FIFO Cost Layers: ${escapeHtml(sku)}`,
+          bodyHtml: `
+            <div class="table-responsive">
+              <table class="data-table">
+                <thead>
                   <tr>
-                    <td>${new Date(l.layerDate).toLocaleDateString()} ${new Date(l.layerDate).toLocaleTimeString()}</td>
-                    <td>${formatQty(l.receivedQty)}</td>
-                    <td><strong>${formatQty(l.remainingQty)}</strong></td>
-                    <td>$${parseFloat(l.unitCost).toFixed(2)}</td>
-                    <td><span class="badge-pill ${l.status === 'OPEN' ? 'badge-green' : 'badge-yellow'}">${l.status}</span></td>
+                    <th>Layer Date</th>
+                    <th>Received Qty</th>
+                    <th>Remaining Qty</th>
+                    <th>Layer Unit Cost</th>
+                    <th>Status</th>
                   </tr>
-                `).join('')}
-              </tbody>
-            </table>
-          </div>
-          <div style="display: flex; justify-content: flex-end; margin-top: 16px;">
+                </thead>
+                <tbody>
+                  ${layerList.length === 0 ? '<tr><td colspan="5" style="text-align: center; padding: 24px; color: var(--text-secondary);">No open FIFO layers found for this product.</td></tr>' : ''}
+                  ${layerList.map(l => `
+                    <tr>
+                      <td>${l.layerDate ? new Date(l.layerDate).toLocaleString() : '—'}</td>
+                      <td>${formatQty(l.receivedQty)}</td>
+                      <td><strong>${formatQty(l.remainingQty)}</strong></td>
+                      <td>$${parseFloat(l.unitCost || 0).toFixed(2)}</td>
+                      <td><span class="badge-pill ${l.status === 'OPEN' ? 'badge-green' : 'badge-yellow'}">${escapeHtml(l.status)}</span></td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          `,
+          footerHtml: `
             <button class="btn btn-secondary" onclick="closeModal()">Close</button>
-          </div>
-        `;
-        openModal(html);
+          `
+        });
       } catch (err) {
         showToast(`Failed to load layers: ${err.message}`, 'error');
       }
