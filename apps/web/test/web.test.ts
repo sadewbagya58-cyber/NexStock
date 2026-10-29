@@ -15,6 +15,7 @@ import {
   getWebThemeTokens,
   isSessionAuthenticated,
   resolveWebApiClientUrl,
+  escapeHtml,
 } from '../src/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -181,6 +182,45 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
 
       // Verifies seamless transition to business onboarding
       expect(html).toContain("renderView('onboard-business');");
+    });
+
+    it('verifies escapeHtml sanitizes special characters and safely handles primitives', () => {
+      expect(escapeHtml('Hello World')).toBe('Hello World');
+      expect(escapeHtml('<script>alert("xss")</script>')).toBe(
+        '&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;',
+      );
+      expect(escapeHtml("Tom & Jerry's")).toBe('Tom &amp; Jerry&#39;s');
+      expect(escapeHtml('<img src=x onerror=alert(1)>')).toBe(
+        '&lt;img src=x onerror=alert(1)&gt;',
+      );
+      expect(escapeHtml('')).toBe('');
+      expect(escapeHtml(null)).toBe('');
+      expect(escapeHtml(undefined)).toBe('');
+      expect(escapeHtml(12345)).toBe('12345');
+      expect(escapeHtml(false)).toBe('false');
+    });
+
+    it('verifies public/index.html defines escapeHtml globally and hardens signup and login error handling', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // Verifies global escapeHtml declaration and window attachment
+      expect(html).toContain('function escapeHtml(str)');
+      expect(html).toContain('window.escapeHtml = escapeHtml;');
+
+      // Verifies escapeHtml is applied to user email in verification banner
+      expect(html).toContain('${escapeHtml(email)}');
+
+      // Verifies safe JSON parsing and hardened error fallbacks in handleSignUpSubmit
+      expect(html).toContain('let data = {};');
+      expect(html).toContain('data = await res.json();');
+      expect(html).toContain('data?.detail ||');
+      expect(html).toContain('data?.title ||');
+      expect(html).toContain('data?.message ||');
+
+      // Verifies alert and submit button elements are checked before mutation
+      expect(html).toContain('if (alertEl)');
+      expect(html).toContain('if (submitBtn)');
     });
   });
 });

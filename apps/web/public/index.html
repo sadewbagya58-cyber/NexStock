@@ -905,6 +905,20 @@
       return 'https://nexstock-vu5i.onrender.com';
     }
 
+    // Helper: HTML Escaping for safe DOM interpolation and XSS mitigation
+    function escapeHtml(str) {
+      if (str === null || str === undefined) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+    if (typeof window !== 'undefined') {
+      window.escapeHtml = escapeHtml;
+    }
+
     // State Store (Phase 5.0 Authentication & Tenant Scoped)
     const state = {
       apiBaseUrl: resolveApiBaseUrl(),
@@ -1296,14 +1310,16 @@
 
     async function handleLoginSubmit(event) {
       event.preventDefault();
-      const email = document.getElementById('loginEmail').value.trim();
-      const password = document.getElementById('loginPassword').value;
+      const email = (document.getElementById('loginEmail')?.value || '').trim();
+      const password = document.getElementById('loginPassword')?.value || '';
       const alertEl = document.getElementById('loginAlert');
       const submitBtn = document.getElementById('loginSubmitBtn');
 
-      alertEl.style.display = 'none';
-      submitBtn.disabled = true;
-      submitBtn.innerText = 'Signing in...';
+      if (alertEl) alertEl.style.display = 'none';
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.innerText = 'Signing in...';
+      }
 
       try {
         const res = await fetch(`${state.apiBaseUrl}/v1/auth/login`, {
@@ -1312,9 +1328,23 @@
           body: JSON.stringify({ email, password })
         });
 
-        const data = await res.json();
+        let data = {};
+        try {
+          data = await res.json();
+        } catch {
+          data = {};
+        }
+
         if (!res.ok) {
-          throw new Error(data?.detail || data?.title || 'Invalid email or password.');
+          const errorMsg =
+            data?.detail ||
+            data?.title ||
+            data?.message ||
+            data?.error_description ||
+            data?.error ||
+            (res.statusText ? `Sign in failed (${res.status} ${res.statusText})` : null) ||
+            'Invalid email or password.';
+          throw new Error(errorMsg);
         }
 
         const sessionToken = data.token || data.accessToken;
@@ -1343,10 +1373,15 @@
           renderView('tenant-select');
         }
       } catch (err) {
-        alertEl.innerText = err.message;
-        alertEl.style.display = 'block';
-        submitBtn.disabled = false;
-        submitBtn.innerText = 'Sign In';
+        if (alertEl) {
+          alertEl.innerText = err?.message || 'Invalid email or password.';
+          alertEl.style.display = 'block';
+        }
+      } finally {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.innerText = 'Sign In';
+        }
       }
     }
 
@@ -1395,21 +1430,25 @@
       event.preventDefault();
       const fullNameInput = document.getElementById('signupFullName');
       const fullName = (fullNameInput ? fullNameInput.value : '').trim();
-      const email = document.getElementById('signupEmail').value.trim();
-      const password = document.getElementById('signupPassword').value;
+      const email = (document.getElementById('signupEmail')?.value || '').trim();
+      const password = document.getElementById('signupPassword')?.value || '';
       const alertEl = document.getElementById('signupAlert');
       const submitBtn = document.getElementById('signupSubmitBtn');
 
-      alertEl.style.display = 'none';
+      if (alertEl) alertEl.style.display = 'none';
 
       if (fullName.length < 2) {
-        alertEl.innerText = 'Full name must be at least 2 characters.';
-        alertEl.style.display = 'block';
+        if (alertEl) {
+          alertEl.innerText = 'Full name must be at least 2 characters.';
+          alertEl.style.display = 'block';
+        }
         return;
       }
 
-      submitBtn.disabled = true;
-      submitBtn.innerText = 'Creating account...';
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.innerText = 'Creating account...';
+      }
 
       try {
         const res = await fetch(`${state.apiBaseUrl}/v1/auth/signup`, {
@@ -1418,9 +1457,23 @@
           body: JSON.stringify({ email, password, fullName })
         });
 
-        const data = await res.json();
+        let data = {};
+        try {
+          data = await res.json();
+        } catch {
+          data = {};
+        }
+
         if (!res.ok) {
-          throw new Error(data?.detail || data?.title || 'Registration failed. Please check your information.');
+          const errorMsg =
+            data?.detail ||
+            data?.title ||
+            data?.message ||
+            data?.error_description ||
+            data?.error ||
+            (res.statusText ? `Registration failed (${res.status} ${res.statusText})` : null) ||
+            'Registration failed. Please check your information.';
+          throw new Error(errorMsg);
         }
 
         const sessionToken = data.token || data.accessToken;
@@ -1442,7 +1495,8 @@
           renderView('onboard-business');
         } else if (data.requiresEmailVerification || data.emailConfirmationRequired) {
           const container = document.getElementById('mainContainer');
-          container.innerHTML = `
+          if (container) {
+            container.innerHTML = `
             <div class="auth-wrapper">
               <div class="auth-card" style="text-align: center;">
                 <div class="auth-brand">
@@ -1459,16 +1513,21 @@
               </div>
             </div>
           `;
+          }
         } else {
           showToast('Account created! Please sign in.', 'success');
           renderView('login');
         }
       } catch (err) {
-        alertEl.innerText = err.message;
-        alertEl.style.display = 'block';
+        if (alertEl) {
+          alertEl.innerText = err?.message || 'Registration failed. Please check your information.';
+          alertEl.style.display = 'block';
+        }
       } finally {
-        submitBtn.disabled = false;
-        submitBtn.innerText = 'Create Account & Continue';
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.innerText = 'Create Account & Continue';
+        }
       }
     }
 

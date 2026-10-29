@@ -165,3 +165,16 @@ export interface WebAuthState {
 export function isSessionAuthenticated(token: string | null | undefined): boolean {
   return typeof token === 'string' && token.trim().length > 0;
 }
+
+/**
+ * Safely escapes HTML special characters to prevent XSS during dynamic DOM interpolation.
+ */
+export function escapeHtml(str: unknown): string {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
