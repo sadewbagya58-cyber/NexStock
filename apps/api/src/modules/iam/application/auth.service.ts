@@ -14,6 +14,8 @@ import {
   AppError,
   type NexStockDatabase,
   generateUuidV7,
+  sanitizeLogMessage,
+  withAppUserTransaction,
   withUserTransaction,
 } from '../../shared/index.js';
 import {
@@ -25,6 +27,12 @@ export interface AuthServiceConfig {
   readonly supabaseUrl?: string | undefined;
   readonly supabaseAnonKey?: string | undefined;
   readonly isDevOrTestMode?: boolean | undefined;
+}
+
+function isProductionEnvironment(config: AuthServiceConfig): boolean {
+  if (config.isDevOrTestMode === false) return true;
+  if (config.isDevOrTestMode === true) return false;
+  return Boolean(process.env['APP_DATABASE_URL']);
 }
 
 interface SupabaseAuthErrorBody {
@@ -67,25 +75,32 @@ export async function ensureUserRecordDirect(
     readonly email: string;
     readonly fullName: string;
   },
+  traceId?: string,
 ): Promise<void> {
-  const existing = await db
-    .selectFrom('users')
-    .select(['id', 'full_name'])
-    .where('id', '=', input.userId)
-    .executeTakeFirst();
+  await withAppUserTransaction(
+    db,
+    { userId: input.userId, traceId },
+    async (trx) => {
+      const existing = await trx
+        .selectFrom('users')
+        .select(['id', 'full_name'])
+        .where('id', '=', input.userId)
+        .executeTakeFirst();
 
-  if (!existing) {
-    await db
-      .insertInto('users')
-      .values({
-        id: input.userId,
-        email: input.email.trim().toLowerCase(),
-        full_name: input.fullName.trim(),
-        is_platform_admin: false,
-      })
-      .onConflict((oc) => oc.column('id').doNothing())
-      .execute();
-  }
+      if (!existing) {
+        await trx
+          .insertInto('users')
+          .values({
+            id: input.userId,
+            email: input.email.trim().toLowerCase(),
+            full_name: input.fullName.trim(),
+            is_platform_admin: false,
+          })
+          .onConflict((oc) => oc.column('id').doNothing())
+          .execute();
+      }
+    },
+  );
 }
 
 /**
@@ -95,7 +110,9 @@ export async function handleSignUp(
   db: Kysely<NexStockDatabase>,
   config: AuthServiceConfig,
   input: SignUpRequest,
+  traceId?: string,
 ): Promise<SignUpResponse> {
+  const currentTraceId = traceId ?? `req_${generateUuidV7()}`;
   const normalizedEmail = input.email.trim().toLowerCase();
   const fullName = input.fullName.trim();
 
@@ -108,12 +125,35 @@ export async function handleSignUp(
     });
   }
 
-  // Check local database for pre-existing email
-  const existingUser = await db
-    .selectFrom('users')
-    .select('id')
-    .where('email', '=', normalizedEmail)
-    .executeTakeFirst();
+  const supabaseUrl = config.supabaseUrl ?? process.env['SUPABASE_URL'] ?? DEFAULT_SUPABASE_URL;
+  const anonKey = config.supabaseAnonKey ?? process.env['SUPABASE_ANON_KEY'] ?? process.env['SUPABASE_PUBLISHABLE_KEY'];
+
+  // Check if live Supabase auth key is required but missing in production
+  if (isProductionEnvironment(config) && (!anonKey || anonKey === 'SET_IN_LOCAL_ENV')) {
+    console.error('[NexStock Auth Configuration Error]', {
+      traceId: currentTraceId,
+      error: 'SUPABASE_ANON_KEY (or SUPABASE_PUBLISHABLE_KEY) is missing in production environment.',
+    });
+    throw new AppError({
+      statusCode: 503,
+      errorCode: 'ERR_INTERNAL_SERVER_ERROR',
+      title: 'Authentication Service Not Configured',
+      detail: 'Supabase authentication is not configured in this environment. Set SUPABASE_ANON_KEY in Render environment variables.',
+    });
+  }
+
+  // Check local database for pre-existing email using safe app user transaction
+  const existingUser = await withAppUserTransaction(
+    db,
+    { traceId: currentTraceId },
+    async (trx) => {
+      return trx
+        .selectFrom('users')
+        .select('id')
+        .where('email', '=', normalizedEmail)
+        .executeTakeFirst();
+    },
+  );
 
   if (existingUser) {
     throw new AppError({
@@ -124,9 +164,6 @@ export async function handleSignUp(
     });
   }
 
-  const supabaseUrl = config.supabaseUrl ?? process.env['SUPABASE_URL'] ?? DEFAULT_SUPABASE_URL;
-  const anonKey = config.supabaseAnonKey ?? process.env['SUPABASE_ANON_KEY'] ?? process.env['SUPABASE_PUBLISHABLE_KEY'];
-
   // If live Supabase anon key is provided, delegate to GoTrue REST API
   if (anonKey && anonKey !== 'SET_IN_LOCAL_ENV') {
     try {
@@ -135,6 +172,7 @@ export async function handleSignUp(
         headers: {
           'Content-Type': 'application/json',
           apikey: anonKey,
+          Authorization: `Bearer ${anonKey}`,
         },
         body: JSON.stringify({
           email: normalizedEmail,
@@ -149,12 +187,30 @@ export async function handleSignUp(
 
       if (!resp.ok) {
         const errorMsg = data.msg ?? data.message ?? data.error_description ?? data.error ?? 'Registration failed.';
+        const safeSupabaseCode = data.code ?? (typeof data.error === 'string' ? data.error : undefined);
+
+        console.warn('[NexStock Supabase Auth Error]', {
+          traceId: currentTraceId,
+          operation: 'signup',
+          httpStatus: resp.status,
+          supabaseCode: safeSupabaseCode,
+          message: sanitizeLogMessage(errorMsg),
+        });
+
         if (resp.status === 422 || errorMsg.toLowerCase().includes('already') || errorMsg.toLowerCase().includes('registered')) {
           throw new AppError({
             statusCode: 409,
             errorCode: 'AUTH_EMAIL_ALREADY_EXISTS',
             title: 'Email Already Registered',
             detail: 'An account with this email address already exists. Please log in instead.',
+          });
+        }
+        if (resp.status === 400 && errorMsg.toLowerCase().includes('password')) {
+          throw new AppError({
+            statusCode: 400,
+            errorCode: 'AUTH_WEAK_PASSWORD',
+            title: 'Weak Password',
+            detail: errorMsg,
           });
         }
         throw new AppError({
@@ -167,6 +223,10 @@ export async function handleSignUp(
 
       const userId = data.user?.id ?? data.id;
       if (!userId) {
+        console.error('[NexStock Supabase Auth Missing User ID]', {
+          traceId: currentTraceId,
+          operation: 'signup',
+        });
         throw new AppError({
           statusCode: 500,
           errorCode: 'ERR_INTERNAL_SERVER_ERROR',
@@ -175,11 +235,15 @@ export async function handleSignUp(
         });
       }
 
-      await ensureUserRecordDirect(db, {
-        userId,
-        email: normalizedEmail,
-        fullName,
-      });
+      await ensureUserRecordDirect(
+        db,
+        {
+          userId,
+          email: normalizedEmail,
+          fullName,
+        },
+        currentTraceId,
+      );
 
       const token = data.access_token;
       const refreshToken = data.refresh_token;
@@ -198,22 +262,33 @@ export async function handleSignUp(
       };
     } catch (err) {
       if (err instanceof AppError) throw err;
+      const safeDetail = sanitizeLogMessage(err instanceof Error ? err.message : String(err));
+      console.error('[NexStock Auth Provider Failure]', {
+        traceId: currentTraceId,
+        operation: 'signup',
+        errorName: err instanceof Error ? err.name : typeof err,
+        detail: safeDetail,
+      });
       throw new AppError({
         statusCode: 502,
         errorCode: 'ERR_INTERNAL_SERVER_ERROR',
         title: 'Authentication Service Unavailable',
-        detail: `Failed to communicate with authentication provider: ${err instanceof Error ? err.message : String(err)}`,
+        detail: `Failed to communicate with authentication provider: ${safeDetail}`,
       });
     }
   }
 
   // Local Development / Test Fallback
   const userId = generateUuidV7();
-  await ensureUserRecordDirect(db, {
-    userId,
-    email: normalizedEmail,
-    fullName,
-  });
+  await ensureUserRecordDirect(
+    db,
+    {
+      userId,
+      email: normalizedEmail,
+      fullName,
+    },
+    currentTraceId,
+  );
 
   const token = signDevJwt({
     userId,
@@ -239,12 +314,27 @@ export async function handleLogin(
   db: Kysely<NexStockDatabase>,
   config: AuthServiceConfig,
   input: LoginRequest,
-  traceId: string,
+  traceId?: string,
 ): Promise<LoginResponse> {
+  const currentTraceId = traceId ?? `req_${generateUuidV7()}`;
   const normalizedEmail = input.email.trim().toLowerCase();
 
   const supabaseUrl = config.supabaseUrl ?? process.env['SUPABASE_URL'] ?? DEFAULT_SUPABASE_URL;
   const anonKey = config.supabaseAnonKey ?? process.env['SUPABASE_ANON_KEY'] ?? process.env['SUPABASE_PUBLISHABLE_KEY'];
+
+  // Check if live Supabase auth key is required but missing in production
+  if (isProductionEnvironment(config) && (!anonKey || anonKey === 'SET_IN_LOCAL_ENV')) {
+    console.error('[NexStock Auth Configuration Error]', {
+      traceId: currentTraceId,
+      error: 'SUPABASE_ANON_KEY (or SUPABASE_PUBLISHABLE_KEY) is missing in production environment.',
+    });
+    throw new AppError({
+      statusCode: 503,
+      errorCode: 'ERR_INTERNAL_SERVER_ERROR',
+      title: 'Authentication Service Not Configured',
+      detail: 'Supabase authentication is not configured in this environment. Set SUPABASE_ANON_KEY in Render environment variables.',
+    });
+  }
 
   if (anonKey && anonKey !== 'SET_IN_LOCAL_ENV') {
     try {
@@ -253,6 +343,7 @@ export async function handleLogin(
         headers: {
           'Content-Type': 'application/json',
           apikey: anonKey,
+          Authorization: `Bearer ${anonKey}`,
         },
         body: JSON.stringify({
           email: normalizedEmail,
@@ -263,6 +354,11 @@ export async function handleLogin(
       const data = (await resp.json()) as SupabaseSessionResponse & SupabaseAuthErrorBody;
 
       if (!resp.ok) {
+        console.warn('[NexStock Supabase Login Failed]', {
+          traceId: currentTraceId,
+          status: resp.status,
+          code: data.code ?? data.error,
+        });
         // Uniform error response to avoid leaking account existence
         throw new AppError({
           statusCode: 401,
@@ -284,13 +380,17 @@ export async function handleLogin(
       const userId = data.user.id;
       const fullName = data.user.user_metadata?.full_name ?? data.user.user_metadata?.name ?? normalizedEmail.split('@')[0] ?? 'User';
 
-      await ensureUserRecordDirect(db, {
-        userId,
-        email: normalizedEmail,
-        fullName,
-      });
+      await ensureUserRecordDirect(
+        db,
+        {
+          userId,
+          email: normalizedEmail,
+          fullName,
+        },
+        currentTraceId,
+      );
 
-      const userProfile = await getUserProfileAndMemberships(db, userId, traceId);
+      const userProfile = await getUserProfileAndMemberships(db, userId, currentTraceId);
 
       return {
         token: data.access_token,
@@ -301,21 +401,29 @@ export async function handleLogin(
       };
     } catch (err) {
       if (err instanceof AppError) throw err;
+      const safeDetail = sanitizeLogMessage(err instanceof Error ? err.message : String(err));
+      console.error('[NexStock Auth Login Failure]', {
+        traceId: currentTraceId,
+        errorName: err instanceof Error ? err.name : typeof err,
+        detail: safeDetail,
+      });
       throw new AppError({
         statusCode: 502,
         errorCode: 'ERR_INTERNAL_SERVER_ERROR',
         title: 'Authentication Service Unavailable',
-        detail: `Failed to communicate with authentication provider: ${err instanceof Error ? err.message : String(err)}`,
+        detail: `Failed to communicate with authentication provider: ${safeDetail}`,
       });
     }
   }
 
   // Local Development / Test Fallback
-  let user = await db
-    .selectFrom('users')
-    .select(['id', 'email', 'full_name'])
-    .where('email', '=', normalizedEmail)
-    .executeTakeFirst();
+  let user = await withAppUserTransaction(db, { traceId: currentTraceId }, async (trx) => {
+    return trx
+      .selectFrom('users')
+      .select(['id', 'email', 'full_name'])
+      .where('email', '=', normalizedEmail)
+      .executeTakeFirst();
+  });
 
   if (!user) {
     // In dev mode, auto-provision user if password meets minimum length
@@ -329,11 +437,15 @@ export async function handleLogin(
     }
     const userId = generateUuidV7();
     const fullName = normalizedEmail.split('@')[0] ?? 'Local Developer';
-    await ensureUserRecordDirect(db, {
-      userId,
-      email: normalizedEmail,
-      fullName,
-    });
+    await ensureUserRecordDirect(
+      db,
+      {
+        userId,
+        email: normalizedEmail,
+        fullName,
+      },
+      currentTraceId,
+    );
     user = { id: userId, email: normalizedEmail, full_name: fullName };
   }
 
@@ -343,7 +455,7 @@ export async function handleLogin(
     userMetadata: { full_name: user.full_name },
   });
 
-  const userProfile = await getUserProfileAndMemberships(db, user.id, traceId);
+  const userProfile = await getUserProfileAndMemberships(db, user.id, currentTraceId);
 
   return {
     token,
@@ -360,7 +472,9 @@ export async function handleLogin(
 export async function handleRefreshToken(
   config: AuthServiceConfig,
   input: RefreshTokenRequest,
+  traceId?: string,
 ): Promise<{ token: string; refreshToken?: string; expiresIn?: number }> {
+  const currentTraceId = traceId ?? `req_${generateUuidV7()}`;
   const supabaseUrl = config.supabaseUrl ?? process.env['SUPABASE_URL'] ?? DEFAULT_SUPABASE_URL;
   const anonKey = config.supabaseAnonKey ?? process.env['SUPABASE_ANON_KEY'] ?? process.env['SUPABASE_PUBLISHABLE_KEY'];
 
@@ -371,6 +485,7 @@ export async function handleRefreshToken(
         headers: {
           'Content-Type': 'application/json',
           apikey: anonKey,
+          Authorization: `Bearer ${anonKey}`,
         },
         body: JSON.stringify({
           refresh_token: input.refreshToken,
@@ -395,11 +510,17 @@ export async function handleRefreshToken(
       };
     } catch (err) {
       if (err instanceof AppError) throw err;
+      const safeDetail = sanitizeLogMessage(err instanceof Error ? err.message : String(err));
+      console.error('[NexStock Auth Refresh Failure]', {
+        traceId: currentTraceId,
+        errorName: err instanceof Error ? err.name : typeof err,
+        detail: safeDetail,
+      });
       throw new AppError({
         statusCode: 502,
         errorCode: 'ERR_INTERNAL_SERVER_ERROR',
         title: 'Authentication Service Unavailable',
-        detail: `Failed to communicate with authentication provider: ${err instanceof Error ? err.message : String(err)}`,
+        detail: `Failed to communicate with authentication provider: ${safeDetail}`,
       });
     }
   }
@@ -418,6 +539,7 @@ export async function handleRefreshToken(
 export async function handleLogout(
   config: AuthServiceConfig,
   token?: string,
+  traceId?: string,
 ): Promise<{ success: boolean; message: string }> {
   const supabaseUrl = config.supabaseUrl ?? process.env['SUPABASE_URL'] ?? DEFAULT_SUPABASE_URL;
   const anonKey = config.supabaseAnonKey ?? process.env['SUPABASE_ANON_KEY'] ?? process.env['SUPABASE_PUBLISHABLE_KEY'];
@@ -432,8 +554,12 @@ export async function handleLogout(
           Authorization: `Bearer ${token}`,
         },
       });
-    } catch {
+    } catch (err) {
       // Best-effort remote revocation; local session is cleared regardless
+      console.warn('[NexStock Supabase Logout Warning]', {
+        traceId,
+        message: sanitizeLogMessage(err instanceof Error ? err.message : String(err)),
+      });
     }
   }
 
@@ -447,6 +573,7 @@ export async function handlePasswordResetRequest(
   config: AuthServiceConfig,
   input: PasswordResetRequest,
   redirectTo?: string,
+  traceId?: string,
 ): Promise<{ message: string }> {
   const normalizedEmail = input.email.trim().toLowerCase();
   const supabaseUrl = config.supabaseUrl ?? process.env['SUPABASE_URL'] ?? DEFAULT_SUPABASE_URL;
@@ -459,14 +586,19 @@ export async function handlePasswordResetRequest(
         headers: {
           'Content-Type': 'application/json',
           apikey: anonKey,
+          Authorization: `Bearer ${anonKey}`,
         },
         body: JSON.stringify({
           email: normalizedEmail,
           ...(redirectTo ? { redirect_to: redirectTo } : {}),
         }),
       });
-    } catch {
+    } catch (err) {
       // Return uniform message to avoid leaking errors or timing
+      console.warn('[NexStock Supabase Recover Warning]', {
+        traceId,
+        message: sanitizeLogMessage(err instanceof Error ? err.message : String(err)),
+      });
     }
   }
 

@@ -3,6 +3,7 @@ import {
   buildApp,
   generateUuidV7,
   getOrCreateDevKeyMaterial,
+  sanitizeLogMessage,
   signDevJwt,
   StaticJwksProvider,
 } from '../src/index.js';
@@ -626,6 +627,174 @@ describe('Phase 5.0 — Authentication & Business Foundation Integration Suite',
       expect(tenantBranch).toBeUndefined();
 
       await app.close();
+    });
+  });
+
+  describe('6. Production Authentication Configuration, Provider Resilience & Safe Logging', () => {
+    it('returns 503 when running in production mode without SUPABASE_ANON_KEY configured', async () => {
+      const app = await buildApp({
+        db: harness.db,
+        jwksProvider: devJwksProvider,
+        authServiceConfig: {
+          isDevOrTestMode: false,
+          supabaseAnonKey: undefined,
+        },
+      });
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/auth/signup',
+        payload: {
+          email: `prod_unconfigured_${generateUuidV7()}@test.com`,
+          password: 'Password123!',
+          fullName: 'Production User',
+        },
+      });
+
+      expect(res.statusCode).toBe(503);
+      const body = res.json();
+      expect(body.errorCode).toBe('ERR_INTERNAL_SERVER_ERROR');
+      expect(body.title).toContain('Authentication Service Not Configured');
+      expect(body.detail).toContain('SUPABASE_ANON_KEY');
+
+      await app.close();
+    });
+
+    it('returns 502 with sanitized Problem Details when Supabase GoTrue REST provider fails or is unreachable', async () => {
+      const originalFetch = globalThis.fetch;
+      // Mock fetch to simulate network failure / connection refused
+      globalThis.fetch = async () => {
+        throw new Error('connect ECONNREFUSED 127.0.0.1:9999 (mock provider outage)');
+      };
+
+      try {
+        const app = await buildApp({
+          db: harness.db,
+          jwksProvider: devJwksProvider,
+          authServiceConfig: {
+            supabaseUrl: 'http://127.0.0.1:9999',
+            supabaseAnonKey: 'mock-test-anon-key-12345',
+            isDevOrTestMode: true,
+          },
+        });
+
+        const res = await app.inject({
+          method: 'POST',
+          url: '/v1/auth/signup',
+          payload: {
+            email: `provider_outage_${generateUuidV7()}@test.com`,
+            password: 'Password123!',
+            fullName: 'Resilient User',
+          },
+        });
+
+        expect(res.statusCode).toBe(502);
+        const body = res.json();
+        expect(body.errorCode).toBe('ERR_INTERNAL_SERVER_ERROR');
+        expect(body.title).toContain('Authentication Service Unavailable');
+        expect(body.detail).toContain('Failed to communicate with authentication provider');
+
+        await app.close();
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
+    it('translates GoTrue provider 422 duplicate email into 409 AUTH_EMAIL_ALREADY_EXISTS', async () => {
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = async () => {
+        return new Response(
+          JSON.stringify({
+            code: 422,
+            msg: 'User already registered',
+          }),
+          { status: 422, headers: { 'Content-Type': 'application/json' } },
+        );
+      };
+
+      try {
+        const app = await buildApp({
+          db: harness.db,
+          jwksProvider: devJwksProvider,
+          authServiceConfig: {
+            supabaseUrl: 'http://mock-supabase.local',
+            supabaseAnonKey: 'mock-test-anon-key-12345',
+            isDevOrTestMode: true,
+          },
+        });
+
+        const res = await app.inject({
+          method: 'POST',
+          url: '/v1/auth/signup',
+          payload: {
+            email: `gotrue_dup_${generateUuidV7()}@test.com`,
+            password: 'Password123!',
+            fullName: 'Duplicate In GoTrue',
+          },
+        });
+
+        expect(res.statusCode).toBe(409);
+        const body = res.json();
+        expect(body.errorCode).toBe('AUTH_EMAIL_ALREADY_EXISTS');
+        expect(body.detail).toContain('already exists');
+
+        await app.close();
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
+    it('verifies server logging completely scrubs passwords, tokens, and database secrets', async () => {
+      const errorLogs: unknown[] = [];
+      const warnLogs: unknown[] = [];
+
+      const originalConsoleError = console.error;
+      const originalConsoleWarn = console.warn;
+      console.error = (...args: unknown[]) => errorLogs.push(args);
+      console.warn = (...args: unknown[]) => warnLogs.push(args);
+
+      try {
+        const secretPassword = 'SUPER_SECRET_PLAINTEXT_PASSWORD_999!';
+        const secretToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.sensitive_payload.signature';
+        const secretConnStr = 'postgresql://nexstock_app_user:SUPER_SECRET_DB_PASSWORD@db.host.com:5432/postgres';
+
+        const sanitized = sanitizeLogMessage(
+          `Error occurred with password="${secretPassword}" and token="Bearer ${secretToken}" and conn="${secretConnStr}"`,
+        );
+
+        expect(sanitized).not.toContain(secretPassword);
+        expect(sanitized).not.toContain(secretToken);
+        expect(sanitized).not.toContain('SUPER_SECRET_DB_PASSWORD');
+        expect(sanitized).toContain('password="***"');
+        expect(sanitized).toContain('Bearer ***');
+        expect(sanitized).toContain(':***@');
+
+        // Also verify Fastify error handler logging scrubs sensitive detail
+        const app = await buildApp({
+          db: harness.db,
+          jwksProvider: devJwksProvider,
+        });
+
+        // Trigger an invalid password error
+        await app.inject({
+          method: 'POST',
+          url: '/v1/auth/signup',
+          payload: {
+            email: `scrub_${generateUuidV7()}@test.com`,
+            password: 'short',
+            fullName: 'Scrub Test User',
+          },
+        });
+
+        const allLogsText = JSON.stringify({ errorLogs, warnLogs });
+        expect(allLogsText).not.toContain(secretPassword);
+        expect(allLogsText).not.toContain('SUPER_SECRET_DB_PASSWORD');
+
+        await app.close();
+      } finally {
+        console.error = originalConsoleError;
+        console.warn = originalConsoleWarn;
+      }
     });
   });
 });

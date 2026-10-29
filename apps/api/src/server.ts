@@ -668,9 +668,26 @@ export async function startServer(): Promise<void> {
     await seedDemoData(db);
   }
 
+  if (
+    process.env['APP_DATABASE_URL'] &&
+    !process.env['SUPABASE_ANON_KEY'] &&
+    !process.env['SUPABASE_PUBLISHABLE_KEY']
+  ) {
+    console.warn(
+      '[NexStock API Warning] SUPABASE_ANON_KEY (or SUPABASE_PUBLISHABLE_KEY) is not configured in environment variables. User registration and login endpoints will return HTTP 503 until SUPABASE_ANON_KEY is provided.',
+    );
+  }
+
   const app = await buildApp({
     db,
     jwksProvider,
+    authServiceConfig: {
+      supabaseUrl: process.env['SUPABASE_URL'],
+      supabaseAnonKey:
+        process.env['SUPABASE_ANON_KEY'] ??
+        process.env['SUPABASE_PUBLISHABLE_KEY'],
+      isDevOrTestMode: !process.env['APP_DATABASE_URL'],
+    },
   });
 
   // Local development demo auth endpoint

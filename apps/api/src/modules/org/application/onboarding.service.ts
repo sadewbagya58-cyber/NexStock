@@ -14,6 +14,7 @@ import {
   appendAuditLog,
   enqueueOutboxEvent,
   generateUuidV7,
+  withAppUserTransaction,
   withTenantTransaction,
 } from '../../shared/index.js';
 
@@ -51,13 +52,15 @@ export async function onboardBusinessAtomic(
 ): Promise<OnboardBusinessResponse> {
   const currency = input.request.currency.trim().toUpperCase();
 
-  // Validate currency code
-  const currencyExists = await db
-    .selectFrom('currencies')
-    .select('code')
-    .where('code', '=', currency)
-    .where('is_active', '=', true)
-    .executeTakeFirst();
+  // Validate currency code under application role
+  const currencyExists = await withAppUserTransaction(db, { traceId: input.traceId }, async (trx) => {
+    return trx
+      .selectFrom('currencies')
+      .select('code')
+      .where('code', '=', currency)
+      .where('is_active', '=', true)
+      .executeTakeFirst();
+  });
 
   if (!currencyExists) {
     throw new AppError({
@@ -68,38 +71,44 @@ export async function onboardBusinessAtomic(
     });
   }
 
-  // Ensure user record exists
-  const userRecord = await db
-    .selectFrom('users')
-    .select(['id', 'email', 'full_name'])
-    .where('id', '=', input.userId)
-    .executeTakeFirst();
+  // Ensure user record exists under application role
+  const userRecord = await withAppUserTransaction(db, { userId: input.userId, traceId: input.traceId }, async (trx) => {
+    return trx
+      .selectFrom('users')
+      .select(['id', 'email', 'full_name'])
+      .where('id', '=', input.userId)
+      .executeTakeFirst();
+  });
 
   const email = userRecord?.email ?? input.userEmail ?? `${input.userId}@nexstock.local`;
   const fullName = userRecord?.full_name ?? input.userFullName ?? input.request.businessName;
 
   if (!userRecord) {
-    await db
-      .insertInto('users')
-      .values({
-        id: input.userId,
-        email: email.trim().toLowerCase(),
-        full_name: fullName.trim(),
-        is_platform_admin: false,
-      })
-      .onConflict((oc) => oc.column('id').doNothing())
-      .execute();
+    await withAppUserTransaction(db, { userId: input.userId, traceId: input.traceId }, async (trx) => {
+      await trx
+        .insertInto('users')
+        .values({
+          id: input.userId,
+          email: email.trim().toLowerCase(),
+          full_name: fullName.trim(),
+          is_platform_admin: false,
+        })
+        .onConflict((oc) => oc.column('id').doNothing())
+        .execute();
+    });
   }
 
   const baseSlug = slugify(input.request.businessName);
   let slug = baseSlug;
 
-  // Ensure unique slug
-  const existingSlug = await db
-    .selectFrom('tenants')
-    .select('id')
-    .where('slug', '=', slug)
-    .executeTakeFirst();
+  // Ensure unique slug under application role
+  const existingSlug = await withAppUserTransaction(db, { traceId: input.traceId }, async (trx) => {
+    return trx
+      .selectFrom('tenants')
+      .select('id')
+      .where('slug', '=', slug)
+      .executeTakeFirst();
+  });
 
   if (existingSlug) {
     const randomSuffix = Math.floor(1000 + Math.random() * 9000).toString();

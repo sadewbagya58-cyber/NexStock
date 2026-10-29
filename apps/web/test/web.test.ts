@@ -166,5 +166,21 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       expect(html).not.toContain('/v1/auth/demo-session');
       expect(html).not.toContain('switchRole()');
     });
+
+    it('verifies public/index.html signup response handler maps tokens and maintains session continuity', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // Verifies compatibility with both GoTrue and custom auth responses
+      expect(html).toContain('const sessionToken = data.token || data.accessToken;');
+      expect(html).toContain("localStorage.setItem('nexstock_session_token', sessionToken);");
+      expect(html).toContain('state.user = { id: data.userId, email: data.email, fullName: data.fullName };');
+
+      // Verifies email verification banner handling
+      expect(html).toContain('data.requiresEmailVerification || data.emailConfirmationRequired');
+
+      // Verifies seamless transition to business onboarding
+      expect(html).toContain("renderView('onboard-business');");
+    });
   });
 });

@@ -1317,8 +1317,9 @@
           throw new Error(data?.detail || data?.title || 'Invalid email or password.');
         }
 
-        state.token = data.accessToken;
-        localStorage.setItem('nexstock_session_token', data.accessToken);
+        const sessionToken = data.token || data.accessToken;
+        state.token = sessionToken;
+        localStorage.setItem('nexstock_session_token', sessionToken);
         if (data.refreshToken) {
           localStorage.setItem('nexstock_refresh_token', data.refreshToken);
         }
@@ -1392,13 +1393,21 @@
 
     async function handleSignUpSubmit(event) {
       event.preventDefault();
-      const fullName = document.getElementById('signupFullName').value.trim();
+      const fullNameInput = document.getElementById('signupFullName');
+      const fullName = (fullNameInput ? fullNameInput.value : '').trim();
       const email = document.getElementById('signupEmail').value.trim();
       const password = document.getElementById('signupPassword').value;
       const alertEl = document.getElementById('signupAlert');
       const submitBtn = document.getElementById('signupSubmitBtn');
 
       alertEl.style.display = 'none';
+
+      if (fullName.length < 2) {
+        alertEl.innerText = 'Full name must be at least 2 characters.';
+        alertEl.style.display = 'block';
+        return;
+      }
+
       submitBtn.disabled = true;
       submitBtn.innerText = 'Creating account...';
 
@@ -1406,7 +1415,7 @@
         const res = await fetch(`${state.apiBaseUrl}/v1/auth/signup`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, password, fullName: fullName || undefined })
+          body: JSON.stringify({ email, password, fullName })
         });
 
         const data = await res.json();
@@ -1414,15 +1423,16 @@
           throw new Error(data?.detail || data?.title || 'Registration failed. Please check your information.');
         }
 
-        if (data.accessToken) {
-          state.token = data.accessToken;
-          localStorage.setItem('nexstock_session_token', data.accessToken);
+        const sessionToken = data.token || data.accessToken;
+        if (sessionToken) {
+          state.token = sessionToken;
+          localStorage.setItem('nexstock_session_token', sessionToken);
           if (data.refreshToken) {
             localStorage.setItem('nexstock_refresh_token', data.refreshToken);
           }
-          state.user = data.user;
-          state.fullName = data.user.fullName || data.user.email;
-          state.userEmail = data.user.email;
+          state.user = { id: data.userId, email: data.email, fullName: data.fullName };
+          state.fullName = data.fullName || data.email;
+          state.userEmail = data.email;
           state.memberships = [];
 
           const userNameEl = document.getElementById('topbarUserName');
@@ -1430,7 +1440,7 @@
 
           showToast('Account created! Welcome to NexStock.', 'success');
           renderView('onboard-business');
-        } else if (data.emailConfirmationRequired) {
+        } else if (data.requiresEmailVerification || data.emailConfirmationRequired) {
           const container = document.getElementById('mainContainer');
           container.innerHTML = `
             <div class="auth-wrapper">
@@ -1440,7 +1450,8 @@
                 </div>
                 <h2 class="auth-title">Confirm Your Email</h2>
                 <p class="auth-subtitle" style="margin-bottom: 24px;">
-                  We have sent a verification email to <strong>${email}</strong>. Please click the confirmation link to activate your account.
+                  We have sent a verification email to <strong>${escapeHtml(email)}</strong>.<br/>
+                  Please click the confirmation link to activate your account, then sign in to complete your business setup.
                 </p>
                 <button class="btn btn-primary" onclick="renderView('login')" style="width: 100%; justify-content: center; padding: 10px;">
                   Proceed to Sign In
@@ -1455,6 +1466,7 @@
       } catch (err) {
         alertEl.innerText = err.message;
         alertEl.style.display = 'block';
+      } finally {
         submitBtn.disabled = false;
         submitBtn.innerText = 'Create Account & Continue';
       }

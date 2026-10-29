@@ -31,6 +31,7 @@ export interface ValidatedEnvironmentConfig {
   readonly supabaseJwtAudience: string;
   readonly appDatabaseUrl: string;
   readonly migrationDatabaseUrl?: string | undefined;
+  readonly supabaseAnonKey?: string | undefined;
   readonly appDatabaseSslCa?: string | undefined;
   readonly appDatabaseSslCaPath?: string | undefined;
 }
@@ -61,7 +62,12 @@ export function sanitizeLogMessage(message: string): string {
   if (!message) return '';
   return message
     .replace(/(postgres(?:ql)?:\/\/[^:]+:)([^@]+)(@)/gi, '$1***$3')
-    .replace(/(bearer\s+)[a-zA-Z0-9._-]+/gi, '$1***');
+    .replace(/(bearer\s+)[a-zA-Z0-9._-]+/gi, '$1***')
+    .replace(/("password"\s*:\s*")[^"]*(")/gi, '$1***$2')
+    .replace(/("apikey"\s*:\s*")[^"]*(")/gi, '$1***$2')
+    .replace(/("refreshToken"\s*:\s*")[^"]*(")/gi, '$1***$2')
+    .replace(/(password\s*[:=]\s*['"]?)[^&'"\s,]+/gi, '$1***')
+    .replace(/(apikey\s*[:=]\s*['"]?)[^&'"\s,]+/gi, '$1***');
 }
 
 /**
@@ -196,7 +202,10 @@ export function resolveDatabaseSslConfig(params: {
  */
 export function validateEnvironmentConfig(
   env: Readonly<Record<string, string | undefined>>,
-  options?: { readonly requireMigrationDatabaseUrl?: boolean },
+  options?: {
+    readonly requireMigrationDatabaseUrl?: boolean;
+    readonly requireSupabaseAnonKey?: boolean;
+  },
 ): ValidatedEnvironmentConfig {
   const supabaseUrl = assertNonEmptyEnvVar(env, 'SUPABASE_URL');
   const supabaseJwksUrl = assertNonEmptyEnvVar(env, 'SUPABASE_JWKS_URL');
@@ -206,6 +215,23 @@ export function validateEnvironmentConfig(
     'SUPABASE_JWT_AUDIENCE',
   );
   const appDatabaseUrl = assertNonEmptyEnvVar(env, 'APP_DATABASE_URL');
+
+  const supabaseAnonKey =
+    env['SUPABASE_ANON_KEY']?.trim() ||
+    env['SUPABASE_PUBLISHABLE_KEY']?.trim();
+
+  if (options?.requireSupabaseAnonKey) {
+    if (!supabaseAnonKey) {
+      throw new SecurityConfigurationError(
+        'Missing required environment variable "SUPABASE_ANON_KEY" (or "SUPABASE_PUBLISHABLE_KEY"). Configure it in your environment.',
+      );
+    }
+    if (supabaseAnonKey === 'SET_IN_LOCAL_ENV') {
+      throw new SecurityConfigurationError(
+        'Environment variable "SUPABASE_ANON_KEY" still contains the placeholder value "SET_IN_LOCAL_ENV".',
+      );
+    }
+  }
 
   try {
     const parsedSupabase = new URL(supabaseUrl);
@@ -253,6 +279,7 @@ export function validateEnvironmentConfig(
     supabaseJwtAudience,
     appDatabaseUrl,
     migrationDatabaseUrl,
+    ...(supabaseAnonKey ? { supabaseAnonKey } : {}),
     ...(appDatabaseSslCa ? { appDatabaseSslCa } : {}),
     ...(appDatabaseSslCaPath ? { appDatabaseSslCaPath } : {}),
   };

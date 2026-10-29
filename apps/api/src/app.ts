@@ -330,6 +330,27 @@ export async function buildApp(
     const traceId = String(request.id);
 
     if (error instanceof AppError) {
+      if (error.statusCode >= 500) {
+        console.error('[NexStock Server Error]', {
+          traceId,
+          route: request.url,
+          method: request.method,
+          status: error.statusCode,
+          errorCode: error.errorCode,
+          title: error.title,
+          detail: sanitizeLogMessage(error.message),
+        });
+      } else if (request.url.startsWith('/v1/auth')) {
+        console.warn('[NexStock Auth Diagnostic]', {
+          traceId,
+          route: request.url,
+          method: request.method,
+          status: error.statusCode,
+          errorCode: error.errorCode,
+          detail: sanitizeLogMessage(error.message),
+        });
+      }
+
       return reply
         .status(error.statusCode)
         .header('content-type', 'application/problem+json')
@@ -342,6 +363,14 @@ export async function buildApp(
       message?: string;
     };
     if (fastifyErr.validation) {
+      console.warn('[NexStock Validation Failed]', {
+        traceId,
+        route: request.url,
+        method: request.method,
+        status: 400,
+        message: sanitizeLogMessage(fastifyErr.message ?? 'Payload failed validation'),
+      });
+
       return reply
         .status(400)
         .header('content-type', 'application/problem+json')
@@ -358,20 +387,20 @@ export async function buildApp(
     }
 
     const errObj = error as Record<string, unknown>;
-    request.log.error(
-      {
-        traceId,
-        url: request.url,
-        method: request.method,
-        errName: error instanceof Error ? error.name : typeof error,
-        errCode: errObj?.['code'],
-        errMessage:
-          error instanceof Error
-            ? sanitizeLogMessage(error.message)
-            : String(error),
-      },
-      '[NexStock Unhandled Error]',
-    );
+    const sanitizedMsg =
+      error instanceof Error
+        ? sanitizeLogMessage(error.message)
+        : sanitizeLogMessage(String(error));
+
+    console.error('[NexStock Unhandled Error]', {
+      traceId,
+      route: request.url,
+      method: request.method,
+      status: 500,
+      errName: error instanceof Error ? error.name : typeof error,
+      errCode: errObj?.['code'],
+      errMessage: sanitizedMsg,
+    });
 
     return reply
       .status(500)
@@ -506,7 +535,13 @@ export async function buildApp(
       },
     },
     async (request, reply) => {
-      const result = await handleSignUp(options.db, authConfig, request.body);
+      const traceId = String(request.id);
+      const result = await handleSignUp(
+        options.db,
+        authConfig,
+        request.body,
+        traceId,
+      );
       return reply.status(201).send(result);
     },
   );
@@ -550,8 +585,9 @@ export async function buildApp(
       },
     },
     async (request, reply) => {
+      const traceId = String(request.id);
       const token = request.headers.authorization?.replace(/^Bearer\s+/i, '');
-      const result = await handleLogout(authConfig, token);
+      const result = await handleLogout(authConfig, token, traceId);
       return reply.send(result);
     },
   );
@@ -573,7 +609,8 @@ export async function buildApp(
       },
     },
     async (request, reply) => {
-      const result = await handleRefreshToken(authConfig, request.body);
+      const traceId = String(request.id);
+      const result = await handleRefreshToken(authConfig, request.body, traceId);
       return reply.send(result);
     },
   );
@@ -592,7 +629,13 @@ export async function buildApp(
       },
     },
     async (request, reply) => {
-      const result = await handlePasswordResetRequest(authConfig, request.body);
+      const traceId = String(request.id);
+      const result = await handlePasswordResetRequest(
+        authConfig,
+        request.body,
+        undefined,
+        traceId,
+      );
       return reply.send(result);
     },
   );

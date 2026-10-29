@@ -132,3 +132,30 @@ export async function withUserTransaction<T>(
   });
 }
 
+/**
+ * Executes `fn` inside an atomic PostgreSQL transaction with the application runtime role
+ * (`SET LOCAL ROLE nexstock_app_user`). Sets `app.current_user_id` if provided, and clears `app.current_tenant_id`.
+ * Suitable for authentication checks, user pre-existence checks, and sync operations before a tenant context exists.
+ */
+export async function withAppUserTransaction<T>(
+  db: Kysely<NexStockDatabase>,
+  ctx: { readonly traceId?: string | undefined; readonly userId?: string | undefined },
+  fn: (trx: Transaction<NexStockDatabase>) => Promise<T>,
+): Promise<T> {
+  return db.transaction().execute(async (trx) => {
+    // 1. Switch transaction-local role to nexstock_app_user (NOSUPERUSER NOBYPASSRLS)
+    await sql`SET LOCAL ROLE nexstock_app_user`.execute(trx);
+
+    // 2. Set user context (or empty string if not authenticated yet) and clear tenant context
+    const currentUserId = ctx.userId && UUID_REGEX.test(ctx.userId) ? ctx.userId : '';
+    await sql`
+      SELECT
+        set_config('app.current_user_id', ${currentUserId}, true),
+        set_config('app.current_tenant_id', '', true),
+        set_config('app.is_platform_admin', 'false', true)
+    `.execute(trx);
+
+    return fn(trx);
+  });
+}
+
