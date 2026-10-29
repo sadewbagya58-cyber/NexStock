@@ -9,7 +9,7 @@ import type {
   TenantMembershipSummary,
   UserMeResponse,
 } from '@nexstock/contracts';
-import type { Kysely } from 'kysely';
+import { type Kysely, sql } from 'kysely';
 import {
   AppError,
   type NexStockDatabase,
@@ -77,14 +77,22 @@ export async function ensureUserRecordDirect(
   },
   traceId?: string,
 ): Promise<void> {
+  const normalizedEmail = input.email.trim().toLowerCase();
+  const trimmedName = input.fullName.trim() || normalizedEmail.split('@')[0] || 'User';
+
   await withAppUserTransaction(
     db,
     { userId: input.userId, traceId },
     async (trx) => {
       const existing = await trx
         .selectFrom('users')
-        .select(['id', 'full_name'])
-        .where('id', '=', input.userId)
+        .select(['id', 'email', 'full_name'])
+        .where((eb) =>
+          eb.or([
+            eb('id', '=', input.userId),
+            eb('email', '=', normalizedEmail),
+          ]),
+        )
         .executeTakeFirst();
 
       if (!existing) {
@@ -92,12 +100,32 @@ export async function ensureUserRecordDirect(
           .insertInto('users')
           .values({
             id: input.userId,
-            email: input.email.trim().toLowerCase(),
-            full_name: input.fullName.trim(),
+            email: normalizedEmail,
+            full_name: trimmedName,
             is_platform_admin: false,
           })
           .onConflict((oc) => oc.column('id').doNothing())
           .execute();
+      } else if (existing.id === input.userId) {
+        // User already synced; update full_name if existing was placeholder
+        if ((!existing.full_name || existing.full_name === normalizedEmail) && trimmedName) {
+          await trx
+            .updateTable('users')
+            .set({
+              full_name: trimmedName,
+              updated_at: sql`clock_timestamp()`,
+            })
+            .where('id', '=', input.userId)
+            .execute();
+        }
+      } else if (existing.email === normalizedEmail && existing.id !== input.userId) {
+        // Collision: email already registered under a different user identifier
+        throw new AppError({
+          statusCode: 409,
+          errorCode: 'AUTH_EMAIL_ALREADY_EXISTS',
+          title: 'Email Already Registered',
+          detail: 'An account with this email address already exists. Please log in instead.',
+        });
       }
     },
   );
@@ -166,8 +194,9 @@ export async function handleSignUp(
 
   // If live Supabase anon key is provided, delegate to GoTrue REST API
   if (anonKey && anonKey !== 'SET_IN_LOCAL_ENV') {
+    let resp: Response;
     try {
-      const resp = await fetch(`${supabaseUrl}/auth/v1/signup`, {
+      resp = await fetch(`${supabaseUrl}/auth/v1/signup`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -182,84 +211,6 @@ export async function handleSignUp(
           },
         }),
       });
-
-      const data = (await resp.json()) as SupabaseSessionResponse & SupabaseAuthErrorBody;
-
-      if (!resp.ok) {
-        const errorMsg = data.msg ?? data.message ?? data.error_description ?? data.error ?? 'Registration failed.';
-        const safeSupabaseCode = data.code ?? (typeof data.error === 'string' ? data.error : undefined);
-
-        console.warn('[NexStock Supabase Auth Error]', {
-          traceId: currentTraceId,
-          operation: 'signup',
-          httpStatus: resp.status,
-          supabaseCode: safeSupabaseCode,
-          message: sanitizeLogMessage(errorMsg),
-        });
-
-        if (resp.status === 422 || errorMsg.toLowerCase().includes('already') || errorMsg.toLowerCase().includes('registered')) {
-          throw new AppError({
-            statusCode: 409,
-            errorCode: 'AUTH_EMAIL_ALREADY_EXISTS',
-            title: 'Email Already Registered',
-            detail: 'An account with this email address already exists. Please log in instead.',
-          });
-        }
-        if (resp.status === 400 && errorMsg.toLowerCase().includes('password')) {
-          throw new AppError({
-            statusCode: 400,
-            errorCode: 'AUTH_WEAK_PASSWORD',
-            title: 'Weak Password',
-            detail: errorMsg,
-          });
-        }
-        throw new AppError({
-          statusCode: resp.status >= 400 && resp.status < 500 ? resp.status : 400,
-          errorCode: 'ERR_VALIDATION_FAILED',
-          title: 'Registration Error',
-          detail: errorMsg,
-        });
-      }
-
-      const userId = data.user?.id ?? data.id;
-      if (!userId) {
-        console.error('[NexStock Supabase Auth Missing User ID]', {
-          traceId: currentTraceId,
-          operation: 'signup',
-        });
-        throw new AppError({
-          statusCode: 500,
-          errorCode: 'ERR_INTERNAL_SERVER_ERROR',
-          title: 'Registration Failed',
-          detail: 'Identity provider did not return a user identifier.',
-        });
-      }
-
-      await ensureUserRecordDirect(
-        db,
-        {
-          userId,
-          email: normalizedEmail,
-          fullName,
-        },
-        currentTraceId,
-      );
-
-      const token = data.access_token;
-      const refreshToken = data.refresh_token;
-      const requiresEmailVerification = !token;
-
-      return {
-        userId,
-        email: normalizedEmail,
-        fullName,
-        ...(token ? { token } : {}),
-        ...(refreshToken ? { refreshToken } : {}),
-        requiresEmailVerification,
-        message: requiresEmailVerification
-          ? 'Registration successful. Please verify your email address to complete sign in.'
-          : 'Registration successful.',
-      };
     } catch (err) {
       if (err instanceof AppError) throw err;
       const safeDetail = sanitizeLogMessage(err instanceof Error ? err.message : String(err));
@@ -276,6 +227,101 @@ export async function handleSignUp(
         detail: `Failed to communicate with authentication provider: ${safeDetail}`,
       });
     }
+
+    const data = (await resp.json()) as SupabaseSessionResponse & SupabaseAuthErrorBody;
+
+    if (!resp.ok) {
+      const errorMsg = data.msg ?? data.message ?? data.error_description ?? data.error ?? 'Registration failed.';
+      const safeSupabaseCode = data.code ?? (typeof data.error === 'string' ? data.error : undefined);
+
+      console.warn('[NexStock Supabase Auth Error]', {
+        traceId: currentTraceId,
+        operation: 'signup',
+        httpStatus: resp.status,
+        supabaseCode: safeSupabaseCode,
+        message: sanitizeLogMessage(errorMsg),
+      });
+
+      if (resp.status === 422 || errorMsg.toLowerCase().includes('already') || errorMsg.toLowerCase().includes('registered')) {
+        throw new AppError({
+          statusCode: 409,
+          errorCode: 'AUTH_EMAIL_ALREADY_EXISTS',
+          title: 'Email Already Registered',
+          detail: 'An account with this email address already exists. Please log in instead.',
+        });
+      }
+      if (resp.status === 400 && errorMsg.toLowerCase().includes('password')) {
+        throw new AppError({
+          statusCode: 400,
+          errorCode: 'AUTH_WEAK_PASSWORD',
+          title: 'Weak Password',
+          detail: errorMsg,
+        });
+      }
+      throw new AppError({
+        statusCode: resp.status >= 400 && resp.status < 500 ? resp.status : 400,
+        errorCode: 'ERR_VALIDATION_FAILED',
+        title: 'Registration Error',
+        detail: errorMsg,
+      });
+    }
+
+    const userId = data.user?.id ?? data.id;
+    if (!userId) {
+      console.error('[NexStock Supabase Auth Missing User ID]', {
+        traceId: currentTraceId,
+        operation: 'signup',
+      });
+      throw new AppError({
+        statusCode: 500,
+        errorCode: 'ERR_INTERNAL_SERVER_ERROR',
+        title: 'Registration Failed',
+        detail: 'Identity provider did not return a user identifier.',
+      });
+    }
+
+    try {
+      await ensureUserRecordDirect(
+        db,
+        {
+          userId,
+          email: normalizedEmail,
+          fullName,
+        },
+        currentTraceId,
+      );
+    } catch (err) {
+      if (err instanceof AppError) throw err;
+      const safeDetail = sanitizeLogMessage(err instanceof Error ? err.message : String(err));
+      console.error('[NexStock User Profile Sync Failure]', {
+        traceId: currentTraceId,
+        operation: 'signup',
+        errorName: err instanceof Error ? err.name : typeof err,
+        detail: safeDetail,
+      });
+      throw new AppError({
+        statusCode: 500,
+        errorCode: 'ERR_INTERNAL_SERVER_ERROR',
+        title: 'User Profile Sync Failed',
+        detail: `Failed to synchronize user account profile: ${safeDetail}`,
+      });
+    }
+
+    const token = data.access_token;
+    const refreshToken = data.refresh_token;
+    const requiresEmailVerification = !token;
+
+    return {
+      userId,
+      email: normalizedEmail,
+      fullName,
+      ...(token ? { token } : {}),
+      ...(refreshToken ? { refreshToken } : {}),
+      requiresEmailVerification,
+      message: requiresEmailVerification
+        ? 'Registration successful. Please verify your email address to complete sign in.'
+        : 'Registration successful.',
+    };
   }
 
   // Local Development / Test Fallback
@@ -337,8 +383,9 @@ export async function handleLogin(
   }
 
   if (anonKey && anonKey !== 'SET_IN_LOCAL_ENV') {
+    let resp: Response;
     try {
-      const resp = await fetch(`${supabaseUrl}/auth/v1/token?grant_type=password`, {
+      resp = await fetch(`${supabaseUrl}/auth/v1/token?grant_type=password`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -350,55 +397,6 @@ export async function handleLogin(
           password: input.password,
         }),
       });
-
-      const data = (await resp.json()) as SupabaseSessionResponse & SupabaseAuthErrorBody;
-
-      if (!resp.ok) {
-        console.warn('[NexStock Supabase Login Failed]', {
-          traceId: currentTraceId,
-          status: resp.status,
-          code: data.code ?? data.error,
-        });
-        // Uniform error response to avoid leaking account existence
-        throw new AppError({
-          statusCode: 401,
-          errorCode: 'AUTH_INVALID_CREDENTIALS',
-          title: 'Invalid Credentials',
-          detail: 'Invalid email address or password.',
-        });
-      }
-
-      if (!data.access_token || !data.user?.id) {
-        throw new AppError({
-          statusCode: 401,
-          errorCode: 'AUTH_INVALID_CREDENTIALS',
-          title: 'Authentication Failed',
-          detail: 'Invalid credentials or inactive session.',
-        });
-      }
-
-      const userId = data.user.id;
-      const fullName = data.user.user_metadata?.full_name ?? data.user.user_metadata?.name ?? normalizedEmail.split('@')[0] ?? 'User';
-
-      await ensureUserRecordDirect(
-        db,
-        {
-          userId,
-          email: normalizedEmail,
-          fullName,
-        },
-        currentTraceId,
-      );
-
-      const userProfile = await getUserProfileAndMemberships(db, userId, currentTraceId);
-
-      return {
-        token: data.access_token,
-        ...(data.refresh_token ? { refreshToken: data.refresh_token } : {}),
-        ...(data.expires_in ? { expiresIn: data.expires_in } : {}),
-        user: userProfile.user,
-        memberships: userProfile.memberships,
-      };
     } catch (err) {
       if (err instanceof AppError) throw err;
       const safeDetail = sanitizeLogMessage(err instanceof Error ? err.message : String(err));
@@ -414,6 +412,72 @@ export async function handleLogin(
         detail: `Failed to communicate with authentication provider: ${safeDetail}`,
       });
     }
+
+    const data = (await resp.json()) as SupabaseSessionResponse & SupabaseAuthErrorBody;
+
+    if (!resp.ok) {
+      console.warn('[NexStock Supabase Login Failed]', {
+        traceId: currentTraceId,
+        status: resp.status,
+        code: data.code ?? data.error,
+      });
+      // Uniform error response to avoid leaking account existence
+      throw new AppError({
+        statusCode: 401,
+        errorCode: 'AUTH_INVALID_CREDENTIALS',
+        title: 'Invalid Credentials',
+        detail: 'Invalid email address or password.',
+      });
+    }
+
+    if (!data.access_token || !data.user?.id) {
+      throw new AppError({
+        statusCode: 401,
+        errorCode: 'AUTH_INVALID_CREDENTIALS',
+        title: 'Authentication Failed',
+        detail: 'Invalid credentials or inactive session.',
+      });
+    }
+
+    const userId = data.user.id;
+    const fullName = data.user.user_metadata?.full_name ?? data.user.user_metadata?.name ?? normalizedEmail.split('@')[0] ?? 'User';
+
+    try {
+      await ensureUserRecordDirect(
+        db,
+        {
+          userId,
+          email: normalizedEmail,
+          fullName,
+        },
+        currentTraceId,
+      );
+    } catch (err) {
+      if (err instanceof AppError) throw err;
+      const safeDetail = sanitizeLogMessage(err instanceof Error ? err.message : String(err));
+      console.error('[NexStock User Profile Sync Failure]', {
+        traceId: currentTraceId,
+        operation: 'login',
+        errorName: err instanceof Error ? err.name : typeof err,
+        detail: safeDetail,
+      });
+      throw new AppError({
+        statusCode: 500,
+        errorCode: 'ERR_INTERNAL_SERVER_ERROR',
+        title: 'User Profile Sync Failed',
+        detail: `Failed to synchronize user account profile: ${safeDetail}`,
+      });
+    }
+
+    const userProfile = await getUserProfileAndMemberships(db, userId, currentTraceId);
+
+    return {
+      token: data.access_token,
+      ...(data.refresh_token ? { refreshToken: data.refresh_token } : {}),
+      ...(data.expires_in ? { expiresIn: data.expires_in } : {}),
+      user: userProfile.user,
+      memberships: userProfile.memberships,
+    };
   }
 
   // Local Development / Test Fallback

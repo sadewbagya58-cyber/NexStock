@@ -473,6 +473,13 @@ export function loadPhase5MigrationSql(): string {
   return sqlText;
 }
 
+export function loadPhase5UsersRlsMigrationSql(): string {
+  const filename = '0007_phase5_users_rls_policies.sql';
+  const sqlText = readFileSync(resolve(migrationsDir, filename), 'utf-8');
+  assertPostgresMigrationSqlCompatible(sqlText, filename);
+  return sqlText;
+}
+
 export function getOrderedPostgresMigrations(): readonly PostgresMigrationSpec[] {
   return [
     {
@@ -516,6 +523,13 @@ export function getOrderedPostgresMigrations(): readonly PostgresMigrationSpec[]
       name: '0006_phase5_auth_and_user_tenants',
       filename: '0006_phase5_auth_and_user_tenants.sql',
       sql: loadPhase5MigrationSql(),
+    },
+    {
+      dialect: 'postgres',
+      version: 7,
+      name: '0007_phase5_users_rls_policies',
+      filename: '0007_phase5_users_rls_policies.sql',
+      sql: loadPhase5UsersRlsMigrationSql(),
     },
   ];
 }

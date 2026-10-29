@@ -1,11 +1,13 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   buildApp,
+  ensureUserRecordDirect,
   generateUuidV7,
   getOrCreateDevKeyMaterial,
   sanitizeLogMessage,
   signDevJwt,
   StaticJwksProvider,
+  withAppUserTransaction,
 } from '../src/index.js';
 import {
   type TestPostgresHarness,
@@ -795,6 +797,144 @@ describe('Phase 5.0 — Authentication & Business Foundation Integration Suite',
         console.error = originalConsoleError;
         console.warn = originalConsoleWarn;
       }
+    });
+  });
+
+  describe('7. Users Table Row Level Security (RLS) & Idempotent Profile Synchronization', () => {
+    it('verifies that nexstock_app_user can insert their own user profile matching app_current_user_id under RLS', async () => {
+      const myUserId = generateUuidV7();
+      const myEmail = `self_sync_${generateUuidV7()}@test.com`;
+
+      await withAppUserTransaction(harness.db, { userId: myUserId }, async (trx) => {
+        await trx
+          .insertInto('users')
+          .values({
+            id: myUserId,
+            email: myEmail,
+            full_name: 'Self Registered User',
+            is_platform_admin: false,
+          })
+          .execute();
+      });
+
+      const user = await harness.db
+        .selectFrom('users')
+        .select(['id', 'email', 'full_name'])
+        .where('id', '=', myUserId)
+        .executeTakeFirst();
+
+      expect(user).toBeDefined();
+      expect(user?.email).toBe(myEmail);
+      expect(user?.full_name).toBe('Self Registered User');
+    });
+
+    it('strictly denies nexstock_app_user from inserting another user profile without tenant context (RLS Violation)', async () => {
+      const callerUserId = generateUuidV7();
+      const victimUserId = generateUuidV7();
+      const victimEmail = `victim_${generateUuidV7()}@test.com`;
+
+      await expect(
+        withAppUserTransaction(harness.db, { userId: callerUserId }, async (trx) => {
+          await trx
+            .insertInto('users')
+            .values({
+              id: victimUserId, // Mismatch between app.current_user_id (callerUserId) and row id (victimUserId)
+              email: victimEmail,
+              full_name: 'Impersonated User',
+              is_platform_admin: false,
+            })
+            .execute();
+        }),
+      ).rejects.toThrow(/violates row-level security policy for table "users"/i);
+    });
+
+    it('strictly denies nexstock_app_user from escalating is_platform_admin = true (RLS Violation)', async () => {
+      const attackerUserId = generateUuidV7();
+      const attackerEmail = `attacker_${generateUuidV7()}@test.com`;
+
+      await expect(
+        withAppUserTransaction(harness.db, { userId: attackerUserId }, async (trx) => {
+          await trx
+            .insertInto('users')
+            .values({
+              id: attackerUserId,
+              email: attackerEmail,
+              full_name: 'Malicious Admin Wannabe',
+              is_platform_admin: true, // Forbidden privilege escalation
+            })
+            .execute();
+        }),
+      ).rejects.toThrow(/violates row-level security policy for table "users"/i);
+    });
+
+    it('verifies idempotent profile synchronization (ensureUserRecordDirect retries cleanly)', async () => {
+      const userId = generateUuidV7();
+      const email = `idempotent_${generateUuidV7()}@test.com`;
+
+      // Initial sync
+      await ensureUserRecordDirect(harness.db, {
+        userId,
+        email,
+        fullName: 'Initial Full Name',
+      });
+
+      const firstRecord = await harness.db
+        .selectFrom('users')
+        .select(['id', 'email', 'full_name'])
+        .where('id', '=', userId)
+        .executeTakeFirst();
+      expect(firstRecord?.full_name).toBe('Initial Full Name');
+
+      // Retry sync with identical parameters (idempotent no-op)
+      await expect(
+        ensureUserRecordDirect(harness.db, {
+          userId,
+          email,
+          fullName: 'Initial Full Name',
+        }),
+      ).resolves.toBeUndefined();
+
+      // Retry sync updating empty placeholder
+      await harness.db
+        .updateTable('users')
+        .set({ full_name: '' })
+        .where('id', '=', userId)
+        .execute();
+
+      await ensureUserRecordDirect(harness.db, {
+        userId,
+        email,
+        fullName: 'Updated Name After Placeholder',
+      });
+
+      const updatedRecord = await harness.db
+        .selectFrom('users')
+        .select(['id', 'email', 'full_name'])
+        .where('id', '=', userId)
+        .executeTakeFirst();
+      expect(updatedRecord?.full_name).toBe('Updated Name After Placeholder');
+    });
+
+    it('rejects email collision when registering a different user ID with pre-existing email (409)', async () => {
+      const existingUserId = generateUuidV7();
+      const conflictingUserId = generateUuidV7();
+      const sharedEmail = `collision_${generateUuidV7()}@test.com`;
+
+      // First user registers
+      await ensureUserRecordDirect(harness.db, {
+        userId: existingUserId,
+        email: sharedEmail,
+        fullName: 'First Account Holder',
+      });
+
+      // Second user attempts to register with same email but different ID
+      await expect(
+        ensureUserRecordDirect(harness.db, {
+          userId: conflictingUserId,
+          email: sharedEmail,
+          fullName: 'Second Account Holder',
+        }),
+      ).rejects.toThrow(/already exists/i);
     });
   });
 });
