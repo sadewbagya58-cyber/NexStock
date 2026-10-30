@@ -690,5 +690,37 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       const templateDollarMatches = (html.match(/\$\$\{[^}]+\}/g) || []);
       expect(templateDollarMatches.length).toBe(0);
     });
+
+    it('BUG-004 & BUG-005: verifies POS product price mapping/cart calculation and stock movement ledger product details/delta display', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // BUG-004: POS product card price uses p.retailPrice || p.sellingPrice || '0.0000'
+      expect(html).toContain("const price = p.retailPrice || p.sellingPrice || '0.0000';");
+      expect(html).toContain('${formatTenantMoney(price)}');
+
+      // BUG-004: addToCart receives price and sets unitPrice
+      expect(html).toContain("const numericPrice = parseFloat(unitPrice || '0');");
+      expect(html).toContain("const safePrice = Number.isFinite(numericPrice) ? numericPrice.toFixed(4) : '0.0000';");
+      expect(html).toContain('unitPrice: safePrice');
+
+      // BUG-004: calculateCartSubtotal parses item.unitPrice as float without falling back to 0 when valid
+      expect(html).toContain('(parseFloat(item.unitPrice) || 0)');
+
+      // BUG-004: Cart item render formats unitPrice correctly with formatTenantMoney
+      expect(html).toContain('${formatTenantMoney(line.unitPrice)} / ${escapeHtml(line.uomCode)}');
+      expect(html).toContain('${formatTenantMoney(line.qty * (parseFloat(line.unitPrice) || 0))}');
+
+      // BUG-005: Movement view resolves product SKU and Name
+      expect(html).toContain("const sku = escapeHtml(m.productSku || fallback?.sku || '');");
+      expect(html).toContain("const pName = escapeHtml(m.productName || fallback?.name || 'Product');");
+
+      // BUG-005: Movement view resolves rawQty with fallback to qtyDelta, quantity, inputQty
+      expect(html).toContain('const rawQty = m.qtyDelta ?? m.quantity ?? m.inputQty ?? 0;');
+      expect(html).toContain("const qtyFormatted = `${qty > 0 ? '+' : ''}${parseFloat(qty.toFixed(4))} ${uom}`;");
+
+      // BUG-005: Balance after displayed with UoM
+      expect(html).toContain('<strong>${balAfter} ${uom}</strong>');
+    });
   });
 });

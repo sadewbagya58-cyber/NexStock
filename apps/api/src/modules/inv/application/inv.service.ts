@@ -72,6 +72,8 @@ function mapStockMovementRow(
     branch_id: string;
     warehouse_id: string;
     product_id: string;
+    product_sku?: string | null;
+    product_name?: string | null;
     batch_id?: string | null;
     serial_id?: string | null;
     supplier_id: string | null;
@@ -102,6 +104,8 @@ function mapStockMovementRow(
     branchId: row.branch_id,
     warehouseId: row.warehouse_id,
     productId: row.product_id,
+    productSku: row.product_sku ?? null,
+    productName: row.product_name ?? null,
     batchId: row.batch_id ?? null,
     serialId: row.serial_id ?? null,
     supplierId: row.supplier_id,
@@ -112,6 +116,7 @@ function mapStockMovementRow(
       String(row.conversion_factor_to_base),
     ).toDecimalString(),
     qtyDelta: Quantity.fromDecimalString(String(row.qty_delta)).toDecimalString(),
+    quantity: Quantity.fromDecimalString(String(row.qty_delta)).toDecimalString(),
     balanceBefore: Quantity.fromDecimalString(
       String(row.balance_before),
     ).toDecimalString(),
@@ -140,6 +145,7 @@ function mapStockMovementRow(
     idempotencyKey: row.idempotency_key,
     occurredAt: new Date(row.occurred_at).toISOString(),
     recordedAt: new Date(row.recorded_at).toISOString(),
+    createdAt: new Date(row.occurred_at).toISOString(),
   };
 }
 
@@ -923,7 +929,14 @@ export async function postStockMovement(
     .where('id', '=', movementId)
     .executeTakeFirstOrThrow();
 
-  return mapStockMovementRow(inserted, baseCurrency);
+  return mapStockMovementRow(
+    {
+      ...inserted,
+      product_sku: product.sku,
+      product_name: product.name,
+    },
+    baseCurrency,
+  );
 }
 
 export async function reverseStockMovement(
@@ -1202,7 +1215,14 @@ export async function reverseStockMovement(
     .where('id', '=', reversalId)
     .executeTakeFirstOrThrow();
 
-  return mapStockMovementRow(inserted, baseCurrency);
+  return mapStockMovementRow(
+    {
+      ...inserted,
+      product_sku: product.sku,
+      product_name: product.name,
+    },
+    baseCurrency,
+  );
 }
 
 export async function getStockMovementById(
@@ -1211,8 +1231,42 @@ export async function getStockMovementById(
 ): Promise<StockMovementResponse> {
   const row = await trx.db
     .selectFrom('stock_ledger_entries')
-    .selectAll()
-    .where('id', '=', movementId)
+    .leftJoin('products', (join) =>
+      join
+        .onRef('stock_ledger_entries.tenant_id', '=', 'products.tenant_id')
+        .onRef('stock_ledger_entries.product_id', '=', 'products.id'),
+    )
+    .select([
+      'stock_ledger_entries.id as id',
+      'stock_ledger_entries.tenant_id as tenant_id',
+      'stock_ledger_entries.branch_id as branch_id',
+      'stock_ledger_entries.warehouse_id as warehouse_id',
+      'stock_ledger_entries.product_id as product_id',
+      'products.sku as product_sku',
+      'products.name as product_name',
+      'stock_ledger_entries.batch_id as batch_id',
+      'stock_ledger_entries.serial_id as serial_id',
+      'stock_ledger_entries.supplier_id as supplier_id',
+      'stock_ledger_entries.movement_type as movement_type',
+      'stock_ledger_entries.uom_code as uom_code',
+      'stock_ledger_entries.input_qty as input_qty',
+      'stock_ledger_entries.conversion_factor_to_base as conversion_factor_to_base',
+      'stock_ledger_entries.qty_delta as qty_delta',
+      'stock_ledger_entries.balance_before as balance_before',
+      'stock_ledger_entries.balance_after as balance_after',
+      'stock_ledger_entries.unit_cost as unit_cost',
+      'stock_ledger_entries.total_cost_delta as total_cost_delta',
+      'stock_ledger_entries.reference_type as reference_type',
+      'stock_ledger_entries.reference_id as reference_id',
+      'stock_ledger_entries.reversed_entry_id as reversed_entry_id',
+      'stock_ledger_entries.reason as reason',
+      'stock_ledger_entries.negative_stock_override_applied as negative_stock_override_applied',
+      'stock_ledger_entries.actor_user_id as actor_user_id',
+      'stock_ledger_entries.idempotency_key as idempotency_key',
+      'stock_ledger_entries.occurred_at as occurred_at',
+      'stock_ledger_entries.recorded_at as recorded_at',
+    ])
+    .where('stock_ledger_entries.id', '=', movementId)
     .executeTakeFirst();
 
   if (!row) {
@@ -1257,26 +1311,60 @@ export async function listStockMovements(
 
   let dbQuery = trx.db
     .selectFrom('stock_ledger_entries')
-    .selectAll()
-    .orderBy('id', 'desc');
+    .leftJoin('products', (join) =>
+      join
+        .onRef('stock_ledger_entries.tenant_id', '=', 'products.tenant_id')
+        .onRef('stock_ledger_entries.product_id', '=', 'products.id'),
+    )
+    .select([
+      'stock_ledger_entries.id as id',
+      'stock_ledger_entries.tenant_id as tenant_id',
+      'stock_ledger_entries.branch_id as branch_id',
+      'stock_ledger_entries.warehouse_id as warehouse_id',
+      'stock_ledger_entries.product_id as product_id',
+      'products.sku as product_sku',
+      'products.name as product_name',
+      'stock_ledger_entries.batch_id as batch_id',
+      'stock_ledger_entries.serial_id as serial_id',
+      'stock_ledger_entries.supplier_id as supplier_id',
+      'stock_ledger_entries.movement_type as movement_type',
+      'stock_ledger_entries.uom_code as uom_code',
+      'stock_ledger_entries.input_qty as input_qty',
+      'stock_ledger_entries.conversion_factor_to_base as conversion_factor_to_base',
+      'stock_ledger_entries.qty_delta as qty_delta',
+      'stock_ledger_entries.balance_before as balance_before',
+      'stock_ledger_entries.balance_after as balance_after',
+      'stock_ledger_entries.unit_cost as unit_cost',
+      'stock_ledger_entries.total_cost_delta as total_cost_delta',
+      'stock_ledger_entries.reference_type as reference_type',
+      'stock_ledger_entries.reference_id as reference_id',
+      'stock_ledger_entries.reversed_entry_id as reversed_entry_id',
+      'stock_ledger_entries.reason as reason',
+      'stock_ledger_entries.negative_stock_override_applied as negative_stock_override_applied',
+      'stock_ledger_entries.actor_user_id as actor_user_id',
+      'stock_ledger_entries.idempotency_key as idempotency_key',
+      'stock_ledger_entries.occurred_at as occurred_at',
+      'stock_ledger_entries.recorded_at as recorded_at',
+    ])
+    .orderBy('stock_ledger_entries.id', 'desc');
 
   if (query.branchId) {
-    dbQuery = dbQuery.where('branch_id', '=', query.branchId);
+    dbQuery = dbQuery.where('stock_ledger_entries.branch_id', '=', query.branchId);
   }
   if (query.warehouseId) {
-    dbQuery = dbQuery.where('warehouse_id', '=', query.warehouseId);
+    dbQuery = dbQuery.where('stock_ledger_entries.warehouse_id', '=', query.warehouseId);
   }
   if (query.productId) {
-    dbQuery = dbQuery.where('product_id', '=', query.productId);
+    dbQuery = dbQuery.where('stock_ledger_entries.product_id', '=', query.productId);
   }
   if (query.supplierId) {
-    dbQuery = dbQuery.where('supplier_id', '=', query.supplierId);
+    dbQuery = dbQuery.where('stock_ledger_entries.supplier_id', '=', query.supplierId);
   }
   if (query.movementType) {
-    dbQuery = dbQuery.where('movement_type', '=', query.movementType);
+    dbQuery = dbQuery.where('stock_ledger_entries.movement_type', '=', query.movementType);
   }
   if (query.cursor) {
-    dbQuery = dbQuery.where('id', '<', query.cursor);
+    dbQuery = dbQuery.where('stock_ledger_entries.id', '<', query.cursor);
   }
 
   if (!authCtx.allLocationsAccess) {
@@ -1287,7 +1375,7 @@ export async function listStockMovements(
         pageInfo: { hasNextPage: false, nextCursor: null },
       };
     }
-    dbQuery = dbQuery.where('warehouse_id', 'in', allowedWh);
+    dbQuery = dbQuery.where('stock_ledger_entries.warehouse_id', 'in', allowedWh);
   }
 
   const rows = await dbQuery.limit(limit + 1).execute();

@@ -1491,4 +1491,145 @@ describe('@nexstock/api — Phase 3: POS, Sales, Checkout, Payments & Billing', 
       ).rejects.toThrow(/IMMUTABLE_TABLE_VIOLATION/);
     });
   });
+
+  // ==========================================================================
+  // TEST SUITE 7: Phase 5.1 QA: End-to-End Regression Test (BUG-004 & BUG-005)
+  // ==========================================================================
+  describe('7. Phase 5.1 QA: End-to-End Regression Test (BUG-004 & BUG-005)', () => {
+    let app: AppInstance;
+    let qaProductId: string;
+
+    beforeAll(async () => {
+      app = await buildApp({ db: harness.db, jwksProvider });
+    });
+
+    afterAll(async () => {
+      await app.close();
+    });
+
+    it('BUG-004 & BUG-005: creates product with sellingPrice, posts stock movement, verifies ledger product info and delta qty, and verifies POS search returns retailPrice and sellingPrice', async () => {
+      // 1. Create Product with sellingPrice 3500.0000 and purchaseCost 2500.0000
+      const prodRes = await app.inject({
+        method: 'POST',
+        url: '/v1/products',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+          'idempotency-key': generateUuidV7(),
+        },
+        payload: {
+          sku: 'ELEC-MOUSE-QA51',
+          name: 'Wireless Bluetooth Mouse QA',
+          productType: 'STANDARD',
+          baseUom: 'PCS',
+          purchaseCost: '2500.0000',
+          sellingPrice: '3500.0000',
+          categoryId: alphaCategoryId,
+          taxGroupId: alphaTaxGroupId,
+          trackInventory: true,
+        },
+      });
+      expect(prodRes.statusCode).toBe(201);
+      const prodBody = prodRes.json();
+      expect(prodBody.sku).toBe('ELEC-MOUSE-QA51');
+      expect(prodBody.sellingPrice).toBe('3500.0000');
+      qaProductId = prodBody.id;
+
+      // 2. Post Stock Movement (STOCK_IN) 10 PCS
+      const mvtRes = await app.inject({
+        method: 'POST',
+        url: '/v1/inventory/movements',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+          'idempotency-key': generateUuidV7(),
+        },
+        payload: {
+          branchId: alphaBranch1Id,
+          warehouseId: alphaMainWarehouseId,
+          productId: qaProductId,
+          movementType: 'STOCK_IN',
+          quantity: '10.000000',
+          unitCost: '2500.0000',
+          reason: 'Initial Opening Stock QA',
+          notes: 'Initial Opening Stock QA',
+        },
+      });
+      expect(mvtRes.statusCode).toBe(201);
+      const mvtBody = mvtRes.json();
+      // Verify BUG-005: response contains productSku, productName, qtyDelta, quantity, balanceAfter
+      expect(mvtBody.productSku).toBe('ELEC-MOUSE-QA51');
+      expect(mvtBody.productName).toBe('Wireless Bluetooth Mouse QA');
+      expect(mvtBody.qtyDelta).toBe('10.000000');
+      expect(mvtBody.quantity).toBe('10.000000');
+      expect(mvtBody.balanceAfter).toBe('10.000000');
+
+      // 3. List Stock Movements: verify ledger returns product details and positive delta
+      const listMvtRes = await app.inject({
+        method: 'GET',
+        url: `/v1/inventory/movements?productId=${qaProductId}&warehouseId=${alphaMainWarehouseId}`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+      expect(listMvtRes.statusCode).toBe(200);
+      const mvtList = listMvtRes.json().data;
+      expect(mvtList.length).toBeGreaterThanOrEqual(1);
+      const foundMvt = mvtList.find((m: { productId: string }) => m.productId === qaProductId);
+      expect(foundMvt).toBeDefined();
+      expect(foundMvt.productSku).toBe('ELEC-MOUSE-QA51');
+      expect(foundMvt.productName).toBe('Wireless Bluetooth Mouse QA');
+      expect(foundMvt.qtyDelta).toBe('10.000000');
+      expect(foundMvt.quantity).toBe('10.000000');
+      expect(foundMvt.balanceAfter).toBe('10.000000');
+
+      // 4. Verify Inventory Balance reflects 10.000000
+      const balRes = await app.inject({
+        method: 'GET',
+        url: `/v1/inventory/balances?productId=${qaProductId}&warehouseId=${alphaMainWarehouseId}`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+      expect(balRes.statusCode).toBe(200);
+      const balances = balRes.json().data;
+      expect(balances.length).toBe(1);
+      expect(balances[0].qtyOnHand).toBe('10.000000');
+      expect(balances[0].availableQty).toBe('10.000000');
+
+      // 5. Verify POS Product Search returns retailPrice AND sellingPrice (BUG-004)
+      const searchRes = await app.inject({
+        method: 'GET',
+        url: `/v1/pos/products/search?warehouseId=${alphaMainWarehouseId}&q=ELEC-MOUSE-QA51`,
+        headers: {
+          authorization: `Bearer ${alphaCashierToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+      expect(searchRes.statusCode).toBe(200);
+      const searchItems = searchRes.json();
+      expect(searchItems).toHaveLength(1);
+      const item = searchItems[0];
+      expect(item.id).toBe(qaProductId);
+      expect(item.sku).toBe('ELEC-MOUSE-QA51');
+      expect(item.retailPrice).toBe('3500.0000');
+      expect(item.sellingPrice).toBe('3500.0000');
+      expect(item.availableQuantity).toBe('10.000000');
+
+      // 6. Simulate frontend cart pricing logic:
+      // In index.html: const price = p.retailPrice || p.sellingPrice || '0.0000';
+      const resolvedPrice = item.retailPrice || item.sellingPrice || '0.0000';
+      expect(resolvedPrice).toBe('3500.0000');
+      const unitPriceFloat = parseFloat(resolvedPrice);
+      expect(unitPriceFloat).toBe(3500);
+
+      // 2 items added to cart -> subtotal = 7000.00
+      const cartQty = 2;
+      const lineTotal = cartQty * unitPriceFloat;
+      expect(lineTotal).toBe(7000);
+      expect(lineTotal.toFixed(2)).toBe('7000.00');
+    });
+  });
 });

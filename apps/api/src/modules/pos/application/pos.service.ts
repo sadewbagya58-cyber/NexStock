@@ -534,6 +534,13 @@ export async function searchPosProducts(
     return [];
   }
 
+  const tenant = await trx.db
+    .selectFrom('tenants')
+    .select(['base_currency'])
+    .where('id', '=', trx.tenantId)
+    .executeTakeFirst();
+  const baseCurrency = tenant?.base_currency || 'USD';
+
   const productIds = rows.map((r) => r.product_id);
   const barcodes = await trx.db
     .selectFrom('product_barcodes')
@@ -557,6 +564,8 @@ export async function searchPosProducts(
       availableQtyStr = onHand.subtract(reserved).toDecimalString();
     }
 
+    const priceStr = Money.fromDecimalString(r.selling_price, baseCurrency).toDecimalString();
+
     return {
       id: r.product_id,
       sku: r.sku,
@@ -565,7 +574,8 @@ export async function searchPosProducts(
       trackingMode: (r.tracking_mode ?? 'NONE') as TrackingMode,
       valuationMethod: (r.valuation_method ?? 'MOVING_AVG') as ValuationMethod,
       baseUom: r.base_uom,
-      retailPrice: Money.fromDecimalString(r.selling_price, 'USD').toDecimalString(),
+      retailPrice: priceStr,
+      sellingPrice: priceStr,
       trackInventory: r.track_inventory,
       availableQuantity: availableQtyStr,
       barcodes: barcodesByProduct.get(r.product_id) ?? [],

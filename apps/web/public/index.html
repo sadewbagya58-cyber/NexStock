@@ -3837,6 +3837,15 @@
         const movementsRes = await apiFetch(`/v1/inventory/movements?${whParam}limit=50`).catch(() => ({ data: [] }));
         const movements = movementsRes?.data || (Array.isArray(movementsRes) ? movementsRes : []);
 
+        const productsMap = new Map();
+        if (movements.some(m => !m.productSku || !m.productName)) {
+          const prodsRes = await apiFetch('/v1/products?limit=200').catch(() => ({ data: [] }));
+          const prods = prodsRes?.data || (Array.isArray(prodsRes) ? prodsRes : []);
+          for (const p of prods) {
+            productsMap.set(p.id, p);
+          }
+        }
+
         container.innerHTML = `
           <div class="view-header">
             <div>
@@ -3873,25 +3882,28 @@
                     <tbody>
                       ${movements.map(m => {
                         const mType = escapeHtml(m.movementType);
-                        const sku = escapeHtml(m.productSku);
-                        const pName = escapeHtml(m.productName);
-                        const uom = escapeHtml(m.uomCode || 'UNIT');
-                        const qty = parseFloat(m.quantity || 0);
+                        const fallback = productsMap.get(m.productId);
+                        const sku = escapeHtml(m.productSku || fallback?.sku || '');
+                        const pName = escapeHtml(m.productName || fallback?.name || 'Product');
+                        const uom = escapeHtml(m.uomCode || fallback?.baseUom || 'PCS');
+                        const rawQty = m.qtyDelta ?? m.quantity ?? m.inputQty ?? 0;
+                        const qty = parseFloat(rawQty) || 0;
+                        const qtyFormatted = `${qty > 0 ? '+' : ''}${parseFloat(qty.toFixed(4))} ${uom}`;
                         const unitCostFormatted = formatTenantMoney(m.unitCost);
-                        const balAfter = parseFloat(m.balanceAfter || 0).toFixed(0);
+                        const balAfter = parseFloat(m.balanceAfter ?? 0).toFixed(0);
                         const refType = escapeHtml(m.referenceType || 'MANUAL');
-                        const dateStr = m.createdAt ? new Date(m.createdAt).toLocaleString() : '—';
+                        const dateStr = (m.createdAt || m.occurredAt) ? new Date(m.createdAt || m.occurredAt).toLocaleString() : '—';
 
                         return `
                           <tr>
                             <td>${dateStr}</td>
                             <td><span class="badge-pill ${mType.includes('IN') || mType.includes('RETURN') ? 'badge-green' : 'badge-yellow'}">${mType}</span></td>
-                            <td><strong>${sku}</strong> (${pName})</td>
+                            <td><strong>${sku || '—'}</strong> ${pName ? `(${pName})` : ''}</td>
                             <td style="font-weight: 700; color: ${qty >= 0 ? 'var(--status-success)' : 'var(--status-danger)'};">
-                              ${qty > 0 ? '+' : ''}${qty.toFixed(0)} ${uom}
+                              ${qtyFormatted}
                             </td>
                             <td>${unitCostFormatted}</td>
-                            <td><strong>${balAfter}</strong></td>
+                            <td><strong>${balAfter} ${uom}</strong></td>
                             <td><code>${refType}</code></td>
                             <td>
                               ${!m.reversedEntryId && m.movementType !== 'CUSTOMER_RETURN_RESTOCK' ? `
@@ -3909,20 +3921,23 @@
               <div class="mobile-cards-container">
                 ${movements.map(m => {
                   const mType = escapeHtml(m.movementType);
-                  const sku = escapeHtml(m.productSku);
-                  const pName = escapeHtml(m.productName);
-                  const uom = escapeHtml(m.uomCode || 'UNIT');
-                  const qty = parseFloat(m.quantity || 0);
+                  const fallback = productsMap.get(m.productId);
+                  const sku = escapeHtml(m.productSku || fallback?.sku || '');
+                  const pName = escapeHtml(m.productName || fallback?.name || 'Product');
+                  const uom = escapeHtml(m.uomCode || fallback?.baseUom || 'PCS');
+                  const rawQty = m.qtyDelta ?? m.quantity ?? m.inputQty ?? 0;
+                  const qty = parseFloat(rawQty) || 0;
+                  const qtyFormatted = `${qty > 0 ? '+' : ''}${parseFloat(qty.toFixed(4))} ${uom}`;
                   const unitCostFormatted = formatTenantMoney(m.unitCost);
-                  const balAfter = parseFloat(m.balanceAfter || 0).toFixed(0);
+                  const balAfter = parseFloat(m.balanceAfter ?? 0).toFixed(0);
                   const refType = escapeHtml(m.referenceType || 'MANUAL');
-                  const dateStr = m.createdAt ? new Date(m.createdAt).toLocaleString() : '—';
+                  const dateStr = (m.createdAt || m.occurredAt) ? new Date(m.createdAt || m.occurredAt).toLocaleString() : '—';
                   const canReverse = !m.reversedEntryId && m.movementType !== 'CUSTOMER_RETURN_RESTOCK';
 
                   return `
                     <div class="entity-card">
                       <div class="entity-card-header">
-                        <span class="entity-card-code"><strong>${sku}</strong></span>
+                        <span class="entity-card-code"><strong>${sku || '—'}</strong></span>
                         <span class="badge-pill ${mType.includes('IN') || mType.includes('RETURN') ? 'badge-green' : 'badge-yellow'}">${mType}</span>
                       </div>
                       <div class="entity-card-title">${pName}</div>
@@ -3930,7 +3945,7 @@
                         <div class="detail-row">
                           <span class="detail-label">Delta Qty</span>
                           <span class="detail-value" style="font-weight: 700; color: ${qty >= 0 ? 'var(--status-success)' : 'var(--status-danger)'};">
-                            ${qty > 0 ? '+' : ''}${qty.toFixed(0)} ${uom}
+                            ${qtyFormatted}
                           </span>
                         </div>
                         <div class="detail-row">
@@ -4283,18 +4298,20 @@
                     <div style="grid-column: 1 / -1; text-align: center; padding: 40px 16px; color: var(--text-secondary);">
                       No active products found in this branch's catalog. Add products in the Inventory menu to begin sales.
                     </div>
-                  ` : products.map(p => `
-                    <div class="pos-product-card" onclick="addToCart('${p.id}', '${p.sku}', '${p.name}', '${p.sellingPrice}', '${p.baseUom}', ${p.trackInventory}, '${p.availableQuantity}')">
+                  ` : products.map(p => {
+                    const price = p.retailPrice || p.sellingPrice || '0.0000';
+                    return `
+                    <div class="pos-product-card" onclick="addToCart('${p.id}', '${escapeHtml(p.sku)}', '${escapeHtml(p.name)}', '${price}', '${escapeHtml(p.baseUom)}', ${Boolean(p.trackInventory)}, '${p.availableQuantity}')">
                       <div>
                         <div class="pos-product-name">${escapeHtml(p.name)}</div>
                         <div class="pos-product-sku">${escapeHtml(p.sku)}</div>
                         <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">
-                          ${p.trackInventory ? `Stock: <strong>${parseFloat(p.availableQuantity).toFixed(0)}</strong>` : 'Service (No Stock)'}
+                          ${p.trackInventory ? `Stock: <strong>${parseFloat(p.availableQuantity || '0').toFixed(0)}</strong>` : 'Service (No Stock)'}
                         </div>
                       </div>
-                      <div class="pos-product-price">${formatTenantMoney(p.sellingPrice)}</div>
+                      <div class="pos-product-price">${formatTenantMoney(price)}</div>
                     </div>
-                  `).join('')}
+                  `;}).join('')}
                 </div>
               `}
 
@@ -4330,7 +4347,7 @@
                       <button class="qty-btn" onclick="updateCartQty(${idx}, 1)">+</button>
                     </div>
                     <div style="min-width: 65px; text-align: right; font-weight: 700; color: var(--text-primary); margin-left: 12px;">
-                      ${formatTenantMoney(line.qty * parseFloat(line.unitPrice))}
+                      ${formatTenantMoney(line.qty * (parseFloat(line.unitPrice) || 0))}
                     </div>
                   </div>
                 `).join('')}
@@ -4386,14 +4403,16 @@
         const results = await apiFetch(`/v1/pos/products/search?warehouseId=${encodeURIComponent(state.warehouseId)}&barcode=${encodeURIComponent(barcodeOrSku)}`, { silent: true }).catch(() => []);
         if (results && results.length > 0) {
           const p = results[0];
-          addToCart(p.id, p.sku, p.name, p.sellingPrice, p.baseUom, p.trackInventory, p.availableQuantity);
+          const price = p.retailPrice || p.sellingPrice || '0.0000';
+          addToCart(p.id, p.sku, p.name, price, p.baseUom, p.trackInventory, p.availableQuantity);
           showToast(`Scanned: ${p.name}`, 'success');
         } else {
           // Fallback to text query
           const textResults = await apiFetch(`/v1/pos/products/search?warehouseId=${encodeURIComponent(state.warehouseId)}&q=${encodeURIComponent(barcodeOrSku)}`, { silent: true }).catch(() => []);
           if (textResults && textResults.length > 0) {
             const p = textResults[0];
-            addToCart(p.id, p.sku, p.name, p.sellingPrice, p.baseUom, p.trackInventory, p.availableQuantity);
+            const price = p.retailPrice || p.sellingPrice || '0.0000';
+            addToCart(p.id, p.sku, p.name, price, p.baseUom, p.trackInventory, p.availableQuantity);
             showToast(`Added: ${p.name}`, 'success');
           } else {
             showToast(`No product matching "${barcodeOrSku}"`, 'error');
@@ -4409,19 +4428,25 @@
         return;
       }
 
+      const numericPrice = parseFloat(unitPrice || '0');
+      const safePrice = Number.isFinite(numericPrice) ? numericPrice.toFixed(4) : '0.0000';
+
       const existingIndex = state.cart.findIndex(i => i.productId === productId && i.uomCode === uomCode);
       if (existingIndex >= 0) {
         state.cart[existingIndex].qty += 1;
+        if ((parseFloat(state.cart[existingIndex].unitPrice || '0') || 0) === 0 && numericPrice > 0) {
+          state.cart[existingIndex].unitPrice = safePrice;
+        }
       } else {
         state.cart.push({
           productId,
           sku,
           name,
-          unitPrice,
+          unitPrice: safePrice,
           uomCode,
           qty: 1,
           trackInventory,
-          availableQuantity: parseFloat(availableQuantity)
+          availableQuantity: parseFloat(availableQuantity || '0') || 0
         });
       }
 
@@ -4444,7 +4469,7 @@
     }
 
     function calculateCartSubtotal() {
-      return state.cart.reduce((acc, item) => acc + (item.qty * parseFloat(item.unitPrice)), 0);
+      return state.cart.reduce((acc, item) => acc + (item.qty * (parseFloat(item.unitPrice) || 0)), 0);
     }
 
     function calculateCartTax() {
@@ -4480,7 +4505,7 @@
               <button class="qty-btn" onclick="updateCartQty(${idx}, 1)">+</button>
             </div>
             <div style="min-width: 65px; text-align: right; font-weight: 700; color: var(--text-primary); margin-left: 12px;">
-              ${formatTenantMoney(line.qty * parseFloat(line.unitPrice))}
+              ${formatTenantMoney(line.qty * (parseFloat(line.unitPrice) || 0))}
             </div>
           </div>
         `).join('');

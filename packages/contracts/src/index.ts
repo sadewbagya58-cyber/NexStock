@@ -878,6 +878,8 @@ export const StockMovementResponseSchema = Type.Object({
   branchId: UuidSchema,
   warehouseId: UuidSchema,
   productId: UuidSchema,
+  productSku: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  productName: Type.Optional(Type.Union([Type.String(), Type.Null()])),
   batchId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
   serialId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
   supplierId: Type.Union([UuidSchema, Type.Null()]),
@@ -886,6 +888,7 @@ export const StockMovementResponseSchema = Type.Object({
   inputQty: DecimalQuantityStringSchema,
   conversionFactorToBase: DecimalQuantityStringSchema,
   qtyDelta: DecimalQuantityStringSchema,
+  quantity: Type.Optional(DecimalQuantityStringSchema),
   balanceBefore: DecimalQuantityStringSchema,
   balanceAfter: DecimalQuantityStringSchema,
   unitCost: DecimalMoneyStringSchema,
@@ -900,6 +903,7 @@ export const StockMovementResponseSchema = Type.Object({
   idempotencyKey: UuidSchema,
   occurredAt: IsoTimestampSchema,
   recordedAt: IsoTimestampSchema,
+  createdAt: Type.Optional(IsoTimestampSchema),
 });
 export type StockMovementResponse = Static<typeof StockMovementResponseSchema>;
 
@@ -1091,6 +1095,7 @@ export const PosProductItemResponseSchema = Type.Object({
   valuationMethod: ValuationMethodSchema,
   baseUom: Type.String(),
   retailPrice: DecimalMoneyStringSchema,
+  sellingPrice: Type.Optional(DecimalMoneyStringSchema),
   trackInventory: Type.Boolean(),
   availableQuantity: DecimalQuantityStringSchema,
   barcodes: Type.Array(Type.String()),
