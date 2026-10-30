@@ -1391,4 +1391,31 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       expect(html).not.toContain('submitEditAuditLog');
     });
   });
+
+  describe('16. BUG-015 — Batch Creation Stock Ledger & Balances Integration', () => {
+    it('verifies public/index.html includes branchId and idempotency-key in createBatch requests', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // 1. Modal and creation functions exist
+      expect(html).toContain('openCreateBatchModal');
+      expect(html).toContain('btnOpenNewBatchModal');
+      expect(html).toContain('/v1/inventory/batches');
+
+      // 2. branchId included in payload
+      expect(html).toContain('branchId: state.branchId');
+
+      // 3. Idempotency Key header included
+      expect(html).toContain("const idempotencyKey = crypto.randomUUID()");
+      expect(html).toContain("'idempotency-key': idempotencyKey");
+
+      // 4. In-flight button disabled and label updated
+      expect(html).toContain('submitBtn.disabled = true');
+      expect(html).toContain("submitBtn.textContent = 'Creating...'");
+
+      // 5. Success toast notifies user of batch and ledger registration
+      expect(html).toContain('showToast(');
+      expect(html).toContain('Batch created and inventory intake recorded successfully');
+    });
+  });
 });

@@ -6468,7 +6468,7 @@
           </div>
           <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px;">
             <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-            <button type="submit" class="btn btn-primary">Create Batch</button>
+            <button type="submit" id="btnSubmitCreateBatch" class="btn btn-primary">Create Batch</button>
           </div>
         </form>
       `;
@@ -6476,8 +6476,15 @@
       openModal(html);
       document.getElementById('createBatchForm').onsubmit = async (e) => {
         e.preventDefault();
+        const submitBtn = document.getElementById('btnSubmitCreateBatch');
+        if (submitBtn) {
+          submitBtn.disabled = true;
+          submitBtn.textContent = 'Creating...';
+        }
+
         try {
           const payload = {
+            branchId: state.branchId,
             warehouseId: state.warehouseId,
             productId: document.getElementById('newBatchProductId').value,
             batchNumber: document.getElementById('newBatchNumber').value.trim(),
@@ -6487,16 +6494,26 @@
             expiryDate: document.getElementById('newBatchExpiryDate').value || null
           };
 
+          const idempotencyKey = crypto.randomUUID();
+
           await apiFetch('/v1/inventory/batches', {
             method: 'POST',
+            headers: {
+              'idempotency-key': idempotencyKey
+            },
             body: JSON.stringify(payload)
           });
 
-          showToast('Batch created successfully', 'success');
+          showToast('Batch created and inventory intake recorded successfully', 'success');
           closeModal();
           renderBatchesView();
         } catch (err) {
           showToast(`Error creating batch: ${err.message}`, 'error');
+        } finally {
+          if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Create Batch';
+          }
         }
       };
     }

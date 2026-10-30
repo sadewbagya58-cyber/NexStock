@@ -1435,4 +1435,513 @@ describe('@nexstock/api — Phase 4: Advanced Inventory (Batches, Expiry, Serial
       }
     });
   });
+
+  describe('6. BUG-015 — Batch Creation Stock Ledger & Balances Integration', () => {
+    let qaBatchProductId: string;
+    let nonTrackableBatchProductId: string;
+
+    beforeAll(async () => {
+      // 1. Create a dedicated BATCH product matching QA-BATCH-001
+      const pRes = await app.inject({
+        method: 'POST',
+        url: '/v1/products',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+        payload: {
+          sku: 'QA-BATCH-001',
+          name: 'QA Batch Product 001',
+          productType: 'STANDARD',
+          baseUom: 'PCS',
+          purchaseCost: '2500.0000',
+          sellingPrice: '3500.0000',
+          categoryId: alphaCategoryId,
+          taxGroupId: alphaTaxGroupId,
+          trackInventory: true,
+          trackingMode: 'BATCH',
+          valuationMethod: 'FIFO',
+        },
+      });
+      expect(pRes.statusCode).toBe(201);
+      qaBatchProductId = pRes.json().id;
+
+      // 2. Create a non-trackable product
+      const pNonTrackRes = await app.inject({
+        method: 'POST',
+        url: '/v1/products',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+        payload: {
+          sku: 'QA-NONTRACK-ITEM',
+          name: 'Non Trackable Item',
+          productType: 'SERVICE',
+          baseUom: 'PCS',
+          purchaseCost: '10.0000',
+          sellingPrice: '20.0000',
+          categoryId: alphaCategoryId,
+          taxGroupId: alphaTaxGroupId,
+          trackInventory: false,
+          trackingMode: 'NONE',
+          valuationMethod: 'MOVING_AVG',
+        },
+      });
+      expect(pNonTrackRes.statusCode).toBe(201);
+      nonTrackableBatchProductId = pNonTrackRes.json().id;
+    });
+
+    it('creates batch with initialQuantity 100, posting STOCK_IN movement and updating inventory balance', async () => {
+      const createRes = await app.inject({
+        method: 'POST',
+        url: '/v1/inventory/batches',
+        headers: {
+          authorization: `Bearer ${alphaManagerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+        payload: {
+          productId: qaBatchProductId,
+          branchId: alphaBranchId,
+          warehouseId: alphaWarehouseId,
+          batchNumber: 'QA-BATCH-2026-001',
+          initialQuantity: '100.0000',
+          unitCost: '2500.0000',
+        },
+      });
+
+      expect(createRes.statusCode).toBe(201);
+      const batch = createRes.json();
+      expect(batch.batchNumber).toBe('QA-BATCH-2026-001');
+      expect(Number(batch.initialQuantity)).toBe(100);
+      expect(Number(batch.currentQuantity)).toBe(100);
+      expect(batch.status).toBe('ACTIVE');
+
+      // 1. Verify stock_ledger_entries row
+      await withTenantTransaction(
+        harness.db,
+        {
+          tenantId: TENANT_ALPHA_ID,
+          userId: TENANT_ALPHA_MANAGER,
+          traceId: 'verify_batch_ledger',
+        },
+        async (trx) => {
+          const ledgerEntries = await trx.db
+            .selectFrom('stock_ledger_entries')
+            .selectAll()
+            .where('tenant_id', '=', TENANT_ALPHA_ID)
+            .where('batch_id', '=', batch.id)
+            .execute();
+
+          expect(ledgerEntries).toHaveLength(1);
+          const entry = ledgerEntries[0]!;
+          expect(entry.movement_type).toBe('STOCK_IN');
+          expect(entry.qty_delta).toBe('100.000000');
+          expect(entry.balance_before).toBe('0.000000');
+          expect(entry.balance_after).toBe('100.000000');
+          expect(entry.reference_type).toBe('BATCH_REGISTRATION');
+          expect(entry.reference_id).toBe('QA-BATCH-2026-001');
+
+          // 2. Verify inventory_balances row
+          const balanceRow = await trx.db
+            .selectFrom('inventory_balances')
+            .selectAll()
+            .where('tenant_id', '=', TENANT_ALPHA_ID)
+            .where('warehouse_id', '=', alphaWarehouseId)
+            .where('product_id', '=', qaBatchProductId)
+            .executeTakeFirst();
+
+          expect(balanceRow).toBeDefined();
+          expect(balanceRow!.qty_on_hand).toBe('100.000000');
+        },
+      );
+
+      // 3. Verify public API endpoints
+      // GET /v1/inventory/movements
+      const movRes = await app.inject({
+        method: 'GET',
+        url: `/v1/inventory/movements?warehouseId=${alphaWarehouseId}&productId=${qaBatchProductId}`,
+        headers: {
+          authorization: `Bearer ${alphaManagerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+      expect(movRes.statusCode).toBe(200);
+      const movements = movRes.json().data;
+      expect(movements).toHaveLength(1);
+      expect(movements[0].movementType).toBe('STOCK_IN');
+      expect(movements[0].qtyDelta).toBe('100.000000');
+      expect(movements[0].batchId).toBe(batch.id);
+
+      // GET /v1/inventory/balances
+      const balRes = await app.inject({
+        method: 'GET',
+        url: `/v1/inventory/balances?warehouseId=${alphaWarehouseId}&productId=${qaBatchProductId}`,
+        headers: {
+          authorization: `Bearer ${alphaManagerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+      expect(balRes.statusCode).toBe(200);
+      const balances = balRes.json().data;
+      expect(balances).toHaveLength(1);
+      expect(Number(balances[0].qtyOnHand)).toBe(100);
+    });
+
+    it('creates batch with initialQuantity 0 without posting stock movement or changing balance', async () => {
+      const createRes = await app.inject({
+        method: 'POST',
+        url: '/v1/inventory/batches',
+        headers: {
+          authorization: `Bearer ${alphaManagerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+        payload: {
+          productId: qaBatchProductId,
+          branchId: alphaBranchId,
+          warehouseId: alphaWarehouseId,
+          batchNumber: 'QA-BATCH-ZERO-001',
+          initialQuantity: '0.0000',
+          unitCost: '2500.0000',
+        },
+      });
+
+      expect(createRes.statusCode).toBe(201);
+      const batch = createRes.json();
+      expect(batch.batchNumber).toBe('QA-BATCH-ZERO-001');
+      expect(Number(batch.initialQuantity)).toBe(0);
+      expect(Number(batch.currentQuantity)).toBe(0);
+
+      // Verify no ledger entries created for this zero batch
+      await withTenantTransaction(
+        harness.db,
+        {
+          tenantId: TENANT_ALPHA_ID,
+          userId: TENANT_ALPHA_MANAGER,
+          traceId: 'verify_zero_batch',
+        },
+        async (trx) => {
+          const ledgerEntries = await trx.db
+            .selectFrom('stock_ledger_entries')
+            .selectAll()
+            .where('tenant_id', '=', TENANT_ALPHA_ID)
+            .where('batch_id', '=', batch.id)
+            .execute();
+
+          expect(ledgerEntries).toHaveLength(0);
+
+          // Balance should remain 100 from previous test
+          const balanceRow = await trx.db
+            .selectFrom('inventory_balances')
+            .selectAll()
+            .where('tenant_id', '=', TENANT_ALPHA_ID)
+            .where('warehouse_id', '=', alphaWarehouseId)
+            .where('product_id', '=', qaBatchProductId)
+            .executeTakeFirst();
+
+          expect(balanceRow!.qty_on_hand).toBe('100.000000');
+        },
+      );
+    });
+
+    it('rejects batch registration for non-batch-tracked product (422 INV_PRODUCT_NOT_BATCH_TRACKED)', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/inventory/batches',
+        headers: {
+          authorization: `Bearer ${alphaManagerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+        payload: {
+          productId: nonBatchProductId,
+          branchId: alphaBranchId,
+          warehouseId: alphaWarehouseId,
+          batchNumber: 'QA-BATCH-NONBATCH',
+          initialQuantity: '10.0000',
+          unitCost: '5.0000',
+        },
+      });
+
+      expect(res.statusCode).toBe(422);
+      expect(res.json().errorCode).toBe('INV_PRODUCT_NOT_BATCH_TRACKED');
+    });
+
+    it('rejects batch registration for non-trackable product (422)', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/inventory/batches',
+        headers: {
+          authorization: `Bearer ${alphaManagerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+        payload: {
+          productId: nonTrackableBatchProductId,
+          branchId: alphaBranchId,
+          warehouseId: alphaWarehouseId,
+          batchNumber: 'QA-BATCH-NONTRACK',
+          initialQuantity: '10.0000',
+          unitCost: '5.0000',
+        },
+      });
+
+      expect(res.statusCode).toBe(422);
+    });
+
+    it('replays duplicate submission with Idempotency-Key without duplicating ledger entries or balances', async () => {
+      const idempotencyKey = generateUuidV7();
+
+      // First call
+      const firstRes = await app.inject({
+        method: 'POST',
+        url: '/v1/inventory/batches',
+        headers: {
+          authorization: `Bearer ${alphaManagerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+          'idempotency-key': idempotencyKey,
+        },
+        payload: {
+          productId: qaBatchProductId,
+          branchId: alphaBranchId,
+          warehouseId: alphaWarehouseId,
+          batchNumber: 'QA-BATCH-IDEMP-001',
+          initialQuantity: '50.0000',
+          unitCost: '2500.0000',
+        },
+      });
+
+      expect(firstRes.statusCode).toBe(201);
+      const batchId = firstRes.json().id;
+
+      // Second duplicate call with same idempotency key
+      const secondRes = await app.inject({
+        method: 'POST',
+        url: '/v1/inventory/batches',
+        headers: {
+          authorization: `Bearer ${alphaManagerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+          'idempotency-key': idempotencyKey,
+        },
+        payload: {
+          productId: qaBatchProductId,
+          branchId: alphaBranchId,
+          warehouseId: alphaWarehouseId,
+          batchNumber: 'QA-BATCH-IDEMP-001',
+          initialQuantity: '50.0000',
+          unitCost: '2500.0000',
+        },
+      });
+
+      expect(secondRes.statusCode).toBe(201);
+      expect(secondRes.headers['x-idempotent-replayed']).toBe('true');
+      expect(secondRes.json().id).toBe(batchId);
+
+      // Verify exactly ONE ledger entry exists for this batch
+      await withTenantTransaction(
+        harness.db,
+        {
+          tenantId: TENANT_ALPHA_ID,
+          userId: TENANT_ALPHA_MANAGER,
+          traceId: 'verify_idemp_batch',
+        },
+        async (trx) => {
+          const ledgerEntries = await trx.db
+            .selectFrom('stock_ledger_entries')
+            .selectAll()
+            .where('tenant_id', '=', TENANT_ALPHA_ID)
+            .where('batch_id', '=', batchId)
+            .execute();
+
+          expect(ledgerEntries).toHaveLength(1);
+
+          // Total on hand should be 100 (batch 1) + 50 (batch idemp) = 150 (NOT 200)
+          const balanceRow = await trx.db
+            .selectFrom('inventory_balances')
+            .selectAll()
+            .where('tenant_id', '=', TENANT_ALPHA_ID)
+            .where('warehouse_id', '=', alphaWarehouseId)
+            .where('product_id', '=', qaBatchProductId)
+            .executeTakeFirst();
+
+          expect(balanceRow!.qty_on_hand).toBe('150.000000');
+        },
+      );
+    });
+
+    it('rejects batch creation if warehouse does not belong to branch (400 ERR_VALIDATION_FAILED)', async () => {
+      const dummyBranchId = generateUuidV7();
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/inventory/batches',
+        headers: {
+          authorization: `Bearer ${alphaManagerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+        payload: {
+          productId: qaBatchProductId,
+          branchId: dummyBranchId,
+          warehouseId: alphaWarehouseId,
+          batchNumber: 'QA-BATCH-BADBRANCH',
+          initialQuantity: '10.0000',
+          unitCost: '100.0000',
+        },
+      });
+
+      expect(res.statusCode).toBe(400);
+      expect(res.json().errorCode).toBe('ERR_VALIDATION_FAILED');
+    });
+
+    it('rolls back batch and ensures no ledger entries are created if registration transaction fails on duplicate', async () => {
+      const initialEntryCount = await withTenantTransaction(
+        harness.db,
+        {
+          tenantId: TENANT_ALPHA_ID,
+          userId: TENANT_ALPHA_MANAGER,
+          traceId: 'verify_rollback_initial',
+        },
+        async (trx) => {
+          const entries = await trx.db
+            .selectFrom('stock_ledger_entries')
+            .selectAll()
+            .where('tenant_id', '=', TENANT_ALPHA_ID)
+            .where('product_id', '=', qaBatchProductId)
+            .execute();
+          return entries.length;
+        },
+      );
+
+      // Attempt duplicate batch number
+      const dupRes = await app.inject({
+        method: 'POST',
+        url: '/v1/inventory/batches',
+        headers: {
+          authorization: `Bearer ${alphaManagerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+        payload: {
+          productId: qaBatchProductId,
+          branchId: alphaBranchId,
+          warehouseId: alphaWarehouseId,
+          batchNumber: 'QA-BATCH-2026-001',
+          initialQuantity: '25.0000',
+          unitCost: '2500.0000',
+        },
+      });
+
+      expect(dupRes.statusCode).toBe(409);
+      expect(dupRes.json().errorCode).toBe('INV_BATCH_DUPLICATE_NUMBER');
+
+      // Verify no extra ledger entries created
+      await withTenantTransaction(
+        harness.db,
+        {
+          tenantId: TENANT_ALPHA_ID,
+          userId: TENANT_ALPHA_MANAGER,
+          traceId: 'verify_rollback_final',
+        },
+        async (trx) => {
+          const entries = await trx.db
+            .selectFrom('stock_ledger_entries')
+            .selectAll()
+            .where('tenant_id', '=', TENANT_ALPHA_ID)
+            .where('product_id', '=', qaBatchProductId)
+            .execute();
+          expect(entries.length).toBe(initialEntryCount);
+        },
+      );
+    });
+
+    it('successfully allocates stock via FEFO from batch created with initialQuantity', async () => {
+      // Create dedicated BATCH_EXPIRY product to test isolated FEFO allocation
+      const pFefoRes = await app.inject({
+        method: 'POST',
+        url: '/v1/products',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+        payload: {
+          sku: 'QA-FEFO-PROD-01',
+          name: 'QA FEFO Isolated Product',
+          productType: 'STANDARD',
+          baseUom: 'PCS',
+          purchaseCost: '15.0000',
+          sellingPrice: '30.0000',
+          categoryId: alphaCategoryId,
+          taxGroupId: alphaTaxGroupId,
+          trackInventory: true,
+          trackingMode: 'BATCH_EXPIRY',
+          valuationMethod: 'FIFO',
+        },
+      });
+      expect(pFefoRes.statusCode).toBe(201);
+      const fefoProdId = pFefoRes.json().id;
+
+      // Create a batch with expiry date and initialQuantity: 30
+      const expDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const batchRes = await app.inject({
+        method: 'POST',
+        url: '/v1/inventory/batches',
+        headers: {
+          authorization: `Bearer ${alphaManagerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+        payload: {
+          productId: fefoProdId,
+          branchId: alphaBranchId,
+          warehouseId: alphaWarehouseId,
+          batchNumber: 'QA-FEFO-BATCH-001',
+          initialQuantity: '30.0000',
+          unitCost: '15.0000',
+          expiryDate: expDate,
+        },
+      });
+      expect(batchRes.statusCode).toBe(201);
+      const newBatchId = batchRes.json().id;
+
+      // Allocate 15 units via FEFO
+      const fefoRes = await app.inject({
+        method: 'POST',
+        url: '/v1/inventory/batches/fefo-select',
+        headers: {
+          authorization: `Bearer ${alphaManagerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+        payload: {
+          warehouseId: alphaWarehouseId,
+          productId: fefoProdId,
+          requiredQuantity: '15.0000',
+        },
+      });
+      expect(fefoRes.statusCode).toBe(200);
+      const fefo = fefoRes.json();
+      expect(fefo.allocations.length).toBeGreaterThan(0);
+      expect(fefo.allocations.some((a: { batchId: string }) => a.batchId === newBatchId)).toBe(true);
+      const totalAllocated = fefo.allocations.reduce((acc: number, a: { allocatedQty: string }) => acc + Number(a.allocatedQty), 0);
+      expect(totalAllocated).toBe(15);
+    });
+
+    it('enforces multi-tenant isolation: Tenant Beta cannot see Tenant Alpha batches or stock ledger', async () => {
+      const bRes = await app.inject({
+        method: 'GET',
+        url: `/v1/inventory/batches?productId=${qaBatchProductId}`,
+        headers: {
+          authorization: `Bearer ${betaOwnerToken}`,
+          'x-tenant-id': TENANT_BETA_ID,
+        },
+      });
+      expect(bRes.statusCode).toBe(200);
+      expect(bRes.json().data).toHaveLength(0);
+
+      const mRes = await app.inject({
+        method: 'GET',
+        url: `/v1/inventory/movements?productId=${qaBatchProductId}`,
+        headers: {
+          authorization: `Bearer ${betaOwnerToken}`,
+          'x-tenant-id': TENANT_BETA_ID,
+        },
+      });
+      expect(mRes.statusCode).toBe(200);
+      expect(mRes.json().data).toHaveLength(0);
+    });
+  });
 });

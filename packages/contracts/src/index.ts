@@ -1399,6 +1399,7 @@ export type BatchExpiryStatus = Static<typeof BatchExpiryStatusSchema>;
 
 export const CreateBatchRequestSchema = Type.Object(
   {
+    branchId: Type.Optional(UuidSchema),
     productId: UuidSchema,
     warehouseId: UuidSchema,
     batchNumber: Type.String({ minLength: 1, maxLength: 64 }),

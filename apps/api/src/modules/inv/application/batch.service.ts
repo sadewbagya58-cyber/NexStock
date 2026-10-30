@@ -20,6 +20,7 @@ import {
   generateUuidV7,
 } from '../../shared/index.js';
 import { assertSubscriptionEntitlement } from '../../sub/index.js';
+import { postStockMovement } from './inv.service.js';
 
 export function calculateBatchExpiryStatus(
   expiryDate: string | Date | null | undefined,
@@ -108,6 +109,7 @@ async function getTenantBaseCurrency(
 export async function createBatch(
   trx: TenantTransactionContext,
   input: CreateBatchRequest,
+  _idempotencyKey?: string,
 ): Promise<BatchResponse> {
   await assertAuthorized(trx, {
     permission: 'inv:batch:manage',
@@ -120,7 +122,15 @@ export async function createBatch(
 
   const product = await trx.db
     .selectFrom('products')
-    .select(['id', 'sku', 'track_inventory', 'tracking_mode', 'status'])
+    .select([
+      'id',
+      'sku',
+      'track_inventory',
+      'tracking_mode',
+      'status',
+      'base_uom',
+      'purchase_cost',
+    ])
     .where('tenant_id', '=', trx.tenantId)
     .where('id', '=', input.productId)
     .executeTakeFirst();
@@ -146,9 +156,18 @@ export async function createBatch(
     });
   }
 
+  if (!product.track_inventory) {
+    throw new AppError({
+      statusCode: 422,
+      errorCode: 'INV_PRODUCT_NOT_TRACKABLE',
+      title: 'Product Does Not Track Stock',
+      detail: `Product "${product.sku}" is configured with track_inventory=false.`,
+    });
+  }
+
   const warehouse = await trx.db
     .selectFrom('warehouses')
-    .select(['id', 'is_active'])
+    .select(['id', 'branch_id', 'is_active'])
     .where('tenant_id', '=', trx.tenantId)
     .where('id', '=', input.warehouseId)
     .executeTakeFirst();
@@ -160,6 +179,66 @@ export async function createBatch(
       title: 'Active Warehouse Not Found',
       detail: `Active warehouse "${input.warehouseId}" not found.`,
     });
+  }
+
+  let resolvedBranchId = input.branchId ?? warehouse.branch_id;
+  if (!resolvedBranchId) {
+    const link = await trx.db
+      .selectFrom('branch_warehouse_links')
+      .select(['branch_id'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('warehouse_id', '=', input.warehouseId)
+      .executeTakeFirst();
+    resolvedBranchId = link?.branch_id ?? null;
+  }
+
+  if (!resolvedBranchId) {
+    throw new AppError({
+      statusCode: 400,
+      errorCode: 'ERR_VALIDATION_FAILED',
+      title: 'Warehouse Branch Unresolved',
+      detail: `Warehouse "${input.warehouseId}" is not associated with any active branch.`,
+    });
+  }
+
+  if (input.branchId) {
+    let belongsToBranch = warehouse.branch_id === input.branchId;
+    if (!belongsToBranch) {
+      const link = await trx.db
+        .selectFrom('branch_warehouse_links')
+        .select(['id'])
+        .where('tenant_id', '=', trx.tenantId)
+        .where('branch_id', '=', input.branchId)
+        .where('warehouse_id', '=', input.warehouseId)
+        .executeTakeFirst();
+      belongsToBranch = Boolean(link);
+    }
+    if (!belongsToBranch) {
+      throw new AppError({
+        statusCode: 400,
+        errorCode: 'ERR_VALIDATION_FAILED',
+        title: 'Warehouse Not Linked to Branch',
+        detail: `Warehouse "${input.warehouseId}" does not belong to branch "${input.branchId}".`,
+      });
+    }
+  }
+
+  if (input.supplierId) {
+    const supplierRow = await trx.db
+      .selectFrom('suppliers')
+      .select(['id', 'status'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('id', '=', input.supplierId)
+      .executeTakeFirst();
+
+    if (!supplierRow) {
+      throw new AppError({
+        statusCode: 404,
+        errorCode: 'ERR_NOT_FOUND',
+        title: 'Supplier Not Found',
+        detail: `Supplier "${input.supplierId}" was not found in tenant "${trx.tenantId}".`,
+      });
+    }
   }
 
   const batchNumber = input.batchNumber.trim().toUpperCase();
@@ -216,6 +295,7 @@ export async function createBatch(
   const now = new Date();
   const receivedDate = input.receivedDate || now.toISOString().slice(0, 10);
 
+  // Initialize batch with 0 current_quantity so postStockMovement atomically increments it to initialQuantity
   await trx.db
     .insertInto('inventory_batches')
     .values({
@@ -230,7 +310,7 @@ export async function createBatch(
       manufacturing_date: input.manufacturingDate ?? null,
       expiry_date: input.expiryDate ?? null,
       initial_quantity: initialQty.toDecimalString(),
-      current_quantity: initialQty.toDecimalString(),
+      current_quantity: Quantity.zero().toDecimalString(),
       unit_cost: unitCostMoney.toDecimalString(),
       currency_code: currency,
       quarantine_reason: null,
@@ -239,6 +319,30 @@ export async function createBatch(
     })
     .execute();
 
+  if (initialQty.isPositive()) {
+    const movementKey = generateUuidV7();
+
+    await postStockMovement(
+      trx,
+      movementKey,
+      {
+        branchId: resolvedBranchId,
+        warehouseId: input.warehouseId,
+        productId: input.productId,
+        batchId,
+        movementType: 'STOCK_IN',
+        quantity: initialQty.toDecimalString(),
+        uomCode: product.base_uom,
+        unitCost: unitCostMoney.toDecimalString(),
+        referenceType: 'BATCH_REGISTRATION',
+        referenceId: batchNumber,
+        reason: 'Initial batch registration intake',
+        supplierId: input.supplierId ?? null,
+      },
+      { skipPermissionCheck: true },
+    );
+  }
+
   await appendAuditLog(trx, {
     action: 'INV_BATCH_CREATED',
     resourceType: 'INVENTORY_BATCH',
@@ -246,6 +350,7 @@ export async function createBatch(
     metadata: {
       productId: input.productId,
       warehouseId: input.warehouseId,
+      branchId: resolvedBranchId,
       batchNumber,
       initialQuantity: initialQty.toDecimalString(),
       expiryDate: input.expiryDate ?? null,
