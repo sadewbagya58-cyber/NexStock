@@ -4,10 +4,12 @@ import {
   ensureUserRecordDirect,
   generateUuidV7,
   getOrCreateDevKeyMaterial,
+  getTenantSubscriptionEntitlement,
   sanitizeLogMessage,
   signDevJwt,
   StaticJwksProvider,
   withAppUserTransaction,
+  withTenantTransaction,
 } from '../src/index.js';
 import {
   type TestPostgresHarness,
@@ -393,6 +395,56 @@ describe('Phase 5.0 — Authentication & Business Foundation Integration Suite',
       expect(tenantsBody.length).toBe(1);
       expect(tenantsBody[0].tenantId).toBe(body.tenant.id);
 
+      // 7. Verify GET /v1/subscriptions/entitlement returns active STARTER trial subscription
+      const subRes = await app.inject({
+        method: 'GET',
+        url: '/v1/subscriptions/entitlement',
+        headers: {
+          authorization: `Bearer ${token}`,
+          'x-tenant-id': body.tenant.id,
+        },
+      });
+      expect(subRes.statusCode).toBe(200);
+      const subBody = subRes.json();
+      expect(subBody.planCode).toBe('STARTER');
+      expect(subBody.status).toBe('TRIALING');
+      expect(subBody.limits.maxBranches).toBeGreaterThanOrEqual(1);
+
+      // 8. Verify domain endpoints (balances, products, registers) return HTTP 200 without Subscription 404
+      const balancesRes = await app.inject({
+        method: 'GET',
+        url: `/v1/inventory/balances?warehouseId=${body.warehouse.id}`,
+        headers: {
+          authorization: `Bearer ${token}`,
+          'x-tenant-id': body.tenant.id,
+        },
+      });
+      expect(balancesRes.statusCode).toBe(200);
+      expect(balancesRes.json().data).toEqual([]);
+
+      const productsRes = await app.inject({
+        method: 'GET',
+        url: '/v1/products',
+        headers: {
+          authorization: `Bearer ${token}`,
+          'x-tenant-id': body.tenant.id,
+        },
+      });
+      expect(productsRes.statusCode).toBe(200);
+      expect(productsRes.json().data).toEqual([]);
+
+      const registersRes = await app.inject({
+        method: 'GET',
+        url: '/v1/pos/registers',
+        headers: {
+          authorization: `Bearer ${token}`,
+          'x-tenant-id': body.tenant.id,
+        },
+      });
+      expect(registersRes.statusCode).toBe(200);
+      expect(registersRes.json().length).toBe(1);
+      expect(registersRes.json()[0].id).toBe(body.register.id);
+
       await app.close();
     });
 
@@ -690,6 +742,145 @@ describe('Phase 5.0 — Authentication & Business Foundation Integration Suite',
           .executeTakeFirst();
         expect(dbTenant?.base_currency.trim()).toBe(curr);
       }
+
+      await app.close();
+    });
+
+    it('self-heals missing subscription record for existing valid tenant and enables inventory access', async () => {
+      const app = await buildApp({
+        db: harness.db,
+        jwksProvider: devJwksProvider,
+      });
+
+      const founderId = generateUuidV7();
+      const founderEmail = `founder_repair_${generateUuidV7()}@testrepair.com`;
+      const token = signDevJwt({ userId: founderId, email: founderEmail });
+
+      await harness.db
+        .insertInto('users')
+        .values({
+          id: founderId,
+          email: founderEmail,
+          full_name: 'Repair Founder',
+          is_platform_admin: false,
+        })
+        .execute();
+
+      const onboardRes = await app.inject({
+        method: 'POST',
+        url: '/v1/org/onboard',
+        headers: { authorization: `Bearer ${token}` },
+        payload: {
+          businessName: 'Repair Shop Inc.',
+          businessType: 'RETAIL',
+          currency: 'USD',
+          firstBranchName: 'Repair Main',
+        },
+      });
+
+      expect(onboardRes.statusCode).toBe(201);
+      const onboardBody = onboardRes.json();
+      const tenantId = onboardBody.tenant.id;
+      const warehouseId = onboardBody.warehouse.id;
+
+      // Simulate existing unmigrated tenant: delete subscription record completely
+      await harness.db
+        .deleteFrom('tenant_subscriptions')
+        .where('tenant_id', '=', tenantId)
+        .execute();
+
+      const deletedSub = await harness.db
+        .selectFrom('tenant_subscriptions')
+        .select('id')
+        .where('tenant_id', '=', tenantId)
+        .executeTakeFirst();
+      expect(deletedSub).toBeUndefined();
+
+      // Calling GET /v1/products must self-heal the subscription and return HTTP 200 (not 404)
+      const productsRes = await app.inject({
+        method: 'GET',
+        url: '/v1/products',
+        headers: {
+          authorization: `Bearer ${token}`,
+          'x-tenant-id': tenantId,
+        },
+      });
+
+      expect(productsRes.statusCode).toBe(200);
+      expect(productsRes.json().data).toEqual([]);
+
+      // Verify that tenant_subscriptions was self-healed in the database
+      const healedSub = await harness.db
+        .selectFrom('tenant_subscriptions')
+        .selectAll()
+        .where('tenant_id', '=', tenantId)
+        .executeTakeFirst();
+
+      expect(healedSub).toBeDefined();
+      expect(healedSub?.status).toBe('TRIALING');
+      expect(healedSub?.billing_mode).toBe('ADMIN_PROVISIONED');
+
+      // Calling GET /v1/inventory/balances must also succeed with HTTP 200
+      const balancesRes = await app.inject({
+        method: 'GET',
+        url: `/v1/inventory/balances?warehouseId=${warehouseId}`,
+        headers: {
+          authorization: `Bearer ${token}`,
+          'x-tenant-id': tenantId,
+        },
+      });
+
+      expect(balancesRes.statusCode).toBe(200);
+      expect(balancesRes.json().data).toEqual([]);
+
+      // Calling GET /v1/subscriptions/entitlement must return 200 with STARTER plan details
+      const entRes = await app.inject({
+        method: 'GET',
+        url: '/v1/subscriptions/entitlement',
+        headers: {
+          authorization: `Bearer ${token}`,
+          'x-tenant-id': tenantId,
+        },
+      });
+
+      expect(entRes.statusCode).toBe(200);
+      const entBody = entRes.json();
+      expect(entBody.planCode).toBe('STARTER');
+      expect(entBody.status).toBe('TRIALING');
+
+      await app.close();
+    });
+
+    it('denies access (403) or throws 404 when querying subscription entitlement for non-existent tenant', async () => {
+      const app = await buildApp({
+        db: harness.db,
+        jwksProvider: devJwksProvider,
+      });
+
+      const userId = generateUuidV7();
+      const token = signDevJwt({ userId, email: 'ghost@test.com' });
+      const nonExistentTenantId = generateUuidV7();
+
+      // HTTP layer enforces IAM authorization first (403 for unknown/unauthorized tenant)
+      const res = await app.inject({
+        method: 'GET',
+        url: '/v1/subscriptions/entitlement',
+        headers: {
+          authorization: `Bearer ${token}`,
+          'x-tenant-id': nonExistentTenantId,
+        },
+      });
+
+      expect(res.statusCode).toBe(403);
+
+      // Service layer throws 404 when resolving entitlement directly for non-existent tenant
+      await expect(
+        withTenantTransaction(
+          harness.db,
+          { tenantId: nonExistentTenantId, userId, traceId: 'test-trace' },
+          async (trx) => getTenantSubscriptionEntitlement(trx),
+        ),
+      ).rejects.toThrow(/No subscription record found/i);
 
       await app.close();
     });

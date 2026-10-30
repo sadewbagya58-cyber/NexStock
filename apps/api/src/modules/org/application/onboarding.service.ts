@@ -8,6 +8,7 @@ import {
   provisionTenantMember,
   seedDefaultSystemRoles,
 } from '../../iam/index.js';
+import { provisionTenantSubscription } from '../../sub/index.js';
 import {
   AppError,
   type NexStockDatabase,
@@ -290,28 +291,11 @@ export async function onboardBusinessAtomic(
         .execute();
 
       // 9. Provision Subscription Plan (STARTER)
-      const plan = await trx.db
-        .selectFrom('subscription_plans')
-        .select('id')
-        .where('code', '=', 'STARTER')
-        .executeTakeFirst();
-
-      if (plan) {
-        await trx.db
-          .insertInto('tenant_subscriptions')
-          .values({
-            id: generateUuidV7(),
-            tenant_id: newTenantId,
-            plan_id: plan.id,
-            status: 'TRIALING',
-            billing_mode: 'ADMIN_PROVISIONED',
-            provider_code: 'MANUAL_ADMIN',
-            trial_ends_at: new Date(Date.now() + 14 * 86400 * 1000),
-            current_period_start: new Date(),
-            current_period_end: new Date(Date.now() + 14 * 86400 * 1000),
-          })
-          .execute();
-      }
+      await provisionTenantSubscription(trx, {
+        planCode: 'STARTER',
+        status: 'TRIALING',
+        trialDays: 14,
+      });
 
       // 10. Upsert Localization Settings
       await upsertTenantLocalizationSettings(trx, {

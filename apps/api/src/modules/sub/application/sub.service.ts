@@ -126,38 +126,33 @@ export async function provisionTenantSubscription(
 
   const subscriptionId = existing?.id ?? generateUuidV7();
 
-  if (existing) {
-    await trx.db
-      .updateTable('tenant_subscriptions')
-      .set({
+  await trx.db
+    .insertInto('tenant_subscriptions')
+    .values({
+      id: subscriptionId,
+      tenant_id: trx.tenantId,
+      plan_id: plan.id,
+      billing_mode: 'ADMIN_PROVISIONED',
+      provider_code: 'MANUAL_ADMIN',
+      status,
+      trial_ends_at: trialEndsAt,
+      current_period_start: now,
+      current_period_end: currentPeriodEnd,
+      allow_admin_override: false,
+      override_reason: null,
+      updated_at: now,
+    })
+    .onConflict((oc) =>
+      oc.column('tenant_id').doUpdateSet({
         plan_id: plan.id,
         status,
         trial_ends_at: trialEndsAt,
         current_period_start: now,
         current_period_end: currentPeriodEnd,
         updated_at: now,
-      })
-      .where('tenant_id', '=', trx.tenantId)
-      .where('id', '=', subscriptionId)
-      .execute();
-  } else {
-    await trx.db
-      .insertInto('tenant_subscriptions')
-      .values({
-        id: subscriptionId,
-        tenant_id: trx.tenantId,
-        plan_id: plan.id,
-        billing_mode: 'ADMIN_PROVISIONED',
-        provider_code: 'MANUAL_ADMIN',
-        status,
-        trial_ends_at: trialEndsAt,
-        current_period_start: now,
-        current_period_end: currentPeriodEnd,
-        allow_admin_override: false,
-        override_reason: null,
-      })
-      .execute();
-  }
+      }),
+    )
+    .execute();
 
   // Synchronize tenant lifecycle status
   await trx.db
@@ -203,7 +198,7 @@ export async function provisionTenantSubscription(
 export async function getTenantSubscriptionEntitlement(
   trx: TenantTransactionContext,
 ): Promise<SubscriptionEntitlementDto> {
-  const row = await trx.db
+  let row = await trx.db
     .selectFrom('tenant_subscriptions')
     .innerJoin(
       'subscription_plans',
@@ -231,6 +226,114 @@ export async function getTenantSubscriptionEntitlement(
     ])
     .where('tenant_subscriptions.tenant_id', '=', trx.tenantId)
     .executeTakeFirst();
+
+  if (!row) {
+    // Attempt lazy self-healing: verify if this tenant organization exists in public.tenants
+    const tenant = await trx.db
+      .selectFrom('tenants')
+      .select(['id', 'status', 'created_at'])
+      .where('id', '=', trx.tenantId)
+      .executeTakeFirst();
+
+    if (tenant) {
+      // Find STARTER plan
+      const starterPlan = await trx.db
+        .selectFrom('subscription_plans')
+        .select([
+          'id',
+          'code',
+          'name',
+          'max_branches',
+          'max_warehouses',
+          'max_registers',
+          'max_users',
+        ])
+        .where('code', '=', 'STARTER')
+        .where('is_active', '=', true)
+        .executeTakeFirst();
+
+      if (starterPlan) {
+        const now = new Date();
+        const trialDays = 14;
+        const tenantCreatedAt = tenant.created_at
+          ? new Date(tenant.created_at)
+          : now;
+        const trialEndsAt = new Date(
+          Math.max(
+            now.getTime() + trialDays * 86400 * 1000,
+            tenantCreatedAt.getTime() + trialDays * 86400 * 1000,
+          ),
+        );
+        const currentPeriodEnd = trialEndsAt;
+
+        await trx.db
+          .insertInto('tenant_subscriptions')
+          .values({
+            id: generateUuidV7(),
+            tenant_id: trx.tenantId,
+            plan_id: starterPlan.id,
+            billing_mode: 'ADMIN_PROVISIONED',
+            provider_code: 'MANUAL_ADMIN',
+            status: 'TRIALING',
+            trial_ends_at: trialEndsAt,
+            current_period_start: now,
+            current_period_end: currentPeriodEnd,
+            allow_admin_override: false,
+            override_reason:
+              'Self-healed missing subscription during entitlement resolution',
+            updated_at: now,
+          })
+          .onConflict((oc) =>
+            oc.column('tenant_id').doUpdateSet({
+              plan_id: starterPlan.id,
+              status: 'TRIALING',
+              trial_ends_at: trialEndsAt,
+              current_period_start: now,
+              current_period_end: currentPeriodEnd,
+              updated_at: now,
+            }),
+          )
+          .execute();
+
+        if (tenant.status !== 'TRIALING' && tenant.status !== 'ACTIVE') {
+          await trx.db
+            .updateTable('tenants')
+            .set({ status: 'TRIALING', updated_at: now })
+            .where('id', '=', trx.tenantId)
+            .execute();
+        }
+
+        row = await trx.db
+          .selectFrom('tenant_subscriptions')
+          .innerJoin(
+            'subscription_plans',
+            'subscription_plans.id',
+            'tenant_subscriptions.plan_id',
+          )
+          .select([
+            'tenant_subscriptions.id as subscription_id',
+            'tenant_subscriptions.tenant_id as tenant_id',
+            'tenant_subscriptions.plan_id as plan_id',
+            'tenant_subscriptions.billing_mode as billing_mode',
+            'tenant_subscriptions.provider_code as provider_code',
+            'tenant_subscriptions.status as status',
+            'tenant_subscriptions.trial_ends_at as trial_ends_at',
+            'tenant_subscriptions.current_period_start as current_period_start',
+            'tenant_subscriptions.current_period_end as current_period_end',
+            'tenant_subscriptions.allow_admin_override as allow_admin_override',
+            'tenant_subscriptions.override_reason as override_reason',
+            'subscription_plans.code as plan_code',
+            'subscription_plans.name as plan_name',
+            'subscription_plans.max_branches as max_branches',
+            'subscription_plans.max_warehouses as max_warehouses',
+            'subscription_plans.max_registers as max_registers',
+            'subscription_plans.max_users as max_users',
+          ])
+          .where('tenant_subscriptions.tenant_id', '=', trx.tenantId)
+          .executeTakeFirst();
+      }
+    }
+  }
 
   if (!row) {
     throw new AppError({
