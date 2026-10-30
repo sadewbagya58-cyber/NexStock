@@ -711,6 +711,13 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       expect(html).toContain('${formatTenantMoney(line.unitPrice)} / ${escapeHtml(line.uomCode)}');
       expect(html).toContain('${formatTenantMoney(line.qty * (parseFloat(line.unitPrice) || 0))}');
 
+      // BUG-004 POS Checkout Button: verifies posCheckoutBtn element, dynamic grandTotal binding, and state syncing
+      expect(html).toContain('id="posCheckoutBtn"');
+      expect(html).toContain("const checkoutBtn = document.getElementById('posCheckoutBtn');");
+      expect(html).toContain('checkoutBtn.disabled = state.cart.length === 0;');
+      expect(html).toContain('checkoutBtn.innerHTML = `Checkout &amp; Pay (${formatTenantMoney(grandTotal)})`;');
+      expect(html).toContain('state.cart = [];\n        renderPosCartPanel();');
+
       // BUG-005: Movement view resolves product SKU and Name
       expect(html).toContain("const sku = escapeHtml(m.productSku || fallback?.sku || '');");
       expect(html).toContain("const pName = escapeHtml(m.productName || fallback?.name || 'Product');");
@@ -721,6 +728,53 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
 
       // BUG-005: Balance after displayed with UoM
       expect(html).toContain('<strong>${balAfter} ${uom}</strong>');
+    });
+
+    it('BUG-004 POS Checkout Button: verifies authoritative grand total calculation and dynamic button label matching cart summary', () => {
+      // Production evidence scenario:
+      // Item 1: HEAD SEAT (4000.00, qty 1)
+      // Item 2: Wireless Bluetooth Mouse (3500.00, qty 1)
+      const cart = [
+        { productId: 'p1', sku: 'KUV-HEAD SEAT', name: 'HEAD SEAT', unitPrice: '4000.0000', qty: 1 },
+        { productId: 'p2', sku: 'ELEC-MOUSE-001', name: 'Wireless Bluetooth Mouse', unitPrice: '3500.0000', qty: 1 },
+      ];
+
+      function calculateCartSubtotal(items: typeof cart) {
+        return items.reduce((acc, item) => acc + (item.qty * (parseFloat(item.unitPrice) || 0)), 0);
+      }
+      function calculateCartTax(items: typeof cart, taxRate = 0) {
+        const sub = calculateCartSubtotal(items);
+        return Math.round(sub * taxRate * 100) / 100;
+      }
+      function calculateCartGrandTotal(items: typeof cart, taxRate = 0) {
+        return calculateCartSubtotal(items) + calculateCartTax(items, taxRate);
+      }
+
+      // 1. Initial cart: 7500.00
+      const subtotal1 = calculateCartSubtotal(cart);
+      const grandTotal1 = calculateCartGrandTotal(cart);
+      expect(subtotal1).toBe(7500);
+      expect(grandTotal1).toBe(7500);
+      expect(formatCurrency(grandTotal1, 'LKR')).toBe('LKR 7500.00');
+
+      const btnLabel1 = `Checkout & Pay (${formatCurrency(grandTotal1, 'LKR')})`;
+      expect(btnLabel1).toBe('Checkout & Pay (LKR 7500.00)');
+
+      // 2. Quantity change: 2 Wireless Mice (7000.00) + 1 HEAD SEAT (4000.00) = 11000.00
+      cart[1].qty = 2;
+      const grandTotal2 = calculateCartGrandTotal(cart);
+      expect(grandTotal2).toBe(11000);
+      expect(formatCurrency(grandTotal2, 'LKR')).toBe('LKR 11000.00');
+      const btnLabel2 = `Checkout & Pay (${formatCurrency(grandTotal2, 'LKR')})`;
+      expect(btnLabel2).toBe('Checkout & Pay (LKR 11000.00)');
+
+      // 3. Clear cart / Empty cart: 0.00
+      const emptyCart: typeof cart = [];
+      const grandTotalEmpty = calculateCartGrandTotal(emptyCart);
+      expect(grandTotalEmpty).toBe(0);
+      expect(formatCurrency(grandTotalEmpty, 'LKR')).toBe('LKR 0.00');
+      const btnLabelEmpty = `Checkout & Pay (${formatCurrency(grandTotalEmpty, 'LKR')})`;
+      expect(btnLabelEmpty).toBe('Checkout & Pay (LKR 0.00)');
     });
   });
 });

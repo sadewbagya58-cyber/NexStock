@@ -4367,7 +4367,7 @@
                   <span id="cartGrandTotalText" style="color: var(--accent-primary);">${formatTenantMoney(calculateCartGrandTotal())}</span>
                 </div>
 
-                <button class="btn btn-primary" style="width: 100%; margin-top: 14px; justify-content: center; font-size: 16px; padding: 12px;" onclick="openPaymentDrawer()" ${state.cart.length === 0 ? 'disabled' : ''}>
+                <button id="posCheckoutBtn" class="btn btn-primary" style="width: 100%; margin-top: 14px; justify-content: center; font-size: 16px; padding: 12px;" onclick="openPaymentDrawer()" ${state.cart.length === 0 ? 'disabled' : ''}>
                   Checkout &amp; Pay (${formatTenantMoney(calculateCartGrandTotal())})
                 </button>
               </div>
@@ -4519,6 +4519,12 @@
 
       const totalEl = document.getElementById('cartGrandTotalText');
       if (totalEl) totalEl.innerText = formatTenantMoney(grandTotal);
+
+      const checkoutBtn = document.getElementById('posCheckoutBtn');
+      if (checkoutBtn) {
+        checkoutBtn.disabled = state.cart.length === 0;
+        checkoutBtn.innerHTML = `Checkout &amp; Pay (${formatTenantMoney(grandTotal)})`;
+      }
 
       const mobileCountEl = document.getElementById('mobileCartItemCount');
       if (mobileCountEl) mobileCountEl.innerText = state.cart.length;
@@ -4674,6 +4680,7 @@
 
         showToast(`Sale completed! Invoice: ${sale.invoiceNumber}`, 'success');
         state.cart = [];
+        renderPosCartPanel();
         closeModal();
         openReceiptModal(sale.id);
       } catch (err) {}

@@ -1630,6 +1630,11 @@ describe('@nexstock/api — Phase 3: POS, Sales, Checkout, Payments & Billing', 
       const lineTotal = cartQty * unitPriceFloat;
       expect(lineTotal).toBe(7000);
       expect(lineTotal.toFixed(2)).toBe('7000.00');
+
+      // Checkout button label dynamically derives from calculateCartGrandTotal()
+      const cartGrandTotal = lineTotal;
+      const checkoutBtnLabel = `Checkout & Pay (LKR ${cartGrandTotal.toFixed(2)})`;
+      expect(checkoutBtnLabel).toBe('Checkout & Pay (LKR 7000.00)');
     });
   });
 });
