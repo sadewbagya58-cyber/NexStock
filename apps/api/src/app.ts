@@ -1734,7 +1734,33 @@ export async function buildApp(
         jwtOptions,
       );
       const tenantId = request.headers['x-tenant-id'];
+      const idempotencyKey = request.headers['idempotency-key'] as
+        | string
+        | undefined;
       const traceId = String(request.id);
+
+      if (idempotencyKey) {
+        const outcome = await withTenantTransaction(
+          options.db,
+          { tenantId, userId: principal.userId, traceId },
+          (trx) =>
+            executeIdempotentMutation({
+              trx,
+              idempotencyKey,
+              endpoint: 'POST /v1/products',
+              requestPayload: request.body,
+              execute: async (innerTrx) => {
+                const body = await createProduct(innerTrx, request.body);
+                return { statusCode: 201, body };
+              },
+            }),
+        );
+
+        return reply
+          .status(outcome.statusCode as 201)
+          .header('x-idempotent-replayed', String(outcome.replayed))
+          .send(outcome.body);
+      }
 
       const product = await withTenantTransaction(
         options.db,

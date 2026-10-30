@@ -23,6 +23,8 @@ import {
   normalizeApiEndpoint,
   AUTH_VIEW_IDS,
   ALL_SPA_VIEW_IDS,
+  CURRENCY_MINOR_UNITS,
+  getCurrencyMinorUnits,
 } from '../src/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -599,6 +601,94 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       // Landing button IDs for responsive sizing
       expect(html).toContain('id="btnLandingSignIn"');
       expect(html).toContain('id="btnLandingGetStarted"');
+    });
+
+    it('BUG-001 & BUG-002: verifies inflight locks, button disabling, idempotency headers, and dual movement payload in index.html', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // BUG-001: Product creation inflight guard and submit button reference
+      expect(html).toContain('id="btnSubmitCreateProduct"');
+      expect(html).toContain('if (state.isSubmittingProduct) return;');
+      expect(html).toContain('state.isSubmittingProduct = true;');
+      expect(html).toContain('submitBtn.disabled = true;');
+      expect(html).toContain("submitBtn.textContent = 'Creating...';");
+      expect(html).toContain('state.isSubmittingProduct = false;');
+      expect(html).toContain('submitBtn.disabled = false;');
+      expect(html).toContain("submitBtn.textContent = 'Create Product';");
+
+      // BUG-001: Product creation sends idempotency-key header
+      expect(html).toContain("'idempotency-key': idempotencyKey");
+
+      // BUG-002: Stock movement inflight guard and submit button reference
+      expect(html).toContain('id="btnSubmitStockMovement"');
+      expect(html).toContain('if (state.isSubmittingMovement) return;');
+      expect(html).toContain('state.isSubmittingMovement = true;');
+      expect(html).toContain("submitBtn.textContent = 'Posting...';");
+      expect(html).toContain('state.isSubmittingMovement = false;');
+      expect(html).toContain("submitBtn.textContent = 'Post to Ledger';");
+
+      // BUG-002: Stock movement payload passes both reason and notes
+      expect(html).toContain('reason: notes,');
+      expect(html).toContain('notes: notes');
+      expect(html).toContain("'idempotency-key': idempotencyKey");
+    });
+
+    it('BUG-003: verifies currency minor units, formatting, and tenant-wide consistency', () => {
+      // 1. Minor units map verification
+      expect(CURRENCY_MINOR_UNITS['JPY']).toBe(0);
+      expect(CURRENCY_MINOR_UNITS['KWD']).toBe(3);
+      expect(CURRENCY_MINOR_UNITS['LKR']).toBe(2);
+      expect(getCurrencyMinorUnits('JPY')).toBe(0);
+      expect(getCurrencyMinorUnits('KRW')).toBe(0);
+      expect(getCurrencyMinorUnits('KWD')).toBe(3);
+      expect(getCurrencyMinorUnits('BHD')).toBe(3);
+      expect(getCurrencyMinorUnits('OMR')).toBe(3);
+      expect(getCurrencyMinorUnits('LKR')).toBe(2);
+      expect(getCurrencyMinorUnits('USD')).toBe(2);
+      expect(getCurrencyMinorUnits('EUR')).toBe(2);
+      expect(getCurrencyMinorUnits('GBP')).toBe(2);
+      expect(getCurrencyMinorUnits('INR')).toBe(2);
+      expect(getCurrencyMinorUnits('AED')).toBe(2);
+      expect(getCurrencyMinorUnits('SGD')).toBe(2);
+      expect(getCurrencyMinorUnits('AUD')).toBe(2);
+      expect(getCurrencyMinorUnits('XYZ')).toBe(2); // Fallback to 2
+
+      // 2. formatCurrency utility formatting with minor units
+      expect(formatCurrency(2500, 'LKR')).toBe('LKR 2500.00');
+      expect(formatCurrency(2500, 'USD')).toBe('USD 2500.00');
+      expect(formatCurrency(2500, 'JPY')).toBe('JPY 2500');
+      expect(formatCurrency(2500.85, 'JPY')).toBe('JPY 2501');
+      expect(formatCurrency(25.5, 'KWD')).toBe('KWD 25.500');
+      expect(formatCurrency(null, 'LKR')).toBe('LKR 0.00');
+      expect(formatCurrency(undefined, 'JPY')).toBe('JPY 0');
+
+      // 3. index.html helper definitions and absence of hardcoded dollar signs in tenant views
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      expect(html).toContain('function getTenantCurrency()');
+      expect(html).toContain('function getCurrencyMinorUnits(');
+      expect(html).toContain('function getCurrencyInputStep(');
+      expect(html).toContain('function getCurrencyDefaultCost(');
+      expect(html).toContain('function getCurrencyDefaultPrice(');
+      expect(html).toContain('function formatTenantMoney(');
+
+      // Verify active tenant currency synchronization with localStorage
+      expect(html).toContain('nexstock_active_currency');
+
+      // Verify dynamic currency labels in forms and tables
+      expect(html).toContain('Purchase Cost (${escapeHtml(getTenantCurrency())}) *');
+      expect(html).toContain('Selling Price (${escapeHtml(getTenantCurrency())}) *');
+      expect(html).toContain('Unit Cost (${escapeHtml(getTenantCurrency())}) *');
+      expect(html).toContain('Cost (${escapeHtml(getTenantCurrency())})');
+      expect(html).toContain('Selling Price (${escapeHtml(getTenantCurrency())})');
+      expect(html).toContain('Total (${escapeHtml(getTenantCurrency())})');
+
+      // Verify tenant views do not contain hardcoded dollar template literals like $${
+      // Match $${...} inside index.html: should be 0 occurrences in tenant views
+      const templateDollarMatches = (html.match(/\$\$\{[^}]+\}/g) || []);
+      expect(templateDollarMatches.length).toBe(0);
     });
   });
 });

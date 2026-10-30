@@ -1754,6 +1754,75 @@
       window.escapeHtml = escapeHtml;
     }
 
+    // Authoritative Minor-Unit and Currency Formatting Helpers (Phase 5.1 BUG-003)
+    const CURRENCY_MINOR_UNITS = {
+      USD: 2,
+      LKR: 2,
+      EUR: 2,
+      GBP: 2,
+      INR: 2,
+      AED: 2,
+      SGD: 2,
+      AUD: 2,
+      JPY: 0,
+      KRW: 0,
+      KWD: 3,
+      BHD: 3,
+      OMR: 3
+    };
+
+    function getTenantCurrency() {
+      return ((state && state.currency) || 'USD').toUpperCase();
+    }
+
+    function getCurrencyMinorUnits(currencyCode) {
+      const code = (currencyCode || getTenantCurrency()).toUpperCase();
+      return typeof CURRENCY_MINOR_UNITS[code] === 'number' ? CURRENCY_MINOR_UNITS[code] : 2;
+    }
+
+    function getCurrencyInputStep(currencyCode) {
+      const decimals = getCurrencyMinorUnits(currencyCode);
+      if (decimals === 0) return '1';
+      if (decimals === 3) return '0.001';
+      return '0.01';
+    }
+
+    function getCurrencyDefaultCost(currencyCode) {
+      const curr = (currencyCode || getTenantCurrency()).toUpperCase();
+      const decimals = getCurrencyMinorUnits(curr);
+      if (curr === 'LKR') return (2500).toFixed(decimals);
+      if (curr === 'JPY' || curr === 'KRW') return (1000).toFixed(decimals);
+      if (curr === 'KWD' || curr === 'BHD' || curr === 'OMR') return (5).toFixed(decimals);
+      return (10).toFixed(decimals);
+    }
+
+    function getCurrencyDefaultPrice(currencyCode) {
+      const curr = (currencyCode || getTenantCurrency()).toUpperCase();
+      const decimals = getCurrencyMinorUnits(curr);
+      if (curr === 'LKR') return (3500).toFixed(decimals);
+      if (curr === 'JPY' || curr === 'KRW') return (2000).toFixed(decimals);
+      if (curr === 'KWD' || curr === 'BHD' || curr === 'OMR') return (10).toFixed(decimals);
+      return (20).toFixed(decimals);
+    }
+
+    function formatTenantMoney(amount, currencyCode) {
+      const curr = (currencyCode || getTenantCurrency()).toUpperCase();
+      const decimals = getCurrencyMinorUnits(curr);
+      const numeric = typeof amount === 'number' ? amount : parseFloat(String(amount ?? '0'));
+      const safe = Number.isFinite(numeric) ? numeric : 0;
+      return `${curr} ${safe.toFixed(decimals)}`;
+    }
+
+    if (typeof window !== 'undefined') {
+      window.getTenantCurrency = getTenantCurrency;
+      window.getCurrencyMinorUnits = getCurrencyMinorUnits;
+      window.getCurrencyInputStep = getCurrencyInputStep;
+      window.getCurrencyDefaultCost = getCurrencyDefaultCost;
+      window.getCurrencyDefaultPrice = getCurrencyDefaultPrice;
+      window.formatTenantMoney = formatTenantMoney;
+      window.formatCurrency = formatTenantMoney;
+    }
+
     // State Store (Phase 5.0 Authentication & Tenant Scoped)
     const state = {
       sessionEpoch: 0,
@@ -1761,7 +1830,7 @@
       token: '',
       tenantId: '',
       tenantName: '',
-      currency: 'USD',
+      currency: (typeof localStorage !== 'undefined' && localStorage.getItem('nexstock_active_currency')) || 'USD',
       countryCode: 'US',
       plan: 'TRIAL',
       branchId: '',
@@ -1926,6 +1995,7 @@
       state.tenantId = membership.tenantId;
       state.tenantName = membership.businessName || membership.tenantName || 'My Business';
       state.currency = membership.baseCurrency || membership.currency || 'USD';
+      localStorage.setItem('nexstock_active_currency', state.currency);
       state.countryCode = membership.countryCode || membership.country || 'US';
       state.plan = membership.status || membership.plan || 'TRIAL';
       state.userRole = membership.role || membership.roleName || 'MEMBER';
@@ -2020,12 +2090,14 @@
         localStorage.removeItem('nexstock_session_token');
         localStorage.removeItem('nexstock_refresh_token');
         localStorage.removeItem('nexstock_active_tenant_id');
+        localStorage.removeItem('nexstock_active_currency');
       } catch {}
 
       // Synchronously reset state
       state.token = '';
       state.tenantId = '';
       state.tenantName = '';
+      state.currency = 'USD';
       state.branchId = '';
       state.branchName = '';
       state.warehouseId = '';
@@ -2945,7 +3017,8 @@
         // Apply newly provisioned context
         state.tenantId = data.tenant.id;
         state.tenantName = data.tenant.legalName || data.tenant.name;
-        state.currency = data.tenant.baseCurrency || data.tenant.currency;
+        state.currency = data.tenant.baseCurrency || data.tenant.currency || currency || 'USD';
+        localStorage.setItem('nexstock_active_currency', state.currency);
         state.plan = 'TRIAL';
         state.userRole = 'TENANT_OWNER';
         state.branchId = data.branch.id;
@@ -3093,7 +3166,7 @@
             </div>
             <div class="kpi-card">
               <div class="kpi-label">Today's POS Sales</div>
-              <div class="kpi-value">${escapeHtml(state.currency || 'USD')} ${totalSalesRevenue.toFixed(2)}</div>
+              <div class="kpi-value">${formatTenantMoney(totalSalesRevenue)}</div>
               <div class="kpi-trend">${saleList.length} transactions recorded</div>
             </div>
           </div>
@@ -3110,7 +3183,7 @@
                     <thead>
                       <tr>
                         <th>Invoice</th>
-                        <th>Total</th>
+                        <th>Total (${escapeHtml(getTenantCurrency())})</th>
                         <th>Status</th>
                       </tr>
                     </thead>
@@ -3118,7 +3191,7 @@
                       ${saleList.slice(0, 5).map(s => `
                         <tr>
                           <td><strong>${s.invoiceNumber}</strong></td>
-                          <td>${escapeHtml(state.currency || '$')} ${parseFloat(s.grandTotal).toFixed(2)}</td>
+                          <td>${formatTenantMoney(s.grandTotal)}</td>
                           <td><span class="badge-pill ${s.status === 'COMPLETED' ? 'badge-green' : 'badge-red'}">${s.status}</span></td>
                         </tr>
                       `).join('')}
@@ -3212,8 +3285,8 @@
                         <th>SKU</th>
                         <th>Product Name</th>
                         <th>Base UoM</th>
-                        <th>Cost</th>
-                        <th>Selling Price</th>
+                        <th>Cost (${escapeHtml(getTenantCurrency())})</th>
+                        <th>Selling Price (${escapeHtml(getTenantCurrency())})</th>
                         <th>Primary Barcode</th>
                         <th>Inventory Tracked</th>
                         <th>Status</th>
@@ -3226,8 +3299,8 @@
                         const name = escapeHtml(p.name);
                         const barcode = escapeHtml(p.primaryBarcode || '—');
                         const uom = escapeHtml(p.baseUom || 'UNIT');
-                        const cost = parseFloat(p.purchaseCost || 0).toFixed(2);
-                        const price = parseFloat(p.sellingPrice || 0).toFixed(2);
+                        const costFormatted = formatTenantMoney(p.purchaseCost);
+                        const priceFormatted = formatTenantMoney(p.sellingPrice);
                         const isTracked = p.trackInventory !== false;
                         const isActive = p.status === 'ACTIVE' || p.isActive === true;
 
@@ -3236,8 +3309,8 @@
                             <td><strong>${sku}</strong></td>
                             <td>${name}</td>
                             <td><span class="badge-pill badge-blue">${uom}</span></td>
-                            <td>$${cost}</td>
-                            <td><strong style="color: var(--accent-primary);">$${price}</strong></td>
+                            <td>${costFormatted}</td>
+                            <td><strong style="color: var(--accent-primary);">${priceFormatted}</strong></td>
                             <td><code>${barcode}</code></td>
                             <td>${isTracked ? '<span class="badge-pill badge-green">Tracked</span>' : '<span class="badge-pill badge-yellow">Non-Tracked</span>'}</td>
                             <td><span class="badge-pill ${isActive ? 'badge-green' : 'badge-red'}">${isActive ? 'ACTIVE' : 'ARCHIVED'}</span></td>
@@ -3260,8 +3333,8 @@
                   const name = escapeHtml(p.name);
                   const barcode = escapeHtml(p.primaryBarcode || '—');
                   const uom = escapeHtml(p.baseUom || 'UNIT');
-                  const cost = parseFloat(p.purchaseCost || 0).toFixed(2);
-                  const price = parseFloat(p.sellingPrice || 0).toFixed(2);
+                  const costFormatted = formatTenantMoney(p.purchaseCost);
+                  const priceFormatted = formatTenantMoney(p.sellingPrice);
                   const isTracked = p.trackInventory !== false;
                   const isActive = p.status === 'ACTIVE' || p.isActive === true;
 
@@ -3275,11 +3348,11 @@
                       <div class="entity-card-details">
                         <div class="detail-row">
                           <span class="detail-label">Selling Price</span>
-                          <span class="detail-value" style="color: var(--accent-primary); font-weight: 700;">$${price}</span>
+                          <span class="detail-value" style="color: var(--accent-primary); font-weight: 700;">${priceFormatted}</span>
                         </div>
                         <div class="detail-row">
                           <span class="detail-label">Cost / UoM</span>
-                          <span class="detail-value">$${cost} / ${uom}</span>
+                          <span class="detail-value">${costFormatted} / ${uom}</span>
                         </div>
                         <div class="detail-row">
                           <span class="detail-label">Barcode</span>
@@ -3357,12 +3430,12 @@
           </div>
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
             <div class="form-group">
-              <label class="form-label">Purchase Cost ($) *</label>
-              <input type="number" step="0.01" class="form-input" id="newProdCost" value="10.00" required>
+              <label class="form-label">Purchase Cost (${escapeHtml(getTenantCurrency())}) *</label>
+              <input type="number" step="${getCurrencyInputStep()}" class="form-input" id="newProdCost" value="${getCurrencyDefaultCost()}" required>
             </div>
             <div class="form-group">
-              <label class="form-label">Selling Price ($) *</label>
-              <input type="number" step="0.01" class="form-input" id="newProdPrice" value="20.00" required>
+              <label class="form-label">Selling Price (${escapeHtml(getTenantCurrency())}) *</label>
+              <input type="number" step="${getCurrencyInputStep()}" class="form-input" id="newProdPrice" value="${getCurrencyDefaultPrice()}" required>
             </div>
           </div>
           <div class="form-group">
@@ -3373,12 +3446,14 @@
         `,
         footerHtml: `
           <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-          <button class="btn btn-primary" onclick="submitCreateProduct()">Create Product</button>
+          <button id="btnSubmitCreateProduct" class="btn btn-primary" onclick="submitCreateProduct()">Create Product</button>
         `
       });
     }
 
     async function submitCreateProduct() {
+      if (state.isSubmittingProduct) return;
+
       const sku = document.getElementById('newProdSku').value.trim();
       const name = document.getElementById('newProdName').value.trim();
       const categoryId = document.getElementById('newProdCategory').value || null;
@@ -3393,9 +3468,21 @@
         return;
       }
 
+      const submitBtn = document.getElementById('btnSubmitCreateProduct');
+      state.isSubmittingProduct = true;
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Creating...';
+      }
+
+      const idempotencyKey = crypto.randomUUID();
+
       try {
         await apiFetch('/v1/products', {
           method: 'POST',
+          headers: {
+            'idempotency-key': idempotencyKey
+          },
           body: JSON.stringify({
             sku,
             name,
@@ -3413,6 +3500,12 @@
         renderProductsView();
       } catch (err) {
         // error toast already shown
+      } finally {
+        state.isSubmittingProduct = false;
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Create Product';
+        }
       }
     }
 
@@ -3603,7 +3696,7 @@
                         const contact = escapeHtml(s.contactPerson || '—');
                         const email = escapeHtml(s.email || '');
                         const phone = escapeHtml(s.phone || '—');
-                        const curr = escapeHtml(s.currencyCode || state.currency || 'USD');
+                        const curr = escapeHtml(s.currencyCode || getTenantCurrency());
                         const isActive = s.isActive ?? (s.status === 'ACTIVE');
 
                         return `
@@ -3630,7 +3723,7 @@
                   const contact = escapeHtml(s.contactPerson || '—');
                   const email = escapeHtml(s.email || '');
                   const phone = escapeHtml(s.phone || '—');
-                  const curr = escapeHtml(s.currencyCode || state.currency || 'USD');
+                  const curr = escapeHtml(s.currencyCode || getTenantCurrency());
                   const isActive = s.isActive ?? (s.status === 'ACTIVE');
 
                   return `
@@ -3725,7 +3818,7 @@
             email,
             phone,
             countryCode: state.countryCode || 'US',
-            currencyCode: state.currency || 'USD'
+            currencyCode: getTenantCurrency()
           })
         });
         showToast(`Supplier ${code} created`, 'success');
@@ -3771,7 +3864,7 @@
                         <th>Movement Type</th>
                         <th>Product</th>
                         <th>Delta Qty</th>
-                        <th>Unit Cost</th>
+                        <th>Unit Cost (${escapeHtml(getTenantCurrency())})</th>
                         <th>Balance After</th>
                         <th>Reference</th>
                         <th>Action</th>
@@ -3784,7 +3877,7 @@
                         const pName = escapeHtml(m.productName);
                         const uom = escapeHtml(m.uomCode || 'UNIT');
                         const qty = parseFloat(m.quantity || 0);
-                        const unitCost = parseFloat(m.unitCost || 0).toFixed(2);
+                        const unitCostFormatted = formatTenantMoney(m.unitCost);
                         const balAfter = parseFloat(m.balanceAfter || 0).toFixed(0);
                         const refType = escapeHtml(m.referenceType || 'MANUAL');
                         const dateStr = m.createdAt ? new Date(m.createdAt).toLocaleString() : '—';
@@ -3797,7 +3890,7 @@
                             <td style="font-weight: 700; color: ${qty >= 0 ? 'var(--status-success)' : 'var(--status-danger)'};">
                               ${qty > 0 ? '+' : ''}${qty.toFixed(0)} ${uom}
                             </td>
-                            <td>$${unitCost}</td>
+                            <td>${unitCostFormatted}</td>
                             <td><strong>${balAfter}</strong></td>
                             <td><code>${refType}</code></td>
                             <td>
@@ -3820,7 +3913,7 @@
                   const pName = escapeHtml(m.productName);
                   const uom = escapeHtml(m.uomCode || 'UNIT');
                   const qty = parseFloat(m.quantity || 0);
-                  const unitCost = parseFloat(m.unitCost || 0).toFixed(2);
+                  const unitCostFormatted = formatTenantMoney(m.unitCost);
                   const balAfter = parseFloat(m.balanceAfter || 0).toFixed(0);
                   const refType = escapeHtml(m.referenceType || 'MANUAL');
                   const dateStr = m.createdAt ? new Date(m.createdAt).toLocaleString() : '—';
@@ -3846,7 +3939,7 @@
                         </div>
                         <div class="detail-row">
                           <span class="detail-label">Unit Cost</span>
-                          <span class="detail-value">$${unitCost}</span>
+                          <span class="detail-value">${unitCostFormatted}</span>
                         </div>
                         <div class="detail-row">
                           <span class="detail-label">Date / Reference</span>
@@ -3880,7 +3973,7 @@
           <div class="form-group">
             <label class="form-label">Product *</label>
             <select class="form-select" id="moveProdId">
-              ${products.map(p => `<option value="${p.id}">${p.sku} — ${p.name} ($${p.purchaseCost})</option>`).join('')}
+              ${products.map(p => `<option value="${p.id}">${escapeHtml(p.sku)} — ${escapeHtml(p.name)} (${formatTenantMoney(p.purchaseCost)})</option>`).join('')}
             </select>
           </div>
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
@@ -3899,8 +3992,8 @@
             </div>
           </div>
           <div class="form-group">
-            <label class="form-label">Unit Cost ($) *</label>
-            <input type="number" step="0.01" class="form-input" id="moveCost" value="12.00" required>
+            <label class="form-label">Unit Cost (${escapeHtml(getTenantCurrency())}) *</label>
+            <input type="number" step="${getCurrencyInputStep()}" class="form-input" id="moveCost" value="${getCurrencyDefaultCost()}" required>
           </div>
           <div class="form-group">
             <label class="form-label">Reason / Notes</label>
@@ -3909,12 +4002,14 @@
         `,
         footerHtml: `
           <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-          <button class="btn btn-primary" onclick="submitStockMovement()">Post to Ledger</button>
+          <button id="btnSubmitStockMovement" class="btn btn-primary" onclick="submitStockMovement()">Post to Ledger</button>
         `
       });
     }
 
     async function submitStockMovement() {
+      if (state.isSubmittingMovement) return;
+
       const productId = document.getElementById('moveProdId').value;
       const movementType = document.getElementById('moveType').value;
       const rawQty = parseFloat(document.getElementById('moveQty').value || '0');
@@ -3923,13 +4018,31 @@
 
       if (rawQty <= 0) return showToast('Quantity must be greater than zero', 'error');
 
+      if (
+        (movementType.includes('ADJUSTMENT')) &&
+        (!notes || notes.length < 3)
+      ) {
+        return showToast('Stock adjustment requires an auditable reason of at least 3 characters', 'error');
+      }
+
+      const submitBtn = document.getElementById('btnSubmitStockMovement');
+      state.isSubmittingMovement = true;
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Posting...';
+      }
+
       // Stock out is recorded as negative delta in the ledger
       const isOut = movementType.includes('OUT');
       const quantity = (isOut ? -rawQty : rawQty).toFixed(6);
+      const idempotencyKey = crypto.randomUUID();
 
       try {
         await apiFetch('/v1/inventory/movements', {
           method: 'POST',
+          headers: {
+            'idempotency-key': idempotencyKey
+          },
           body: JSON.stringify({
             branchId: state.branchId,
             warehouseId: state.warehouseId,
@@ -3937,14 +4050,23 @@
             movementType,
             quantity,
             unitCost,
-            notes
+            reason: notes,
+            notes: notes
           })
         });
 
         showToast('Stock movement recorded in immutable ledger', 'success');
         closeModal();
         renderMovementsView();
-      } catch (err) {}
+      } catch (err) {
+        // error toast already shown
+      } finally {
+        state.isSubmittingMovement = false;
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Post to Ledger';
+        }
+      }
     }
 
     async function reverseStockMovement(movementId, sku) {
@@ -4123,7 +4245,7 @@
             </div>
             <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
               ${state.activeShift ? `
-                <div class="badge-pill badge-green">● Shift Open (Opened: ${escapeHtml(state.currency || '$')} ${parseFloat(state.activeShift.openingCashFloat).toFixed(2)})</div>
+                <div class="badge-pill badge-green">● Shift Open (Opened: ${formatTenantMoney(state.activeShift.openingCashFloat)})</div>
                 <button class="btn btn-secondary btn-sm" onclick="openCloseShiftModal('${state.activeShift.id}')">Close Shift</button>
               ` : `
                 <div class="badge-pill badge-yellow">Shift Closed</div>
@@ -4170,7 +4292,7 @@
                           ${p.trackInventory ? `Stock: <strong>${parseFloat(p.availableQuantity).toFixed(0)}</strong>` : 'Service (No Stock)'}
                         </div>
                       </div>
-                      <div class="pos-product-price">${escapeHtml(state.currency || '$')} ${parseFloat(p.sellingPrice).toFixed(2)}</div>
+                      <div class="pos-product-price">${formatTenantMoney(p.sellingPrice)}</div>
                     </div>
                   `).join('')}
                 </div>
@@ -4179,7 +4301,7 @@
               <!-- Floating Mobile Cart Pill -->
               <div class="pos-mobile-floating-cart" id="posMobileFloatingCart" onclick="switchPosMobileTab('cart')" style="display: ${state.cart.length > 0 ? 'flex' : 'none'};">
                 <span>🛒 Cart (${state.cart.length} items)</span>
-                <span>${escapeHtml(state.currency || '$')} ${calculateCartGrandTotal().toFixed(2)} &rarr;</span>
+                <span>${formatTenantMoney(calculateCartGrandTotal())} &rarr;</span>
               </div>
             </div>
 
@@ -4200,7 +4322,7 @@
                   <div class="cart-line">
                     <div class="cart-line-info">
                       <div class="cart-line-name">${escapeHtml(line.name)}</div>
-                      <div class="cart-line-sub">${escapeHtml(state.currency || '$')} ${parseFloat(line.unitPrice).toFixed(2)} / ${escapeHtml(line.uomCode)}</div>
+                      <div class="cart-line-sub">${formatTenantMoney(line.unitPrice)} / ${escapeHtml(line.uomCode)}</div>
                     </div>
                     <div class="cart-line-controls">
                       <button class="qty-btn" onclick="updateCartQty(${idx}, -1)">-</button>
@@ -4208,7 +4330,7 @@
                       <button class="qty-btn" onclick="updateCartQty(${idx}, 1)">+</button>
                     </div>
                     <div style="min-width: 65px; text-align: right; font-weight: 700; color: var(--text-primary); margin-left: 12px;">
-                      ${escapeHtml(state.currency || '$')} ${(line.qty * parseFloat(line.unitPrice)).toFixed(2)}
+                      ${formatTenantMoney(line.qty * parseFloat(line.unitPrice))}
                     </div>
                   </div>
                 `).join('')}
@@ -4217,19 +4339,19 @@
               <div class="pos-cart-summary">
                 <div class="summary-row">
                   <span>Subtotal</span>
-                  <span id="cartSubtotalText">${escapeHtml(state.currency || '$')} ${calculateCartSubtotal().toFixed(2)}</span>
+                  <span id="cartSubtotalText">${formatTenantMoney(calculateCartSubtotal())}</span>
                 </div>
                 <div class="summary-row">
                   <span>Standard Tax (0.00%)</span>
-                  <span id="cartTaxText">${escapeHtml(state.currency || '$')} ${calculateCartTax().toFixed(2)}</span>
+                  <span id="cartTaxText">${formatTenantMoney(calculateCartTax())}</span>
                 </div>
                 <div class="summary-row summary-total">
                   <span>Grand Total</span>
-                  <span id="cartGrandTotalText" style="color: var(--accent-primary);">${escapeHtml(state.currency || '$')} ${calculateCartGrandTotal().toFixed(2)}</span>
+                  <span id="cartGrandTotalText" style="color: var(--accent-primary);">${formatTenantMoney(calculateCartGrandTotal())}</span>
                 </div>
 
                 <button class="btn btn-primary" style="width: 100%; margin-top: 14px; justify-content: center; font-size: 16px; padding: 12px;" onclick="openPaymentDrawer()" ${state.cart.length === 0 ? 'disabled' : ''}>
-                  Checkout &amp; Pay (${escapeHtml(state.currency || '$')} ${calculateCartGrandTotal().toFixed(2)})
+                  Checkout &amp; Pay (${formatTenantMoney(calculateCartGrandTotal())})
                 </button>
               </div>
             </div>
@@ -4350,7 +4472,7 @@
           <div class="cart-line">
             <div class="cart-line-info">
               <div class="cart-line-name">${escapeHtml(line.name)}</div>
-              <div class="cart-line-sub">${escapeHtml(state.currency || '$')} ${parseFloat(line.unitPrice).toFixed(2)} / ${escapeHtml(line.uomCode)}</div>
+              <div class="cart-line-sub">${formatTenantMoney(line.unitPrice)} / ${escapeHtml(line.uomCode)}</div>
             </div>
             <div class="cart-line-controls">
               <button class="qty-btn" onclick="updateCartQty(${idx}, -1)">-</button>
@@ -4358,20 +4480,20 @@
               <button class="qty-btn" onclick="updateCartQty(${idx}, 1)">+</button>
             </div>
             <div style="min-width: 65px; text-align: right; font-weight: 700; color: var(--text-primary); margin-left: 12px;">
-              ${escapeHtml(state.currency || '$')} ${(line.qty * parseFloat(line.unitPrice)).toFixed(2)}
+              ${formatTenantMoney(line.qty * parseFloat(line.unitPrice))}
             </div>
           </div>
         `).join('');
       }
 
       const subEl = document.getElementById('cartSubtotalText');
-      if (subEl) subEl.innerText = `${escapeHtml(state.currency || '$')} ${subtotal.toFixed(2)}`;
+      if (subEl) subEl.innerText = formatTenantMoney(subtotal);
 
       const taxEl = document.getElementById('cartTaxText');
-      if (taxEl) taxEl.innerText = `${escapeHtml(state.currency || '$')} ${tax.toFixed(2)}`;
+      if (taxEl) taxEl.innerText = formatTenantMoney(tax);
 
       const totalEl = document.getElementById('cartGrandTotalText');
-      if (totalEl) totalEl.innerText = `${escapeHtml(state.currency || '$')} ${grandTotal.toFixed(2)}`;
+      if (totalEl) totalEl.innerText = formatTenantMoney(grandTotal);
 
       const mobileCountEl = document.getElementById('mobileCartItemCount');
       if (mobileCountEl) mobileCountEl.innerText = state.cart.length;
@@ -4379,19 +4501,20 @@
       const floatCart = document.getElementById('posMobileFloatingCart');
       if (floatCart) {
         floatCart.style.display = state.cart.length > 0 ? 'flex' : 'none';
-        floatCart.innerHTML = `<span>🛒 Cart (${state.cart.length} items)</span><span>${escapeHtml(state.currency || '$')} ${grandTotal.toFixed(2)} &rarr;</span>`;
+        floatCart.innerHTML = `<span>🛒 Cart (${state.cart.length} items)</span><span>${formatTenantMoney(grandTotal)} &rarr;</span>`;
       }
     }
 
     // Checkout & Payment Modal
     function openPaymentDrawer() {
       const grandTotal = calculateCartGrandTotal();
+      const decimals = getCurrencyMinorUnits();
       openModal({
         title: 'Complete Sale Checkout',
         bodyHtml: `
           <div style="text-align: center; margin-bottom: 20px; padding: 14px; background: var(--bg-primary); border-radius: var(--radius);">
             <div style="font-size: 13px; color: var(--text-secondary);">Amount Due</div>
-            <div style="font-size: 32px; font-weight: 800; color: var(--accent-primary);">$${grandTotal.toFixed(2)}</div>
+            <div style="font-size: 32px; font-weight: 800; color: var(--accent-primary);">${formatTenantMoney(grandTotal)}</div>
           </div>
 
           <div class="form-group">
@@ -4405,12 +4528,12 @@
 
           <div id="cashPaymentFields">
             <div class="form-group">
-              <label class="form-label">Tendered Cash ($)</label>
-              <input type="number" step="0.01" class="form-input" id="payCashTendered" value="${grandTotal.toFixed(2)}" oninput="calculateChangeDue()">
+              <label class="form-label">Tendered Cash (${escapeHtml(getTenantCurrency())})</label>
+              <input type="number" step="${getCurrencyInputStep()}" class="form-input" id="payCashTendered" value="${grandTotal.toFixed(decimals)}" oninput="calculateChangeDue()">
             </div>
             <div style="display: flex; justify-content: space-between; padding: 10px; background: var(--bg-primary); border-radius: var(--radius); font-weight: 600;">
               <span>Change Due:</span>
-              <strong id="payChangeDueText" style="color: var(--status-success);">$0.00</strong>
+              <strong id="payChangeDueText" style="color: var(--status-success);">${formatTenantMoney(0)}</strong>
             </div>
           </div>
 
@@ -4434,7 +4557,7 @@
         `,
         footerHtml: `
           <button class="btn btn-secondary" onclick="closeModal()">Back to Cart</button>
-          <button class="btn btn-primary" onclick="submitPosCheckout()">Process Payment ($${grandTotal.toFixed(2)})</button>
+          <button class="btn btn-primary" onclick="submitPosCheckout()">Process Payment (${formatTenantMoney(grandTotal)})</button>
         `
       });
     }
@@ -4462,7 +4585,7 @@
       const tendered = parseFloat(document.getElementById('payCashTendered')?.value || '0');
       const change = Math.max(0, tendered - total);
       const el = document.getElementById('payChangeDueText');
-      if (el) el.innerText = `$${change.toFixed(2)}`;
+      if (el) el.innerText = formatTenantMoney(change);
     }
 
     async function submitPosCheckout() {
@@ -4535,6 +4658,7 @@
     async function openReceiptModal(saleId) {
       try {
         const receipt = await apiFetch(`/v1/pos/sales/${saleId}/receipt`);
+        const receiptCurr = receipt.currencyCode || receipt.currency || getTenantCurrency();
         openModal({
           title: `Receipt #${receipt.invoiceNumber}`,
           bodyHtml: `
@@ -4556,34 +4680,34 @@
                 ${receipt.lines.map(l => `
                   <div class="receipt-row">
                     <span>${l.name} (x${parseFloat(l.quantity).toFixed(0)})</span>
-                    <span>$${parseFloat(l.lineTotal).toFixed(2)}</span>
+                    <span>${formatTenantMoney(l.lineTotal, receiptCurr)}</span>
                   </div>
                 `).join('')}
               </div>
               <div class="receipt-divider"></div>
               <div class="receipt-row">
-                <span>Subtotal:</span> <span>$${parseFloat(receipt.subtotalAmount).toFixed(2)}</span>
+                <span>Subtotal:</span> <span>${formatTenantMoney(receipt.subtotalAmount, receiptCurr)}</span>
               </div>
               <div class="receipt-row">
-                <span>Tax:</span> <span>$${parseFloat(receipt.taxAmount).toFixed(2)}</span>
+                <span>Tax:</span> <span>${formatTenantMoney(receipt.taxAmount, receiptCurr)}</span>
               </div>
               <div class="receipt-row receipt-bold" style="font-size: 14px; margin-top: 4px;">
-                <span>Total:</span> <span>$${parseFloat(receipt.grandTotal).toFixed(2)}</span>
+                <span>Total:</span> <span>${formatTenantMoney(receipt.grandTotal, receiptCurr)}</span>
               </div>
               <div class="receipt-divider"></div>
               ${receipt.payments.map(p => `
                 <div class="receipt-row">
-                  <span>Paid (${p.method || p.paymentMethod}):</span> <span>$${parseFloat(p.amount).toFixed(2)}</span>
+                  <span>Paid (${p.method || p.paymentMethod}):</span> <span>${formatTenantMoney(p.amount, receiptCurr)}</span>
                 </div>
                 ${parseFloat(p.changeAmount || '0') > 0 ? `
                   <div class="receipt-row">
-                    <span>Change Due:</span> <span>$${parseFloat(p.changeAmount).toFixed(2)}</span>
+                    <span>Change Due:</span> <span>${formatTenantMoney(p.changeAmount, receiptCurr)}</span>
                   </div>
                 ` : ''}
               `).join('')}
               ${parseFloat(receipt.changeGiven || '0') > 0 ? `
                 <div class="receipt-row">
-                  <span>Change Given:</span> <span>$${parseFloat(receipt.changeGiven).toFixed(2)}</span>
+                  <span>Change Given:</span> <span>${formatTenantMoney(receipt.changeGiven, receiptCurr)}</span>
                 </div>
               ` : ''}
               <div class="receipt-divider"></div>
@@ -4745,11 +4869,11 @@
                 </div>
                 <div>
                   <div class="kpi-label">Opening Float</div>
-                  <div style="font-weight: 700; color: var(--accent-primary); margin-top: 4px;">$${parseFloat(activeShift.openingCashFloat).toFixed(2)}</div>
+                  <div style="font-weight: 700; color: var(--accent-primary); margin-top: 4px;">${formatTenantMoney(activeShift.openingCashFloat)}</div>
                 </div>
                 <div>
                   <div class="kpi-label">Expected Drawer Cash</div>
-                  <div style="font-weight: 700; color: var(--text-primary); margin-top: 4px;">$${parseFloat(activeShift.expectedClosingCash).toFixed(2)}</div>
+                  <div style="font-weight: 700; color: var(--text-primary); margin-top: 4px;">${formatTenantMoney(activeShift.expectedClosingCash)}</div>
                 </div>
               </div>
             ` : `
@@ -4771,8 +4895,8 @@
         title: 'Open Cashier Shift',
         bodyHtml: `
           <div class="form-group">
-            <label class="form-label">Opening Cash Float ($) *</label>
-            <input type="number" step="0.01" class="form-input" id="openFloatInput" value="150.00" required>
+            <label class="form-label">Opening Cash Float (${escapeHtml(getTenantCurrency())}) *</label>
+            <input type="number" step="${getCurrencyInputStep()}" class="form-input" id="openFloatInput" value="${getCurrencyDefaultCost()}" required>
           </div>
           <div class="form-group">
             <label class="form-label">Notes (Optional)</label>
@@ -4810,8 +4934,8 @@
         title: 'Close Cashier Shift &amp; Reconcile Cash',
         bodyHtml: `
           <div class="form-group">
-            <label class="form-label">Counted Drawer Cash ($) *</label>
-            <input type="number" step="0.01" class="form-input" id="closeCountedInput" placeholder="Enter counted cash in drawer..." required>
+            <label class="form-label">Counted Drawer Cash (${escapeHtml(getTenantCurrency())}) *</label>
+            <input type="number" step="${getCurrencyInputStep()}" class="form-input" id="closeCountedInput" placeholder="Enter counted cash in drawer..." required>
           </div>
           <div class="form-group">
             <label class="form-label">Closing Notes</label>
@@ -4839,7 +4963,7 @@
         });
 
         const variance = parseFloat(closed.cashVariance || '0');
-        showToast(`Shift closed! Cash variance: $${variance.toFixed(2)}`, variance === 0 ? 'success' : 'warning');
+        showToast(`Shift closed! Cash variance: ${formatTenantMoney(variance)}`, variance === 0 ? 'success' : 'warning');
         state.activeShift = null;
         closeModal();
         renderView('pos-shifts');
@@ -4879,9 +5003,9 @@
                         <th>Invoice #</th>
                         <th>Date / Time</th>
                         <th>Customer</th>
-                        <th>Subtotal</th>
-                        <th>Tax</th>
-                        <th>Grand Total</th>
+                        <th>Subtotal (${escapeHtml(getTenantCurrency())})</th>
+                        <th>Tax (${escapeHtml(getTenantCurrency())})</th>
+                        <th>Grand Total (${escapeHtml(getTenantCurrency())})</th>
                         <th>Status</th>
                         <th>Actions</th>
                       </tr>
@@ -4892,9 +5016,9 @@
                           <td><strong>${s.invoiceNumber}</strong></td>
                           <td>${new Date(s.soldAt).toLocaleString()}</td>
                           <td>${s.customerName || 'Walk-in Customer'}</td>
-                          <td>$${parseFloat(s.subtotalAmount).toFixed(2)}</td>
-                          <td>$${parseFloat(s.taxAmount).toFixed(2)}</td>
-                          <td style="font-weight: 700; color: var(--accent-primary);">$${parseFloat(s.grandTotal).toFixed(2)}</td>
+                          <td>${formatTenantMoney(s.subtotalAmount)}</td>
+                          <td>${formatTenantMoney(s.taxAmount)}</td>
+                          <td style="font-weight: 700; color: var(--accent-primary);">${formatTenantMoney(s.grandTotal)}</td>
                           <td><span class="badge-pill ${s.status === 'COMPLETED' ? 'badge-green' : 'badge-red'}">${s.status}</span></td>
                           <td>
                             <button class="btn btn-secondary btn-sm" onclick="openReceiptModal('${s.id}')">Receipt</button>
@@ -4916,9 +5040,6 @@
                   const inv = escapeHtml(s.invoiceNumber);
                   const dateStr = s.soldAt ? new Date(s.soldAt).toLocaleString() : '—';
                   const cust = escapeHtml(s.customerName || 'Walk-in Customer');
-                  const subtotal = parseFloat(s.subtotalAmount || 0).toFixed(2);
-                  const tax = parseFloat(s.taxAmount || 0).toFixed(2);
-                  const total = parseFloat(s.grandTotal || 0).toFixed(2);
                   const isCompleted = s.status === 'COMPLETED';
 
                   return `
@@ -4927,11 +5048,11 @@
                         <span class="entity-card-code"><strong>${inv}</strong></span>
                         <span class="badge-pill ${isCompleted ? 'badge-green' : 'badge-red'}">${s.status}</span>
                       </div>
-                      <div class="entity-card-title">$${total} &bull; <span style="font-size: 13px; font-weight: normal; color: var(--text-secondary);">${cust}</span></div>
+                      <div class="entity-card-title">${formatTenantMoney(s.grandTotal)} &bull; <span style="font-size: 13px; font-weight: normal; color: var(--text-secondary);">${cust}</span></div>
                       <div class="entity-card-details">
                         <div class="detail-row">
                           <span class="detail-label">Subtotal / Tax</span>
-                          <span class="detail-value">$${subtotal} + $${tax}</span>
+                          <span class="detail-value">${formatTenantMoney(s.subtotalAmount)} + ${formatTenantMoney(s.taxAmount)}</span>
                         </div>
                         <div class="detail-row">
                           <span class="detail-label">Completed At</span>
@@ -5014,7 +5135,7 @@
               <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
                 <div class="form-group">
                   <label class="form-label">Base Currency</label>
-                  <input type="text" class="form-input" value="${escapeHtml(state.currency || 'USD')}" readonly>
+                  <input type="text" class="form-input" value="${escapeHtml(state.currency || getTenantCurrency())}" readonly>
                 </div>
                 <div class="form-group">
                   <label class="form-label">Default Country</label>
@@ -5127,7 +5248,7 @@
                         <th>Expiry Date</th>
                         <th>Initial Qty</th>
                         <th>Current Qty</th>
-                        <th>Unit Cost</th>
+                        <th>Unit Cost (${escapeHtml(getTenantCurrency())})</th>
                         <th>Expiry Status</th>
                         <th>Batch Status</th>
                         <th>Actions</th>
@@ -5152,7 +5273,7 @@
                             <td>${b.expiryDate || '—'}</td>
                             <td>${formatQty(b.initialQuantity)}</td>
                             <td><strong>${formatQty(b.currentQuantity)}</strong></td>
-                            <td>$${parseFloat(b.unitCost).toFixed(2)}</td>
+                            <td>${formatTenantMoney(b.unitCost)}</td>
                             <td>${expBadge}</td>
                             <td>${statusBadge}</td>
                             <td>
@@ -5203,7 +5324,7 @@
                         </div>
                         <div class="detail-row">
                           <span class="detail-label">Unit Cost</span>
-                          <span class="detail-value">$${parseFloat(b.unitCost).toFixed(2)}</span>
+                          <span class="detail-value">${formatTenantMoney(b.unitCost)}</span>
                         </div>
                         <div class="detail-row">
                           <span class="detail-label">Received</span>
@@ -5261,8 +5382,8 @@
               <input type="number" step="1" min="1" class="form-input" id="newBatchQty" value="100" required>
             </div>
             <div class="form-group">
-              <label class="form-label">Unit Cost (USD)</label>
-              <input type="number" step="0.01" min="0" class="form-input" id="newBatchUnitCost" value="15.00" required>
+              <label class="form-label">Unit Cost (${escapeHtml(getTenantCurrency())})</label>
+              <input type="number" step="${getCurrencyInputStep()}" min="0" class="form-input" id="newBatchUnitCost" value="${getCurrencyDefaultCost()}" required>
             </div>
           </div>
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
@@ -5413,7 +5534,7 @@
                         <th>Serial Number</th>
                         <th>Product</th>
                         <th>Lifecycle Status</th>
-                        <th>Unit Cost</th>
+                        <th>Unit Cost (${escapeHtml(getTenantCurrency())})</th>
                         <th>Received At</th>
                         <th>Sold At</th>
                         <th>Actions</th>
@@ -5432,7 +5553,7 @@
                             <td><strong style="font-family: monospace; font-size: 13px;">${s.serialNumber}</strong></td>
                             <td>${prod ? `${prod.sku} - ${prod.name}` : s.productId}</td>
                             <td><span class="badge-pill ${badgeClass}">${s.status}</span></td>
-                            <td>$${parseFloat(s.unitCost).toFixed(2)}</td>
+                            <td>${formatTenantMoney(s.unitCost)}</td>
                             <td>${new Date(s.receivedAt).toLocaleDateString()}</td>
                             <td>${s.soldAt ? new Date(s.soldAt).toLocaleDateString() : '—'}</td>
                             <td>
@@ -5465,7 +5586,7 @@
                       <div class="entity-card-details">
                         <div class="detail-row">
                           <span class="detail-label">Unit Cost</span>
-                          <span class="detail-value">$${parseFloat(s.unitCost).toFixed(2)}</span>
+                          <span class="detail-value">${formatTenantMoney(s.unitCost)}</span>
                         </div>
                         <div class="detail-row">
                           <span class="detail-label">Received At</span>
@@ -5520,8 +5641,8 @@
             <textarea class="form-input" id="regSerialNumbers" rows="4" placeholder="SN-10001&#10;SN-10002&#10;SN-10003" required style="font-family: monospace;"></textarea>
           </div>
           <div class="form-group">
-            <label class="form-label">Unit Cost (USD)</label>
-            <input type="number" step="0.01" min="0" class="form-input" id="regSerialCost" value="120.00" required>
+            <label class="form-label">Unit Cost (${escapeHtml(getTenantCurrency())})</label>
+            <input type="number" step="${getCurrencyInputStep()}" min="0" class="form-input" id="regSerialCost" value="${getCurrencyDefaultCost()}" required>
           </div>
           <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px;">
             <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
@@ -5661,7 +5782,7 @@
           <div class="kpi-grid">
             <div class="kpi-card">
               <div class="kpi-label">Total Inventory Asset Value</div>
-              <div class="kpi-value" style="color: var(--accent-primary);">$${totalAssetVal}</div>
+              <div class="kpi-value" style="color: var(--accent-primary);">${formatTenantMoney(totalAssetVal)}</div>
             </div>
             <div class="kpi-card">
               <div class="kpi-label">Tracked SKUs</div>
@@ -5695,8 +5816,8 @@
                         <th>Product Name</th>
                         <th>Valuation Method</th>
                         <th>On Hand</th>
-                        <th>Unit / MAC Cost</th>
-                        <th>Total Inventory Value</th>
+                        <th>Unit / MAC Cost (${escapeHtml(getTenantCurrency())})</th>
+                        <th>Total Inventory Value (${escapeHtml(getTenantCurrency())})</th>
                         <th>Open FIFO Layers</th>
                         <th>Active Batches</th>
                         <th>Actions</th>
@@ -5716,8 +5837,8 @@
                             <td>${name}</td>
                             <td>${methodBadge}</td>
                             <td>${formatQty(i.qtyOnHand)}</td>
-                            <td>$${parseFloat(i.movingAvgCost || 0).toFixed(2)}</td>
-                            <td><strong>$${parseFloat(i.totalInventoryValue || 0).toFixed(2)}</strong></td>
+                            <td>${formatTenantMoney(i.movingAvgCost)}</td>
+                            <td><strong>${formatTenantMoney(i.totalInventoryValue)}</strong></td>
                             <td>${i.openLayersCount || 0}</td>
                             <td>${i.activeBatchesCount || 0}</td>
                             <td>
@@ -5738,8 +5859,6 @@
                   const methodBadge = i.valuationMethod === 'FIFO'
                     ? '<span class="badge-pill badge-blue">FIFO</span>'
                     : '<span class="badge-pill badge-green">MOVING_AVG</span>';
-                  const totalVal = parseFloat(i.totalInventoryValue || 0).toFixed(2);
-                  const mac = parseFloat(i.movingAvgCost || 0).toFixed(2);
 
                   return `
                     <div class="entity-card">
@@ -5751,7 +5870,7 @@
                       <div class="entity-card-details">
                         <div class="detail-row">
                           <span class="detail-label">Total Value</span>
-                          <span class="detail-value" style="font-weight: 700; color: var(--accent-primary);">$${totalVal}</span>
+                          <span class="detail-value" style="font-weight: 700; color: var(--accent-primary);">${formatTenantMoney(i.totalInventoryValue)}</span>
                         </div>
                         <div class="detail-row">
                           <span class="detail-label">Qty on Hand</span>
@@ -5759,7 +5878,7 @@
                         </div>
                         <div class="detail-row">
                           <span class="detail-label">Unit / MAC Cost</span>
-                          <span class="detail-value">$${mac}</span>
+                          <span class="detail-value">${formatTenantMoney(i.movingAvgCost)}</span>
                         </div>
                         <div class="detail-row">
                           <span class="detail-label">Layers / Batches</span>
@@ -5801,7 +5920,7 @@
                     <th>Layer Date</th>
                     <th>Received Qty</th>
                     <th>Remaining Qty</th>
-                    <th>Layer Unit Cost</th>
+                    <th>Layer Unit Cost (${escapeHtml(getTenantCurrency())})</th>
                     <th>Status</th>
                   </tr>
                 </thead>
@@ -5812,7 +5931,7 @@
                       <td>${l.layerDate ? new Date(l.layerDate).toLocaleString() : '—'}</td>
                       <td>${formatQty(l.receivedQty)}</td>
                       <td><strong>${formatQty(l.remainingQty)}</strong></td>
-                      <td>$${parseFloat(l.unitCost || 0).toFixed(2)}</td>
+                      <td>${formatTenantMoney(l.unitCost)}</td>
                       <td><span class="badge-pill ${l.status === 'OPEN' ? 'badge-green' : 'badge-yellow'}">${escapeHtml(l.status)}</span></td>
                     </tr>
                   `).join('')}
@@ -5889,7 +6008,7 @@
                         <th>Status</th>
                         <th>Total Lines</th>
                         <th>Discrepant Lines</th>
-                        <th>Net Variance Value</th>
+                        <th>Net Variance Value (${escapeHtml(getTenantCurrency())})</th>
                         <th>Started At</th>
                         <th>Actions</th>
                       </tr>
@@ -5910,7 +6029,7 @@
                             <td>${statusBadge}</td>
                             <td>${s.totalLinesCount}</td>
                             <td>${s.discrepantLinesCount > 0 ? `<strong style="color: var(--status-warning);">${s.discrepantLinesCount}</strong>` : '0'}</td>
-                            <td><strong>$${parseFloat(s.totalVarianceValue).toFixed(2)}</strong></td>
+                            <td><strong>${formatTenantMoney(s.totalVarianceValue)}</strong></td>
                             <td>${s.startedAt ? new Date(s.startedAt).toLocaleDateString() : '—'}</td>
                             <td style="display: flex; gap: 6px;">
                               ${s.status === 'DRAFT' || s.status === 'IN_PROGRESS' ? `
@@ -5953,7 +6072,7 @@
                       <div class="entity-card-details">
                         <div class="detail-row">
                           <span class="detail-label">Variance Value</span>
-                          <span class="detail-value" style="font-weight: 700;">$${parseFloat(s.totalVarianceValue).toFixed(2)}</span>
+                          <span class="detail-value" style="font-weight: 700;">${formatTenantMoney(s.totalVarianceValue)}</span>
                         </div>
                         <div class="detail-row">
                           <span class="detail-label">Lines / Discrepant</span>
@@ -6144,7 +6263,7 @@
         const html = `
           <div style="font-size: 18px; font-weight: 700; margin-bottom: 8px;">Supervisor Review: ${session.countNumber}</div>
           <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px;">
-            Total lines: <strong>${session.totalLinesCount}</strong> | Discrepancies: <strong style="color: var(--status-warning);">${session.discrepantLinesCount}</strong> | Net Variance: <strong>$${parseFloat(session.totalVarianceValue).toFixed(2)}</strong>
+            Total lines: <strong>${session.totalLinesCount}</strong> | Discrepancies: <strong style="color: var(--status-warning);">${session.discrepantLinesCount}</strong> | Net Variance: <strong>${formatTenantMoney(session.totalVarianceValue)}</strong>
           </div>
           <div class="table-responsive" style="max-height: 350px; overflow-y: auto;">
             <table class="data-table">
@@ -6155,7 +6274,7 @@
                   <th>Expected</th>
                   <th>Counted</th>
                   <th>Variance Qty</th>
-                  <th>Variance Value</th>
+                  <th>Variance Value (${escapeHtml(getTenantCurrency())})</th>
                 </tr>
               </thead>
               <tbody>
@@ -6166,7 +6285,7 @@
                     <td>${formatQty(l.expectedQty)}</td>
                     <td>${formatQty(l.countedQty)}</td>
                     <td><strong style="color: ${parseFloat(l.varianceQty || '0') < 0 ? 'var(--status-danger)' : parseFloat(l.varianceQty || '0') > 0 ? 'var(--status-success)' : 'inherit'};">${formatQty(l.varianceQty)}</strong></td>
-                    <td>$${parseFloat(l.varianceValue || '0').toFixed(2)}</td>
+                    <td>${formatTenantMoney(l.varianceValue)}</td>
                   </tr>
                 `).join('')}
               </tbody>
@@ -6223,7 +6342,7 @@
         const html = `
           <div style="font-size: 18px; font-weight: 700; margin-bottom: 8px;">Stocktake Details: ${session.countNumber}</div>
           <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px;">
-            Status: <span class="badge-pill badge-green">${session.status}</span> | Total Variance: <strong>$${parseFloat(session.totalVarianceValue).toFixed(2)}</strong>
+            Status: <span class="badge-pill badge-green">${session.status}</span> | Total Variance: <strong>${formatTenantMoney(session.totalVarianceValue)}</strong>
           </div>
           <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
             <table class="data-table">

@@ -931,35 +931,74 @@ export async function createProduct(
   const productId = generateUuidV7();
   const now = new Date();
 
-  await trx.db
-    .insertInto('products')
-    .values({
-      id: productId,
-      tenant_id: trx.tenantId,
-      sku,
-      name,
-      description: input.description?.trim() ?? null,
-      product_type: productType,
-      status: 'ACTIVE',
-      category_id: categoryId,
-      base_uom: baseUom,
-      purchase_cost: purchaseCost,
-      selling_price: sellingPrice,
-      tax_group_id: taxGroupId,
-      track_inventory: trackInventory,
-      tracking_mode: input.trackingMode ?? 'NONE',
-      valuation_method: input.valuationMethod ?? 'MOVING_AVG',
-      reorder_point: reorderPoint,
-      reorder_qty: reorderQty,
-      image_url: input.imageUrl?.trim() ?? null,
-      image_alt: input.imageAlt?.trim() ?? null,
-      primary_barcode: primaryBarcode,
-      sync_version: 1,
-      created_at: now,
-      updated_at: now,
-      archived_at: null,
-    })
-    .execute();
+  try {
+    await trx.db
+      .insertInto('products')
+      .values({
+        id: productId,
+        tenant_id: trx.tenantId,
+        sku,
+        name,
+        description: input.description?.trim() ?? null,
+        product_type: productType,
+        status: 'ACTIVE',
+        category_id: categoryId,
+        base_uom: baseUom,
+        purchase_cost: purchaseCost,
+        selling_price: sellingPrice,
+        tax_group_id: taxGroupId,
+        track_inventory: trackInventory,
+        tracking_mode: input.trackingMode ?? 'NONE',
+        valuation_method: input.valuationMethod ?? 'MOVING_AVG',
+        reorder_point: reorderPoint,
+        reorder_qty: reorderQty,
+        image_url: input.imageUrl?.trim() ?? null,
+        image_alt: input.imageAlt?.trim() ?? null,
+        primary_barcode: primaryBarcode,
+        sync_version: 1,
+        created_at: now,
+        updated_at: now,
+        archived_at: null,
+      })
+      .execute();
+  } catch (err: unknown) {
+    const error = err as {
+      code?: string;
+      constraint?: string;
+      message?: string;
+    };
+    if (error?.code === '23505') {
+      if (
+        error.constraint?.toLowerCase().includes('sku') ||
+        error.message?.toLowerCase().includes('sku')
+      ) {
+        throw new AppError({
+          statusCode: 409,
+          errorCode: 'CAT_DUPLICATE_SKU',
+          title: 'Duplicate Product SKU',
+          detail: `A product with SKU "${sku}" already exists in this organization.`,
+        });
+      }
+      if (
+        error.constraint?.toLowerCase().includes('barcode') ||
+        error.message?.toLowerCase().includes('barcode')
+      ) {
+        throw new AppError({
+          statusCode: 409,
+          errorCode: 'CAT_DUPLICATE_BARCODE',
+          title: 'Duplicate Barcode',
+          detail: `A product with primary barcode "${primaryBarcode}" already exists in this organization.`,
+        });
+      }
+      throw new AppError({
+        statusCode: 409,
+        errorCode: 'CAT_DUPLICATE_SKU',
+        title: 'Duplicate Product Conflict',
+        detail: `The product could not be created because a conflicting SKU or product already exists in this organization.`,
+      });
+    }
+    throw err;
+  }
 
   for (const conv of normalizedConversions) {
     await trx.db
@@ -979,19 +1018,36 @@ export async function createProduct(
   }
 
   for (const bc of barcodeEntries) {
-    await trx.db
-      .insertInto('product_barcodes')
-      .values({
-        id: generateUuidV7(),
-        tenant_id: trx.tenantId,
-        product_id: productId,
-        barcode: bc.barcode,
-        barcode_type: bc.barcodeType,
-        uom_code: bc.uomCode,
-        is_primary: bc.isPrimary,
-        created_at: now,
-      })
-      .execute();
+    try {
+      await trx.db
+        .insertInto('product_barcodes')
+        .values({
+          id: generateUuidV7(),
+          tenant_id: trx.tenantId,
+          product_id: productId,
+          barcode: bc.barcode,
+          barcode_type: bc.barcodeType,
+          uom_code: bc.uomCode,
+          is_primary: bc.isPrimary,
+          created_at: now,
+        })
+        .execute();
+    } catch (err: unknown) {
+      const error = err as {
+        code?: string;
+        constraint?: string;
+        message?: string;
+      };
+      if (error?.code === '23505') {
+        throw new AppError({
+          statusCode: 409,
+          errorCode: 'CAT_DUPLICATE_BARCODE',
+          title: 'Duplicate Barcode',
+          detail: `Barcode "${bc.barcode}" is already assigned to a product in this organization.`,
+        });
+      }
+      throw err;
+    }
   }
 
   await appendAuditLog(trx, {

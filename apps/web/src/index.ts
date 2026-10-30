@@ -211,16 +211,39 @@ export function escapeHtml(str: unknown): string {
     .replace(/'/g, '&#39;');
 }
 
+export const CURRENCY_MINOR_UNITS: Readonly<Record<string, number>> = {
+  USD: 2,
+  LKR: 2,
+  EUR: 2,
+  GBP: 2,
+  INR: 2,
+  AED: 2,
+  SGD: 2,
+  AUD: 2,
+  JPY: 0,
+  KRW: 0,
+  KWD: 3,
+  BHD: 3,
+  OMR: 3,
+};
+
+export function getCurrencyMinorUnits(currencyCode: string): number {
+  const code = (currencyCode || '').trim().toUpperCase();
+  return CURRENCY_MINOR_UNITS[code] ?? 2;
+}
+
 /**
- * Safely formats monetary amounts with standard 2 decimal places and currency code.
+ * Safely formats monetary amounts with proper minor unit decimals and currency code.
  */
 export function formatCurrency(
   amount: number | string | null | undefined,
   currencyCode = 'USD',
 ): string {
+  const code = (currencyCode || 'USD').trim().toUpperCase();
   const numeric = typeof amount === 'number' ? amount : parseFloat(String(amount ?? '0'));
   const safe = Number.isFinite(numeric) ? numeric : 0;
-  return `${currencyCode.toUpperCase()} ${safe.toFixed(2)}`;
+  const decimals = getCurrencyMinorUnits(code);
+  return `${code} ${safe.toFixed(decimals)}`;
 }
 
 /**

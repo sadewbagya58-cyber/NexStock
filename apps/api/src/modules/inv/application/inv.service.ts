@@ -134,6 +134,7 @@ function mapStockMovementRow(
     referenceId: row.reference_id,
     reversedEntryId: row.reversed_entry_id,
     reason: row.reason,
+    notes: row.reason,
     negativeStockOverrideApplied: row.negative_stock_override_applied,
     actorUserId: row.actor_user_id,
     idempotencyKey: row.idempotency_key,
@@ -333,10 +334,12 @@ export async function postStockMovement(
     });
   }
 
+  const movementReason = (input.reason ?? input.notes)?.trim() || null;
+
   if (
     (input.movementType === 'ADJUSTMENT_POSITIVE' ||
       input.movementType === 'ADJUSTMENT_NEGATIVE') &&
-    (!input.reason || input.reason.trim().length < 3)
+    (!movementReason || movementReason.length < 3)
   ) {
     throw new AppError({
       statusCode: 400,
@@ -534,7 +537,7 @@ export async function postStockMovement(
   const now = new Date();
   const occurredAt = input.occurredAt ? new Date(input.occurredAt) : now;
   const reason =
-    input.overrideReason?.trim() || input.reason?.trim() || null;
+    input.overrideReason?.trim() || movementReason;
 
   // Costing & Valuation computation (FIFO vs Moving Average Cost)
   let unitCostSnapshot = unitCostMoney;

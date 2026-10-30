@@ -644,6 +644,52 @@ describe('@nexstock/api — Phase 2: Core Inventory (CAT, PUR, INV, RLS, RBAC & 
       });
       expect(betaProdRes.statusCode).toBe(201);
 
+      // 4b. Phase 5.1 BUG-001: Idempotent Product Creation replays successfully without 409
+      const prodIdempotencyKey = generateUuidV7();
+      const firstCreateRes = await app.inject({
+        method: 'POST',
+        url: '/v1/products',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+          'idempotency-key': prodIdempotencyKey,
+        },
+        payload: {
+          sku: 'ELEC-MOUSE-001',
+          name: 'Wireless Bluetooth Mouse',
+          productType: 'STANDARD',
+          baseUom: 'PCS',
+          purchaseCost: '2500.0000',
+          sellingPrice: '3500.0000',
+        },
+      });
+      expect(firstCreateRes.statusCode).toBe(201);
+      expect(firstCreateRes.headers['x-idempotent-replayed']).toBe('false');
+      const createdProd = firstCreateRes.json();
+      expect(createdProd.sku).toBe('ELEC-MOUSE-001');
+
+      // Replay with identical idempotency key returns cached outcome (201) rather than 409
+      const secondCreateRes = await app.inject({
+        method: 'POST',
+        url: '/v1/products',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+          'idempotency-key': prodIdempotencyKey,
+        },
+        payload: {
+          sku: 'ELEC-MOUSE-001',
+          name: 'Wireless Bluetooth Mouse',
+          productType: 'STANDARD',
+          baseUom: 'PCS',
+          purchaseCost: '2500.0000',
+          sellingPrice: '3500.0000',
+        },
+      });
+      expect(secondCreateRes.statusCode).toBe(201);
+      expect(secondCreateRes.headers['x-idempotent-replayed']).toBe('true');
+      expect(secondCreateRes.json().id).toBe(createdProd.id);
+
       // 5. SERVICE product with trackInventory: true must be rejected with 400 ERR_VALIDATION_FAILED
       const badServiceRes = await app.inject({
         method: 'POST',
@@ -1022,6 +1068,52 @@ describe('@nexstock/api — Phase 2: Core Inventory (CAT, PUR, INV, RLS, RBAC & 
       expect(mismatchRes.json().errorCode).toBe(
         'ERR_IDEMPOTENCY_KEY_REUSED_DIFFERENT_PAYLOAD',
       );
+
+      // 3b. Phase 5.1 BUG-002: Post stock movement accepting `notes` field without 400 validation error
+      const testNotesProdRes = await app.inject({
+        method: 'POST',
+        url: '/v1/products',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+          'idempotency-key': generateUuidV7(),
+        },
+        payload: {
+          sku: 'SKU-MOUSE-BUG002',
+          name: 'Optical Mouse Bug 002',
+          productType: 'STANDARD',
+          baseUom: 'PCS',
+          purchaseCost: '2500.0000',
+          sellingPrice: '3500.0000',
+        },
+      });
+      expect(testNotesProdRes.statusCode).toBe(201);
+      const testNotesProdId = testNotesProdRes.json().id;
+
+      const movementWithNotesKey = generateUuidV7();
+      const movementWithNotesRes = await app.inject({
+        method: 'POST',
+        url: '/v1/inventory/movements',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+          'idempotency-key': movementWithNotesKey,
+        },
+        payload: {
+          branchId: alphaBranch1Id,
+          warehouseId: alphaMainWarehouseId,
+          productId: testNotesProdId,
+          movementType: 'OPENING_STOCK',
+          quantity: '50.0000',
+          uomCode: 'PCS',
+          unitCost: '2500.0000',
+          notes: 'Initial warehouse intake note',
+        },
+      });
+      expect(movementWithNotesRes.statusCode).toBe(201);
+      const movNotesJson = movementWithNotesRes.json();
+      expect(movNotesJson.reason).toBe('Initial warehouse intake note');
+      expect(movNotesJson.notes).toBe('Initial warehouse intake note');
 
       // 4. Post STOCK_IN using alternate UoM "BOX" (2 BOX * 6.000000 PCS/BOX = +12.000000 PCS -> balanceAfter = 32.000000)
       const stockInBoxRes = await app.inject({

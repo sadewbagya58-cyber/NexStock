@@ -826,6 +826,9 @@ export const PostStockMovementRequestSchema = Type.Object(
     reason: Type.Optional(
       Type.Union([Type.String({ maxLength: 500 }), Type.Null()]),
     ),
+    notes: Type.Optional(
+      Type.Union([Type.String({ maxLength: 500 }), Type.Null()]),
+    ),
     occurredAt: Type.Optional(IsoTimestampSchema),
     allowNegativeStockOverride: Type.Optional(Type.Boolean()),
     overrideReason: Type.Optional(
@@ -891,6 +894,7 @@ export const StockMovementResponseSchema = Type.Object({
   referenceId: Type.Union([Type.String(), Type.Null()]),
   reversedEntryId: Type.Union([UuidSchema, Type.Null()]),
   reason: Type.Union([Type.String(), Type.Null()]),
+  notes: Type.Optional(Type.Union([Type.String(), Type.Null()])),
   negativeStockOverrideApplied: Type.Boolean(),
   actorUserId: UuidSchema,
   idempotencyKey: UuidSchema,
