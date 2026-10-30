@@ -311,8 +311,8 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       const html = readFileSync(indexPath, 'utf8');
 
       // Verifies unauthenticated visitors land on welcome view
-      expect(html).toContain("if (!storedToken) {\n        renderView('welcome');");
-      expect(html).toContain("renderView('welcome');\n          return;");
+      expect(html).toMatch(/if \(!storedToken[\s\S]*?renderView\('welcome'\);/);
+      expect(html).toContain("renderView('welcome');");
 
       // Verifies signout redirects to welcome view
       expect(html).toContain("showToast('You have been signed out.', 'info');\n      renderView('welcome');");
@@ -966,6 +966,127 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       // 4. Ultra-compact mobile responsive rules (360px - 320px)
       expect(html).toContain('grid-template-columns: repeat(2, 1fr) !important;');
       expect(html).toContain('min-height: 80px !important;');
+    });
+
+    it('BUG-011: verifies session retention, token refresh mutex, HTTP 403 safety, and multi-tab sync', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // 1. Session store properties
+      expect(html).toContain('tokenExpiresAt: 0');
+      expect(html).toContain('timezone:');
+
+      // 2. JWT expiration decoder and proactive refresh
+      expect(html).toContain('function getTokenExpiry(jwtToken)');
+      expect(html).toContain('Date.now() + 30000 >= exp');
+
+      // 3. Singleton token refresh mutex
+      expect(html).toContain('let activeRefreshPromise = null;');
+      expect(html).toContain('async function refreshAccessToken()');
+      expect(html).toContain('if (activeRefreshPromise)');
+      expect(html).toContain('activeRefreshPromise = (async () =>');
+
+      // 4. apiFetch retry on 401 with refreshed token
+      expect(html).toContain('if (res.status === 401 && !isAuthBypass)');
+      expect(html).toContain('const refreshed = await refreshAccessToken();');
+      expect(html).toContain("return apiFetch(endpoint, { ...options, _retried: true });");
+
+      // 5. HTTP 403 Forbidden does NOT trigger signout
+      expect(html).toContain('HTTP 403 Forbidden or other client/server error: DO NOT SIGN OUT!');
+
+      // 6. initApp preserves session on 5xx or offline network errors
+      expect(html).toContain('Server error (500, 502, 503, 504) or gateway timeout: PRESERVE SESSION!');
+      expect(html).toContain('Network offline / connection failed: PRESERVE SESSION!');
+      expect(html).toContain('● Server Reconnecting...');
+      expect(html).toContain('● Offline / Disconnected');
+
+      // 7. Multi-tab storage listener
+      expect(html).toContain("window.addEventListener('storage',");
+      expect(html).toContain("event.key === 'nexstock_session_token'");
+
+      // 8. Explicit sign out cleans up all storage keys
+      expect(html).toContain("localStorage.removeItem('nexstock_session_token');");
+      expect(html).toContain("localStorage.removeItem('nexstock_refresh_token');");
+      expect(html).toContain("localStorage.removeItem('nexstock_active_timezone');");
+    });
+
+    it('BUG-012: verifies Dashboard KPI calculation, strict COMPLETED vs VOIDED separation, and timezone-aware boundaries', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // 1. Timezone-aware date helper
+      expect(html).toContain('function isSameDayInTimezone(dateOrIso, targetDate = new Date(), timezone = \'UTC\')');
+
+      // 2. Strict status separation in Dashboard KPI
+      expect(html).toContain("const completedSales = todaySales.filter(s => s.status === 'COMPLETED');");
+      expect(html).toContain("const voidedSales = todaySales.filter(s => s.status === 'VOIDED');");
+      expect(html).toContain("const completedCount = completedSales.length;");
+      expect(html).toContain("const voidedCount = voidedSales.length;");
+      expect(html).toContain("${completedCount} completed transaction");
+
+      // 3. Recent Completed Sales table displays only completed sales
+      expect(html).toContain("${completedSales.slice(0, 5).map(s =>");
+
+      // 4. Algorithmic verification with production evidence:
+      // REG-01-000001 (COMPLETED, 11000)
+      // REG-01-000002 (COMPLETED, 11000)
+      // REG-01-000003 (VOIDED, 11000)
+      // REG-01-000004 (VOIDED, 11000)
+      interface InvoiceItem {
+        invoiceNumber: string;
+        status: 'COMPLETED' | 'VOIDED';
+        grandTotal: string;
+        createdAt: string;
+      }
+
+      const mockInvoices: InvoiceItem[] = [
+        { invoiceNumber: 'REG-01-000001', status: 'COMPLETED', grandTotal: '11000.0000', createdAt: '2026-10-30T03:41:36.999Z' },
+        { invoiceNumber: 'REG-01-000002', status: 'COMPLETED', grandTotal: '11000.0000', createdAt: '2026-10-30T03:41:42.830Z' },
+        { invoiceNumber: 'REG-01-000003', status: 'VOIDED', grandTotal: '11000.0000', createdAt: '2026-10-30T03:41:48.464Z' },
+        { invoiceNumber: 'REG-01-000004', status: 'VOIDED', grandTotal: '11000.0000', createdAt: '2026-10-30T03:41:54.202Z' },
+      ];
+
+      const tz = 'Asia/Colombo';
+      const targetDate = new Date('2026-10-30T10:00:00.000Z');
+
+      const isSameDay = (dateStr: string, target: Date, timezone: string): boolean => {
+        const formatter = new Intl.DateTimeFormat('en-CA', {
+          timeZone: timezone,
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+        });
+        return formatter.format(new Date(dateStr)) === formatter.format(target);
+      };
+
+      const todaySales = mockInvoices.filter(s => isSameDay(s.createdAt, targetDate, tz));
+      expect(todaySales).toHaveLength(4);
+
+      const completed = todaySales.filter(s => s.status === 'COMPLETED');
+      const voided = todaySales.filter(s => s.status === 'VOIDED');
+
+      const completedSalesTotal = completed.reduce((acc, s) => acc + parseFloat(s.grandTotal), 0);
+      const completedCount = completed.length;
+      const voidedCount = voided.length;
+
+      // Exact production expectations:
+      expect(completedSalesTotal).toBe(22000);
+      expect(formatCurrency(completedSalesTotal, 'LKR')).toBe('LKR 22000.00');
+      expect(completedCount).toBe(2);
+      expect(voidedCount).toBe(2);
+
+      // Verify KPI trend label formatting
+      const kpiTrend = `${completedCount} completed transaction${completedCount === 1 ? '' : 's'}${voidedCount > 0 ? ` (${voidedCount} voided)` : ''}`;
+      expect(kpiTrend).toBe('2 completed transactions (2 voided)');
+
+      // Verify that date boundary correctly excludes yesterday's sales in that timezone
+      const yesterdayInvoice: InvoiceItem = {
+        invoiceNumber: 'REG-01-000000',
+        status: 'COMPLETED',
+        grandTotal: '5000.0000',
+        createdAt: '2026-10-29T10:00:00.000Z',
+      };
+      expect(isSameDay(yesterdayInvoice.createdAt, targetDate, tz)).toBe(false);
     });
   });
 });

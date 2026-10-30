@@ -705,6 +705,7 @@ export async function getUserProfileAndMemberships(
         'tenants.legal_name as business_name',
         'tenants.slug',
         'tenants.base_currency',
+        'tenants.default_timezone',
         'tenants.status as tenant_status',
       ])
       .where('tenant_memberships.user_id', '=', userId)
@@ -729,7 +730,7 @@ export async function getUserProfileAndMemberships(
       // Find branches for this tenant
       const branchRows = await trx
         .selectFrom('branches')
-        .select(['id', 'code', 'name', 'default_warehouse_id'])
+        .select(['id', 'code', 'name', 'default_warehouse_id', 'timezone'])
         .where('tenant_id', '=', m.tenant_id)
         .where('is_active', '=', true)
         .orderBy('name', 'asc')
@@ -742,11 +743,13 @@ export async function getUserProfileAndMemberships(
         baseCurrency: m.base_currency,
         status: m.tenant_status,
         role: roleRow?.role_code ?? 'MEMBER',
+        timezone: m.default_timezone ?? 'UTC',
         branches: branchRows.map((b) => ({
           id: b.id,
           code: b.code,
           name: b.name,
           defaultWarehouseId: b.default_warehouse_id,
+          timezone: b.timezone ?? m.default_timezone ?? 'UTC',
         })),
       });
     }

@@ -1243,6 +1243,28 @@ export const ListSalesQuerySchema = Type.Object(
 );
 export type ListSalesQuery = Static<typeof ListSalesQuerySchema>;
 
+export const SalesSummaryQuerySchema = Type.Object(
+  {
+    registerId: Type.Optional(UuidSchema),
+    startDate: Type.Optional(IsoTimestampSchema),
+    endDate: Type.Optional(IsoTimestampSchema),
+  },
+  { additionalProperties: false },
+);
+export type SalesSummaryQuery = Static<typeof SalesSummaryQuerySchema>;
+
+export const SalesSummaryResponseSchema = Type.Object(
+  {
+    completedAmount: DecimalMoneyStringSchema,
+    completedCount: Type.Integer({ minimum: 0 }),
+    voidedAmount: DecimalMoneyStringSchema,
+    voidedCount: Type.Integer({ minimum: 0 }),
+    totalSalesCount: Type.Integer({ minimum: 0 }),
+  },
+  { additionalProperties: false },
+);
+export type SalesSummaryResponse = Static<typeof SalesSummaryResponseSchema>;
+
 export const VoidSaleRequestSchema = Type.Object(
   {
     reason: Type.String({ minLength: 3, maxLength: 500 }),
@@ -1683,6 +1705,7 @@ export const BranchSummarySchema = Type.Object({
   code: Type.String(),
   name: Type.String(),
   defaultWarehouseId: Type.Union([UuidSchema, Type.Null()]),
+  timezone: Type.Optional(Type.String()),
 });
 export type BranchSummary = Static<typeof BranchSummarySchema>;
 
@@ -1693,6 +1716,7 @@ export const TenantMembershipSummarySchema = Type.Object({
   baseCurrency: CurrencyCodeSchema,
   status: Type.String(),
   role: Type.String(),
+  timezone: Type.Optional(Type.String()),
   branches: Type.Array(BranchSummarySchema),
 });
 export type TenantMembershipSummary = Static<

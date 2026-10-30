@@ -1817,5 +1817,121 @@ describe('@nexstock/api — Phase 3: POS, Sales, Checkout, Payments & Billing', 
       });
       expect(balCheck2.json().data[0].qtyOnHand).toBe('6.000000');
     });
+
+    it('BUG-012: verifies sales KPI summary and listSales status filtering with mixed COMPLETED and VOIDED sales', async () => {
+      // 1. Create a sale that we will void
+      const saleToVoidRes = await app.inject({
+        method: 'POST',
+        url: '/v1/pos/sales',
+        headers: {
+          authorization: `Bearer ${alphaCashierToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+          'idempotency-key': generateUuidV7(),
+        },
+        payload: {
+          registerId: alphaRegister1Id,
+          customerName: 'Customer To Void',
+          lines: [
+            {
+              productId: serviceProductId,
+              quantity: '1.000000',
+            },
+          ],
+          payments: [
+            {
+              paymentMethod: 'CASH',
+              amount: '54.4400',
+              tenderedAmount: '60.0000',
+            },
+          ],
+        },
+      });
+      expect(saleToVoidRes.statusCode).toBe(201);
+      const saleToVoid = saleToVoidRes.json();
+      expect(saleToVoid.status).toBe('COMPLETED');
+
+      // 2. Void this sale
+      const voidRes = await app.inject({
+        method: 'POST',
+        url: `/v1/pos/sales/${saleToVoid.id}/void`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+          'idempotency-key': generateUuidV7(),
+        },
+        payload: {
+          reason: 'Customer cancelled transaction',
+        },
+      });
+      expect(voidRes.statusCode).toBe(200);
+      expect(voidRes.json().status).toBe('VOIDED');
+
+      // 3. Test GET /v1/pos/sales/summary endpoint
+      const summaryRes = await app.inject({
+        method: 'GET',
+        url: '/v1/pos/sales/summary',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+      expect(summaryRes.statusCode).toBe(200);
+      const summary = summaryRes.json();
+
+      expect(summary.completedCount).toBeGreaterThanOrEqual(1);
+      expect(summary.voidedCount).toBeGreaterThanOrEqual(1);
+      expect(Number(summary.completedAmount)).toBeGreaterThan(0);
+      expect(Number(summary.voidedAmount)).toBeGreaterThan(0);
+      expect(summary.totalSalesCount).toBe(summary.completedCount + summary.voidedCount);
+
+      // 4. Test GET /v1/pos/sales?status=COMPLETED
+      const completedListRes = await app.inject({
+        method: 'GET',
+        url: '/v1/pos/sales?status=COMPLETED&limit=50',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+      expect(completedListRes.statusCode).toBe(200);
+      const completedList = completedListRes.json() as Array<{ status: string }>;
+      expect(completedList.length).toBeGreaterThanOrEqual(1);
+      completedList.forEach((s) => {
+        expect(s.status).toBe('COMPLETED');
+      });
+
+      // 5. Test GET /v1/pos/sales?status=VOIDED
+      const voidedListRes = await app.inject({
+        method: 'GET',
+        url: '/v1/pos/sales?status=VOIDED&limit=50',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+      expect(voidedListRes.statusCode).toBe(200);
+      const voidedList = voidedListRes.json() as Array<{ id: string; status: string }>;
+      expect(voidedList.length).toBeGreaterThanOrEqual(1);
+      voidedList.forEach((s) => {
+        expect(s.status).toBe('VOIDED');
+      });
+      expect(voidedList.some((s) => s.id === saleToVoid.id)).toBe(true);
+
+      // 6. Test date range filtering
+      const now = new Date();
+      const past = new Date(now.getTime() - 86400000);
+      const future = new Date(now.getTime() + 86400000);
+
+      const rangeSummaryRes = await app.inject({
+        method: 'GET',
+        url: `/v1/pos/sales/summary?startDate=${past.toISOString()}&endDate=${future.toISOString()}`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+      expect(rangeSummaryRes.statusCode).toBe(200);
+      expect(rangeSummaryRes.json().totalSalesCount).toBe(summary.totalSalesCount);
+    });
   });
 });

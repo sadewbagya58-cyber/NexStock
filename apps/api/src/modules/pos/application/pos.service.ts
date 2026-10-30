@@ -10,10 +10,13 @@ import {
   type PosShiftResponse,
   type ReceiptResponse,
   type SalesInvoiceResponse,
+  type SalesSummaryQuery,
+  type SalesSummaryResponse,
   type TrackingMode,
   type ValuationMethod,
   type VoidSaleRequest,
 } from '@nexstock/contracts';
+import { sql } from 'kysely';
 import {
   Money,
   Quantity,
@@ -1824,6 +1827,61 @@ export async function listSales(
       })),
     };
   });
+}
+
+export async function getSalesSummary(
+  trx: TenantTransactionContext,
+  query: SalesSummaryQuery,
+): Promise<SalesSummaryResponse> {
+  await assertAuthorized(trx, {
+    permission: 'pos:sale:read',
+  });
+
+  let dbQuery = trx.db
+    .selectFrom('sales_invoices')
+    .select([
+      'status',
+      trx.db.fn.count<number | string>('id').as('count'),
+      trx.db.fn.coalesce(trx.db.fn.sum<string>('grand_total'), sql`0`).as('total_amount'),
+    ])
+    .where('tenant_id', '=', trx.tenantId)
+    .groupBy('status');
+
+  if (query.registerId) {
+    dbQuery = dbQuery.where('register_id', '=', query.registerId);
+  }
+
+  if (query.startDate) {
+    dbQuery = dbQuery.where('created_at', '>=', new Date(query.startDate));
+  }
+
+  if (query.endDate) {
+    dbQuery = dbQuery.where('created_at', '<=', new Date(query.endDate));
+  }
+
+  const rows = await dbQuery.execute();
+  let completedAmount = '0.0000';
+  let completedCount = 0;
+  let voidedAmount = '0.0000';
+  let voidedCount = 0;
+
+  for (const row of rows) {
+    if (row.status === 'COMPLETED') {
+      completedCount = Number(row.count);
+      completedAmount = Number(row.total_amount).toFixed(4);
+    } else if (row.status === 'VOIDED') {
+      voidedCount = Number(row.count);
+      voidedAmount = Number(row.total_amount).toFixed(4);
+    }
+  }
+
+  return {
+    completedAmount,
+    completedCount,
+    voidedAmount,
+    voidedCount,
+    totalSalesCount: completedCount + voidedCount,
+  };
 }
 
 // ============================================================================

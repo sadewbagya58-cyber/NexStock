@@ -1873,6 +1873,8 @@
       tenantName: '',
       currency: (typeof localStorage !== 'undefined' && localStorage.getItem('nexstock_active_currency')) || 'USD',
       countryCode: 'US',
+      timezone: (typeof localStorage !== 'undefined' && localStorage.getItem('nexstock_active_timezone')) || 'UTC',
+      tokenExpiresAt: 0,
       plan: 'TRIAL',
       branchId: '',
       branchName: '',
@@ -1896,6 +1898,106 @@
       isSubmittingCheckout: false,
       activeCheckoutKey: null
     };
+
+    // Helper: JWT Expiry Decoder (client-side read of standard exp claim)
+    function getTokenExpiry(jwtToken) {
+      try {
+        if (!jwtToken || typeof jwtToken !== 'string') return null;
+        const parts = jwtToken.split('.');
+        if (parts.length !== 3) return null;
+        const payloadStr = atob(parts[1].replace(/-/g, '+').replace(/_/g, '/'));
+        const payload = JSON.parse(payloadStr);
+        return payload.exp ? payload.exp * 1000 : null;
+      } catch {
+        return null;
+      }
+    }
+
+    // Helper: Timezone-accurate date comparison
+    function isSameDayInTimezone(dateOrIso, targetDate = new Date(), timezone = 'UTC') {
+      if (!dateOrIso) return false;
+      const d = new Date(dateOrIso);
+      if (isNaN(d.getTime())) return false;
+      try {
+        const formatter = new Intl.DateTimeFormat('en-CA', {
+          timeZone: timezone || 'UTC',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit'
+        });
+        const target = targetDate instanceof Date ? targetDate : new Date(targetDate);
+        return formatter.format(d) === formatter.format(target);
+      } catch {
+        const target = targetDate instanceof Date ? targetDate : new Date(targetDate);
+        return d.toDateString() === target.toDateString();
+      }
+    }
+
+    // Helper: Singleton Token Refresh Mutex (guards concurrent API requests)
+    let activeRefreshPromise = null;
+
+    async function refreshAccessToken() {
+      if (activeRefreshPromise) {
+        return activeRefreshPromise;
+      }
+
+      activeRefreshPromise = (async () => {
+        try {
+          const storedRefreshToken = (typeof localStorage !== 'undefined')
+            ? localStorage.getItem('nexstock_refresh_token')
+            : null;
+
+          if (!storedRefreshToken) {
+            return false;
+          }
+
+          const rawBase = (state.apiBaseUrl && typeof state.apiBaseUrl === 'string' && state.apiBaseUrl.trim() !== '')
+            ? state.apiBaseUrl.trim()
+            : resolveApiBaseUrl();
+          const baseUrl = rawBase.replace(/\/+$/, '');
+
+          const res = await fetch(`${baseUrl}/v1/auth/refresh`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ refreshToken: storedRefreshToken })
+          });
+
+          if (!res.ok) {
+            // 401 or 403 means the refresh token is genuinely invalid, revoked, or expired
+            if (res.status === 401 || res.status === 403) {
+              return false;
+            }
+            // 5xx or server gateway issue: temporary server problem, do NOT destroy session!
+            return null;
+          }
+
+          const data = await res.json();
+          if (data && data.token) {
+            state.token = data.token;
+            const exp = getTokenExpiry(data.token);
+            if (exp) state.tokenExpiresAt = exp;
+            if (typeof localStorage !== 'undefined') {
+              localStorage.setItem('nexstock_session_token', data.token);
+              if (data.refreshToken) {
+                localStorage.setItem('nexstock_refresh_token', data.refreshToken);
+              }
+            }
+            return true;
+          }
+
+          return false;
+        } catch (err) {
+          // Temporary network error during refresh (offline / DNS / socket error)
+          return null;
+        } finally {
+          activeRefreshPromise = null;
+        }
+      })();
+
+      return activeRefreshPromise;
+    }
 
     // Helper: Toast Notifications with deduplication and throttling
     const activeToastMessages = new Set();
@@ -1922,7 +2024,7 @@
       }, 3500);
     }
 
-    // API Client with automatic auth, tenant header, and idempotency key
+    // API Client with automatic auth, token refresh, tenant header, and idempotency key
     async function apiFetch(endpoint, options = {}) {
       const requestEpoch = state.sessionEpoch || 0;
       const rawBase = (state.apiBaseUrl && typeof state.apiBaseUrl === 'string' && state.apiBaseUrl.trim() !== '')
@@ -1932,6 +2034,19 @@
       const rawEndpoint = String(endpoint || '').trim();
       const normalizedEndpoint = rawEndpoint.startsWith('/') ? rawEndpoint : `/${rawEndpoint}`;
       const url = `${baseUrl}${normalizedEndpoint}`;
+
+      const isAuthBypass = normalizedEndpoint.startsWith('/v1/auth/login') ||
+        normalizedEndpoint.startsWith('/v1/auth/signup') ||
+        normalizedEndpoint.startsWith('/v1/auth/recover') ||
+        normalizedEndpoint.startsWith('/v1/auth/refresh');
+
+      // Proactive token refresh if token exists, is expiring within 30 seconds, and refresh token is available
+      if (!isAuthBypass && state.token && !options._retried) {
+        const exp = state.tokenExpiresAt || getTokenExpiry(state.token);
+        if (exp && Date.now() + 30000 >= exp) {
+          await refreshAccessToken();
+        }
+      }
 
       const headers = {
         'Content-Type': 'application/json',
@@ -1961,11 +2076,29 @@
         const data = contentType.includes('application/json') ? await res.json() : null;
 
         if (!res.ok) {
-          if (res.status === 401 && !endpoint.startsWith('/v1/auth/login') && !endpoint.startsWith('/v1/auth/signup')) {
-            showToast('Session expired. Please sign in again.', 'warning');
-            handleSignOut();
-            return null;
+          if (res.status === 401 && !isAuthBypass) {
+            // Attempt token refresh on 401 once before deciding whether to sign out
+            if (!options._retried) {
+              const refreshed = await refreshAccessToken();
+              if (refreshed === true) {
+                return apiFetch(endpoint, { ...options, _retried: true });
+              }
+              if (refreshed === false) {
+                // Server confirmed refresh token is expired or revoked
+                showToast('Your session has expired. Please sign in again.', 'warning');
+                handleSignOut();
+                return null;
+              }
+              // If refreshed is null (network error / 5xx), do NOT sign out!
+            } else {
+              // Already retried after refresh and still got 401
+              showToast('Your session has expired. Please sign in again.', 'warning');
+              handleSignOut();
+              return null;
+            }
           }
+
+          // HTTP 403 Forbidden or other client/server error: DO NOT SIGN OUT!
           const detail = data?.detail || data?.title || data?.message || `HTTP ${res.status}`;
           throw new Error(detail);
         }
@@ -2042,6 +2175,8 @@
       state.currency = membership.baseCurrency || membership.currency || 'USD';
       localStorage.setItem('nexstock_active_currency', state.currency);
       state.countryCode = membership.countryCode || membership.country || 'US';
+      state.timezone = membership.timezone || (membership.branches && membership.branches[0]?.timezone) || 'UTC';
+      localStorage.setItem('nexstock_active_timezone', state.timezone);
       state.plan = membership.status || membership.plan || 'TRIAL';
       state.userRole = membership.role || membership.roleName || 'MEMBER';
       localStorage.setItem('nexstock_active_tenant_id', membership.tenantId);
@@ -2136,13 +2271,16 @@
         localStorage.removeItem('nexstock_refresh_token');
         localStorage.removeItem('nexstock_active_tenant_id');
         localStorage.removeItem('nexstock_active_currency');
+        localStorage.removeItem('nexstock_active_timezone');
       } catch {}
 
       // Synchronously reset state
       state.token = '';
+      state.tokenExpiresAt = 0;
       state.tenantId = '';
       state.tenantName = '';
       state.currency = 'USD';
+      state.timezone = 'UTC';
       state.branchId = '';
       state.branchName = '';
       state.warehouseId = '';
@@ -3174,7 +3312,7 @@
         const [products, balances, sales, registers] = await Promise.all([
           apiFetch('/v1/products?limit=100', { silent: true }).catch(() => ({ data: [] })),
           apiFetch(`/v1/inventory/balances?limit=100${whParam}`, { silent: true }).catch(() => ({ data: [] })),
-          apiFetch('/v1/pos/sales?limit=10', { silent: true }).catch(() => []),
+          apiFetch('/v1/pos/sales?limit=100', { silent: true }).catch(() => []),
           state.branchId ? apiFetch(`/v1/pos/registers${regParam}`, { silent: true }).catch(() => []) : Promise.resolve([])
         ]);
 
@@ -3185,7 +3323,18 @@
         const totalProducts = prodList.length;
         const totalOnHand = balList.reduce((acc, b) => acc + parseFloat(b.qtyOnHand || '0'), 0);
         const lowStockCount = balList.filter(b => parseFloat(b.availableQty ?? b.availableQuantity ?? '0') <= parseFloat(b.reorderPoint || '0')).length;
-        const totalSalesRevenue = saleList.reduce((acc, s) => s.status === 'COMPLETED' ? acc + parseFloat(s.grandTotal || '0') : acc, 0);
+
+        // BUG-012 Fix: Date boundary filter using tenant's configured timezone and strict status separation
+        const tz = state.timezone || 'UTC';
+        const now = new Date();
+        const todaySales = saleList.filter(s => isSameDayInTimezone(s.createdAt || s.soldAt, now, tz));
+
+        const completedSales = todaySales.filter(s => s.status === 'COMPLETED');
+        const voidedSales = todaySales.filter(s => s.status === 'VOIDED');
+
+        const totalSalesRevenue = completedSales.reduce((acc, s) => acc + parseFloat(s.grandTotal || '0'), 0);
+        const completedCount = completedSales.length;
+        const voidedCount = voidedSales.length;
 
         container.innerHTML = `
           <div class="view-header">
@@ -3214,7 +3363,7 @@
             <div class="kpi-card">
               <div class="kpi-label">Today's POS Sales</div>
               <div class="kpi-value">${formatTenantMoney(totalSalesRevenue)}</div>
-              <div class="kpi-trend">${saleList.length} transactions recorded</div>
+              <div class="kpi-trend">${completedCount} completed transaction${completedCount === 1 ? '' : 's'}${voidedCount > 0 ? ` (${voidedCount} voided)` : ''}</div>
             </div>
           </div>
 
@@ -3224,7 +3373,7 @@
                 <span>Recent Completed Sales</span>
                 <button class="btn btn-secondary btn-sm" onclick="renderView('pos-sales')">View All</button>
               </div>
-              ${saleList.length === 0 ? '<div class="empty-state"><div class="empty-state-title">No sales recorded yet</div><p style="font-size: 13px; color: var(--text-secondary); margin-top: 4px;">Transactions completed at the POS checkout register will appear here in real time.</p></div>' : `
+              ${completedSales.length === 0 ? '<div class="empty-state"><div class="empty-state-title">No completed sales yet</div><p style="font-size: 13px; color: var(--text-secondary); margin-top: 4px;">Transactions completed at the POS checkout register will appear here in real time.</p></div>' : `
                 <div class="table-responsive">
                   <table class="data-table">
                     <thead>
@@ -3235,11 +3384,11 @@
                       </tr>
                     </thead>
                     <tbody>
-                      ${saleList.slice(0, 5).map(s => `
+                      ${completedSales.slice(0, 5).map(s => `
                         <tr>
                           <td><strong>${s.invoiceNumber}</strong></td>
                           <td>${formatTenantMoney(s.grandTotal)}</td>
-                          <td><span class="badge-pill ${s.status === 'COMPLETED' ? 'badge-green' : 'badge-red'}">${s.status}</span></td>
+                          <td><span class="badge-pill badge-green">${s.status}</span></td>
                         </tr>
                       `).join('')}
                     </tbody>
@@ -6606,55 +6755,139 @@
         document.body.setAttribute('data-theme', savedTheme);
       }
 
-      // Check for stored session token
+      // Multi-tab storage listener to sync session token and signout events
+      window.addEventListener('storage', (event) => {
+        if (event.key === 'nexstock_session_token') {
+          if (!event.newValue && state.token) {
+            handleSignOut();
+          } else if (event.newValue && event.newValue !== state.token) {
+            state.token = event.newValue;
+          }
+        }
+      });
+
+      // Check for stored session token and refresh token
       const storedToken = localStorage.getItem('nexstock_session_token');
-      if (!storedToken) {
+      const storedRefreshToken = localStorage.getItem('nexstock_refresh_token');
+      if (!storedToken && !storedRefreshToken) {
         renderView('welcome');
         return;
       }
 
       try {
-        const res = await fetch(`${state.apiBaseUrl}/v1/auth/me`, {
-          headers: {
-            'Authorization': `Bearer ${storedToken}`,
-            'Content-Type': 'application/json'
-          }
-        });
+        let activeToken = storedToken;
 
-        if (!res.ok) {
+        // If storedToken is missing but refreshToken is present, refresh first
+        if (!activeToken && storedRefreshToken) {
+          const refreshed = await refreshAccessToken();
+          if (refreshed === true) {
+            activeToken = state.token;
+          }
+        }
+
+        let res = null;
+        if (activeToken) {
+          res = await fetch(`${state.apiBaseUrl}/v1/auth/me`, {
+            headers: {
+              'Authorization': `Bearer ${activeToken}`,
+              'Content-Type': 'application/json'
+            }
+          });
+
+          // If /v1/auth/me returns 401, attempt token refresh before giving up
+          if (res.status === 401 && storedRefreshToken) {
+            const refreshed = await refreshAccessToken();
+            if (refreshed === true && state.token) {
+              activeToken = state.token;
+              res = await fetch(`${state.apiBaseUrl}/v1/auth/me`, {
+                headers: {
+                  'Authorization': `Bearer ${activeToken}`,
+                  'Content-Type': 'application/json'
+                }
+              });
+            } else if (refreshed === false) {
+              // Server confirmed refresh token is invalid or expired
+              localStorage.removeItem('nexstock_session_token');
+              localStorage.removeItem('nexstock_refresh_token');
+              state.token = '';
+              showToast('Your session has expired. Please sign in again.', 'warning');
+              renderView('welcome');
+              return;
+            }
+          }
+        }
+
+        if (res && res.ok) {
+          const data = await res.json();
+          state.token = activeToken;
+          state.user = data.user;
+          state.fullName = data.user.fullName || data.user.email;
+          state.userEmail = data.user.email;
+          state.memberships = data.memberships || [];
+
+          const userNameEl = document.getElementById('topbarUserName');
+          if (userNameEl) userNameEl.innerText = state.fullName;
+
+          document.getElementById('topbarSyncStatus').innerText = '● Connected';
+          document.getElementById('topbarSyncStatus').className = 'badge-pill badge-green';
+
+          if (state.memberships.length === 0) {
+            renderView('onboard-business');
+            return;
+          }
+
+          const savedTenantId = localStorage.getItem('nexstock_active_tenant_id');
+          const activeMembership = state.memberships.find(m => m.tenantId === savedTenantId) || state.memberships[0];
+          await selectActiveTenant(activeMembership);
+          renderView('dashboard');
+          return;
+        }
+
+        if (res && (res.status === 401 || res.status === 403)) {
+          // Token is genuinely invalid and refresh was not possible or failed
           localStorage.removeItem('nexstock_session_token');
           localStorage.removeItem('nexstock_refresh_token');
           state.token = '';
+          showToast('Your session has expired. Please sign in again.', 'warning');
           renderView('welcome');
           return;
         }
 
-        const data = await res.json();
-        state.token = storedToken;
-        state.user = data.user;
-        state.fullName = data.user.fullName || data.user.email;
-        state.userEmail = data.user.email;
-        state.memberships = data.memberships || [];
-
-        const userNameEl = document.getElementById('topbarUserName');
-        if (userNameEl) userNameEl.innerText = state.fullName;
-
-        document.getElementById('topbarSyncStatus').innerText = '● Connected';
-        document.getElementById('topbarSyncStatus').className = 'badge-pill badge-green';
-
-        if (state.memberships.length === 0) {
-          renderView('onboard-business');
-          return;
+        // Server error (500, 502, 503, 504) or gateway timeout: PRESERVE SESSION!
+        state.token = activeToken || storedToken;
+        const statusEl = document.getElementById('topbarSyncStatus');
+        if (statusEl) {
+          statusEl.innerText = '● Server Reconnecting...';
+          statusEl.className = 'badge-pill badge-yellow';
         }
+        showToast('Connecting to server... Your session is preserved.', 'warning');
 
         const savedTenantId = localStorage.getItem('nexstock_active_tenant_id');
-        const activeMembership = state.memberships.find(m => m.tenantId === savedTenantId) || state.memberships[0];
-        await selectActiveTenant(activeMembership);
+        const savedCurrency = localStorage.getItem('nexstock_active_currency');
+        if (savedTenantId) {
+          state.tenantId = savedTenantId;
+          state.currency = savedCurrency || 'USD';
+        }
         renderView('dashboard');
       } catch (err) {
-        document.getElementById('topbarSyncStatus').innerText = '● Offline / Disconnected';
-        document.getElementById('topbarSyncStatus').className = 'badge-pill badge-red';
-        renderView('welcome');
+        // Network offline / connection failed: PRESERVE SESSION!
+        state.token = storedToken;
+        const statusEl = document.getElementById('topbarSyncStatus');
+        if (statusEl) {
+          statusEl.innerText = '● Offline / Disconnected';
+          statusEl.className = 'badge-pill badge-red';
+        }
+        showToast('Network offline. Your session is preserved.', 'info');
+
+        const savedTenantId = localStorage.getItem('nexstock_active_tenant_id');
+        const savedCurrency = localStorage.getItem('nexstock_active_currency');
+        if (savedTenantId) {
+          state.tenantId = savedTenantId;
+          state.currency = savedCurrency || 'USD';
+          renderView('dashboard');
+        } else {
+          renderView('welcome');
+        }
       }
     }
 

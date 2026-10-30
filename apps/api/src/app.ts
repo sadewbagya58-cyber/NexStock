@@ -63,6 +63,8 @@ import {
   ReverseStockMovementRequestSchema,
   ReviewStocktakeRequestSchema,
   SalesInvoiceResponseSchema,
+  SalesSummaryQuerySchema,
+  SalesSummaryResponseSchema,
   SerialResponseSchema,
   SignUpRequestSchema,
   SignUpResponseSchema,
@@ -173,6 +175,7 @@ import {
   getActivePosShift,
   getReceiptData,
   getSaleById,
+  getSalesSummary,
   listAuthorizedRegisters,
   listSales,
   openPosShift,
@@ -3260,6 +3263,37 @@ export async function buildApp(
         options.db,
         { tenantId, userId: principal.userId, traceId },
         (trx) => listSales(trx, request.query),
+      );
+    },
+  );
+
+  // 7b. Sales KPI Summary (Precedes /v1/pos/sales/:saleId)
+  app.get(
+    '/v1/pos/sales/summary',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        querystring: SalesSummaryQuerySchema,
+        response: {
+          200: SalesSummaryResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => getSalesSummary(trx, request.query),
       );
     },
   );
