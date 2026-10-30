@@ -62,6 +62,7 @@ export const ErrorCodeSchema = Type.Union([
   Type.Literal('CAT_DUPLICATE_SKU'),
   Type.Literal('CAT_DUPLICATE_BARCODE'),
   Type.Literal('CAT_INVALID_UOM_CONVERSION'),
+  Type.Literal('CAT_INVALID_TRACKING_MODE_TRANSITION'),
   Type.Literal('PUR_DUPLICATE_SUPPLIER_CODE'),
   Type.Literal('PUR_DUPLICATE_SUPPLIER_TAX_ID'),
   Type.Literal('PUR_DUPLICATE_SUPPLIER_PRODUCT'),
@@ -556,6 +557,7 @@ export const UpdateProductRequestSchema = Type.Object(
     purchaseCost: Type.Optional(DecimalMoneyStringSchema),
     sellingPrice: Type.Optional(DecimalMoneyStringSchema),
     taxGroupId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
+    trackInventory: Type.Optional(Type.Boolean()),
     reorderPoint: Type.Optional(DecimalQuantityStringSchema),
     reorderQty: Type.Optional(DecimalQuantityStringSchema),
     imageUrl: Type.Optional(
@@ -573,6 +575,8 @@ export const UpdateProductRequestSchema = Type.Object(
     unitConversions: Type.Optional(
       Type.Array(ProductUnitConversionInputSchema, { maxItems: 20 }),
     ),
+    isActive: Type.Optional(Type.Boolean()),
+    status: Type.Optional(RecordLifecycleStatusSchema),
   },
   { additionalProperties: false },
 );

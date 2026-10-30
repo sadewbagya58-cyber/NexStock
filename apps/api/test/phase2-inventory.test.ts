@@ -797,6 +797,83 @@ describe('@nexstock/api — Phase 2: Core Inventory (CAT, PUR, INV, RLS, RBAC & 
         updateProdRes.json().unitConversions[0].conversionFactorToBase,
       ).toBe('6.000000');
 
+      // BUG-014 Regression: Update product with isActive: false (archives product)
+      const archiveProdRes = await app.inject({
+        method: 'PATCH',
+        url: `/v1/products/${monitor.id}`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+        payload: {
+          isActive: false,
+        },
+      });
+      expect(archiveProdRes.statusCode).toBe(200);
+      expect(archiveProdRes.json().status).toBe('ARCHIVED');
+      expect(archiveProdRes.json().archivedAt).not.toBeNull();
+
+      // BUG-014 Regression: Update product with isActive: true (restores product to ACTIVE)
+      const unarchiveProdRes = await app.inject({
+        method: 'PATCH',
+        url: `/v1/products/${monitor.id}`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+        payload: {
+          isActive: true,
+        },
+      });
+      expect(unarchiveProdRes.statusCode).toBe(200);
+      expect(unarchiveProdRes.json().status).toBe('ACTIVE');
+      expect(unarchiveProdRes.json().archivedAt).toBeNull();
+
+      // BUG-014 Regression: Update product trackingMode to BATCH when zero stock exists (succeeds)
+      const trackingModeRes = await app.inject({
+        method: 'PATCH',
+        url: `/v1/products/${monitor.id}`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+        payload: {
+          trackingMode: 'BATCH',
+        },
+      });
+      expect(trackingModeRes.statusCode).toBe(200);
+      expect(trackingModeRes.json().trackingMode).toBe('BATCH');
+
+      // BUG-014 Regression: Revert trackingMode to NONE when zero stock exists (succeeds)
+      const revertTrackingRes = await app.inject({
+        method: 'PATCH',
+        url: `/v1/products/${monitor.id}`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+        payload: {
+          trackingMode: 'NONE',
+        },
+      });
+      expect(revertTrackingRes.statusCode).toBe(200);
+      expect(revertTrackingRes.json().trackingMode).toBe('NONE');
+
+      // BUG-014 Regression: Duplicate SKU check returns 409 CAT_DUPLICATE_SKU
+      const dupSkuPatchRes = await app.inject({
+        method: 'PATCH',
+        url: `/v1/products/${monitor.id}`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+        payload: {
+          sku: 'ELEC-MOUSE-001',
+        },
+      });
+      expect(dupSkuPatchRes.statusCode).toBe(409);
+      expect(dupSkuPatchRes.json().errorCode).toBe('CAT_DUPLICATE_SKU');
+
       // 10. Direct SQL hard delete of master product or category must be blocked by both ACLs and database trigger
       // Layer 1: Runtime role lacks DELETE privilege
       await expect(
@@ -1067,6 +1144,23 @@ describe('@nexstock/api — Phase 2: Core Inventory (CAT, PUR, INV, RLS, RBAC & 
       expect(mismatchRes.statusCode).toBe(422);
       expect(mismatchRes.json().errorCode).toBe(
         'ERR_IDEMPOTENCY_KEY_REUSED_DIFFERENT_PAYLOAD',
+      );
+
+      // BUG-014 Regression: Reject tracking mode change when on-hand stock exists (409 CAT_INVALID_TRACKING_MODE_TRANSITION)
+      const invalidTransitionRes = await app.inject({
+        method: 'PATCH',
+        url: `/v1/products/${monitorProductId}`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+        payload: {
+          trackingMode: 'BATCH',
+        },
+      });
+      expect(invalidTransitionRes.statusCode).toBe(409);
+      expect(invalidTransitionRes.json().errorCode).toBe(
+        'CAT_INVALID_TRACKING_MODE_TRANSITION',
       );
 
       // 3b. Phase 5.1 BUG-002: Post stock movement accepting `notes` field without 400 validation error

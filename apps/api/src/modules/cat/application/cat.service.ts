@@ -1249,6 +1249,126 @@ export async function updateProduct(
 
   const now = new Date();
 
+  let nextStatus = existing.status;
+  let nextArchivedAt = existing.archived_at;
+  if (input.status !== undefined) {
+    nextStatus = input.status;
+    nextArchivedAt =
+      input.status === 'ARCHIVED' ? (existing.archived_at ?? now) : null;
+  } else if (input.isActive !== undefined) {
+    nextStatus = input.isActive ? 'ACTIVE' : 'ARCHIVED';
+    nextArchivedAt =
+      input.isActive ? null : (existing.archived_at ?? now);
+  }
+
+  const nextTrackInventory =
+    input.trackInventory !== undefined
+      ? input.trackInventory
+      : existing.track_inventory;
+
+  if (existing.product_type === 'SERVICE') {
+    if (nextTrackInventory === true) {
+      throw new AppError({
+        statusCode: 400,
+        errorCode: 'ERR_VALIDATION_FAILED',
+        title: 'Invalid Service Stock Configuration',
+        detail:
+          'Products with productType="SERVICE" cannot have trackInventory=true.',
+      });
+    }
+    if (input.trackingMode && input.trackingMode !== 'NONE') {
+      throw new AppError({
+        statusCode: 400,
+        errorCode: 'ERR_VALIDATION_FAILED',
+        title: 'Invalid Service Stock Configuration',
+        detail:
+          'Products with productType="SERVICE" cannot have trackingMode other than NONE.',
+      });
+    }
+  }
+
+  const nextTrackingMode =
+    input.trackingMode !== undefined
+      ? input.trackingMode
+      : existing.tracking_mode;
+
+  if (
+    input.trackingMode !== undefined &&
+    input.trackingMode !== existing.tracking_mode
+  ) {
+    // 1. Inspect on-hand quantity in inventory_balances
+    const balances = await trx.db
+      .selectFrom('inventory_balances')
+      .select(['qty_on_hand'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('product_id', '=', productId)
+      .execute();
+
+    const hasStock = balances.some((b) => {
+      try {
+        return Quantity.fromDecimalString(String(b.qty_on_hand)).isPositive();
+      } catch {
+        return Number(b.qty_on_hand) > 0;
+      }
+    });
+
+    if (hasStock) {
+      throw new AppError({
+        statusCode: 409,
+        errorCode: 'CAT_INVALID_TRACKING_MODE_TRANSITION',
+        title: 'Invalid Tracking Mode Transition',
+        detail: `Cannot change tracking mode from ${existing.tracking_mode} to ${input.trackingMode} while on-hand stock exists for product "${existing.sku}". Stock must be zero before changing tracking mode.`,
+      });
+    }
+
+    // 2. If moving away from BATCH / BATCH_EXPIRY, inspect active/quarantined batches
+    const isOldBatch =
+      existing.tracking_mode === 'BATCH' ||
+      existing.tracking_mode === 'BATCH_EXPIRY';
+    const isNewBatch =
+      input.trackingMode === 'BATCH' ||
+      input.trackingMode === 'BATCH_EXPIRY';
+
+    if (isOldBatch && !isNewBatch) {
+      const activeBatch = await trx.db
+        .selectFrom('inventory_batches')
+        .select(['id', 'batch_number'])
+        .where('tenant_id', '=', trx.tenantId)
+        .where('product_id', '=', productId)
+        .where('status', 'in', ['ACTIVE', 'QUARANTINED'])
+        .executeTakeFirst();
+
+      if (activeBatch) {
+        throw new AppError({
+          statusCode: 409,
+          errorCode: 'CAT_INVALID_TRACKING_MODE_TRANSITION',
+          title: 'Invalid Tracking Mode Transition',
+          detail: `Cannot change tracking mode from ${existing.tracking_mode} to ${input.trackingMode} while active or quarantined batches exist for product "${existing.sku}" (batch: ${activeBatch.batch_number}).`,
+        });
+      }
+    }
+
+    // 3. If moving away from SERIAL, inspect in-stock/reserved serials
+    if (existing.tracking_mode === 'SERIAL' && input.trackingMode !== 'SERIAL') {
+      const activeSerial = await trx.db
+        .selectFrom('inventory_serials')
+        .select(['id', 'serial_number'])
+        .where('tenant_id', '=', trx.tenantId)
+        .where('product_id', '=', productId)
+        .where('status', 'in', ['IN_STOCK', 'RESERVED'])
+        .executeTakeFirst();
+
+      if (activeSerial) {
+        throw new AppError({
+          statusCode: 409,
+          errorCode: 'CAT_INVALID_TRACKING_MODE_TRANSITION',
+          title: 'Invalid Tracking Mode Transition',
+          detail: `Cannot change tracking mode from SERIAL to ${input.trackingMode} while active serial numbers exist for product "${existing.sku}" (serial: ${activeSerial.serial_number}).`,
+        });
+      }
+    }
+  }
+
   if (input.unitConversions !== undefined) {
     const seenUoms = new Set<string>([existing.base_uom]);
     const normalizedConversions: Array<{
@@ -1437,16 +1557,15 @@ export async function updateProduct(
         input.description !== undefined
           ? (input.description?.trim() ?? null)
           : existing.description,
+      status: nextStatus,
       category_id: nextCategoryId,
       purchase_cost: nextPurchaseCost,
       selling_price: nextSellingPrice,
       tax_group_id: nextTaxGroupId,
+      track_inventory: nextTrackInventory,
       reorder_point: nextReorderPoint,
       reorder_qty: nextReorderQty,
-      tracking_mode:
-        input.trackingMode !== undefined
-          ? input.trackingMode
-          : existing.tracking_mode,
+      tracking_mode: nextTrackingMode,
       valuation_method:
         input.valuationMethod !== undefined
           ? input.valuationMethod
@@ -1462,6 +1581,7 @@ export async function updateProduct(
       primary_barcode: nextPrimaryBarcode,
       sync_version: nextSyncVersion,
       updated_at: now,
+      archived_at: nextArchivedAt,
     })
     .where('tenant_id', '=', trx.tenantId)
     .where('id', '=', productId)
@@ -1476,6 +1596,12 @@ export async function updateProduct(
       nextSku,
       previousSellingPrice: existing.selling_price,
       nextSellingPrice,
+      previousStatus: existing.status,
+      nextStatus,
+      previousTrackingMode: existing.tracking_mode,
+      nextTrackingMode,
+      previousTrackInventory: existing.track_inventory,
+      nextTrackInventory,
     },
   });
 

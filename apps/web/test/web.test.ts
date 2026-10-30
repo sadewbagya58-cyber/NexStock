@@ -1338,6 +1338,11 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       expect(html).toContain('id="editProdCategory"');
       expect(html).toContain('id="editProdCost"');
       expect(html).toContain('id="editProdPrice"');
+      expect(html).toContain('id="editProdTrackingMode"');
+      expect(html).toContain('id="newProdTrackingMode"');
+      expect(html).toContain('<th>Tracking Mode</th>');
+      expect(html).toContain('No Batch-Eligible Products Found');
+      expect(html).toContain('No Serial-Eligible Products Found');
 
       // 2. Categories Edit
       expect(html).toContain('openEditCategoryModal(');
