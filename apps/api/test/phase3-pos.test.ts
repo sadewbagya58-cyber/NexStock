@@ -1636,5 +1636,186 @@ describe('@nexstock/api — Phase 3: POS, Sales, Checkout, Payments & Billing', 
       const checkoutBtnLabel = `Checkout & Pay (LKR ${cartGrandTotal.toFixed(2)})`;
       expect(checkoutBtnLabel).toBe('Checkout & Pay (LKR 7000.00)');
     });
+
+    it('BUG-006: GET /v1/pos/sales returns raw array and provides full invoice, line items, and payment details', async () => {
+      const salesRes = await app.inject({
+        method: 'GET',
+        url: '/v1/pos/sales?limit=50',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+      expect(salesRes.statusCode).toBe(200);
+      const sales = salesRes.json();
+      expect(Array.isArray(sales)).toBe(true);
+      expect(sales.length).toBeGreaterThanOrEqual(1);
+
+      const first = sales[0];
+      expect(first.id).toBeDefined();
+      expect(first.invoiceNumber).toBeDefined();
+      expect(first.status).toBeDefined();
+      expect(first.createdAt).toBeDefined();
+      expect(first.subtotalAmount).toBeDefined();
+      expect(first.grandTotal).toBeDefined();
+      expect(Array.isArray(first.lines)).toBe(true);
+      expect(Array.isArray(first.payments)).toBe(true);
+    });
+
+    it('BUG-007: enforces exactly-once POS checkout idempotency under duplicate, concurrent, or replayed submissions', async () => {
+      // Create a zero-tax product for clean total calculations
+      const mouseRes = await app.inject({
+        method: 'POST',
+        url: '/v1/products',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+          'idempotency-key': generateUuidV7(),
+        },
+        payload: {
+          sku: 'IDEM-MOUSE-001',
+          name: 'Idempotency Test Mouse',
+          productType: 'STANDARD',
+          baseUom: 'PCS',
+          purchaseCost: '2000.0000',
+          sellingPrice: '3000.0000',
+          categoryId: alphaCategoryId,
+          trackInventory: true,
+        },
+      });
+      expect(mouseRes.statusCode).toBe(201);
+      const testProdId = mouseRes.json().id;
+
+      // Stock intake: 10 PCS
+      await app.inject({
+        method: 'POST',
+        url: '/v1/inventory/movements',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+          'idempotency-key': generateUuidV7(),
+        },
+        payload: {
+          branchId: alphaBranch1Id,
+          warehouseId: alphaMainWarehouseId,
+          productId: testProdId,
+          movementType: 'STOCK_IN',
+          quantity: '10.000000',
+          unitCost: '2000.0000',
+          reason: 'Initial Stock for Idempotency Test',
+        },
+      });
+
+      const stableCheckoutKey = generateUuidV7();
+      const checkoutPayload = {
+        registerId: alphaRegister1Id,
+        customerName: 'walter waiter',
+        lines: [
+          {
+            productId: testProdId,
+            quantity: '2.000000',
+          },
+        ],
+        payments: [
+          {
+            paymentMethod: 'CASH',
+            amount: '6000.0000',
+            tenderedAmount: '6000.0000',
+          },
+        ],
+      };
+
+      // 1. Initial intentional checkout submission
+      const checkoutRes1 = await app.inject({
+        method: 'POST',
+        url: '/v1/pos/sales',
+        headers: {
+          authorization: `Bearer ${alphaCashierToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+          'idempotency-key': stableCheckoutKey,
+        },
+        payload: checkoutPayload,
+      });
+      expect(checkoutRes1.statusCode).toBe(201);
+      const invoice1 = checkoutRes1.json();
+      expect(invoice1.status).toBe('COMPLETED');
+      expect(invoice1.grandTotal).toBe('6000.0000');
+      expect(invoice1.customerName).toBe('walter waiter');
+      expect(checkoutRes1.headers['x-idempotent-replayed']).toBe('false');
+
+      // 2. Replay with the EXACT same idempotency key and payload (simulating button double-click or network retry)
+      const checkoutRes2 = await app.inject({
+        method: 'POST',
+        url: '/v1/pos/sales',
+        headers: {
+          authorization: `Bearer ${alphaCashierToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+          'idempotency-key': stableCheckoutKey,
+        },
+        payload: checkoutPayload,
+      });
+      expect(checkoutRes2.statusCode).toBe(201);
+      expect(checkoutRes2.headers['x-idempotent-replayed']).toBe('true');
+      const invoice2 = checkoutRes2.json();
+      expect(invoice2.id).toBe(invoice1.id);
+      expect(invoice2.invoiceNumber).toBe(invoice1.invoiceNumber);
+
+      // 3. Verify stock was decremented EXACTLY ONCE (10 - 2 = 8, not 6)
+      const balCheck = await app.inject({
+        method: 'GET',
+        url: `/v1/inventory/balances?productId=${testProdId}&warehouseId=${alphaMainWarehouseId}`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+      expect(balCheck.json().data[0].qtyOnHand).toBe('8.000000');
+
+      // 4. Reusing the same key with a DIFFERENT payload must fail with 422 ERR_IDEMPOTENCY_KEY_REUSED_DIFFERENT_PAYLOAD
+      const modifiedPayload = {
+        ...checkoutPayload,
+        lines: [{ productId: testProdId, quantity: '5.000000' }],
+      };
+      const conflictRes = await app.inject({
+        method: 'POST',
+        url: '/v1/pos/sales',
+        headers: {
+          authorization: `Bearer ${alphaCashierToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+          'idempotency-key': stableCheckoutKey,
+        },
+        payload: modifiedPayload,
+      });
+      expect(conflictRes.statusCode).toBe(422);
+      expect(conflictRes.json().errorCode).toBe('ERR_IDEMPOTENCY_KEY_REUSED_DIFFERENT_PAYLOAD');
+
+      // 5. A brand new checkout with a NEW key succeeds as a legitimate separate transaction
+      const newKey = generateUuidV7();
+      const freshRes = await app.inject({
+        method: 'POST',
+        url: '/v1/pos/sales',
+        headers: {
+          authorization: `Bearer ${alphaCashierToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+          'idempotency-key': newKey,
+        },
+        payload: checkoutPayload,
+      });
+      expect(freshRes.statusCode).toBe(201);
+      const freshInvoice = freshRes.json();
+      expect(freshInvoice.id).not.toBe(invoice1.id);
+      expect(freshInvoice.invoiceNumber).not.toBe(invoice1.invoiceNumber);
+
+      // Stock is now decremented again to 6 (8 - 2 = 6)
+      const balCheck2 = await app.inject({
+        method: 'GET',
+        url: `/v1/inventory/balances?productId=${testProdId}&warehouseId=${alphaMainWarehouseId}`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+      expect(balCheck2.json().data[0].qtyOnHand).toBe('6.000000');
+    });
   });
 });

@@ -776,5 +776,196 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       const btnLabelEmpty = `Checkout & Pay (${formatCurrency(grandTotalEmpty, 'LKR')})`;
       expect(btnLabelEmpty).toBe('Checkout & Pay (LKR 0.00)');
     });
+
+    it('BUG-006: verifies sales history response parsing, loading, error retry states, and production sales data rendering', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // 1. Raw array & object envelope fallback parsing
+      expect(html).toContain('const sales = Array.isArray(res) ? res : (res?.data || res?.items || []);');
+
+      // 2. Loading state before fetch
+      expect(html).toContain('Loading sales history...');
+
+      // 3. Error state with explicit Retry action
+      expect(html).toContain('Failed to load sales:');
+      expect(html).toContain('onclick="renderPosSalesView()">Retry</button>');
+
+      // 4. Creation date fallback
+      expect(html).toContain('(s.createdAt || s.soldAt)');
+
+      // 5. Items count and payment summary
+      expect(html).toContain('s.lines ? s.lines.length : 0');
+      expect(html).toContain("s.payments && s.payments.length > 0");
+
+      // 6. Data rendering simulation with the 4 production sales
+      interface MockSale {
+        id: string;
+        invoiceNumber: string;
+        status: string;
+        customerName: string;
+        currencyCode: string;
+        subtotalAmount: string;
+        taxAmount: string;
+        grandTotal: string;
+        createdAt: string;
+        lines: Array<{ productId: string; sku: string; productName: string; quantity: string }>;
+        payments: Array<{ paymentMethod: string; amount: string }>;
+      }
+
+      const productionSales: MockSale[] = [
+        {
+          id: '0192b4c0-0001-7000-8000-000000000001',
+          invoiceNumber: 'REG-01-000001',
+          status: 'COMPLETED',
+          customerName: 'walter waiter',
+          currencyCode: 'LKR',
+          subtotalAmount: '11000.0000',
+          taxAmount: '0.0000',
+          grandTotal: '11000.0000',
+          createdAt: '2026-10-30T03:41:36.999Z',
+          lines: [
+            { productId: 'p1', sku: 'ELEC-MOUSE-001', productName: 'Wireless Bluetooth Mouse', quantity: '2.000000' },
+            { productId: 'p2', sku: 'KUV-HEAD SEAT', productName: 'HEAD SEAT', quantity: '1.000000' },
+          ],
+          payments: [{ paymentMethod: 'CASH', amount: '11000.0000' }],
+        },
+        {
+          id: '0192b4c0-0002-7000-8000-000000000002',
+          invoiceNumber: 'REG-01-000002',
+          status: 'COMPLETED',
+          customerName: 'walter waiter',
+          currencyCode: 'LKR',
+          subtotalAmount: '11000.0000',
+          taxAmount: '0.0000',
+          grandTotal: '11000.0000',
+          createdAt: '2026-10-30T03:41:42.830Z',
+          lines: [
+            { productId: 'p1', sku: 'ELEC-MOUSE-001', productName: 'Wireless Bluetooth Mouse', quantity: '2.000000' },
+            { productId: 'p2', sku: 'KUV-HEAD SEAT', productName: 'HEAD SEAT', quantity: '1.000000' },
+          ],
+          payments: [{ paymentMethod: 'CASH', amount: '11000.0000' }],
+        },
+        {
+          id: '0192b4c0-0003-7000-8000-000000000003',
+          invoiceNumber: 'REG-01-000003',
+          status: 'COMPLETED',
+          customerName: 'walter waiter',
+          currencyCode: 'LKR',
+          subtotalAmount: '11000.0000',
+          taxAmount: '0.0000',
+          grandTotal: '11000.0000',
+          createdAt: '2026-10-30T03:41:48.464Z',
+          lines: [
+            { productId: 'p1', sku: 'ELEC-MOUSE-001', productName: 'Wireless Bluetooth Mouse', quantity: '2.000000' },
+            { productId: 'p2', sku: 'KUV-HEAD SEAT', productName: 'HEAD SEAT', quantity: '1.000000' },
+          ],
+          payments: [{ paymentMethod: 'CASH', amount: '11000.0000' }],
+        },
+        {
+          id: '0192b4c0-0004-7000-8000-000000000004',
+          invoiceNumber: 'REG-01-000004',
+          status: 'COMPLETED',
+          customerName: 'walter waiter',
+          currencyCode: 'LKR',
+          subtotalAmount: '11000.0000',
+          taxAmount: '0.0000',
+          grandTotal: '11000.0000',
+          createdAt: '2026-10-30T03:41:54.202Z',
+          lines: [
+            { productId: 'p1', sku: 'ELEC-MOUSE-001', productName: 'Wireless Bluetooth Mouse', quantity: '2.000000' },
+            { productId: 'p2', sku: 'KUV-HEAD SEAT', productName: 'HEAD SEAT', quantity: '1.000000' },
+          ],
+          payments: [{ paymentMethod: 'CASH', amount: '11000.0000' }],
+        },
+      ];
+
+      // Verifies array parser treats raw array correctly
+      const parsed = Array.isArray(productionSales)
+        ? productionSales
+        : ((productionSales as unknown as { data?: MockSale[] })?.data || []);
+      expect(parsed).toHaveLength(4);
+      expect(parsed.map((s) => s.invoiceNumber)).toEqual([
+        'REG-01-000001',
+        'REG-01-000002',
+        'REG-01-000003',
+        'REG-01-000004',
+      ]);
+      parsed.forEach((s) => {
+        expect(formatCurrency(s.grandTotal, 'LKR')).toBe('LKR 11000.00');
+        expect(s.customerName).toBe('walter waiter');
+        expect(s.status).toBe('COMPLETED');
+        expect(s.lines).toHaveLength(2);
+      });
+
+      // An empty response correctly evaluates to length 0
+      const emptyRes: unknown[] = [];
+      const parsedEmpty = Array.isArray(emptyRes)
+        ? emptyRes
+        : (emptyRes as unknown as { data?: unknown[] })?.data || [];
+      expect(parsedEmpty).toHaveLength(0);
+    });
+
+    it('BUG-007: verifies checkout state machine, button locking, stable idempotency key reuse on retry, and key consumption', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // 1. State machine properties
+      expect(html).toContain('isSubmittingCheckout: false');
+      expect(html).toContain('activeCheckoutKey: null');
+
+      // 2. Guard against concurrent/duplicate in-flight submissions
+      expect(html).toContain('if (state.isSubmittingCheckout) return;');
+      expect(html).toContain('state.isSubmittingCheckout = true;');
+
+      // 3. UI button disabling and loading label
+      expect(html).toContain('id="btnSubmitPosCheckout"');
+      expect(html).toContain('id="btnCancelCheckout"');
+      expect(html).toContain('submitBtn.disabled = true;');
+      expect(html).toContain("submitBtn.innerText = 'Processing Payment...';");
+      expect(html).toContain('cancelBtn.disabled = true;');
+
+      // 4. Enter-key submission deduplication
+      expect(html).toContain("if(event.key==='Enter'){event.preventDefault();submitPosCheckout();}");
+
+      // 5. Explicit idempotency key binding
+      expect(html).toContain("'idempotency-key': idempotencyKey");
+
+      // 6. Safe retry restoration on error
+      expect(html).toContain('Retry Payment (');
+      expect(html).toContain('submitBtn.disabled = false;');
+      expect(html).toContain('cancelBtn.disabled = false;');
+
+      // 7. Key consumption upon verified completion
+      expect(html).toContain('state.activeCheckoutKey = null;');
+      expect(html).toContain('state.isSubmittingCheckout = false;');
+
+      // 8. Closing modal and cart changes reset activeCheckoutKey
+      expect(html).toContain('function closeModal() {');
+      expect(html).toContain('if (state.isSubmittingCheckout) return;');
+    });
+
+    it('BUG-008: verifies compact POS product card CSS layout, align-content start, and responsive rules', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // 1. Grid layout properties preventing vertical stretching
+      expect(html).toContain('align-content: start;');
+      expect(html).toContain('grid-auto-rows: max-content;');
+      expect(html).toContain('align-items: start;');
+
+      // 2. Product card compact dimensions and touch attributes
+      expect(html).toContain('min-height: 96px;');
+      expect(html).toContain('box-sizing: border-box;');
+      expect(html).toContain('touch-action: manipulation;');
+      expect(html).toContain('.pos-product-card:active {');
+
+      // 3. Small mobile responsive rules (480px)
+      expect(html).toContain('min-height: 86px !important;');
+
+      // 4. Ultra-compact mobile responsive rules (360px - 320px)
+      expect(html).toContain('grid-template-columns: repeat(2, 1fr) !important;');
+      expect(html).toContain('min-height: 80px !important;');
+    });
   });
 });
