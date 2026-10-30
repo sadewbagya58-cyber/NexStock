@@ -274,6 +274,20 @@
       padding: 4px 10px;
       font-size: 12px;
     }
+    .spinner-sm {
+      display: inline-block;
+      width: 12px;
+      height: 12px;
+      border: 2px solid currentColor;
+      border-right-color: transparent;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+      vertical-align: middle;
+      margin-right: 4px;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
 
     /* Cards */
     .card {
@@ -1895,6 +1909,7 @@
       cachedCategories: [],
       cachedSuppliers: [],
       cachedRegisters: [],
+      cachedSales: [],
       isSubmittingCheckout: false,
       activeCheckoutKey: null
     };
@@ -2292,6 +2307,10 @@
       state.cachedCategories = [];
       state.cachedSuppliers = [];
       state.cachedRegisters = [];
+      state.cachedSales = [];
+      cachedReceipts.clear();
+      activeReceiptFetches.clear();
+      activeVoidOps.clear();
       state.activeShift = null;
       state.cart = [];
       state.isSubmittingCheckout = false;
@@ -4941,74 +4960,118 @@
       }
     }
 
-    // Receipt Modal & Printing
+    // In-flight operation guards and performance caches (BUG-009 & BUG-010)
+    const activeReceiptFetches = new Set();
+    const activeVoidOps = new Set();
+    const cachedReceipts = new Map();
+
+    // Receipt Modal & Printing (BUG-010)
     async function openReceiptModal(saleId) {
-      try {
-        const receipt = await apiFetch(`/v1/pos/sales/${saleId}/receipt`);
-        const receiptCurr = receipt.currencyCode || receipt.currency || getTenantCurrency();
-        openModal({
-          title: `Receipt #${receipt.invoiceNumber}`,
-          bodyHtml: `
-            <div class="receipt-container" id="printableReceipt">
-              <div class="receipt-center">
-                <div class="receipt-bold" style="font-size: 15px;">${escapeHtml(receipt.businessName || state.tenantName || 'NexStock Retail')}</div>
-                <div style="font-size: 11px;">${escapeHtml(receipt.branchName || state.branchName || 'Main Store')}</div>
-                <div style="font-size: 11px;">Register: ${escapeHtml(receipt.registerCode || state.registerCode || 'REG-01')} | Cashier: ${escapeHtml(receipt.cashierName || state.fullName || 'Cashier')}</div>
-              </div>
-              <div class="receipt-divider"></div>
-              <div class="receipt-row">
-                <span>Invoice:</span> <strong>${receipt.invoiceNumber}</strong>
-              </div>
-              <div class="receipt-row">
-                <span>Date:</span> <span>${receipt.formattedTimestamp || new Date().toLocaleString()}</span>
-              </div>
-              <div class="receipt-divider"></div>
-              <div style="margin-bottom: 8px;">
-                ${receipt.lines.map(l => `
-                  <div class="receipt-row">
-                    <span>${l.name} (x${parseFloat(l.quantity).toFixed(0)})</span>
-                    <span>${formatTenantMoney(l.lineTotal, receiptCurr)}</span>
-                  </div>
-                `).join('')}
-              </div>
-              <div class="receipt-divider"></div>
-              <div class="receipt-row">
-                <span>Subtotal:</span> <span>${formatTenantMoney(receipt.subtotalAmount, receiptCurr)}</span>
-              </div>
-              <div class="receipt-row">
-                <span>Tax:</span> <span>${formatTenantMoney(receipt.taxAmount, receiptCurr)}</span>
-              </div>
-              <div class="receipt-row receipt-bold" style="font-size: 14px; margin-top: 4px;">
-                <span>Total:</span> <span>${formatTenantMoney(receipt.grandTotal, receiptCurr)}</span>
-              </div>
-              <div class="receipt-divider"></div>
-              ${receipt.payments.map(p => `
+      if (activeReceiptFetches.has(saleId)) return;
+
+      const btns = [
+        document.getElementById(`btnReceipt-${saleId}`),
+        document.getElementById(`btnReceiptMobile-${saleId}`)
+      ].filter(Boolean);
+
+      let receipt = cachedReceipts.get(saleId);
+
+      if (!receipt) {
+        // Immediate visual feedback on the button
+        btns.forEach(b => {
+          b.disabled = true;
+          b.innerHTML = '<span class="spinner-sm"></span> Loading receipt...';
+        });
+
+        activeReceiptFetches.add(saleId);
+
+        try {
+          receipt = await apiFetch(`/v1/pos/sales/${saleId}/receipt`);
+          if (receipt) {
+            cachedReceipts.set(saleId, receipt);
+          }
+        } catch (err) {
+          showToast(`Failed to load receipt: ${err.message}`, 'error');
+          return;
+        } finally {
+          activeReceiptFetches.delete(saleId);
+          btns.forEach(b => {
+            b.disabled = false;
+            b.innerText = 'Receipt';
+          });
+        }
+      } else {
+        btns.forEach(b => {
+          b.disabled = false;
+          b.innerText = 'Receipt';
+        });
+      }
+
+      if (!receipt) return;
+
+      const receiptCurr = receipt.currencyCode || receipt.currency || getTenantCurrency();
+      openModal({
+        title: `Receipt #${escapeHtml(receipt.invoiceNumber)}`,
+        bodyHtml: `
+          <div class="receipt-container" id="printableReceipt">
+            <div class="receipt-center">
+              <div class="receipt-bold" style="font-size: 15px;">${escapeHtml(receipt.businessName || state.tenantName || 'NexStock Retail')}</div>
+              <div style="font-size: 11px;">${escapeHtml(receipt.branchName || state.branchName || 'Main Store')}</div>
+              <div style="font-size: 11px;">Register: ${escapeHtml(receipt.registerCode || state.registerCode || 'REG-01')} | Cashier: ${escapeHtml(receipt.cashierName || state.fullName || 'Cashier')}</div>
+            </div>
+            <div class="receipt-divider"></div>
+            <div class="receipt-row">
+              <span>Invoice:</span> <strong>${escapeHtml(receipt.invoiceNumber)}</strong>
+            </div>
+            <div class="receipt-row">
+              <span>Date:</span> <span>${escapeHtml(receipt.formattedTimestamp || new Date().toLocaleString())}</span>
+            </div>
+            <div class="receipt-divider"></div>
+            <div style="margin-bottom: 8px;">
+              ${receipt.lines.map(l => `
                 <div class="receipt-row">
-                  <span>Paid (${p.method || p.paymentMethod}):</span> <span>${formatTenantMoney(p.amount, receiptCurr)}</span>
+                  <span>${escapeHtml(l.name)} (x${parseFloat(l.quantity).toFixed(0)})</span>
+                  <span>${formatTenantMoney(l.lineTotal, receiptCurr)}</span>
                 </div>
-                ${parseFloat(p.changeAmount || '0') > 0 ? `
-                  <div class="receipt-row">
-                    <span>Change Due:</span> <span>${formatTenantMoney(p.changeAmount, receiptCurr)}</span>
-                  </div>
-                ` : ''}
               `).join('')}
-              ${parseFloat(receipt.changeGiven || '0') > 0 ? `
+            </div>
+            <div class="receipt-divider"></div>
+            <div class="receipt-row">
+              <span>Subtotal:</span> <span>${formatTenantMoney(receipt.subtotalAmount, receiptCurr)}</span>
+            </div>
+            <div class="receipt-row">
+              <span>Tax:</span> <span>${formatTenantMoney(receipt.taxAmount, receiptCurr)}</span>
+            </div>
+            <div class="receipt-row receipt-bold" style="font-size: 14px; margin-top: 4px;">
+              <span>Total:</span> <span>${formatTenantMoney(receipt.grandTotal, receiptCurr)}</span>
+            </div>
+            <div class="receipt-divider"></div>
+            ${receipt.payments.map(p => `
+              <div class="receipt-row">
+                <span>Paid (${escapeHtml(p.method || p.paymentMethod)}):</span> <span>${formatTenantMoney(p.amount, receiptCurr)}</span>
+              </div>
+              ${parseFloat(p.changeAmount || '0') > 0 ? `
                 <div class="receipt-row">
-                  <span>Change Given:</span> <span>${formatTenantMoney(receipt.changeGiven, receiptCurr)}</span>
+                  <span>Change Due:</span> <span>${formatTenantMoney(p.changeAmount, receiptCurr)}</span>
                 </div>
               ` : ''}
-              <div class="receipt-divider"></div>
-              <div class="receipt-center" style="font-size: 11px; margin-top: 8px;">
-                ${receipt.notes || 'Thank you for shopping with NexStock!'}
+            `).join('')}
+            ${parseFloat(receipt.changeGiven || '0') > 0 ? `
+              <div class="receipt-row">
+                <span>Change Given:</span> <span>${formatTenantMoney(receipt.changeGiven, receiptCurr)}</span>
               </div>
+            ` : ''}
+            <div class="receipt-divider"></div>
+            <div class="receipt-center" style="font-size: 11px; margin-top: 8px;">
+              ${escapeHtml(receipt.notes || 'Thank you for shopping with NexStock!')}
             </div>
-          `,
-          footerHtml: `
-            <button class="btn btn-secondary" onclick="closeModal()">Close</button>
-            <button class="btn btn-primary" onclick="window.print()">Print Receipt</button>
-          `
-        });
-      } catch (err) {}
+          </div>
+        `,
+        footerHtml: `
+          <button class="btn btn-secondary" onclick="closeModal()">Close</button>
+          <button class="btn btn-primary" onclick="window.print()">Print Receipt</button>
+        `
+      });
     }
 
     // =========================================================================
@@ -5276,6 +5339,7 @@
       try {
         const res = await apiFetch('/v1/pos/sales?limit=50');
         const sales = Array.isArray(res) ? res : (res?.data || res?.items || []);
+        state.cachedSales = sales;
 
         container.innerHTML = `
           <div class="view-header">
@@ -5316,6 +5380,8 @@
                         const dateStr = (s.createdAt || s.soldAt) ? new Date(s.createdAt || s.soldAt).toLocaleString() : '—';
                         const cust = escapeHtml(s.customerName || 'Walk-in Customer');
                         const isCompleted = s.status === 'COMPLETED';
+                        const isVoiding = activeVoidOps.has(s.id);
+                        const isReceiptLoading = activeReceiptFetches.has(s.id);
                         const itemsCount = s.lines ? s.lines.length : 0;
                         const itemsSummary = s.lines && s.lines.length > 0
                           ? s.lines.map(l => `${escapeHtml(l.productName || l.sku)} × ${parseFloat(l.quantity)}`).join(', ')
@@ -5325,7 +5391,7 @@
                           : 'CASH';
 
                         return `
-                          <tr>
+                          <tr id="rowSale-${s.id}">
                             <td><strong>${inv}</strong></td>
                             <td>${dateStr}</td>
                             <td>${cust}</td>
@@ -5336,12 +5402,14 @@
                             <td>${formatTenantMoney(s.taxAmount)}</td>
                             <td style="font-weight: 700; color: var(--accent-primary);">${formatTenantMoney(s.grandTotal)}</td>
                             <td><code>${payMethod}</code></td>
-                            <td><span class="badge-pill ${isCompleted ? 'badge-green' : 'badge-red'}">${escapeHtml(s.status)}</span></td>
+                            <td><span id="badgeStatus-${s.id}" class="badge-pill ${isCompleted ? 'badge-green' : 'badge-red'}">${escapeHtml(s.status)}</span></td>
                             <td>
-                              <button class="btn btn-secondary btn-sm" onclick="openReceiptModal('${s.id}')">Receipt</button>
+                              <button class="btn btn-secondary btn-sm" id="btnReceipt-${s.id}" onclick="openReceiptModal('${s.id}')" ${isReceiptLoading ? 'disabled' : ''}>
+                                ${isReceiptLoading ? '<span class="spinner-sm"></span> Loading...' : 'Receipt'}
+                              </button>
                               ${isCompleted ? `
-                                <button class="btn btn-danger btn-sm" onclick="voidSalePrompt('${s.id}', '${inv}')" ${state.userRole === 'CASHIER' ? 'disabled title="Cashiers cannot void sales. Requires Owner/Admin."' : ''}>
-                                  Void
+                                <button class="btn btn-danger btn-sm" id="btnVoid-${s.id}" onclick="openVoidModal('${s.id}', '${inv}')" ${isVoiding ? 'disabled' : ''} ${state.userRole === 'CASHIER' ? 'disabled title="Cashiers cannot void sales. Requires Owner/Admin."' : ''}>
+                                  ${isVoiding ? '<span class="spinner-sm"></span> Voiding...' : 'Void'}
                                 </button>
                               ` : ''}
                             </td>
@@ -5359,6 +5427,8 @@
                   const dateStr = (s.createdAt || s.soldAt) ? new Date(s.createdAt || s.soldAt).toLocaleString() : '—';
                   const cust = escapeHtml(s.customerName || 'Walk-in Customer');
                   const isCompleted = s.status === 'COMPLETED';
+                  const isVoiding = activeVoidOps.has(s.id);
+                  const isReceiptLoading = activeReceiptFetches.has(s.id);
                   const itemsCount = s.lines ? s.lines.length : 0;
                   const itemsSummary = s.lines && s.lines.length > 0
                     ? s.lines.map(l => `${escapeHtml(l.productName || l.sku)} × ${parseFloat(l.quantity)}`).join(', ')
@@ -5368,10 +5438,10 @@
                     : 'CASH';
 
                   return `
-                    <div class="entity-card">
+                    <div class="entity-card" id="cardSaleMobile-${s.id}">
                       <div class="entity-card-header">
                         <span class="entity-card-code"><strong>${inv}</strong></span>
-                        <span class="badge-pill ${isCompleted ? 'badge-green' : 'badge-red'}">${escapeHtml(s.status)}</span>
+                        <span id="badgeStatusMobile-${s.id}" class="badge-pill ${isCompleted ? 'badge-green' : 'badge-red'}">${escapeHtml(s.status)}</span>
                       </div>
                       <div class="entity-card-title">${formatTenantMoney(s.grandTotal)} &bull; <span style="font-size: 13px; font-weight: normal; color: var(--text-secondary);">${cust}</span></div>
                       <div class="entity-card-details">
@@ -5393,10 +5463,12 @@
                         </div>
                       </div>
                       <div class="entity-card-footer">
-                        <button class="btn btn-secondary btn-sm" onclick="openReceiptModal('${s.id}')">Receipt</button>
+                        <button class="btn btn-secondary btn-sm" id="btnReceiptMobile-${s.id}" onclick="openReceiptModal('${s.id}')" ${isReceiptLoading ? 'disabled' : ''}>
+                          ${isReceiptLoading ? '<span class="spinner-sm"></span> Loading...' : 'Receipt'}
+                        </button>
                         ${isCompleted ? `
-                          <button class="btn btn-danger btn-sm" onclick="voidSalePrompt('${s.id}', '${inv}')" ${state.userRole === 'CASHIER' ? 'disabled title="Cashiers cannot void sales. Requires Owner/Admin."' : ''}>
-                            Void Sale
+                          <button class="btn btn-danger btn-sm" id="btnVoidMobile-${s.id}" onclick="openVoidModal('${s.id}', '${inv}')" ${isVoiding ? 'disabled' : ''} ${state.userRole === 'CASHIER' ? 'disabled title="Cashiers cannot void sales. Requires Owner/Admin."' : ''}>
+                            ${isVoiding ? '<span class="spinner-sm"></span> Voiding...' : 'Void Sale'}
                           </button>
                         ` : ''}
                       </div>
@@ -5423,23 +5495,138 @@
       }
     }
 
-    async function voidSalePrompt(saleId, invoiceNumber) {
+    // Sales History Void Operations (BUG-009)
+    function openVoidModal(saleId, invoiceNumber) {
       if (state.userRole === 'CASHIER') {
         showToast('Permission denied: Cashiers cannot void sales. Switch to Owner role.', 'error');
         return;
       }
+      if (activeVoidOps.has(saleId)) return;
 
-      const reason = prompt(`Enter reason for voiding invoice ${invoiceNumber} (inventory will be automatically returned to stock):`);
-      if (!reason) return;
+      openModal({
+        title: `Void Invoice #${escapeHtml(invoiceNumber)}`,
+        bodyHtml: `
+          <div style="margin-bottom: 16px;">
+            <p style="color: var(--status-danger); font-size: 13px; font-weight: 500; margin-bottom: 12px; line-height: 1.5;">
+              Warning: Voiding this invoice will cancel the transaction, return all sold inventory items back to stock, and record a reversing accounting journal entry.
+            </p>
+            <label style="display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px;">Reason for Voiding *</label>
+            <textarea id="voidReasonInput" class="form-control" rows="3" placeholder="Enter reason (e.g., Customer return, cashier entry error)..." style="width: 100%; box-sizing: border-box;"></textarea>
+            <div id="voidReasonError" style="color: var(--status-danger); font-size: 12px; margin-top: 4px; display: none;">Reason is required to void an invoice.</div>
+          </div>
+        `,
+        footerHtml: `
+          <button class="btn btn-secondary" id="btnCancelVoidModal" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-danger" id="btnConfirmVoidModal" onclick="confirmVoidSale('${saleId}', '${escapeHtml(invoiceNumber)}')">
+            Confirm Void
+          </button>
+        `
+      });
+
+      setTimeout(() => {
+        const inp = document.getElementById('voidReasonInput');
+        if (inp) inp.focus();
+      }, 50);
+    }
+
+    async function confirmVoidSale(saleId, invoiceNumber, explicitReason) {
+      if (state.userRole === 'CASHIER') {
+        showToast('Permission denied: Cashiers cannot void sales. Switch to Owner role.', 'error');
+        return;
+      }
+      if (activeVoidOps.has(saleId)) return;
+
+      const reasonInput = document.getElementById('voidReasonInput');
+      const reason = (explicitReason !== undefined ? explicitReason : (reasonInput ? reasonInput.value : '')).trim();
+      const errorEl = document.getElementById('voidReasonError');
+
+      if (!reason) {
+        if (errorEl) errorEl.style.display = 'block';
+        if (reasonInput) reasonInput.focus();
+        return;
+      }
+      if (errorEl) errorEl.style.display = 'none';
+
+      activeVoidOps.add(saleId);
+
+      const modalConfirmBtn = document.getElementById('btnConfirmVoidModal');
+      const modalCancelBtn = document.getElementById('btnCancelVoidModal');
+      const voidBtns = [
+        document.getElementById(`btnVoid-${saleId}`),
+        document.getElementById(`btnVoidMobile-${saleId}`)
+      ].filter(Boolean);
+
+      // Immediate visual feedback on modal button and table/card buttons
+      if (modalConfirmBtn) {
+        modalConfirmBtn.disabled = true;
+        modalConfirmBtn.innerHTML = '<span class="spinner-sm"></span> Voiding...';
+      }
+      if (modalCancelBtn) {
+        modalCancelBtn.disabled = true;
+      }
+      voidBtns.forEach(btn => {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-sm"></span> Voiding...';
+      });
 
       try {
         await apiFetch(`/v1/pos/sales/${saleId}/void`, {
           method: 'POST',
           body: JSON.stringify({ reason })
         });
+
         showToast(`Invoice ${invoiceNumber} voided and stock restocked`, 'success');
-        renderPosSalesView();
-      } catch (err) {}
+        closeModal();
+
+        // In-place DOM status update without full-page re-rendering / layout flicker
+        const badgeDesktop = document.getElementById(`badgeStatus-${saleId}`);
+        const badgeMobile = document.getElementById(`badgeStatusMobile-${saleId}`);
+        if (badgeDesktop) {
+          badgeDesktop.className = 'badge-pill badge-red';
+          badgeDesktop.innerText = 'VOIDED';
+        }
+        if (badgeMobile) {
+          badgeMobile.className = 'badge-pill badge-red';
+          badgeMobile.innerText = 'VOIDED';
+        }
+
+        // Remove void buttons since invoice is now VOIDED
+        voidBtns.forEach(btn => btn.remove());
+
+        // Invalidate receipt cache for this sale
+        cachedReceipts.delete(saleId);
+
+        // Invalidate local cached products and update cachedSales
+        state.cachedProducts = [];
+        if (Array.isArray(state.cachedSales)) {
+          const s = state.cachedSales.find(item => item.id === saleId);
+          if (s) s.status = 'VOIDED';
+        }
+      } catch (err) {
+        showToast(`Failed to void invoice: ${err.message}`, 'error');
+        // Restore buttons on failure
+        if (modalConfirmBtn) {
+          modalConfirmBtn.disabled = false;
+          modalConfirmBtn.innerText = 'Confirm Void';
+        }
+        if (modalCancelBtn) {
+          modalCancelBtn.disabled = false;
+        }
+        voidBtns.forEach(btn => {
+          btn.disabled = false;
+          btn.innerText = btn.id.includes('Mobile') ? 'Void Sale' : 'Void';
+        });
+      } finally {
+        activeVoidOps.delete(saleId);
+      }
+    }
+
+    function voidSalePrompt(saleId, invoiceNumber, explicitReason) {
+      if (explicitReason) {
+        confirmVoidSale(saleId, invoiceNumber, explicitReason);
+      } else {
+        openVoidModal(saleId, invoiceNumber);
+      }
     }
 
     // =========================================================================

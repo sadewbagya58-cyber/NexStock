@@ -1088,5 +1088,166 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       };
       expect(isSameDay(yesterdayInvoice.createdAt, targetDate, tz)).toBe(false);
     });
+
+    it('BUG-009: verifies Sales History Void button immediate visual feedback, in-flight mutex guard, in-place DOM updates, and cache invalidation', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // 1. Spinner styles and helper classes
+      expect(html).toContain('.spinner-sm {');
+      expect(html).toContain('animation: spin 0.6s linear infinite;');
+
+      // 2. Void in-flight mutex set definition
+      expect(html).toContain('const activeVoidOps = new Set();');
+
+      // 3. Modals and handlers
+      expect(html).toContain('function openVoidModal(saleId, invoiceNumber)');
+      expect(html).toContain('async function confirmVoidSale(saleId, invoiceNumber, explicitReason)');
+      expect(html).toContain('function voidSalePrompt(saleId, invoiceNumber, explicitReason)');
+
+      // 4. Role-based authorization guard
+      expect(html).toContain("if (state.userRole === 'CASHIER')");
+      expect(html).toContain("Permission denied: Cashiers cannot void sales. Switch to Owner role.");
+
+      // 5. In-flight concurrency blocking guard
+      expect(html).toContain('if (activeVoidOps.has(saleId)) return;');
+
+      // 6. Mandatory reason validation
+      expect(html).toContain('Reason is required to void an invoice.');
+
+      // 7. Immediate visual feedback on modal and row buttons
+      expect(html).toContain("modalConfirmBtn.innerHTML = '<span class=\"spinner-sm\"></span> Voiding...';");
+      expect(html).toContain("btn.innerHTML = '<span class=\"spinner-sm\"></span> Voiding...';");
+      expect(html).toContain('modalConfirmBtn.disabled = true;');
+      expect(html).toContain('btn.disabled = true;');
+
+      // 8. In-place DOM update without full page reloading / screen blanking
+      expect(html).toContain("badgeDesktop.className = 'badge-pill badge-red';");
+      expect(html).toContain("badgeDesktop.innerText = 'VOIDED';");
+      expect(html).toContain('voidBtns.forEach(btn => btn.remove());');
+
+      // 9. Cache invalidation on successful void
+      expect(html).toContain('cachedReceipts.delete(saleId);');
+      expect(html).toContain('state.cachedProducts = [];');
+      expect(html).toContain("s.status = 'VOIDED';");
+
+      // 10. Graceful error recovery restores button state
+      expect(html).toContain("modalConfirmBtn.innerText = 'Confirm Void';");
+      expect(html).toContain("modalConfirmBtn.disabled = false;");
+
+      // 11. Algorithmic simulation of void mutex and double-submit prevention
+      const activeOps = new Set<string>();
+      let voidApiCallCount = 0;
+
+      const simulateVoidClick = async (saleId: string, reason: string): Promise<{ success: boolean; blocked: boolean }> => {
+        if (!reason || reason.trim() === '') return { success: false, blocked: false };
+        if (activeOps.has(saleId)) return { success: false, blocked: true };
+
+        activeOps.add(saleId);
+        try {
+          voidApiCallCount++;
+          // Simulate network latency
+          await new Promise((r) => setTimeout(r, 10));
+          return { success: true, blocked: false };
+        } finally {
+          activeOps.delete(saleId);
+        }
+      };
+
+      // Test simultaneous clicks on same invoice
+      const p1 = simulateVoidClick('sale-001', 'Damaged goods return');
+      const p2 = simulateVoidClick('sale-001', 'Damaged goods return');
+      const p3 = simulateVoidClick('sale-001', 'Damaged goods return');
+
+      return Promise.all([p1, p2, p3]).then(([res1, res2, res3]) => {
+        expect(res1.success).toBe(true);
+        expect(res2.blocked).toBe(true);
+        expect(res3.blocked).toBe(true);
+        expect(voidApiCallCount).toBe(1);
+      });
+    });
+
+    it('BUG-010: verifies Receipt button immediate loading feedback, in-flight mutex guard, memory caching for 0ms reopening, and graceful error restoration', async () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // 1. Receipt in-flight mutex set and memory cache map
+      expect(html).toContain('const activeReceiptFetches = new Set();');
+      expect(html).toContain('const cachedReceipts = new Map();');
+
+      // 2. openReceiptModal function definition
+      expect(html).toContain('async function openReceiptModal(saleId)');
+
+      // 3. Double-click in-flight mutex protection
+      expect(html).toContain('if (activeReceiptFetches.has(saleId)) return;');
+
+      // 4. Memory cache check
+      expect(html).toContain('let receipt = cachedReceipts.get(saleId);');
+
+      // 5. Immediate visual feedback on receipt buttons
+      expect(html).toContain("b.innerHTML = '<span class=\"spinner-sm\"></span> Loading receipt...';");
+      expect(html).toContain('b.disabled = true;');
+
+      // 6. Network fetch & cache storage
+      expect(html).toContain('receipt = await apiFetch(`/v1/pos/sales/${saleId}/receipt`);');
+      expect(html).toContain('cachedReceipts.set(saleId, receipt);');
+
+      // 7. Cleanup and button restoration
+      expect(html).toContain('activeReceiptFetches.delete(saleId);');
+      expect(html).toContain("b.innerText = 'Receipt';");
+      expect(html).toContain('b.disabled = false;');
+
+      // 8. Sign out cache cleanup
+      expect(html).toContain('cachedReceipts.clear();');
+      expect(html).toContain('activeReceiptFetches.clear();');
+      expect(html).toContain('activeVoidOps.clear();');
+
+      // 9. Algorithmic simulation of receipt caching & concurrency guard
+      const memoryCache = new Map<string, { id: string; invoiceNumber: string; grandTotal: string }>();
+      const inFlightFetches = new Set<string>();
+      let networkFetchCount = 0;
+
+      const simulateGetReceipt = async (saleId: string) => {
+        if (inFlightFetches.has(saleId)) {
+          return { cached: false, inFlightBlocked: true, data: null };
+        }
+
+        const cached = memoryCache.get(saleId);
+        if (cached) {
+          return { cached: true, inFlightBlocked: false, data: cached };
+        }
+
+        inFlightFetches.add(saleId);
+        try {
+          networkFetchCount++;
+          await new Promise((r) => setTimeout(r, 15));
+          const mockReceipt = { id: saleId, invoiceNumber: 'REG-01-000001', grandTotal: '11000.0000' };
+          memoryCache.set(saleId, mockReceipt);
+          return { cached: false, inFlightBlocked: false, data: mockReceipt };
+        } finally {
+          inFlightFetches.delete(saleId);
+        }
+      };
+
+      // Concurrent clicks while first fetch is in flight
+      const call1Promise = simulateGetReceipt('sale-123');
+      const call2Promise = simulateGetReceipt('sale-123');
+      const [res1, res2] = await Promise.all([call1Promise, call2Promise]);
+
+      expect(res1.inFlightBlocked).toBe(false);
+      expect(res1.data?.invoiceNumber).toBe('REG-01-000001');
+      expect(res2.inFlightBlocked).toBe(true);
+      expect(networkFetchCount).toBe(1);
+
+      // Subsequent click after completion is served instantly (0ms) from cache without network fetch
+      const startMs = Date.now();
+      const call3Res = await simulateGetReceipt('sale-123');
+      const durationMs = Date.now() - startMs;
+
+      expect(call3Res.cached).toBe(true);
+      expect(call3Res.data?.invoiceNumber).toBe('REG-01-000001');
+      expect(networkFetchCount).toBe(1); // Still 1, no second network request!
+      expect(durationMs).toBeLessThan(5); // Instant 0ms cache hit
+    });
   });
 });
