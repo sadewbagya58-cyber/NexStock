@@ -3530,9 +3530,12 @@
                             <td>${isTracked ? '<span class="badge-pill badge-green">Tracked</span>' : '<span class="badge-pill badge-yellow">Non-Tracked</span>'}</td>
                             <td><span class="badge-pill ${isActive ? 'badge-green' : 'badge-red'}">${isActive ? 'ACTIVE' : 'ARCHIVED'}</span></td>
                             <td>
-                              ${isActive ? `
-                                <button class="btn btn-secondary btn-sm" onclick="archiveProduct('${p.id}', '${sku}')">Archive</button>
-                              ` : '—'}
+                              <div style="display: flex; gap: 6px;">
+                                <button class="btn btn-secondary btn-sm" onclick="openEditProductModal('${p.id}')">Edit</button>
+                                ${isActive ? `
+                                  <button class="btn btn-secondary btn-sm" onclick="archiveProduct('${p.id}', '${sku}')">Archive</button>
+                                ` : ''}
+                              </div>
                             </td>
                           </tr>
                         `;
@@ -3578,11 +3581,12 @@
                           <span class="detail-value">${isTracked ? 'Tracked' : 'Non-Tracked'}</span>
                         </div>
                       </div>
-                      ${isActive ? `
-                        <div class="entity-card-footer">
-                          <button class="btn btn-secondary btn-sm" style="width: 100%;" onclick="archiveProduct('${p.id}', '${sku}')">Archive Product</button>
-                        </div>
-                      ` : ''}
+                      <div class="entity-card-footer" style="display: flex; gap: 8px;">
+                        <button class="btn btn-secondary btn-sm" style="flex: 1;" onclick="openEditProductModal('${p.id}')">Edit</button>
+                        ${isActive ? `
+                          <button class="btn btn-secondary btn-sm" style="flex: 1;" onclick="archiveProduct('${p.id}', '${sku}')">Archive</button>
+                        ` : ''}
+                      </div>
                     </div>
                   `;
                 }).join('')}
@@ -3733,6 +3737,112 @@
       } catch (err) {}
     }
 
+    function openEditProductModal(productId) {
+      const p = (state.cachedProducts || []).find(x => x.id === productId);
+      if (!p) {
+        showToast('Product not found', 'error');
+        return;
+      }
+
+      const cost = parseFloat(p.purchaseCost || '0').toFixed(2);
+      const price = parseFloat(p.sellingPrice || '0').toFixed(2);
+      const isActive = p.status === 'ACTIVE' || p.isActive === true;
+
+      openModal({
+        title: `Edit Product: ${escapeHtml(p.sku)}`,
+        bodyHtml: `
+          <div class="form-group">
+            <label class="form-label">SKU *</label>
+            <input type="text" class="form-input" id="editProdSku" value="${escapeHtml(p.sku)}" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Product Name *</label>
+            <input type="text" class="form-input" id="editProdName" value="${escapeHtml(p.name)}" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Category</label>
+            <select class="form-select" id="editProdCategory">
+              <option value="">(None)</option>
+              ${(state.cachedCategories || []).map(c => `<option value="${c.id}" ${c.id === p.categoryId ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Primary Barcode</label>
+            <input type="text" class="form-input" id="editProdBarcode" value="${escapeHtml(p.primaryBarcode || '')}" placeholder="e.g. 012345678999">
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <div class="form-group">
+              <label class="form-label">Purchase Cost (${escapeHtml(getTenantCurrency())}) *</label>
+              <input type="number" step="${getCurrencyInputStep()}" class="form-input" id="editProdCost" value="${cost}" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Selling Price (${escapeHtml(getTenantCurrency())}) *</label>
+              <input type="number" step="${getCurrencyInputStep()}" class="form-input" id="editProdPrice" value="${price}" required>
+            </div>
+          </div>
+          <div class="form-group">
+            <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+              <input type="checkbox" id="editProdIsActive" ${isActive ? 'checked' : ''}> Active in Product Catalog
+            </label>
+          </div>
+        `,
+        footerHtml: `
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button id="btnSubmitEditProduct" class="btn btn-primary" onclick="submitEditProduct('${productId}')">Save Changes</button>
+        `
+      });
+    }
+
+    async function submitEditProduct(productId) {
+      if (state.isSubmittingProduct) return;
+
+      const sku = document.getElementById('editProdSku').value.trim();
+      const name = document.getElementById('editProdName').value.trim();
+      const categoryId = document.getElementById('editProdCategory').value || null;
+      const barcode = document.getElementById('editProdBarcode').value.trim() || null;
+      const cost = parseFloat(document.getElementById('editProdCost').value || '0').toFixed(4);
+      const price = parseFloat(document.getElementById('editProdPrice').value || '0').toFixed(4);
+      const isActive = document.getElementById('editProdIsActive').checked;
+
+      if (!sku || !name) {
+        showToast('SKU and Product Name are required', 'error');
+        return;
+      }
+
+      const submitBtn = document.getElementById('btnSubmitEditProduct');
+      state.isSubmittingProduct = true;
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Saving...';
+      }
+
+      try {
+        await apiFetch(`/v1/products/${productId}`, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            sku,
+            name,
+            categoryId,
+            purchaseCost: cost,
+            sellingPrice: price,
+            primaryBarcode: barcode,
+            isActive
+          })
+        });
+
+        showToast(`Product "${name}" updated successfully`, 'success');
+        closeModal();
+        renderProductsView();
+      } catch (err) {
+      } finally {
+        state.isSubmittingProduct = false;
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Save Changes';
+        }
+      }
+    }
+
     // =========================================================================
     // 3. CATEGORIES VIEW
     // =========================================================================
@@ -3769,6 +3879,7 @@
                         <th>Description</th>
                         <th>Status</th>
                         <th>Created At</th>
+                        <th>Actions</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -3784,6 +3895,9 @@
                             <td>${desc}</td>
                             <td><span class="badge-pill ${isActive ? 'badge-green' : 'badge-red'}">${isActive ? 'ACTIVE' : 'ARCHIVED'}</span></td>
                             <td>${dateStr}</td>
+                            <td>
+                              <button class="btn btn-secondary btn-sm" onclick="openEditCategoryModal('${c.id}')">Edit</button>
+                            </td>
                           </tr>
                         `;
                       }).join('')}
@@ -3814,6 +3928,9 @@
                           <span class="detail-label">Created At</span>
                           <span class="detail-value">${dateStr}</span>
                         </div>
+                      </div>
+                      <div class="entity-card-footer">
+                        <button class="btn btn-secondary btn-sm" style="width: 100%;" onclick="openEditCategoryModal('${c.id}')">Edit Category</button>
                       </div>
                     </div>
                   `;
@@ -3863,6 +3980,60 @@
       } catch (err) {}
     }
 
+    function openEditCategoryModal(categoryId) {
+      const c = (state.cachedCategories || []).find(x => x.id === categoryId);
+      if (!c) {
+        showToast('Category not found', 'error');
+        return;
+      }
+
+      openModal({
+        title: `Edit Category: ${escapeHtml(c.name)}`,
+        bodyHtml: `
+          <div class="form-group">
+            <label class="form-label">Category Name *</label>
+            <input type="text" class="form-input" id="editCatName" value="${escapeHtml(c.name)}" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Description</label>
+            <textarea class="form-textarea" id="editCatDesc" rows="3">${escapeHtml(c.description || '')}</textarea>
+          </div>
+        `,
+        footerHtml: `
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button id="btnSubmitEditCategory" class="btn btn-primary" onclick="submitEditCategory('${categoryId}')">Save Changes</button>
+        `
+      });
+    }
+
+    async function submitEditCategory(categoryId) {
+      const name = document.getElementById('editCatName').value.trim();
+      const description = document.getElementById('editCatDesc').value.trim() || null;
+      if (!name) return showToast('Category Name is required', 'error');
+
+      const submitBtn = document.getElementById('btnSubmitEditCategory');
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Saving...';
+      }
+
+      try {
+        await apiFetch(`/v1/categories/${categoryId}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ name, description })
+        });
+
+        showToast(`Category "${name}" updated successfully`, 'success');
+        closeModal();
+        renderCategoriesView();
+      } catch (err) {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Save Changes';
+        }
+      }
+    }
+
     // =========================================================================
     // 4. SUPPLIERS VIEW
     // =========================================================================
@@ -3902,6 +4073,7 @@
                         <th>Phone</th>
                         <th>Currency</th>
                         <th>Status</th>
+                        <th>Actions</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -3923,6 +4095,9 @@
                             <td>${phone}</td>
                             <td><span class="badge-pill badge-blue">${curr}</span></td>
                             <td><span class="badge-pill ${isActive ? 'badge-green' : 'badge-red'}">${isActive ? 'ACTIVE' : 'INACTIVE'}</span></td>
+                            <td>
+                              <button class="btn btn-secondary btn-sm" onclick="openEditSupplierModal('${s.id}')">Edit</button>
+                            </td>
                           </tr>
                         `;
                       }).join('')}
@@ -3965,6 +4140,9 @@
                           <span class="detail-label">Currency</span>
                           <span class="detail-value"><span class="badge-pill badge-blue">${curr}</span></span>
                         </div>
+                      </div>
+                      <div class="entity-card-footer">
+                        <button class="btn btn-secondary btn-sm" style="width: 100%;" onclick="openEditSupplierModal('${s.id}')">Edit Supplier</button>
                       </div>
                     </div>
                   `;
@@ -4040,6 +4218,100 @@
         closeModal();
         renderSuppliersView();
       } catch (err) {}
+    }
+
+    function openEditSupplierModal(supplierId) {
+      const s = (state.cachedSuppliers || []).find(x => x.id === supplierId);
+      if (!s) {
+        showToast('Supplier not found', 'error');
+        return;
+      }
+
+      const isActive = s.isActive ?? (s.status === 'ACTIVE');
+
+      openModal({
+        title: `Edit Supplier: ${escapeHtml(s.name)}`,
+        bodyHtml: `
+          <div class="form-group">
+            <label class="form-label">Supplier Code</label>
+            <input type="text" class="form-input" value="${escapeHtml(s.code)}" disabled style="background: var(--bg-secondary);">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Vendor Name *</label>
+            <input type="text" class="form-input" id="editSupName" value="${escapeHtml(s.name)}" required>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <div class="form-group">
+              <label class="form-label">Contact Person</label>
+              <input type="text" class="form-input" id="editSupContact" value="${escapeHtml(s.contactPerson || '')}">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Email</label>
+              <input type="email" class="form-input" id="editSupEmail" value="${escapeHtml(s.email || '')}">
+            </div>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <div class="form-group">
+              <label class="form-label">Phone</label>
+              <input type="text" class="form-input" id="editSupPhone" value="${escapeHtml(s.phone || '')}">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Lead Time (Days)</label>
+              <input type="number" min="0" class="form-input" id="editSupLeadDays" value="${s.leadTimeDays ?? ''}">
+            </div>
+          </div>
+          <div class="form-group">
+            <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+              <input type="checkbox" id="editSupIsActive" ${isActive ? 'checked' : ''}> Active Supplier
+            </label>
+          </div>
+        `,
+        footerHtml: `
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button id="btnSubmitEditSupplier" class="btn btn-primary" onclick="submitEditSupplier('${supplierId}')">Save Changes</button>
+        `
+      });
+    }
+
+    async function submitEditSupplier(supplierId) {
+      const name = document.getElementById('editSupName').value.trim();
+      const contactPerson = document.getElementById('editSupContact').value.trim() || null;
+      const email = document.getElementById('editSupEmail').value.trim() || null;
+      const phone = document.getElementById('editSupPhone').value.trim() || null;
+      const leadTimeDaysVal = document.getElementById('editSupLeadDays').value;
+      const leadTimeDays = leadTimeDaysVal ? parseInt(leadTimeDaysVal, 10) : undefined;
+      const isActive = document.getElementById('editSupIsActive').checked;
+
+      if (!name) return showToast('Vendor Name is required', 'error');
+
+      const submitBtn = document.getElementById('btnSubmitEditSupplier');
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Saving...';
+      }
+
+      try {
+        await apiFetch(`/v1/suppliers/${supplierId}`, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            name,
+            contactPerson,
+            email,
+            phone,
+            ...(leadTimeDays !== undefined ? { leadTimeDays } : {}),
+            isActive
+          })
+        });
+
+        showToast(`Supplier "${name}" updated successfully`, 'success');
+        closeModal();
+        renderSuppliersView();
+      } catch (err) {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Save Changes';
+        }
+      }
     }
 
     // =========================================================================
@@ -5129,7 +5401,10 @@
                             <td><span class="badge-pill ${isActive ? 'badge-green' : 'badge-red'}">${isActive ? 'ACTIVE' : 'INACTIVE'}</span></td>
                             <td><code>${lastInvoice}</code></td>
                             <td>
-                              <button class="btn btn-primary btn-sm" onclick="selectRegister('${r.id}', '${code}')">Use for POS</button>
+                              <div style="display: flex; gap: 6px;">
+                                <button class="btn btn-primary btn-sm" onclick="selectRegister('${r.id}', '${code}')">Use for POS</button>
+                                <button class="btn btn-secondary btn-sm" onclick="openEditRegisterModal('${r.id}')">Edit</button>
+                              </div>
                             </td>
                           </tr>
                         `;
@@ -5161,8 +5436,9 @@
                           <span class="detail-value"><code>${lastInvoice}</code></span>
                         </div>
                       </div>
-                      <div class="entity-card-footer">
-                        <button class="btn btn-primary btn-sm" style="width: 100%;" onclick="selectRegister('${r.id}', '${code}')">Use for POS</button>
+                      <div class="entity-card-footer" style="display: flex; gap: 8px;">
+                        <button class="btn btn-primary btn-sm" style="flex: 1;" onclick="selectRegister('${r.id}', '${code}')">Use for POS</button>
+                        <button class="btn btn-secondary btn-sm" style="flex: 1;" onclick="openEditRegisterModal('${r.id}')">Edit</button>
                       </div>
                     </div>
                   `;
@@ -5182,6 +5458,68 @@
       renderView('pos-checkout');
     }
 
+    function openEditRegisterModal(registerId) {
+      const r = (state.cachedRegisters || []).find(x => x.id === registerId);
+      if (!r) {
+        showToast('Register not found', 'error');
+        return;
+      }
+
+      const isActive = r.isActive ?? (r.status === 'ACTIVE');
+
+      openModal({
+        title: `Edit POS Register: ${escapeHtml(r.code)}`,
+        bodyHtml: `
+          <div class="form-group">
+            <label class="form-label">Register Code</label>
+            <input type="text" class="form-input" value="${escapeHtml(r.code)}" disabled style="background: var(--bg-secondary);">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Terminal / Station Name *</label>
+            <input type="text" class="form-input" id="editRegName" value="${escapeHtml(r.name)}" required>
+          </div>
+          <div class="form-group">
+            <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+              <input type="checkbox" id="editRegIsActive" ${isActive ? 'checked' : ''}> Active Register Terminal
+            </label>
+          </div>
+        `,
+        footerHtml: `
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button id="btnSubmitEditRegister" class="btn btn-primary" onclick="submitEditRegister('${registerId}')">Save Changes</button>
+        `
+      });
+    }
+
+    async function submitEditRegister(registerId) {
+      const name = document.getElementById('editRegName').value.trim();
+      const isActive = document.getElementById('editRegIsActive').checked;
+
+      if (!name) return showToast('Terminal Name is required', 'error');
+
+      const submitBtn = document.getElementById('btnSubmitEditRegister');
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Saving...';
+      }
+
+      try {
+        await apiFetch(`/v1/pos/registers/${registerId}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ name, isActive })
+        });
+
+        showToast(`Register "${name}" updated successfully`, 'success');
+        closeModal();
+        renderPosRegistersView();
+      } catch (err) {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Save Changes';
+        }
+      }
+    }
+
     async function renderPosShiftsView() {
       const container = document.getElementById('mainContainer');
       try {
@@ -5191,6 +5529,7 @@
             activeShift = await apiFetch(`/v1/pos/shifts/active?registerId=${encodeURIComponent(state.registerId)}`, { silent: true });
           } catch (e) {}
         }
+        state.activeShift = activeShift;
 
         container.innerHTML = `
           <div class="view-header">
@@ -5198,33 +5537,55 @@
               <h1 class="view-title">Cashier Shifts &amp; Floats</h1>
               <div class="view-subtitle">Cash register float accountability and end-of-shift reconciliation</div>
             </div>
-            ${activeShift ? `
-              <button class="btn btn-danger" onclick="openCloseShiftModal('${activeShift.id}')">Close Active Shift</button>
-            ` : `
-              <button class="btn btn-primary" onclick="openShiftModal()">+ Open Shift</button>
-            `}
+            <div style="display: flex; gap: 8px;">
+              ${activeShift ? `
+                <button class="btn btn-secondary" onclick="openCashAdjustmentModal('${activeShift.id}')">+ Cash Adjustment</button>
+                <button class="btn btn-danger" onclick="openCloseShiftModal('${activeShift.id}')">Close Active Shift</button>
+              ` : `
+                <button class="btn btn-primary" onclick="openShiftModal()">+ Open Shift</button>
+              `}
+            </div>
           </div>
 
           <div class="card">
-            <div class="card-title">Active Shift Overview</div>
+            <div class="card-title">Active Shift Overview &amp; Reconciliation</div>
             ${activeShift ? `
-              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px;">
-                <div>
-                  <div class="kpi-label">Status</div>
-                  <div style="font-weight: 700; color: var(--status-success); margin-top: 4px;">OPEN</div>
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 20px;">
+                <div style="padding: 12px; background: var(--bg-primary); border-radius: 8px; border: 1px solid var(--border-color);">
+                  <div class="kpi-label">Shift Status</div>
+                  <div style="font-weight: 700; color: var(--status-success); margin-top: 4px; font-size: 16px;">OPEN</div>
                 </div>
-                <div>
+                <div style="padding: 12px; background: var(--bg-primary); border-radius: 8px; border: 1px solid var(--border-color);">
                   <div class="kpi-label">Opened At</div>
-                  <div style="font-weight: 600; margin-top: 4px;">${new Date(activeShift.openedAt).toLocaleTimeString()}</div>
+                  <div style="font-weight: 600; margin-top: 4px; font-size: 15px;">${new Date(activeShift.openedAt).toLocaleTimeString()}</div>
                 </div>
-                <div>
+                <div style="padding: 12px; background: var(--bg-primary); border-radius: 8px; border: 1px solid var(--border-color);">
                   <div class="kpi-label">Opening Float</div>
-                  <div style="font-weight: 700; color: var(--accent-primary); margin-top: 4px;">${formatTenantMoney(activeShift.openingCashFloat)}</div>
+                  <div style="font-weight: 700; color: var(--accent-primary); margin-top: 4px; font-size: 16px;">${formatTenantMoney(activeShift.openingCashFloat)}</div>
                 </div>
-                <div>
-                  <div class="kpi-label">Expected Drawer Cash</div>
-                  <div style="font-weight: 700; color: var(--text-primary); margin-top: 4px;">${formatTenantMoney(activeShift.expectedClosingCash)}</div>
+                <div style="padding: 12px; background: var(--bg-primary); border-radius: 8px; border: 1px solid var(--border-color);">
+                  <div class="kpi-label">Cash Sales (+)</div>
+                  <div style="font-weight: 700; color: var(--status-success); margin-top: 4px; font-size: 16px;">+${formatTenantMoney(activeShift.cashSales || '0.0000')}</div>
                 </div>
+                <div style="padding: 12px; background: var(--bg-primary); border-radius: 8px; border: 1px solid var(--border-color);">
+                  <div class="kpi-label">Cash In (+)</div>
+                  <div style="font-weight: 700; color: var(--status-success); margin-top: 4px; font-size: 16px;">+${formatTenantMoney(activeShift.cashIn || '0.0000')}</div>
+                </div>
+                <div style="padding: 12px; background: var(--bg-primary); border-radius: 8px; border: 1px solid var(--border-color);">
+                  <div class="kpi-label">Cash Out (-)</div>
+                  <div style="font-weight: 700; color: var(--status-danger); margin-top: 4px; font-size: 16px;">-${formatTenantMoney(activeShift.cashOut || '0.0000')}</div>
+                </div>
+                <div style="padding: 12px; background: var(--bg-primary); border-radius: 8px; border: 1px solid var(--border-color);">
+                  <div class="kpi-label">Cash Refunds (-)</div>
+                  <div style="font-weight: 700; color: var(--status-danger); margin-top: 4px; font-size: 16px;">-${formatTenantMoney(activeShift.cashRefunds || '0.0000')}</div>
+                </div>
+                <div style="padding: 12px; background: var(--bg-primary); border-radius: 8px; border: 2px solid var(--accent-primary);">
+                  <div class="kpi-label" style="font-weight: 700; color: var(--accent-primary);">Expected Drawer Cash</div>
+                  <div style="font-weight: 800; color: var(--text-primary); margin-top: 4px; font-size: 18px;">${formatTenantMoney(activeShift.expectedClosingCash)}</div>
+                </div>
+              </div>
+              <div style="font-size: 12px; color: var(--text-secondary); background: var(--bg-secondary); padding: 10px 14px; border-radius: 6px;">
+                <strong>Reconciliation Formula:</strong> Expected Drawer Cash = Opening Float (${formatTenantMoney(activeShift.openingCashFloat)}) + Cash Sales (${formatTenantMoney(activeShift.cashSales || '0.0000')}) + Cash In (${formatTenantMoney(activeShift.cashIn || '0.0000')}) - Cash Out (${formatTenantMoney(activeShift.cashOut || '0.0000')}) - Cash Refunds (${formatTenantMoney(activeShift.cashRefunds || '0.0000')})
               </div>
             ` : `
               <div class="empty-state">
@@ -5237,6 +5598,75 @@
         `;
       } catch (err) {
         container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load shifts: ${err.message}</div>`;
+      }
+    }
+
+    function openCashAdjustmentModal(shiftId) {
+      openModal({
+        title: 'Record Shift Cash Adjustment',
+        bodyHtml: `
+          <div class="form-group">
+            <label class="form-label">Adjustment Type *</label>
+            <select class="form-select" id="adjTypeSelect">
+              <option value="CASH_IN">Cash In (Float Top-up / Paid In)</option>
+              <option value="CASH_OUT">Cash Out (Safe Drop / Petty Cash Expense)</option>
+              <option value="CASH_REFUND">Cash Refund (Manual Cash Return)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Amount (${escapeHtml(getTenantCurrency())}) *</label>
+            <input type="number" step="${getCurrencyInputStep()}" min="0.01" class="form-input" id="adjAmountInput" placeholder="0.00" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Reason *</label>
+            <input type="text" class="form-input" id="adjReasonInput" placeholder="e.g. Mid-day bank drop, petty cash for office supplies" required>
+          </div>
+        `,
+        footerHtml: `
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button id="btnSubmitAdjustment" class="btn btn-primary" onclick="submitCashAdjustment('${shiftId}')">Record Adjustment</button>
+        `
+      });
+    }
+
+    async function submitCashAdjustment(shiftId) {
+      const type = document.getElementById('adjTypeSelect').value;
+      const amountVal = parseFloat(document.getElementById('adjAmountInput').value || '0');
+      const reason = document.getElementById('adjReasonInput').value.trim();
+
+      if (!amountVal || amountVal <= 0) {
+        showToast('Please enter a valid positive adjustment amount', 'error');
+        return;
+      }
+      if (!reason || reason.length < 3) {
+        showToast('Please enter a reason for this cash adjustment (min 3 chars)', 'error');
+        return;
+      }
+
+      const submitBtn = document.getElementById('btnSubmitAdjustment');
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Saving...';
+      }
+
+      try {
+        await apiFetch(`/v1/pos/shifts/${shiftId}/adjustments`, {
+          method: 'POST',
+          body: JSON.stringify({
+            type,
+            amount: amountVal.toFixed(4),
+            reason
+          })
+        });
+
+        showToast(`Cash adjustment (${type}) of ${formatTenantMoney(amountVal)} recorded`, 'success');
+        closeModal();
+        renderPosShiftsView();
+      } catch (err) {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Record Adjustment';
+        }
       }
     }
 
@@ -5280,12 +5710,22 @@
     }
 
     function openCloseShiftModal(shiftId) {
+      const expectedCash = state.activeShift ? parseFloat(state.activeShift.expectedClosingCash || '0') : 0;
+      const expectedFormatted = formatTenantMoney(expectedCash);
+
       openModal({
         title: 'Close Cashier Shift &amp; Reconcile Cash',
         bodyHtml: `
+          <div style="background: var(--bg-secondary); padding: 12px 16px; border-radius: 8px; margin-bottom: 16px;">
+            <div style="font-size: 12px; color: var(--text-secondary); text-transform: uppercase; font-weight: 600;">System Expected Drawer Cash</div>
+            <div style="font-size: 20px; font-weight: 800; color: var(--text-primary); margin-top: 4px;">${expectedFormatted}</div>
+          </div>
           <div class="form-group">
             <label class="form-label">Counted Drawer Cash (${escapeHtml(getTenantCurrency())}) *</label>
-            <input type="number" step="${getCurrencyInputStep()}" class="form-input" id="closeCountedInput" placeholder="Enter counted cash in drawer..." required>
+            <input type="number" step="${getCurrencyInputStep()}" class="form-input" id="closeCountedInput" placeholder="Enter counted cash in drawer..." required oninput="updateCloseVariancePreview(${expectedCash})">
+          </div>
+          <div id="closeVarianceBox" style="display: none; padding: 10px 14px; border-radius: 6px; margin-bottom: 16px; font-size: 13px; font-weight: 600;">
+            <span id="closeVarianceLabel">Cash Variance:</span> <span id="closeVarianceValue">0.00</span>
           </div>
           <div class="form-group">
             <label class="form-label">Closing Notes</label>
@@ -5294,14 +5734,57 @@
         `,
         footerHtml: `
           <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-          <button class="btn btn-danger" onclick="submitCloseShift('${shiftId}')">Close &amp; Finalize Shift</button>
+          <button id="btnSubmitCloseShift" class="btn btn-danger" onclick="submitCloseShift('${shiftId}')">Close &amp; Finalize Shift</button>
         `
       });
     }
 
+    function updateCloseVariancePreview(expectedCash) {
+      const inputEl = document.getElementById('closeCountedInput');
+      const box = document.getElementById('closeVarianceBox');
+      const valEl = document.getElementById('closeVarianceValue');
+      const lblEl = document.getElementById('closeVarianceLabel');
+      if (!inputEl || !box || !valEl) return;
+
+      const rawVal = inputEl.value;
+      if (rawVal === '') {
+        box.style.display = 'none';
+        return;
+      }
+      const counted = parseFloat(rawVal || '0');
+      const variance = counted - expectedCash;
+      box.style.display = 'block';
+
+      if (Math.abs(variance) < 0.005) {
+        box.style.background = 'rgba(16, 185, 129, 0.1)';
+        box.style.border = '1px solid var(--status-success)';
+        box.style.color = 'var(--status-success)';
+        lblEl.textContent = 'Shift Balanced:';
+        valEl.textContent = formatTenantMoney(0);
+      } else if (variance < 0) {
+        box.style.background = 'rgba(239, 68, 68, 0.1)';
+        box.style.border = '1px solid var(--status-danger)';
+        box.style.color = 'var(--status-danger)';
+        lblEl.textContent = 'Cash Shortage:';
+        valEl.textContent = formatTenantMoney(variance);
+      } else {
+        box.style.background = 'rgba(59, 130, 246, 0.1)';
+        box.style.border = '1px solid var(--accent-primary)';
+        box.style.color = 'var(--accent-primary)';
+        lblEl.textContent = 'Cash Overage:';
+        valEl.textContent = `+${formatTenantMoney(variance)}`;
+      }
+    }
+
     async function submitCloseShift(shiftId) {
-      const counted = parseFloat(document.getElementById('closeCountedInput').value || '0').toFixed(4);
-      const notes = document.getElementById('closeShiftNotes').value.trim() || null;
+      const counted = parseFloat(document.getElementById('closeCountedInput')?.value || '0').toFixed(4);
+      const notes = document.getElementById('closeShiftNotes')?.value.trim() || null;
+      const submitBtn = document.getElementById('btnSubmitCloseShift');
+
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Closing Shift...';
+      }
 
       try {
         const closed = await apiFetch(`/v1/pos/shifts/${shiftId}/close`, {
@@ -5317,7 +5800,12 @@
         state.activeShift = null;
         closeModal();
         renderView('pos-shifts');
-      } catch (err) {}
+      } catch (err) {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Close & Finalize Shift';
+        }
+      }
     }
 
     // =========================================================================

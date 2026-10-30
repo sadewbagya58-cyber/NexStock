@@ -581,3 +581,82 @@ export async function createPosRegister(
     isActive: true,
   };
 }
+
+export async function updateWarehouse(
+  trx: TenantTransactionContext,
+  warehouseId: string,
+  input: {
+    readonly name?: string;
+    readonly isActive?: boolean;
+  },
+): Promise<WarehouseDto> {
+  const existing = await trx.db
+    .selectFrom('warehouses')
+    .selectAll()
+    .where('tenant_id', '=', trx.tenantId)
+    .where('id', '=', warehouseId)
+    .executeTakeFirst();
+
+  if (!existing) {
+    throw new AppError({
+      statusCode: 404,
+      errorCode: 'ERR_NOT_FOUND',
+      title: 'Warehouse Not Found',
+      detail: `Warehouse "${warehouseId}" was not found in tenant "${trx.tenantId}".`,
+    });
+  }
+
+  await assertAuthorized(trx, {
+    permission: 'org:branch:manage',
+    branchId: existing.branch_id ?? undefined,
+    warehouseId: existing.id,
+  });
+
+  await assertSubscriptionEntitlement(trx, { requireWriteAccess: true });
+
+  const nextName = input.name !== undefined ? input.name.trim() : existing.name;
+  if (!nextName) {
+    throw new AppError({
+      statusCode: 400,
+      errorCode: 'ERR_VALIDATION_FAILED',
+      title: 'Invalid Warehouse Name',
+      detail: 'Warehouse name cannot be empty.',
+    });
+  }
+
+  const nextIsActive =
+    input.isActive !== undefined ? input.isActive : existing.is_active;
+
+  await trx.db
+    .updateTable('warehouses')
+    .set({
+      name: nextName,
+      is_active: nextIsActive,
+      updated_at: new Date(),
+    })
+    .where('tenant_id', '=', trx.tenantId)
+    .where('id', '=', warehouseId)
+    .execute();
+
+  await appendAuditLog(trx, {
+    action: 'ORG_WAREHOUSE_UPDATED',
+    resourceType: 'WAREHOUSE',
+    resourceId: warehouseId,
+    metadata: {
+      previousName: existing.name,
+      nextName,
+      previousIsActive: existing.is_active,
+      nextIsActive,
+    },
+  });
+
+  return {
+    id: existing.id,
+    tenantId: existing.tenant_id,
+    branchId: existing.branch_id,
+    code: existing.code,
+    name: nextName,
+    allowNegativeStock: existing.allow_negative_stock,
+    isActive: nextIsActive,
+  };
+}

@@ -494,6 +494,13 @@ export function loadPhase5SubscriptionPlansAndRepairMigrationSql(): string {
   return sqlText;
 }
 
+export function loadPhase5CashShiftReconciliationMigrationSql(): string {
+  const filename = '0010_phase5_cash_shift_reconciliation.sql';
+  const sqlText = readFileSync(resolve(migrationsDir, filename), 'utf-8');
+  assertPostgresMigrationSqlCompatible(sqlText, filename);
+  return sqlText;
+}
+
 export function getOrderedPostgresMigrations(): readonly PostgresMigrationSpec[] {
   return [
     {
@@ -558,6 +565,13 @@ export function getOrderedPostgresMigrations(): readonly PostgresMigrationSpec[]
       name: '0009_phase5_subscription_plans_and_repair',
       filename: '0009_phase5_subscription_plans_and_repair.sql',
       sql: loadPhase5SubscriptionPlansAndRepairMigrationSql(),
+    },
+    {
+      dialect: 'postgres',
+      version: 10,
+      name: '0010_phase5_cash_shift_reconciliation',
+      filename: '0010_phase5_cash_shift_reconciliation.sql',
+      sql: loadPhase5CashShiftReconciliationMigrationSql(),
     },
   ];
 }

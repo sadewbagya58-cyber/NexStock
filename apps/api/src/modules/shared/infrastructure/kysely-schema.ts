@@ -503,6 +503,20 @@ export interface PosShiftsTable {
   metadata_json: Generated<unknown>;
 }
 
+export interface PosCashAdjustmentsTable {
+  id: string;
+  tenant_id: string;
+  branch_id: string;
+  register_id: string;
+  shift_id: string;
+  adjustment_type: 'CASH_IN' | 'CASH_OUT' | 'CASH_REFUND';
+  amount: string;
+  currency_code: string;
+  reason: string;
+  performed_by_user_id: string;
+  created_at: Generated<Date>;
+}
+
 export interface SalesInvoicesTable {
   id: string;
   tenant_id: string;
@@ -735,6 +749,7 @@ export interface NexStockDatabase {
   stock_ledger_entries: StockLedgerEntriesTable;
   inventory_balances: InventoryBalancesTable;
   pos_shifts: PosShiftsTable;
+  pos_cash_adjustments: PosCashAdjustmentsTable;
   sales_invoices: SalesInvoicesTable;
   sales_invoice_lines: SalesInvoiceLinesTable;
   sales_payments: SalesPaymentsTable;

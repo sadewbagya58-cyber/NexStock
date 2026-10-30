@@ -1,6 +1,7 @@
 import {
   type ClosePosShiftRequest,
   type CreatePosSaleRequest,
+  type CreatePosShiftAdjustmentRequest,
   type ListPosRegistersQuery,
   type ListSalesQuery,
   type OpenPosShiftRequest,
@@ -13,6 +14,7 @@ import {
   type SalesSummaryQuery,
   type SalesSummaryResponse,
   type TrackingMode,
+  type UpdatePosRegisterRequest,
   type ValuationMethod,
   type VoidSaleRequest,
 } from '@nexstock/contracts';
@@ -189,6 +191,10 @@ export async function openPosShift(
       shiftRow.opening_cash_float,
       shiftRow.currency_code,
     ).toDecimalString(),
+    cashSales: Money.zero(shiftRow.currency_code).toDecimalString(),
+    cashIn: Money.zero(shiftRow.currency_code).toDecimalString(),
+    cashOut: Money.zero(shiftRow.currency_code).toDecimalString(),
+    cashRefunds: Money.zero(shiftRow.currency_code).toDecimalString(),
     expectedClosingCash: Money.fromDecimalString(
       shiftRow.expected_closing_cash,
       shiftRow.currency_code,
@@ -206,11 +212,137 @@ export async function openPosShift(
         ).toDecimalString()
       : null,
     status: shiftRow.status,
-    openedAt: shiftRow.opened_at.toISOString(),
+    openedAt: (shiftRow.opened_at instanceof Date ? shiftRow.opened_at : new Date(shiftRow.opened_at)).toISOString(),
     closedAt: shiftRow.closed_at
-      ? (shiftRow.closed_at as Date).toISOString()
+      ? (shiftRow.closed_at instanceof Date ? shiftRow.closed_at : new Date(shiftRow.closed_at)).toISOString()
       : null,
     notes: shiftRow.notes,
+  };
+}
+
+// Authoritative Shift Reconciliation (BUG-013)
+export interface ShiftReconciliationResult {
+  readonly openingCashFloat: string;
+  readonly cashSales: string;
+  readonly cashIn: string;
+  readonly cashOut: string;
+  readonly cashRefunds: string;
+  readonly expectedClosingCash: string;
+  readonly countedClosingCash: string | null;
+  readonly cashVariance: string | null;
+}
+
+export async function calculateShiftReconciliation(
+  trx: TenantTransactionContext,
+  shift: {
+    readonly id: string;
+    readonly branch_id: string;
+    readonly register_id: string;
+    readonly currency_code: string;
+    readonly opening_cash_float: string;
+    readonly counted_closing_cash?: string | null;
+    readonly status: string;
+  },
+): Promise<ShiftReconciliationResult> {
+  const currency = shift.currency_code;
+  const openingFloatMoney = Money.fromDecimalString(
+    shift.opening_cash_float,
+    currency,
+  );
+
+  // 1. Authoritative Cash Sales Query:
+  // Must match tenant, branch, register, and shift.
+  // Must strictly exclude VOIDED, DRAFT, CANCELLED sales (status === 'COMPLETED').
+  // Must strictly exclude non-cash payments (payment_method === 'CASH') and non-completed payments.
+  const cashPayments = await trx.db
+    .selectFrom('sales_payments')
+    .innerJoin('sales_invoices', (join) =>
+      join
+        .onRef('sales_payments.tenant_id', '=', 'sales_invoices.tenant_id')
+        .onRef('sales_payments.invoice_id', '=', 'sales_invoices.id'),
+    )
+    .select([
+      'sales_payments.id as payment_id',
+      'sales_payments.amount',
+      'sales_payments.change_amount',
+    ])
+    .where('sales_invoices.tenant_id', '=', trx.tenantId)
+    .where('sales_invoices.branch_id', '=', shift.branch_id)
+    .where('sales_invoices.register_id', '=', shift.register_id)
+    .where('sales_invoices.shift_id', '=', shift.id)
+    .where('sales_invoices.status', '=', 'COMPLETED')
+    .where('sales_payments.payment_method', '=', 'CASH')
+    .where('sales_payments.status', '=', 'COMPLETED')
+    .execute();
+
+  let cashSalesMoney = Money.zero(currency);
+  for (const cp of cashPayments) {
+    cashSalesMoney = cashSalesMoney.add(
+      Money.fromDecimalString(cp.amount, currency),
+    );
+  }
+
+  // 2. Authoritative Cash Adjustments Query (Cash In, Cash Out, Cash Refunds)
+  let cashInMoney = Money.zero(currency);
+  let cashOutMoney = Money.zero(currency);
+  let cashRefundsMoney = Money.zero(currency);
+
+  try {
+    const adjustments = await trx.db
+      .selectFrom('pos_cash_adjustments')
+      .select(['adjustment_type', 'amount'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('branch_id', '=', shift.branch_id)
+      .where('register_id', '=', shift.register_id)
+      .where('shift_id', '=', shift.id)
+      .execute();
+
+    for (const adj of adjustments) {
+      const amt = Money.fromDecimalString(adj.amount, currency);
+      if (adj.adjustment_type === 'CASH_IN') {
+        cashInMoney = cashInMoney.add(amt);
+      } else if (adj.adjustment_type === 'CASH_OUT') {
+        cashOutMoney = cashOutMoney.add(amt);
+      } else if (adj.adjustment_type === 'CASH_REFUND') {
+        cashRefundsMoney = cashRefundsMoney.add(amt);
+      }
+    }
+  } catch {
+    // Gracefully handle if pos_cash_adjustments table is not yet provisioned in target environment
+  }
+
+  // 3. Expected Drawer Cash Formula:
+  // Expected Drawer Cash = Opening Float + Cash Sales + Cash In - Cash Out - Cash Refunds
+  const expectedClosingCashMoney = openingFloatMoney
+    .add(cashSalesMoney)
+    .add(cashInMoney)
+    .subtract(cashOutMoney)
+    .subtract(cashRefundsMoney);
+
+  // 4. Counted Cash & Variance
+  let countedClosingCash: string | null = null;
+  let cashVariance: string | null = null;
+
+  if (shift.counted_closing_cash != null) {
+    const countedMoney = Money.fromDecimalString(
+      shift.counted_closing_cash,
+      currency,
+    );
+    countedClosingCash = countedMoney.toDecimalString();
+    cashVariance = countedMoney
+      .subtract(expectedClosingCashMoney)
+      .toDecimalString();
+  }
+
+  return {
+    openingCashFloat: openingFloatMoney.toDecimalString(),
+    cashSales: cashSalesMoney.toDecimalString(),
+    cashIn: cashInMoney.toDecimalString(),
+    cashOut: cashOutMoney.toDecimalString(),
+    cashRefunds: cashRefundsMoney.toDecimalString(),
+    expectedClosingCash: expectedClosingCashMoney.toDecimalString(),
+    countedClosingCash,
+    cashVariance,
   };
 }
 
@@ -252,40 +384,10 @@ export async function closePosShift(
 
   await assertSubscriptionEntitlement(trx, { requireWriteAccess: true });
 
-  // Compute total cash received during this shift from completed sales
-  const cashPayments = await trx.db
-    .selectFrom('sales_payments')
-    .innerJoin('sales_invoices', (join) =>
-      join
-        .onRef('sales_payments.tenant_id', '=', 'sales_invoices.tenant_id')
-        .onRef('sales_payments.invoice_id', '=', 'sales_invoices.id'),
-    )
-    .select(['sales_payments.amount', 'sales_payments.change_amount'])
-    .where('sales_invoices.tenant_id', '=', trx.tenantId)
-    .where('sales_invoices.shift_id', '=', shiftId)
-    .where('sales_invoices.status', '=', 'COMPLETED')
-    .where('sales_payments.payment_method', '=', 'CASH')
-    .where('sales_payments.status', '=', 'COMPLETED')
-    .execute();
-
-  let netCashSales = Money.zero(shift.currency_code);
-  for (const cp of cashPayments) {
-    const paidMoney = Money.fromDecimalString(cp.amount, shift.currency_code);
-    netCashSales = netCashSales.add(paidMoney);
-  }
-
-  const openingFloatMoney = Money.fromDecimalString(
-    shift.opening_cash_float,
-    shift.currency_code,
-  );
-  const expectedClosingCashMoney = openingFloatMoney.add(netCashSales);
-  const countedClosingCashMoney = Money.fromDecimalString(
-    input.countedClosingCash,
-    shift.currency_code,
-  );
-  const cashVarianceMoney = countedClosingCashMoney.subtract(
-    expectedClosingCashMoney,
-  );
+  const recon = await calculateShiftReconciliation(trx, {
+    ...shift,
+    counted_closing_cash: input.countedClosingCash,
+  });
 
   const updatedShift = await trx.db
     .updateTable('pos_shifts')
@@ -293,9 +395,9 @@ export async function closePosShift(
       status: 'CLOSED',
       closed_by_user_id: trx.userId,
       closed_at: new Date(),
-      expected_closing_cash: expectedClosingCashMoney.toDecimalString(),
-      counted_closing_cash: countedClosingCashMoney.toDecimalString(),
-      cash_variance: cashVarianceMoney.toDecimalString(),
+      expected_closing_cash: recon.expectedClosingCash,
+      counted_closing_cash: recon.countedClosingCash,
+      cash_variance: recon.cashVariance,
       notes: input.notes?.trim() ?? shift.notes,
     })
     .where('tenant_id', '=', trx.tenantId)
@@ -308,9 +410,9 @@ export async function closePosShift(
     resourceType: 'pos_shifts',
     resourceId: shiftId,
     metadata: {
-      expectedClosingCash: expectedClosingCashMoney.toDecimalString(),
-      countedClosingCash: countedClosingCashMoney.toDecimalString(),
-      variance: cashVarianceMoney.toDecimalString(),
+      expectedClosingCash: recon.expectedClosingCash,
+      countedClosingCash: recon.countedClosingCash,
+      variance: recon.cashVariance,
     },
   });
 
@@ -321,9 +423,9 @@ export async function closePosShift(
     payload: {
       shiftId,
       registerId: shift.register_id,
-      expectedClosingCash: expectedClosingCashMoney.toDecimalString(),
-      countedClosingCash: countedClosingCashMoney.toDecimalString(),
-      cashVariance: cashVarianceMoney.toDecimalString(),
+      expectedClosingCash: recon.expectedClosingCash,
+      countedClosingCash: recon.countedClosingCash,
+      cashVariance: recon.cashVariance,
     },
   });
 
@@ -334,30 +436,18 @@ export async function closePosShift(
     openedByUserId: updatedShift.opened_by_user_id,
     closedByUserId: updatedShift.closed_by_user_id,
     currencyCode: updatedShift.currency_code,
-    openingCashFloat: Money.fromDecimalString(
-      updatedShift.opening_cash_float,
-      updatedShift.currency_code,
-    ).toDecimalString(),
-    expectedClosingCash: Money.fromDecimalString(
-      updatedShift.expected_closing_cash,
-      updatedShift.currency_code,
-    ).toDecimalString(),
-    countedClosingCash: updatedShift.counted_closing_cash
-      ? Money.fromDecimalString(
-          updatedShift.counted_closing_cash,
-          updatedShift.currency_code,
-        ).toDecimalString()
-      : null,
-    cashVariance: updatedShift.cash_variance
-      ? Money.fromDecimalString(
-          updatedShift.cash_variance,
-          updatedShift.currency_code,
-        ).toDecimalString()
-      : null,
+    openingCashFloat: recon.openingCashFloat,
+    cashSales: recon.cashSales,
+    cashIn: recon.cashIn,
+    cashOut: recon.cashOut,
+    cashRefunds: recon.cashRefunds,
+    expectedClosingCash: recon.expectedClosingCash,
+    countedClosingCash: recon.countedClosingCash,
+    cashVariance: recon.cashVariance,
     status: updatedShift.status,
-    openedAt: updatedShift.opened_at.toISOString(),
+    openedAt: (updatedShift.opened_at instanceof Date ? updatedShift.opened_at : new Date(updatedShift.opened_at)).toISOString(),
     closedAt: updatedShift.closed_at
-      ? (updatedShift.closed_at as Date).toISOString()
+      ? (updatedShift.closed_at instanceof Date ? updatedShift.closed_at : new Date(updatedShift.closed_at)).toISOString()
       : null,
     notes: updatedShift.notes,
   };
@@ -401,6 +491,8 @@ export async function getActivePosShift(
     return null;
   }
 
+  const recon = await calculateShiftReconciliation(trx, shiftRow);
+
   return {
     id: shiftRow.id,
     branchId: shiftRow.branch_id,
@@ -408,32 +500,202 @@ export async function getActivePosShift(
     openedByUserId: shiftRow.opened_by_user_id,
     closedByUserId: shiftRow.closed_by_user_id,
     currencyCode: shiftRow.currency_code,
-    openingCashFloat: Money.fromDecimalString(
-      shiftRow.opening_cash_float,
-      shiftRow.currency_code,
-    ).toDecimalString(),
-    expectedClosingCash: Money.fromDecimalString(
-      shiftRow.expected_closing_cash,
-      shiftRow.currency_code,
-    ).toDecimalString(),
-    countedClosingCash: shiftRow.counted_closing_cash
-      ? Money.fromDecimalString(
-          shiftRow.counted_closing_cash,
-          shiftRow.currency_code,
-        ).toDecimalString()
-      : null,
-    cashVariance: shiftRow.cash_variance
-      ? Money.fromDecimalString(
-          shiftRow.cash_variance,
-          shiftRow.currency_code,
-        ).toDecimalString()
-      : null,
+    openingCashFloat: recon.openingCashFloat,
+    cashSales: recon.cashSales,
+    cashIn: recon.cashIn,
+    cashOut: recon.cashOut,
+    cashRefunds: recon.cashRefunds,
+    expectedClosingCash: recon.expectedClosingCash,
+    countedClosingCash: recon.countedClosingCash,
+    cashVariance: recon.cashVariance,
     status: shiftRow.status,
-    openedAt: shiftRow.opened_at.toISOString(),
+    openedAt: (shiftRow.opened_at instanceof Date ? shiftRow.opened_at : new Date(shiftRow.opened_at)).toISOString(),
     closedAt: shiftRow.closed_at
-      ? (shiftRow.closed_at as Date).toISOString()
+      ? (shiftRow.closed_at instanceof Date ? shiftRow.closed_at : new Date(shiftRow.closed_at)).toISOString()
       : null,
     notes: shiftRow.notes,
+  };
+}
+
+export async function createPosShiftAdjustment(
+  trx: TenantTransactionContext,
+  shiftId: string,
+  input: CreatePosShiftAdjustmentRequest,
+): Promise<PosShiftResponse> {
+  const shift = await trx.db
+    .selectFrom('pos_shifts')
+    .selectAll()
+    .where('tenant_id', '=', trx.tenantId)
+    .where('id', '=', shiftId)
+    .forUpdate()
+    .executeTakeFirst();
+
+  if (!shift) {
+    throw new AppError({
+      statusCode: 404,
+      errorCode: 'POS_SHIFT_NOT_FOUND',
+      title: 'Shift Not Found',
+      detail: `POS Shift "${shiftId}" was not found.`,
+    });
+  }
+
+  if (shift.status !== 'OPEN') {
+    throw new AppError({
+      statusCode: 409,
+      errorCode: 'POS_SHIFT_NOT_OPEN',
+      title: 'Shift Not Open',
+      detail: `Cannot add cash adjustment to closed shift "${shiftId}".`,
+    });
+  }
+
+  await assertAuthorized(trx, {
+    permission: 'pos:register:read',
+    branchId: shift.branch_id,
+  });
+
+  await assertSubscriptionEntitlement(trx, { requireWriteAccess: true });
+
+  const amountMoney = Money.fromDecimalString(
+    input.amount,
+    shift.currency_code,
+  );
+  if (!amountMoney.isPositive()) {
+    throw new AppError({
+      statusCode: 400,
+      errorCode: 'ERR_VALIDATION_FAILED',
+      title: 'Invalid Adjustment Amount',
+      detail: 'Cash adjustment amount must be strictly positive.',
+    });
+  }
+
+  const adjId = generateUuidV7();
+  await trx.db
+    .insertInto('pos_cash_adjustments')
+    .values({
+      id: adjId,
+      tenant_id: trx.tenantId,
+      branch_id: shift.branch_id,
+      register_id: shift.register_id,
+      shift_id: shift.id,
+      adjustment_type: input.type,
+      amount: amountMoney.toDecimalString(),
+      currency_code: shift.currency_code,
+      reason: input.reason.trim(),
+      performed_by_user_id: trx.userId,
+    })
+    .execute();
+
+  await appendAuditLog(trx, {
+    action: 'pos:shift:adjustment',
+    resourceType: 'pos_cash_adjustments',
+    resourceId: adjId,
+    metadata: {
+      shiftId: shift.id,
+      registerId: shift.register_id,
+      type: input.type,
+      amount: amountMoney.toDecimalString(),
+      reason: input.reason.trim(),
+    },
+  });
+
+  const recon = await calculateShiftReconciliation(trx, shift);
+
+  return {
+    id: shift.id,
+    branchId: shift.branch_id,
+    registerId: shift.register_id,
+    openedByUserId: shift.opened_by_user_id,
+    closedByUserId: shift.closed_by_user_id,
+    currencyCode: shift.currency_code,
+    openingCashFloat: recon.openingCashFloat,
+    cashSales: recon.cashSales,
+    cashIn: recon.cashIn,
+    cashOut: recon.cashOut,
+    cashRefunds: recon.cashRefunds,
+    expectedClosingCash: recon.expectedClosingCash,
+    countedClosingCash: recon.countedClosingCash,
+    cashVariance: recon.cashVariance,
+    status: shift.status,
+    openedAt: (shift.opened_at instanceof Date ? shift.opened_at : new Date(shift.opened_at)).toISOString(),
+    closedAt: shift.closed_at
+      ? (shift.closed_at instanceof Date ? shift.closed_at : new Date(shift.closed_at)).toISOString()
+      : null,
+    notes: shift.notes,
+  };
+}
+
+export async function updatePosRegister(
+  trx: TenantTransactionContext,
+  registerId: string,
+  input: UpdatePosRegisterRequest,
+): Promise<PosRegisterSummaryResponse> {
+  const existing = await trx.db
+    .selectFrom('pos_registers')
+    .selectAll()
+    .where('tenant_id', '=', trx.tenantId)
+    .where('id', '=', registerId)
+    .executeTakeFirst();
+
+  if (!existing) {
+    throw new AppError({
+      statusCode: 404,
+      errorCode: 'POS_REGISTER_NOT_FOUND',
+      title: 'POS Register Not Found',
+      detail: `POS Register "${registerId}" was not found.`,
+    });
+  }
+
+  await assertAuthorized(trx, {
+    permission: 'pos:register:read',
+    branchId: existing.branch_id,
+    warehouseId: existing.warehouse_id,
+  });
+
+  await assertSubscriptionEntitlement(trx, { requireWriteAccess: true });
+
+  const nextName = input.name !== undefined ? input.name.trim() : existing.name;
+  if (!nextName) {
+    throw new AppError({
+      statusCode: 400,
+      errorCode: 'ERR_VALIDATION_FAILED',
+      title: 'Invalid Register Name',
+      detail: 'Register name cannot be empty.',
+    });
+  }
+
+  const nextIsActive =
+    input.isActive !== undefined ? input.isActive : existing.is_active;
+
+  const updated = await trx.db
+    .updateTable('pos_registers')
+    .set({
+      name: nextName,
+      is_active: nextIsActive,
+    })
+    .where('tenant_id', '=', trx.tenantId)
+    .where('id', '=', registerId)
+    .returningAll()
+    .executeTakeFirstOrThrow();
+
+  await appendAuditLog(trx, {
+    action: 'pos:register:update',
+    resourceType: 'pos_registers',
+    resourceId: registerId,
+    metadata: {
+      previousName: existing.name,
+      nextName: updated.name,
+      previousIsActive: existing.is_active,
+      nextIsActive: updated.is_active,
+    },
+  });
+
+  return {
+    id: updated.id,
+    branchId: updated.branch_id,
+    warehouseId: updated.warehouse_id,
+    code: updated.code,
+    name: updated.name,
+    isActive: updated.is_active,
   };
 }
 
@@ -1065,6 +1327,20 @@ export async function checkoutSale(
   }
 
   // 6. INSERT SALE HEADER
+  let assignedShiftId: string | null = input.shiftId ?? null;
+  if (!assignedShiftId) {
+    const activeShiftRow = await trx.db
+      .selectFrom('pos_shifts')
+      .select(['id'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('register_id', '=', register.id)
+      .where('status', '=', 'OPEN')
+      .executeTakeFirst();
+    if (activeShiftRow) {
+      assignedShiftId = activeShiftRow.id;
+    }
+  }
+
   const invoiceRow = await trx.db
     .insertInto('sales_invoices')
     .values({
@@ -1073,7 +1349,7 @@ export async function checkoutSale(
       branch_id: register.branch_id,
       warehouse_id: register.warehouse_id,
       register_id: register.id,
-      shift_id: input.shiftId ?? null,
+      shift_id: assignedShiftId,
       customer_id: null,
       cashier_user_id: trx.userId,
       invoice_number: invoiceNumber,

@@ -1933,5 +1933,263 @@ describe('@nexstock/api — Phase 3: POS, Sales, Checkout, Payments & Billing', 
       expect(rangeSummaryRes.statusCode).toBe(200);
       expect(rangeSummaryRes.json().totalSalesCount).toBe(summary.totalSalesCount);
     });
+
+    it('BUG-013 & BUG-014: verifies live shift drawer reconciliation with adjustments and safe entity updates', async () => {
+      // Setup: Create a test product with stock for Register 2 testing
+      const reg2ProdRes = await app.inject({
+        method: 'POST',
+        url: '/v1/products',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+          'idempotency-key': generateUuidV7(),
+        },
+        payload: {
+          sku: `R2PROD-${generateUuidV7().slice(0, 6).toUpperCase()}`,
+          name: 'Register 2 Recon Test Product',
+          baseUom: 'PCS',
+          purchaseCost: '1000.0000',
+          sellingPrice: '2000.0000',
+          trackInventory: true,
+        },
+      });
+      expect(reg2ProdRes.statusCode).toBe(201);
+      const reg2ProdId = reg2ProdRes.json().id;
+
+      // Restock warehouse for this branch
+      await app.inject({
+        method: 'POST',
+        url: '/v1/inventory/movements',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+          'idempotency-key': generateUuidV7(),
+        },
+        payload: {
+          branchId: alphaBranch2Id,
+          warehouseId: alphaBranch2WarehouseId,
+          productId: reg2ProdId,
+          movementType: 'STOCK_IN',
+          quantity: '50.000000',
+          unitCost: '1000.0000',
+          reason: 'Stock for Register 2 Reconciliation Test',
+        },
+      });
+
+      // 1. Open shift on Register 2 with opening float 2,500.0000
+      const openShiftRes = await app.inject({
+        method: 'POST',
+        url: '/v1/pos/shifts',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+        payload: {
+          registerId: alphaRegister2Id,
+          openingCashFloat: '2500.0000',
+          notes: 'Shift Reconciliation QA Test',
+        },
+      });
+      expect(openShiftRes.statusCode).toBe(201);
+      const shift = openShiftRes.json();
+      expect(shift.status).toBe('OPEN');
+      expect(shift.openingCashFloat).toBe('2500.0000');
+      expect(shift.expectedClosingCash).toBe('2500.0000');
+      expect(shift.cashSales).toBe('0.0000');
+      expect(shift.cashIn).toBe('0.0000');
+      expect(shift.cashOut).toBe('0.0000');
+      expect(shift.cashRefunds).toBe('0.0000');
+      const shiftId = shift.id;
+
+      // 2. Perform Cash Sale: 2 units * 2000 = 4000.0000 (tax inclusive or 0 tax)
+      const cashSaleRes = await app.inject({
+        method: 'POST',
+        url: '/v1/pos/sales',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+          'idempotency-key': generateUuidV7(),
+        },
+        payload: {
+          registerId: alphaRegister2Id,
+          shiftId,
+          customerName: 'Cash Customer',
+          lines: [{ productId: reg2ProdId, quantity: '2.000000' }],
+          payments: [
+            {
+              paymentMethod: 'CASH',
+              amount: '4000.0000',
+              tenderedAmount: '4000.0000',
+            },
+          ],
+        },
+      });
+      expect(cashSaleRes.statusCode).toBe(201);
+
+      // Verify active shift expected drawer cash increases by exact cash sale amount
+      const activeShift1 = await app.inject({
+        method: 'GET',
+        url: `/v1/pos/shifts/active?registerId=${alphaRegister2Id}`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+      expect(activeShift1.statusCode).toBe(200);
+      expect(activeShift1.json().cashSales).toBe('4000.0000');
+      expect(activeShift1.json().expectedClosingCash).toBe('6500.0000'); // 2500 + 4000
+
+      // 3. Perform CARD Sale: 1 unit * 2000 = 2000.0000
+      const cardSaleRes = await app.inject({
+        method: 'POST',
+        url: '/v1/pos/sales',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+          'idempotency-key': generateUuidV7(),
+        },
+        payload: {
+          registerId: alphaRegister2Id,
+          shiftId,
+          customerName: 'Card Customer',
+          lines: [{ productId: reg2ProdId, quantity: '1.000000' }],
+          payments: [
+            {
+              paymentMethod: 'CARD',
+              amount: '2000.0000',
+              tenderedAmount: '2000.0000',
+            },
+          ],
+        },
+      });
+      expect(cardSaleRes.statusCode).toBe(201);
+
+      // Verify active shift expected drawer cash strictly EXCLUDES card sale
+      const activeShift2 = await app.inject({
+        method: 'GET',
+        url: `/v1/pos/shifts/active?registerId=${alphaRegister2Id}`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+      expect(activeShift2.statusCode).toBe(200);
+      expect(activeShift2.json().cashSales).toBe('4000.0000'); // Still 4000
+      expect(activeShift2.json().expectedClosingCash).toBe('6500.0000'); // Still 6500
+
+      // 4. Test Cash Adjustments: CASH_IN, CASH_OUT, CASH_REFUND
+      // 4a. CASH_IN (+1000.0000)
+      const cashInRes = await app.inject({
+        method: 'POST',
+        url: `/v1/pos/shifts/${shiftId}/adjustments`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+        payload: {
+          type: 'CASH_IN',
+          amount: '1000.0000',
+          reason: 'Mid-day cash top-up',
+        },
+      });
+      expect(cashInRes.statusCode).toBe(201);
+      expect(cashInRes.json().cashIn).toBe('1000.0000');
+      expect(cashInRes.json().expectedClosingCash).toBe('7500.0000'); // 6500 + 1000
+
+      // 4b. CASH_OUT (-500.0000)
+      const cashOutRes = await app.inject({
+        method: 'POST',
+        url: `/v1/pos/shifts/${shiftId}/adjustments`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+        payload: {
+          type: 'CASH_OUT',
+          amount: '500.0000',
+          reason: 'Bank safe deposit drop',
+        },
+      });
+      expect(cashOutRes.statusCode).toBe(201);
+      expect(cashOutRes.json().cashOut).toBe('500.0000');
+      expect(cashOutRes.json().expectedClosingCash).toBe('7000.0000'); // 7500 - 500
+
+      // 4c. CASH_REFUND (-200.0000)
+      const cashRefundRes = await app.inject({
+        method: 'POST',
+        url: `/v1/pos/shifts/${shiftId}/adjustments`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+        payload: {
+          type: 'CASH_REFUND',
+          amount: '200.0000',
+          reason: 'Manual cash refund for damaged item',
+        },
+      });
+      expect(cashRefundRes.statusCode).toBe(201);
+      expect(cashRefundRes.json().cashRefunds).toBe('200.0000');
+      expect(cashRefundRes.json().expectedClosingCash).toBe('6800.0000'); // 7000 - 200
+
+      // 5. Close shift with counted cash = 6800.0000 (perfect balance)
+      const closeShiftRes = await app.inject({
+        method: 'POST',
+        url: `/v1/pos/shifts/${shiftId}/close`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+        payload: {
+          countedClosingCash: '6800.0000',
+          notes: 'Reconciliation test closed shift',
+        },
+      });
+      expect(closeShiftRes.statusCode).toBe(200);
+      const closed = closeShiftRes.json();
+      expect(closed.status).toBe('CLOSED');
+      expect(closed.openingCashFloat).toBe('2500.0000');
+      expect(closed.cashSales).toBe('4000.0000');
+      expect(closed.cashIn).toBe('1000.0000');
+      expect(closed.cashOut).toBe('500.0000');
+      expect(closed.cashRefunds).toBe('200.0000');
+      expect(closed.expectedClosingCash).toBe('6800.0000');
+      expect(closed.countedClosingCash).toBe('6800.0000');
+      expect(closed.cashVariance).toBe('0.0000');
+
+      // 6. Test BUG-014: PATCH /v1/pos/registers/:id
+      const updateRegRes = await app.inject({
+        method: 'PATCH',
+        url: `/v1/pos/registers/${alphaRegister2Id}`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+        payload: {
+          name: 'Brooklyn Terminal Alpha Renamed',
+          isActive: true,
+        },
+      });
+      expect(updateRegRes.statusCode).toBe(200);
+      expect(updateRegRes.json().name).toBe('Brooklyn Terminal Alpha Renamed');
+      expect(updateRegRes.json().isActive).toBe(true);
+
+      // 7. Test BUG-014: PATCH /v1/org/warehouses/:id
+      const updateWhRes = await app.inject({
+        method: 'PATCH',
+        url: `/v1/org/warehouses/${alphaBranch2WarehouseId}`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+        payload: {
+          name: 'Brooklyn Main Warehouse Renamed',
+          isActive: true,
+        },
+      });
+      expect(updateWhRes.statusCode).toBe(200);
+      expect(updateWhRes.json().name).toBe('Brooklyn Main Warehouse Renamed');
+      expect(updateWhRes.json().isActive).toBe(true);
+    });
   });
 });

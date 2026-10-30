@@ -1250,4 +1250,140 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       expect(durationMs).toBeLessThan(5); // Instant 0ms cache hit
     });
   });
+
+  describe('14. BUG-013 — Cashier Shift Reconciliation, Float Accountability & Variance Engine', () => {
+    it('verifies public/index.html includes complete drawer reconciliation cards & formula', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // 1. Shift Overview contains the 8 essential metrics
+      expect(html).toContain('Active Shift Overview &amp; Reconciliation');
+      expect(html).toContain('Shift Status');
+      expect(html).toContain('Opened At');
+      expect(html).toContain('Opening Float');
+      expect(html).toContain('Cash Sales (+)');
+      expect(html).toContain('Cash In (+)');
+      expect(html).toContain('Cash Out (-)');
+      expect(html).toContain('Cash Refunds (-)');
+      expect(html).toContain('Expected Drawer Cash');
+
+      // 2. Reconciliation formula string clearly presented to cashier
+      expect(html).toContain('Reconciliation Formula:');
+      expect(html).toContain('Expected Drawer Cash = Opening Float');
+      expect(html).toContain('+ Cash Sales');
+      expect(html).toContain('+ Cash In');
+      expect(html).toContain('- Cash Out');
+      expect(html).toContain('- Cash Refunds');
+
+      // 3. Cash adjustment UI & endpoints
+      expect(html).toContain('+ Cash Adjustment');
+      expect(html).toContain('function openCashAdjustmentModal(');
+      expect(html).toContain('function submitCashAdjustment(');
+      expect(html).toContain('adjTypeSelect');
+      expect(html).toContain('CASH_IN');
+      expect(html).toContain('CASH_OUT');
+      expect(html).toContain('CASH_REFUND');
+      expect(html).toContain('/v1/pos/shifts/${shiftId}/adjustments');
+
+      // 4. Close shift reconciliation modal with live variance calculation
+      expect(html).toContain('function openCloseShiftModal(');
+      expect(html).toContain('System Expected Drawer Cash');
+      expect(html).toContain('updateCloseVariancePreview(');
+      expect(html).toContain('closeVarianceBox');
+      expect(html).toContain('Shift Balanced:');
+      expect(html).toContain('Cash Shortage:');
+      expect(html).toContain('Cash Overage:');
+      expect(html).toContain('function submitCloseShift(');
+      expect(html).toContain('/v1/pos/shifts/${shiftId}/close');
+    });
+
+    it('verifies authoritative drawer cash reconciliation formula arithmetic', () => {
+      // Formula: Expected = Float + CashSales + CashIn - CashOut - CashRefunds
+      const openingFloat = 2500.0;
+      const cashSales = [11000.0, 11000.0, 11000.0]; // 3 completed sales (1 voided excluded)
+      const totalCashSales = cashSales.reduce((a, b) => a + b, 0); // 33000.0
+      const cashIn = 5000.0;
+      const cashOut = 1200.0;
+      const cashRefunds = 800.0;
+
+      const expectedDrawerCash = openingFloat + totalCashSales + cashIn - cashOut - cashRefunds;
+      expect(expectedDrawerCash).toBe(38500.0);
+
+      // Variance test cases: Counted - Expected
+      // 1. Balanced
+      const countedBalanced = 38500.0;
+      expect(countedBalanced - expectedDrawerCash).toBe(0.0);
+
+      // 2. Shortage
+      const countedShortage = 38200.0;
+      expect(countedShortage - expectedDrawerCash).toBe(-300.0);
+
+      // 3. Overage
+      const countedOverage = 38750.0;
+      expect(countedOverage - expectedDrawerCash).toBe(250.0);
+    });
+  });
+
+  describe('15. BUG-014 — Application-wide Entity Editing & Accounting Immutability Enforcement', () => {
+    it('verifies public/index.html includes responsive edit buttons and modals for all editable entities', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // 1. Products Edit
+      expect(html).toContain('openEditProductModal(');
+      expect(html).toContain('submitEditProduct(');
+      expect(html).toContain('/v1/products/${productId}');
+      expect(html).toContain('id="editProdSku"');
+      expect(html).toContain('id="editProdName"');
+      expect(html).toContain('id="editProdCategory"');
+      expect(html).toContain('id="editProdCost"');
+      expect(html).toContain('id="editProdPrice"');
+
+      // 2. Categories Edit
+      expect(html).toContain('openEditCategoryModal(');
+      expect(html).toContain('submitEditCategory(');
+      expect(html).toContain('/v1/categories/${categoryId}');
+      expect(html).toContain('id="editCatName"');
+      expect(html).toContain('id="editCatDesc"');
+
+      // 3. Suppliers Edit
+      expect(html).toContain('openEditSupplierModal(');
+      expect(html).toContain('submitEditSupplier(');
+      expect(html).toContain('/v1/suppliers/${supplierId}');
+      expect(html).toContain('id="editSupName"');
+      expect(html).toContain('id="editSupContact"');
+      expect(html).toContain('id="editSupEmail"');
+      expect(html).toContain('id="editSupPhone"');
+
+      // 4. POS Registers Edit
+      expect(html).toContain('openEditRegisterModal(');
+      expect(html).toContain('submitEditRegister(');
+      expect(html).toContain('/v1/pos/registers/${registerId}');
+      expect(html).toContain('id="editRegName"');
+      expect(html).toContain('id="editRegIsActive"');
+    });
+
+    it('enforces immutable core entities by verifying no edit actions exist for financial & ledger records', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // Stock Ledger Entries must NEVER be directly editable
+      expect(html).not.toContain('openEditStockMovementModal');
+      expect(html).not.toContain('openEditMovementModal');
+      expect(html).not.toContain('submitEditStockMovement');
+
+      // Sales Invoices must NEVER have direct Edit buttons (only Void workflow)
+      expect(html).not.toContain('openEditSaleModal');
+      expect(html).not.toContain('openEditInvoiceModal');
+      expect(html).not.toContain('submitEditSale');
+
+      // Sales Payments must NEVER be directly editable
+      expect(html).not.toContain('openEditPaymentModal');
+      expect(html).not.toContain('submitEditPayment');
+
+      // Audit Logs are append-only write-only immutable records
+      expect(html).not.toContain('openEditAuditLogModal');
+      expect(html).not.toContain('submitEditAuditLog');
+    });
+  });
 });

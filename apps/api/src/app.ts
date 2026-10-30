@@ -19,6 +19,7 @@ import {
   CreateStocktakeSessionRequestSchema,
   CreateSupplierRequestSchema,
   CreateWarehouseRequestSchema,
+  CreatePosShiftAdjustmentRequestSchema,
   CurrencyCodeSchema,
   DecimalMoneyStringSchema,
   DecimalQuantityStringSchema,
@@ -80,7 +81,9 @@ import {
   TransitionSerialStatusRequestSchema,
   UpdateCategoryRequestSchema,
   UpdateProductRequestSchema,
+  UpdatePosRegisterRequestSchema,
   UpdateSupplierRequestSchema,
+  UpdateWarehouseRequestSchema,
   UpsertLocalizationSettingsRequestSchema,
   UserMeResponseSchema,
   UuidSchema,
@@ -160,6 +163,7 @@ import {
   onboardBusinessAtomic,
   onboardTenantOrganization,
   updateBranchName,
+  updateWarehouse,
 } from './modules/org/index.js';
 import {
   archiveSupplier,
@@ -172,6 +176,7 @@ import {
 import {
   checkoutSale,
   closePosShift,
+  createPosShiftAdjustment,
   getActivePosShift,
   getReceiptData,
   getSaleById,
@@ -180,6 +185,7 @@ import {
   listSales,
   openPosShift,
   searchPosProducts,
+  updatePosRegister,
   voidSale,
 } from './modules/pos/index.js';
 import {
@@ -1180,6 +1186,40 @@ export async function buildApp(
       );
 
       return reply.status(201).send(warehouse);
+    },
+  );
+
+  // 12b. Update Warehouse (Enforces JWT + Branch Scope + SUB Write Entitlement)
+  app.patch(
+    '/v1/org/warehouses/:warehouseId',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ warehouseId: UuidSchema }),
+        body: UpdateWarehouseRequestSchema,
+        response: {
+          200: WarehouseResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => updateWarehouse(trx, request.params.warehouseId, request.body),
+      );
     },
   );
 
@@ -3031,6 +3071,42 @@ export async function buildApp(
     },
   );
 
+  // 1b. Update POS Register
+  app.patch(
+    '/v1/pos/registers/:registerId',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ registerId: UuidSchema }),
+        body: UpdatePosRegisterRequestSchema,
+        response: {
+          200: PosRegisterSummaryResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      const register = await withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => updatePosRegister(trx, request.params.registerId, request.body),
+      );
+
+      reply.code(200).send(register);
+    },
+  );
+
   // 2. Open Cashier Shift
   app.post(
     '/v1/pos/shifts',
@@ -3147,6 +3223,44 @@ export async function buildApp(
       }
 
       reply.code(200).send(shift);
+    },
+  );
+
+  // 4b. Record Shift Cash Adjustment (Cash In / Cash Out / Cash Refund)
+  app.post(
+    '/v1/pos/shifts/:shiftId/adjustments',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ shiftId: UuidSchema }),
+        body: CreatePosShiftAdjustmentRequestSchema,
+        response: {
+          201: PosShiftResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      const adjustment = await withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          createPosShiftAdjustment(trx, request.params.shiftId, request.body),
+      );
+
+      reply.code(201).send(adjustment);
     },
   );
 

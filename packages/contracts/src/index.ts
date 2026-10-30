@@ -322,6 +322,15 @@ export const WarehouseResponseSchema = Type.Object({
 });
 export type WarehouseResponse = Static<typeof WarehouseResponseSchema>;
 
+export const UpdateWarehouseRequestSchema = Type.Object(
+  {
+    name: Type.Optional(Type.String({ minLength: 1, maxLength: 160 })),
+    isActive: Type.Optional(Type.Boolean()),
+  },
+  { additionalProperties: false },
+);
+export type UpdateWarehouseRequest = Static<typeof UpdateWarehouseRequestSchema>;
+
 export const RecordSubscriptionPaymentRequestSchema = Type.Object(
   {
     currencyCode: CurrencyCodeSchema,
@@ -1011,6 +1020,17 @@ export type PosRegisterSummaryResponse = Static<
   typeof PosRegisterSummaryResponseSchema
 >;
 
+export const UpdatePosRegisterRequestSchema = Type.Object(
+  {
+    name: Type.Optional(Type.String({ minLength: 1, maxLength: 160 })),
+    isActive: Type.Optional(Type.Boolean()),
+  },
+  { additionalProperties: false },
+);
+export type UpdatePosRegisterRequest = Static<
+  typeof UpdatePosRegisterRequestSchema
+>;
+
 export const ListPosRegistersQuerySchema = Type.Object(
   {
     branchId: Type.Optional(UuidSchema),
@@ -1044,6 +1064,39 @@ export type ClosePosShiftRequest = Static<
   typeof ClosePosShiftRequestSchema
 >;
 
+export const CreatePosShiftAdjustmentRequestSchema = Type.Object(
+  {
+    type: Type.Union([
+      Type.Literal('CASH_IN'),
+      Type.Literal('CASH_OUT'),
+      Type.Literal('CASH_REFUND'),
+    ]),
+    amount: DecimalMoneyStringSchema,
+    reason: Type.String({ minLength: 3, maxLength: 500 }),
+  },
+  { additionalProperties: false },
+);
+export type CreatePosShiftAdjustmentRequest = Static<
+  typeof CreatePosShiftAdjustmentRequestSchema
+>;
+
+export const PosShiftAdjustmentResponseSchema = Type.Object({
+  id: UuidSchema,
+  shiftId: UuidSchema,
+  adjustmentType: Type.Union([
+    Type.Literal('CASH_IN'),
+    Type.Literal('CASH_OUT'),
+    Type.Literal('CASH_REFUND'),
+  ]),
+  amount: DecimalMoneyStringSchema,
+  reason: Type.String(),
+  notes: Type.Union([Type.String(), Type.Null()]),
+  createdAt: IsoTimestampSchema,
+});
+export type PosShiftAdjustmentResponse = Static<
+  typeof PosShiftAdjustmentResponseSchema
+>;
+
 export const PosShiftResponseSchema = Type.Object({
   id: UuidSchema,
   branchId: UuidSchema,
@@ -1052,6 +1105,10 @@ export const PosShiftResponseSchema = Type.Object({
   closedByUserId: Type.Union([UuidSchema, Type.Null()]),
   currencyCode: CurrencyCodeSchema,
   openingCashFloat: DecimalMoneyStringSchema,
+  cashSales: Type.Optional(DecimalMoneyStringSchema),
+  cashIn: Type.Optional(DecimalMoneyStringSchema),
+  cashOut: Type.Optional(DecimalMoneyStringSchema),
+  cashRefunds: Type.Optional(DecimalMoneyStringSchema),
   expectedClosingCash: DecimalMoneyStringSchema,
   countedClosingCash: Type.Union([DecimalMoneyStringSchema, Type.Null()]),
   cashVariance: Type.Union([DecimalMoneyStringSchema, Type.Null()]),
