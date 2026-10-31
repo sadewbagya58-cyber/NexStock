@@ -431,19 +431,75 @@ export async function updateProductBarcode(
   }
 
   const now = new Date();
-  let effectiveIsPrimary = input.isPrimary !== undefined ? input.isPrimary : existing.is_primary;
   const nextIsActive = input.isActive !== undefined ? input.isActive : (existing.is_active ?? true);
+  let effectiveIsPrimary = input.isPrimary !== undefined ? input.isPrimary : existing.is_primary;
   const nextType = input.barcodeType ?? input.symbology ?? existing.barcode_type;
   const nextUom = input.uomCode ? input.uomCode.trim().toUpperCase() : existing.uom_code;
 
+  // If deactivating a primary barcode, it cannot remain primary
   if (!nextIsActive && existing.is_primary) {
-    // If deactivating a primary barcode, clear as primary on product
+    effectiveIsPrimary = false;
+  }
+
+  if (effectiveIsPrimary && !nextIsActive) {
+    throw new AppError({
+      statusCode: 400,
+      errorCode: 'CAT_INACTIVE_BARCODE_CANNOT_BE_PRIMARY',
+      title: 'Inactive Barcode Cannot Be Primary',
+      detail: 'An inactive barcode cannot be designated as primary.',
+    });
+  }
+
+  if ((!nextIsActive && existing.is_primary) || (input.isPrimary === false && existing.is_primary)) {
+    // Find other active barcodes for this product
+    const otherActiveBarcodes = await trx.db
+      .selectFrom('product_barcodes')
+      .selectAll()
+      .where('tenant_id', '=', trx.tenantId)
+      .where('product_id', '=', productId)
+      .where('id', '!=', barcodeId)
+      .where('is_active', '=', true)
+      .orderBy('created_at', 'asc')
+      .execute();
+
+    if (otherActiveBarcodes.length === 0) {
+      throw new AppError({
+        statusCode: 409,
+        errorCode: 'CAT_CANNOT_DEACTIVATE_ONLY_ACTIVE_BARCODE',
+        title: 'Cannot Deactivate Only Active Barcode',
+        detail: `Barcode "${existing.barcode}" is the only active barcode for this product. Products with registered barcodes must retain at least one active primary barcode.`,
+      });
+    }
+
+    // Determine replacement barcode (first created active barcode or explicitly requested)
+    let replacement = otherActiveBarcodes[0]!;
+    if (input.promotedBarcodeId) {
+      const specified = otherActiveBarcodes.find((b) => b.id === input.promotedBarcodeId);
+      if (specified) replacement = specified;
+    }
+
+    // Set other barcodes is_primary = false, and set replacement is_primary = true
+    await trx.db
+      .updateTable('product_barcodes')
+      .set({ is_primary: false, updated_at: now })
+      .where('tenant_id', '=', trx.tenantId)
+      .where('product_id', '=', productId)
+      .execute();
+
+    await trx.db
+      .updateTable('product_barcodes')
+      .set({ is_primary: true, updated_at: now })
+      .where('tenant_id', '=', trx.tenantId)
+      .where('id', '=', replacement.id)
+      .execute();
+
     await trx.db
       .updateTable('products')
-      .set({ primary_barcode: null, updated_at: now })
+      .set({ primary_barcode: replacement.barcode, updated_at: now })
       .where('tenant_id', '=', trx.tenantId)
       .where('id', '=', productId)
       .execute();
+
     effectiveIsPrimary = false;
   } else if (effectiveIsPrimary && !existing.is_primary) {
     // Clear is_primary on other barcodes
@@ -458,14 +514,6 @@ export async function updateProductBarcode(
     await trx.db
       .updateTable('products')
       .set({ primary_barcode: existing.barcode, updated_at: now })
-      .where('tenant_id', '=', trx.tenantId)
-      .where('id', '=', productId)
-      .execute();
-  } else if (!effectiveIsPrimary && existing.is_primary) {
-    // Remove as primary on product
-    await trx.db
-      .updateTable('products')
-      .set({ primary_barcode: null, updated_at: now })
       .where('tenant_id', '=', trx.tenantId)
       .where('id', '=', productId)
       .execute();

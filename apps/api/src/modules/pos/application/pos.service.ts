@@ -752,37 +752,35 @@ export async function searchPosProducts(
   // Exact barcode match search takes highest precedence
   if (query.barcode) {
     const trimmedBarcode = query.barcode.trim();
-    const barcodeMatches = await trx.db
-      .selectFrom('product_barcodes')
-      .select(['product_id'])
-      .where('tenant_id', '=', trx.tenantId)
-      .where('barcode', '=', trimmedBarcode)
-      .where('is_active', '=', true)
-      .execute();
-
-    if (barcodeMatches.length > 0) {
-      const productIds = barcodeMatches.map((b) => b.product_id);
-      dbQuery = dbQuery.where('products.id', 'in', productIds);
-    } else {
-      // Check if it's an individual serial number scan
-      const serialMatches = await trx.db
+    const [barcodeMatches, serialMatches] = await Promise.all([
+      trx.db
+        .selectFrom('product_barcodes')
+        .select(['product_id'])
+        .where('tenant_id', '=', trx.tenantId)
+        .where('barcode', '=', trimmedBarcode)
+        .where('is_active', '=', true)
+        .execute(),
+      trx.db
         .selectFrom('inventory_serials')
         .select(['product_id'])
         .where('tenant_id', '=', trx.tenantId)
         .where('serial_number', '=', trimmedBarcode.toUpperCase())
         .where('status', '=', 'IN_STOCK')
-        .execute();
+        .execute(),
+    ]);
 
-      if (serialMatches.length > 0) {
-        dbQuery = dbQuery.where(
-          'products.id',
-          'in',
-          serialMatches.map((s) => s.product_id),
-        );
-      } else {
-        // Also check if scanned code matches products.sku exactly
-        dbQuery = dbQuery.where('products.sku', '=', trimmedBarcode);
-      }
+    if (barcodeMatches.length > 0) {
+      const productIds = barcodeMatches.map((b) => b.product_id);
+      dbQuery = dbQuery.where('products.id', 'in', productIds);
+    } else if (serialMatches.length > 0) {
+      dbQuery = dbQuery.where(
+        'products.id',
+        'in',
+        serialMatches.map((s) => s.product_id),
+      );
+    } else {
+      // Also check if scanned code matches products.sku exactly
+      dbQuery = dbQuery.where('products.sku', '=', trimmedBarcode);
     }
   } else if (query.q) {
     const trimmedQ = query.q.trim();
@@ -1249,6 +1247,71 @@ export async function checkoutSale(
   const totalDiscountMoney = totalLineDiscounts.add(orderDiscountMoney);
   const netSubtotalMoney = subtotalAccumulator.subtract(totalDiscountMoney);
   const grandTotalMoney = netSubtotalMoney.add(totalTaxes);
+
+  // 4b. Pre-validate available stock for all trackable items in the cart (BUG-020)
+  const warehouse = await trx.db
+    .selectFrom('warehouses')
+    .select(['id', 'allow_negative_stock'])
+    .where('id', '=', register.warehouse_id)
+    .executeTakeFirst();
+
+  const allowNegative = Boolean(
+    warehouse?.allow_negative_stock || input.allowNegativeStockOverride,
+  );
+
+  if (!allowNegative) {
+    const requiredQuantitiesByProduct = new Map<
+      string,
+      { qty: Quantity; sku: string; name: string }
+    >();
+    for (const line of processedLines) {
+      if (line.trackInventory) {
+        const existing = requiredQuantitiesByProduct.get(line.productId);
+        if (existing) {
+          existing.qty = existing.qty.add(line.quantity);
+        } else {
+          requiredQuantitiesByProduct.set(line.productId, {
+            qty: line.quantity,
+            sku: line.sku,
+            name: line.productName,
+          });
+        }
+      }
+    }
+
+    for (const [productId, req] of requiredQuantitiesByProduct.entries()) {
+      const balanceRow = await trx.db
+        .selectFrom('inventory_balances')
+        .select(['qty_on_hand', 'qty_reserved'])
+        .where('tenant_id', '=', trx.tenantId)
+        .where('warehouse_id', '=', register.warehouse_id)
+        .where('product_id', '=', productId)
+        .forUpdate()
+        .executeTakeFirst();
+
+      const onHand = balanceRow
+        ? Quantity.fromDecimalString(String(balanceRow.qty_on_hand))
+        : Quantity.zero();
+      const reserved = balanceRow
+        ? Quantity.fromDecimalString(String(balanceRow.qty_reserved))
+        : Quantity.zero();
+      const available = onHand.subtract(reserved);
+
+      if (available.compare(req.qty) < 0) {
+        throw new AppError({
+          statusCode: 409,
+          errorCode: 'INV_INSUFFICIENT_AVAILABLE_STOCK',
+          title: 'Insufficient Available Stock',
+          detail: `Product "${req.name}" (${req.sku}) has only ${available.toDecimalString()} available in warehouse, but ${req.qty.toDecimalString()} was requested in cart.`,
+          extensions: {
+            productId,
+            available: available.toDecimalString(),
+            requested: req.qty.toDecimalString(),
+          },
+        });
+      }
+    }
+  }
 
   // Validate Payments
   if (input.payments.length === 0) {

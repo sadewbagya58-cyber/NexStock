@@ -294,6 +294,25 @@ export function sanitizeApiBaseUrl(
 }
 
 /**
+ * Resolves media URLs (e.g., product images) against the API base URL.
+ * Prevents 404s when loading relative paths like '/v1/media/...' from frontend origin (BUG-019).
+ */
+export function resolveMediaUrl(
+  imageUrl: string | null | undefined,
+  apiBaseUrl: string = DEFAULT_PRODUCTION_API_URL,
+): string | null {
+  if (!imageUrl || typeof imageUrl !== 'string') return null;
+  const trimmed = imageUrl.trim();
+  if (!trimmed) return null;
+  if (/^https?:\/\//i.test(trimmed) || /^data:/i.test(trimmed) || /^blob:/i.test(trimmed)) {
+    return trimmed;
+  }
+  const cleanBase = apiBaseUrl.replace(/\/+$/, '');
+  const cleanPath = trimmed.replace(/^\/+/, '');
+  return `${cleanBase}/${cleanPath}`;
+}
+
+/**
  * Normalizes an API route endpoint to ensure a single leading slash and no double slashes.
  */
 export function normalizeApiEndpoint(endpoint: string): string {

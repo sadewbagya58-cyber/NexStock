@@ -68,6 +68,8 @@ export const ErrorCodeSchema = Type.Union([
   Type.Literal('CAT_SETTINGS_NOT_AVAILABLE'),
   Type.Literal('CAT_INVALID_IMAGE_TYPE'),
   Type.Literal('CAT_IMAGE_TOO_LARGE'),
+  Type.Literal('CAT_CANNOT_DEACTIVATE_ONLY_ACTIVE_BARCODE'),
+  Type.Literal('CAT_INACTIVE_BARCODE_CANNOT_BE_PRIMARY'),
   Type.Literal('PUR_DUPLICATE_SUPPLIER_CODE'),
   Type.Literal('PUR_DUPLICATE_SUPPLIER_TAX_ID'),
   Type.Literal('PUR_DUPLICATE_SUPPLIER_PRODUCT'),
@@ -672,6 +674,7 @@ export const UpdateProductBarcodeRequestSchema = Type.Object(
     uomCode: Type.Optional(Type.String({ minLength: 1, maxLength: 16 })),
     isPrimary: Type.Optional(Type.Boolean()),
     isActive: Type.Optional(Type.Boolean()),
+    promotedBarcodeId: Type.Optional(UuidSchema),
   },
   { additionalProperties: false },
 );
@@ -1333,14 +1336,20 @@ export type CheckoutPaymentInput = Static<
 export const CreatePosSaleRequestSchema = Type.Object(
   {
     registerId: UuidSchema,
-    shiftId: Type.Optional(UuidSchema),
+    shiftId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
     lines: Type.Array(CheckoutCartLineInputSchema, { minItems: 1 }),
     orderDiscountAmount: Type.Optional(DecimalMoneyStringSchema),
     payments: Type.Array(CheckoutPaymentInputSchema, { minItems: 1 }),
-    customerName: Type.Optional(Type.String({ maxLength: 255 })),
-    notes: Type.Optional(Type.String({ maxLength: 500 })),
+    customerName: Type.Optional(
+      Type.Union([Type.String({ maxLength: 255 }), Type.Null()]),
+    ),
+    notes: Type.Optional(
+      Type.Union([Type.String({ maxLength: 500 }), Type.Null()]),
+    ),
     allowNegativeStockOverride: Type.Optional(Type.Boolean()),
-    overrideReason: Type.Optional(Type.String({ minLength: 3, maxLength: 500 })),
+    overrideReason: Type.Optional(
+      Type.Union([Type.String({ minLength: 3, maxLength: 500 }), Type.Null()]),
+    ),
   },
   { additionalProperties: false },
 );

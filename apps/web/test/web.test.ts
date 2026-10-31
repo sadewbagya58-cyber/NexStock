@@ -25,6 +25,7 @@ import {
   ALL_SPA_VIEW_IDS,
   CURRENCY_MINOR_UNITS,
   getCurrencyMinorUnits,
+  resolveMediaUrl,
 } from '../src/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -1566,6 +1567,114 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
 
       // POST body in generateBarcodeForInput
       expect(html).toContain('body: JSON.stringify({ symbology })');
+    });
+  });
+
+  describe('20. Phase 6 Master QA Remediation UI & POS Printing Systems (BUG-019 to BUG-028)', () => {
+    it('BUG-019: resolves product media URLs accurately against API origin', () => {
+      expect(resolveMediaUrl(null)).toBeNull();
+      expect(resolveMediaUrl('')).toBeNull();
+      expect(resolveMediaUrl('   ')).toBeNull();
+      expect(resolveMediaUrl(undefined)).toBeNull();
+
+      // Absolute URLs are preserved unmodified
+      expect(resolveMediaUrl('https://cdn.example.com/images/prod1.jpg')).toBe(
+        'https://cdn.example.com/images/prod1.jpg',
+      );
+      expect(resolveMediaUrl('http://localhost:4000/v1/media/tenant/prod.png')).toBe(
+        'http://localhost:4000/v1/media/tenant/prod.png',
+      );
+      expect(resolveMediaUrl('data:image/png;base64,iVBORw0KGgo=')).toBe(
+        'data:image/png;base64,iVBORw0KGgo=',
+      );
+
+      // Relative paths are prefixed with API base URL
+      expect(
+        resolveMediaUrl('/v1/media/tenant-123/prod-img.jpg', 'https://nexstock-vu5i.onrender.com'),
+      ).toBe('https://nexstock-vu5i.onrender.com/v1/media/tenant-123/prod-img.jpg');
+      expect(
+        resolveMediaUrl('v1/media/tenant-123/prod-img.jpg', 'https://nexstock-vu5i.onrender.com/'),
+      ).toBe('https://nexstock-vu5i.onrender.com/v1/media/tenant-123/prod-img.jpg');
+    });
+
+    it('BUG-019: verifies public/index.html integrates resolveMediaUrl across catalog and POS', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      expect(html).toContain('function resolveMediaUrl(');
+      expect(html).toContain('resolveMediaUrl(p.imageUrl)');
+      expect(html).toContain('state.posProductsMap');
+    });
+
+    it('BUG-020: verifies public/index.html enforces available stock in POS cart & drawer', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // Cart line stock limits
+      expect(html).toContain('Cannot add more of');
+      expect(html).toContain('stock limit reached');
+      expect(html).toContain('is out of stock (0 available)');
+      expect(html).toContain('Cannot increase quantity: Only');
+      expect(html).toContain('Quantity exceeds available stock');
+
+      // Drawer pre-checkout stock guard
+      expect(html).toContain('Cannot proceed to checkout:');
+      expect(html).toContain('Checkout blocked:');
+    });
+
+    it('BUG-021: verifies in-memory fast-path barcode indexing in executeBarcodeScan', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      expect(html).toContain('state.posProductsMap.has(lowerCode)');
+      expect(html).toContain('FAST-PATH: Instant in-memory index lookup');
+    });
+
+    it('BUG-022 & BUG-028: verifies iframe-isolated printing engine with thermal & A4 support', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // Isolated iframe printer
+      expect(html).toContain('function printHtmlDocument(printableHtml, pageStyles');
+      expect(html).toContain('nexstockPrintFrame');
+
+      // Barcode label printing
+      expect(html).toContain('function printBarcodeLabels(productId)');
+      expect(html).toContain('THERMAL_50X30');
+      expect(html).toContain('THERMAL_40X28');
+
+      // Receipt printing
+      expect(html).toContain('function printReceiptInvoice(saleId)');
+      expect(html).toContain('THERMAL_80');
+      expect(html).toContain('THERMAL_58');
+      expect(html).toContain('receiptPrintFormat');
+    });
+
+    it('BUG-023 & BUG-024: verifies barcode management responsiveness, wider modal and in-flight guards', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      expect(html).toContain("maxWidth: '740px'");
+      expect(html).toContain('activeBarcodeOps');
+      expect(html).toContain('setBarcodePrimary');
+      expect(html).toContain('toggleBarcodeActive');
+      expect(html).toContain('deleteBarcode');
+    });
+
+    it('BUG-026: verifies primary barcode invariant warnings in UI', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      expect(html).toContain('Deactivating this primary barcode will automatically promote');
+    });
+
+    it('BUG-027: verifies cash tendered validation and null customerName in POS checkout', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      expect(html).toContain('Tendered cash');
+      expect(html).toContain('cannot be less than total amount due');
+      expect(html).toContain('const customerName = rawCustomerName ? rawCustomerName : null;');
     });
   });
 });

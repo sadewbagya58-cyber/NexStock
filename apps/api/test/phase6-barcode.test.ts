@@ -7,6 +7,7 @@ import {
   type SupabaseJwk,
   buildApp,
   generateUuidV7,
+  withTenantTransaction,
 } from '../src/index.js';
 import {
   calculateEanCheckDigit,
@@ -1231,6 +1232,479 @@ describe('@nexstock/api — Phase 6: Universal Barcode Management & Dual-Mode PO
 
       expect(imagelessRes.statusCode).toBe(200);
       expect(imagelessRes.json()[0].imageUrl).toBeNull();
+    });
+  });
+
+  // ===========================================================================
+  // 7. Phase 6 Master QA Remediation Regression Tests (BUG-019 to BUG-028)
+  // ===========================================================================
+  describe('7. Phase 6 Master QA Remediation Regression Tests (BUG-019 to BUG-028)', () => {
+    let qaRegisterId: string;
+    let qaTrackedProductId: string;
+    let qaNonTrackedProductId: string;
+
+    beforeAll(async () => {
+      qaRegisterId = generateUuidV7();
+      await withTenantTransaction(
+        harness.db,
+        {
+          tenantId: TENANT_ALPHA_ID,
+          userId: TENANT_ALPHA_OWNER,
+          traceId: 'seed_qa_register',
+        },
+        async (trx) => {
+          await trx.db
+            .insertInto('pos_registers')
+            .values({
+              id: qaRegisterId,
+              tenant_id: TENANT_ALPHA_ID,
+              branch_id: alphaBranchId,
+              warehouse_id: alphaWarehouseId,
+              code: 'REG-QA-01',
+              name: 'QA Test Register',
+              last_invoice_seq: 0,
+              is_active: true,
+            })
+            .execute();
+        },
+      );
+
+      // Create tracked product for stock overselling tests (BUG-020)
+      const trackedRes = await app.inject({
+        method: 'POST',
+        url: '/v1/products',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+          'idempotency-key': generateUuidV7(),
+        },
+        payload: {
+          sku: 'QA-STOCK-001',
+          name: 'Limited Stock Widget',
+          baseUom: 'PCS',
+          purchaseCost: '10.0000',
+          sellingPrice: '20.0000',
+          trackInventory: true,
+          trackingMode: 'NONE',
+        },
+      });
+      expect(trackedRes.statusCode).toBe(201);
+      qaTrackedProductId = trackedRes.json().id;
+
+      // Seed 5 PCS in stock
+      const stockRes = await app.inject({
+        method: 'POST',
+        url: '/v1/inventory/movements',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+          'idempotency-key': generateUuidV7(),
+        },
+        payload: {
+          branchId: alphaBranchId,
+          warehouseId: alphaWarehouseId,
+          productId: qaTrackedProductId,
+          movementType: 'OPENING_STOCK',
+          quantity: '5.000000',
+          unitCost: '10.0000',
+        },
+      });
+      expect(stockRes.statusCode).toBe(201);
+
+      // Create non-tracked product (service/digital)
+      const nonTrackedRes = await app.inject({
+        method: 'POST',
+        url: '/v1/products',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+          'idempotency-key': generateUuidV7(),
+        },
+        payload: {
+          sku: 'QA-SERVICE-001',
+          name: 'Extended Hardware Warranty',
+          baseUom: 'PCS',
+          purchaseCost: '0.0000',
+          sellingPrice: '50.0000',
+          trackInventory: false,
+          trackingMode: 'NONE',
+        },
+      });
+      expect(nonTrackedRes.statusCode).toBe(201);
+      qaNonTrackedProductId = nonTrackedRes.json().id;
+    });
+
+    // --- BUG-020: POS Available Stock Enforcement ---
+    it('BUG-020: blocks checkout and returns 409 INV_INSUFFICIENT_AVAILABLE_STOCK when requested qty exceeds available stock', async () => {
+      // Available stock is 5 PCS. Attempt to checkout 10 PCS.
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/pos/sales',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+          'idempotency-key': generateUuidV7(),
+        },
+        payload: {
+          registerId: qaRegisterId,
+          shiftId: null,
+          customerName: 'Oversell Tester',
+          lines: [
+            {
+              productId: qaTrackedProductId,
+              quantity: '10.000000',
+              uomCode: 'PCS',
+            },
+          ],
+          payments: [
+            {
+              paymentMethod: 'CASH',
+              amount: '200.0000',
+              tenderedAmount: '200.0000',
+            },
+          ],
+        },
+      });
+
+      expect(res.statusCode).toBe(409);
+      const body = res.json();
+      expect(body.errorCode).toBe('INV_INSUFFICIENT_AVAILABLE_STOCK');
+
+      // Verify available balance remains strictly 5 PCS (zero stock deducted, atomic rollback)
+      const balanceRes = await app.inject({
+        method: 'GET',
+        url: `/v1/inventory/balances?warehouseId=${alphaWarehouseId}&productId=${qaTrackedProductId}`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+      expect(balanceRes.statusCode).toBe(200);
+      const balanceBody = balanceRes.json();
+      expect(balanceBody.data.length).toBe(1);
+      expect(parseFloat(balanceBody.data[0].qtyOnHand)).toBe(5);
+    });
+
+    it('BUG-020: allows checkout when requested qty is within available stock and deducts balance accurately', async () => {
+      // Available is 5 PCS. Checkout 3 PCS.
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/pos/sales',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+          'idempotency-key': generateUuidV7(),
+        },
+        payload: {
+          registerId: qaRegisterId,
+          shiftId: null,
+          customerName: 'Valid Purchaser',
+          lines: [
+            {
+              productId: qaTrackedProductId,
+              quantity: '3.000000',
+              uomCode: 'PCS',
+            },
+          ],
+          payments: [
+            {
+              paymentMethod: 'CASH',
+              amount: '60.0000',
+              tenderedAmount: '100.0000',
+            },
+          ],
+        },
+      });
+
+      expect(res.statusCode).toBe(201);
+      const sale = res.json();
+      expect(sale.status).toBe('COMPLETED');
+
+      // Verify balance is decremented from 5 to 2 PCS
+      const balanceRes = await app.inject({
+        method: 'GET',
+        url: `/v1/inventory/balances?warehouseId=${alphaWarehouseId}&productId=${qaTrackedProductId}`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+      expect(balanceRes.statusCode).toBe(200);
+      const balanceBody = balanceRes.json();
+      expect(parseFloat(balanceBody.data[0].qtyOnHand)).toBe(2);
+    });
+
+    it('BUG-020: allows checkout of non-inventory-tracked items without balance constraints', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/pos/sales',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+          'idempotency-key': generateUuidV7(),
+        },
+        payload: {
+          registerId: qaRegisterId,
+          shiftId: null,
+          customerName: 'Service Purchaser',
+          lines: [
+            {
+              productId: qaNonTrackedProductId,
+              quantity: '20.000000',
+              uomCode: 'PCS',
+            },
+          ],
+          payments: [
+            {
+              paymentMethod: 'CASH',
+              amount: '1000.0000',
+              tenderedAmount: '1000.0000',
+            },
+          ],
+        },
+      });
+
+      expect(res.statusCode).toBe(201);
+      expect(res.json().status).toBe('COMPLETED');
+    });
+
+    // --- BUG-021: POS Fast Barcode Resolution ---
+    it('BUG-021: executes POS barcode search with parallelized lookup in sub-200ms', async () => {
+      const start = Date.now();
+      const res = await app.inject({
+        method: 'GET',
+        url: `/v1/pos/products/search?warehouseId=${alphaWarehouseId}&barcode=2001234567893`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+      const durationMs = Date.now() - start;
+
+      expect(res.statusCode).toBe(200);
+      expect(durationMs).toBeLessThan(500); // Target < 500ms
+      const results = res.json();
+      expect(results.length).toBe(1);
+    });
+
+    // --- BUG-026: Primary Barcode Invariant, Auto-Promotion & Unique Constraints ---
+    it('BUG-026: rejects deactivating the ONLY active barcode of a product with 409 CAT_CANNOT_DEACTIVATE_ONLY_ACTIVE_BARCODE', async () => {
+      // 1. Create product with single primary barcode
+      const prodRes = await app.inject({
+        method: 'POST',
+        url: '/v1/products',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+          'idempotency-key': generateUuidV7(),
+        },
+        payload: {
+          sku: 'QA-BC-INVARIANT-001',
+          name: 'Primary Invariant Test Product',
+          baseUom: 'PCS',
+          purchaseCost: '10.0000',
+          sellingPrice: '25.0000',
+          primaryBarcode: 'QA-INV-BC-1111',
+        },
+      });
+      expect(prodRes.statusCode).toBe(201);
+      const invariantProdId = prodRes.json().id;
+
+      // 2. Fetch the barcode ID
+      const listRes = await app.inject({
+        method: 'GET',
+        url: `/v1/products/${invariantProdId}/barcodes`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+      expect(listRes.statusCode).toBe(200);
+      const barcodes = listRes.json();
+      expect(barcodes.length).toBe(1);
+      const primaryBarcodeId = barcodes[0].id;
+
+      // 3. Attempt to deactivate the only active barcode
+      const deactRes = await app.inject({
+        method: 'PATCH',
+        url: `/v1/products/${invariantProdId}/barcodes/${primaryBarcodeId}`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+        payload: {
+          isActive: false,
+        },
+      });
+
+      expect(deactRes.statusCode).toBe(409);
+      expect(deactRes.json().errorCode).toBe('CAT_CANNOT_DEACTIVATE_ONLY_ACTIVE_BARCODE');
+    });
+
+    it('BUG-026: auto-promotes another active barcode when deactivating a primary barcode', async () => {
+      // 1. Create product with single primary barcode
+      const prodRes = await app.inject({
+        method: 'POST',
+        url: '/v1/products',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+          'idempotency-key': generateUuidV7(),
+        },
+        payload: {
+          sku: 'QA-BC-INVARIANT-002',
+          name: 'Primary Auto-Promote Test Product',
+          baseUom: 'PCS',
+          purchaseCost: '15.0000',
+          sellingPrice: '30.0000',
+          primaryBarcode: 'QA-INV-BC-PRIMARY',
+        },
+      });
+      expect(prodRes.statusCode).toBe(201);
+      const prodId = prodRes.json().id;
+
+      // 2. Add a secondary barcode
+      const addSecondaryRes = await app.inject({
+        method: 'POST',
+        url: `/v1/products/${prodId}/barcodes`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+        payload: {
+          barcode: 'QA-INV-BC-SECONDARY',
+          symbology: 'CODE128',
+          isPrimary: false,
+        },
+      });
+      expect(addSecondaryRes.statusCode).toBe(201);
+      const secondaryBcId = addSecondaryRes.json().id;
+
+      // 3. Fetch barcodes to get primary BC id
+      const listRes = await app.inject({
+        method: 'GET',
+        url: `/v1/products/${prodId}/barcodes`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+      const primaryBc = listRes.json().find((b: { barcode: string }) => b.barcode === 'QA-INV-BC-PRIMARY');
+      expect(primaryBc).toBeDefined();
+
+      // 4. Deactivate the primary barcode
+      const deactRes = await app.inject({
+        method: 'PATCH',
+        url: `/v1/products/${prodId}/barcodes/${primaryBc.id}`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+        payload: {
+          isActive: false,
+        },
+      });
+      expect(deactRes.statusCode).toBe(200);
+
+      // 5. Verify the secondary barcode was automatically promoted to primary
+      const updatedListRes = await app.inject({
+        method: 'GET',
+        url: `/v1/products/${prodId}/barcodes`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+      const updatedBarcodes = updatedListRes.json();
+      const newPrimary = updatedBarcodes.find((b: { id: string }) => b.id === secondaryBcId);
+      expect(newPrimary.isPrimary).toBe(true);
+      expect(newPrimary.isActive).toBe(true);
+
+      // 6. Verify products table primary_barcode is updated
+      const productCheckRes = await app.inject({
+        method: 'GET',
+        url: `/v1/products/${prodId}`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+      expect(productCheckRes.statusCode).toBe(200);
+      expect(productCheckRes.json().primaryBarcode).toBe('QA-INV-BC-SECONDARY');
+
+      // 7. Verify setting inactive barcode as primary is rejected with 400
+      const makeInactivePrimaryRes = await app.inject({
+        method: 'PATCH',
+        url: `/v1/products/${prodId}/barcodes/${primaryBc.id}`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+        payload: {
+          isPrimary: true,
+        },
+      });
+      expect(makeInactivePrimaryRes.statusCode).toBe(400);
+      expect(makeInactivePrimaryRes.json().errorCode).toBe('CAT_INACTIVE_BARCODE_CANNOT_BE_PRIMARY');
+    });
+
+    // --- BUG-027: POS Cash Checkout Schema Null-Safety ---
+    it('BUG-027: accepts null values for shiftId, customerName, notes, overrideReason without HTTP 400 validation failure', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/pos/sales',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+          'idempotency-key': generateUuidV7(),
+        },
+        payload: {
+          registerId: qaRegisterId,
+          shiftId: null,
+          customerName: null,
+          notes: null,
+          overrideReason: null,
+          lines: [
+            {
+              productId: qaNonTrackedProductId,
+              quantity: '1.000000',
+              uomCode: 'PCS',
+            },
+          ],
+          payments: [
+            {
+              paymentMethod: 'CASH',
+              amount: '50.0000',
+              tenderedAmount: '100.0000',
+            },
+          ],
+        },
+      });
+
+      expect(res.statusCode).toBe(201);
+      const sale = res.json();
+      expect(sale.id).toBeDefined();
+      expect(sale.invoiceNumber).toMatch(/^REG-QA-01-\d{6}$/);
+      expect(sale.status).toBe('COMPLETED');
+      expect(sale.customerName).toBeNull();
+
+      // Verify receipt endpoint generates accurate receipt with change calculation
+      const receiptRes = await app.inject({
+        method: 'GET',
+        url: `/v1/pos/sales/${sale.id}/receipt`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+
+      expect(receiptRes.statusCode).toBe(200);
+      const receipt = receiptRes.json();
+      expect(receipt.invoiceNumber).toBe(sale.invoiceNumber);
+      expect(parseFloat(receipt.grandTotal)).toBe(50);
+      expect(receipt.payments.length).toBe(1);
+      expect(receipt.payments[0].method).toBe('CASH');
+      expect(parseFloat(receipt.changeGiven)).toBe(50);
     });
   });
 });

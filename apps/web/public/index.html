@@ -731,24 +731,13 @@
 
     /* Print Styles */
     @media print {
-      body * {
-        visibility: hidden !important;
-      }
-      #printableReceipt, #printableReceipt * {
-        visibility: visible !important;
-      }
-      #printableBarcodeLabel, #printableBarcodeLabel * {
-        visibility: visible !important;
+      body {
+        margin: 0 !important;
+        padding: 0 !important;
       }
       #printableReceipt, #printableBarcodeLabel {
-        position: absolute !important;
-        left: 0 !important;
-        top: 0 !important;
-        width: 100% !important;
-        margin: 0 !important;
-        padding: 8px !important;
-        border: none !important;
-        box-shadow: none !important;
+        page-break-inside: avoid !important;
+        page-break-after: avoid !important;
       }
     }
 
@@ -1992,6 +1981,21 @@
       return `${curr} ${safe.toFixed(decimals)}`;
     }
 
+    function resolveMediaUrl(url) {
+      if (!url || typeof url !== 'string') return '';
+      const trimmed = url.trim();
+      if (!trimmed) return '';
+      if (trimmed.startsWith('data:') || trimmed.startsWith('blob:') || /^https?:\/\//i.test(trimmed)) {
+        return trimmed;
+      }
+      const rawBase = (state.apiBaseUrl && typeof state.apiBaseUrl === 'string' && state.apiBaseUrl.trim() !== '')
+        ? state.apiBaseUrl.trim()
+        : resolveApiBaseUrl();
+      const baseUrl = rawBase.replace(/\/+$/, '');
+      const normalized = trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+      return `${baseUrl}${normalized}`;
+    }
+
     if (typeof window !== 'undefined') {
       window.getTenantCurrency = getTenantCurrency;
       window.getCurrencyMinorUnits = getCurrencyMinorUnits;
@@ -2000,6 +2004,7 @@
       window.getCurrencyDefaultPrice = getCurrencyDefaultPrice;
       window.formatTenantMoney = formatTenantMoney;
       window.formatCurrency = formatTenantMoney;
+      window.resolveMediaUrl = resolveMediaUrl;
     }
 
     // State Store (Phase 5.0 Authentication & Tenant Scoped)
@@ -2260,15 +2265,18 @@
       const bodyEl = document.getElementById('modalBody');
       const footerEl = document.getElementById('modalFooter');
       const containerEl = document.getElementById('modalContainer');
+      const modalBox = document.querySelector('.modal-box');
 
       if (typeof optionsOrHtml === 'string') {
         if (titleEl) titleEl.innerText = '';
         if (bodyEl) bodyEl.innerHTML = optionsOrHtml;
         if (footerEl) footerEl.innerHTML = '';
+        if (modalBox) modalBox.style.maxWidth = '540px';
       } else if (optionsOrHtml && typeof optionsOrHtml === 'object') {
-        const { title = '', bodyHtml = '', footerHtml } = optionsOrHtml;
+        const { title = '', bodyHtml = '', footerHtml, maxWidth = '540px' } = optionsOrHtml;
         if (titleEl) titleEl.innerText = title;
         if (bodyEl) bodyEl.innerHTML = bodyHtml;
+        if (modalBox) modalBox.style.maxWidth = maxWidth;
         if (footerEl) {
           footerEl.innerHTML = footerHtml !== undefined ? footerHtml : `
             <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
@@ -2281,6 +2289,8 @@
     function closeModal() {
       if (state.isSubmittingCheckout) return;
       state.activeCheckoutKey = null;
+      const modalBox = document.querySelector('.modal-box');
+      if (modalBox) modalBox.style.maxWidth = '540px';
       document.getElementById('modalContainer').classList.remove('active');
     }
 
@@ -3643,7 +3653,8 @@
                         const priceFormatted = formatTenantMoney(p.sellingPrice);
                         const isTracked = p.trackInventory !== false;
                         const isActive = p.status === 'ACTIVE' || p.isActive === true;
-                        const imgUrl = p.imageUrl ? escapeHtml(p.imageUrl) : null;
+                        const resolvedImg = p.imageUrl ? resolveMediaUrl(p.imageUrl) : null;
+                        const imgUrl = resolvedImg ? escapeHtml(resolvedImg) : null;
 
                         return `
                           <tr data-sku="${sku.toLowerCase()}" data-name="${name.toLowerCase()}" data-barcode="${barcode.toLowerCase()}">
@@ -3695,7 +3706,8 @@
                   const priceFormatted = formatTenantMoney(p.sellingPrice);
                   const isTracked = p.trackInventory !== false;
                   const isActive = p.status === 'ACTIVE' || p.isActive === true;
-                  const imgUrl = p.imageUrl ? escapeHtml(p.imageUrl) : null;
+                  const resolvedImg = p.imageUrl ? resolveMediaUrl(p.imageUrl) : null;
+                  const imgUrl = resolvedImg ? escapeHtml(resolvedImg) : null;
 
                   return `
                     <div class="entity-card" data-sku="${sku.toLowerCase()}" data-name="${name.toLowerCase()}" data-barcode="${barcode.toLowerCase()}">
@@ -3969,7 +3981,7 @@
             <label class="form-label">Product Image (Optional)</label>
             <div id="editProdImageContainer" style="display: flex; gap: 12px; align-items: center;">
               <div id="editProdImagePreviewWrapper" style="${p.imageUrl ? 'display: block;' : 'display: none;'} position: relative;">
-                <img id="editProdImagePreview" src="${p.imageUrl ? escapeHtml(p.imageUrl) : ''}" alt="Preview" style="width: 64px; height: 64px; border-radius: 8px; object-fit: cover; border: 1px solid var(--border-subtle);" />
+                <img id="editProdImagePreview" src="${p.imageUrl ? escapeHtml(resolveMediaUrl(p.imageUrl)) : ''}" alt="Preview" style="width: 64px; height: 64px; border-radius: 8px; object-fit: cover; border: 1px solid var(--border-subtle);" />
                 <button type="button" onclick="removeProductImage('edit')" style="position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; border-radius: 50%; background: #ef4444; color: white; border: none; font-size: 11px; cursor: pointer; display: flex; align-items: center; justify-content: center; line-height: 1;" title="Remove image">&times;</button>
               </div>
               <div id="editProdImageDropzone" style="flex: 1; border: 2px dashed var(--border-subtle); border-radius: 8px; padding: 12px; text-align: center; cursor: pointer; background: var(--bg-hover);" onclick="document.getElementById('editProdImageFileInput').click()" ondragover="handleProductImageDragOver(event)" ondragleave="handleProductImageDragLeave(event)" ondrop="handleProductImageDrop(event, 'edit')">
@@ -4989,9 +5001,20 @@
 
         // 2. Fetch catalog products
         let products = [];
+        state.posProductsMap = new Map();
         if (state.warehouseId) {
-          const productsRes = await apiFetch(`/v1/pos/products/search?warehouseId=${encodeURIComponent(state.warehouseId)}&limit=50`, { silent: true }).catch(() => []);
+          const productsRes = await apiFetch(`/v1/pos/products/search?warehouseId=${encodeURIComponent(state.warehouseId)}&limit=100`, { silent: true }).catch(() => []);
           products = productsRes || [];
+          for (const p of products) {
+            if (p.id) state.posProductsMap.set(p.id, p);
+            if (p.sku) state.posProductsMap.set(p.sku.toLowerCase(), p);
+            if (p.primaryBarcode) state.posProductsMap.set(p.primaryBarcode.toLowerCase(), p);
+            if (Array.isArray(p.barcodes)) {
+              for (const b of p.barcodes) {
+                if (b.barcode) state.posProductsMap.set(b.barcode.toLowerCase(), p);
+              }
+            }
+          }
         }
 
         container.innerHTML = `
@@ -5049,7 +5072,8 @@
                     </div>
                   ` : products.map(p => {
                     const price = p.retailPrice || p.sellingPrice || '0.0000';
-                    const imgUrl = p.imageUrl ? escapeHtml(p.imageUrl) : null;
+                    const resolvedImg = p.imageUrl ? resolveMediaUrl(p.imageUrl) : null;
+                    const imgUrl = resolvedImg ? escapeHtml(resolvedImg) : null;
                     return `
                     <div class="pos-product-card" onclick="addToCart('${p.id}', '${escapeHtml(p.sku)}', '${escapeHtml(p.name)}', '${price}', '${escapeHtml(p.baseUom)}', ${Boolean(p.trackInventory)}, '${p.availableQuantity}')">
                       <div style="display: flex; gap: 8px; align-items: flex-start;">
@@ -5152,16 +5176,33 @@
     async function executeBarcodeScan(barcodeOrSku) {
       if (!barcodeOrSku || !barcodeOrSku.trim()) return;
       const cleanCode = barcodeOrSku.trim();
+      const lowerCode = cleanCode.toLowerCase();
 
       if (!state.warehouseId) {
         showToast('Please select a branch and warehouse before searching products', 'warning');
         return;
       }
+
+      // 1. FAST-PATH: Instant in-memory index lookup (< 5ms response time!)
+      if (state.posProductsMap && state.posProductsMap.has(lowerCode)) {
+        const p = state.posProductsMap.get(lowerCode);
+        const price = p.retailPrice || p.sellingPrice || '0.0000';
+        playScanChime(true);
+        addToCart(p.id, p.sku, p.name, price, p.baseUom, p.trackInventory, p.availableQuantity);
+        showToast(`Scanned: ${p.name}`, 'success');
+        return;
+      }
+
       try {
-        // 1. Search by exact barcode (active barcode table, primary barcode, or serial number)
-        const results = await apiFetch(`/v1/pos/products/search?warehouseId=${encodeURIComponent(state.warehouseId)}&barcode=${encodeURIComponent(cleanCode)}`, { silent: true }).catch(() => []);
+        // 2. Search by exact barcode (active barcode table, primary barcode, or serial number)
+        const results = await apiFetch(`/v1/pos/products/search?warehouseId=${encodeURIComponent(state.warehouseId)}&barcode=${encodeURIComponent(cleanCode)}&limit=1`, { silent: true }).catch(() => []);
         if (results && results.length > 0) {
           const p = results[0];
+          if (state.posProductsMap) {
+            state.posProductsMap.set(lowerCode, p);
+            if (p.id) state.posProductsMap.set(p.id, p);
+            if (p.sku) state.posProductsMap.set(p.sku.toLowerCase(), p);
+          }
           const price = p.retailPrice || p.sellingPrice || '0.0000';
           playScanChime(true);
           addToCart(p.id, p.sku, p.name, price, p.baseUom, p.trackInventory, p.availableQuantity);
@@ -5169,10 +5210,15 @@
           return;
         }
 
-        // 2. Fallback to text query (SKU or name match)
-        const textResults = await apiFetch(`/v1/pos/products/search?warehouseId=${encodeURIComponent(state.warehouseId)}&q=${encodeURIComponent(cleanCode)}`, { silent: true }).catch(() => []);
+        // 3. Fallback to text query (SKU or name match)
+        const textResults = await apiFetch(`/v1/pos/products/search?warehouseId=${encodeURIComponent(state.warehouseId)}&q=${encodeURIComponent(cleanCode)}&limit=1`, { silent: true }).catch(() => []);
         if (textResults && textResults.length > 0) {
           const p = textResults[0];
+          if (state.posProductsMap) {
+            state.posProductsMap.set(lowerCode, p);
+            if (p.id) state.posProductsMap.set(p.id, p);
+            if (p.sku) state.posProductsMap.set(p.sku.toLowerCase(), p);
+          }
           const price = p.retailPrice || p.sellingPrice || '0.0000';
           playScanChime(true);
           addToCart(p.id, p.sku, p.name, price, p.baseUom, p.trackInventory, p.availableQuantity);
@@ -5180,7 +5226,7 @@
           return;
         }
 
-        // 3. Unrecognized Barcode
+        // 4. Unrecognized Barcode
         playScanChime(false);
         showToast(`No product matching "${cleanCode}"`, 'error');
         openUnknownBarcodeModal(cleanCode);
@@ -5471,7 +5517,107 @@
       return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${totalWidth} ${totalHeight}" width="${totalWidth}" height="${totalHeight}" style="background:#FFFFFF; max-width:100%; height:auto;">${rects}<text x="${textX}" y="${textY}" text-anchor="middle" font-family="monospace" font-size="12" font-weight="bold" fill="#000000">${escapeHtml(code)}</text></svg>`;
     }
 
-    // Barcode Label Preview & Management Modal
+    // In-flight operation guards for barcode mutations (BUG-024)
+    const activeBarcodeOps = new Set();
+
+    // Isolated Print Engine for Labels & Receipts (BUG-022 & BUG-028)
+    function printHtmlDocument(printableHtml, pageStyles = '') {
+      let printFrame = document.getElementById('nexstockPrintFrame');
+      if (printFrame) {
+        printFrame.remove();
+      }
+      printFrame = document.createElement('iframe');
+      printFrame.id = 'nexstockPrintFrame';
+      printFrame.style.position = 'fixed';
+      printFrame.style.right = '0';
+      printFrame.style.bottom = '0';
+      printFrame.style.width = '0';
+      printFrame.style.height = '0';
+      printFrame.style.border = '0';
+      document.body.appendChild(printFrame);
+
+      const doc = printFrame.contentWindow.document;
+      doc.open();
+      doc.write(`<!DOCTYPE html><html><head><meta charset="utf-8" /><title>NexStock Print</title><style>* { box-sizing: border-box; margin: 0; padding: 0; } body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: #000; background: #fff; } ${pageStyles}</style></head><body>${printableHtml}</body></html>`);
+      doc.close();
+
+      setTimeout(() => {
+        try {
+          printFrame.contentWindow.focus();
+          printFrame.contentWindow.print();
+        } catch (e) {
+          window.print();
+        }
+      }, 300);
+    }
+
+    // Barcode Labels Printing (BUG-022)
+    function printBarcodeLabels(productId) {
+      const p = (state.cachedProducts || []).find(x => x.id === productId);
+      if (!p) return;
+      const primaryBarcode = p.primaryBarcode || '';
+      if (!primaryBarcode) {
+        showToast('No primary barcode assigned to product', 'warning');
+        return;
+      }
+
+      const formatSelect = document.getElementById('labelPrintFormat');
+      const qtySelect = document.getElementById('labelPrintQty');
+      const format = formatSelect ? formatSelect.value : 'THERMAL_50X30';
+      const qty = qtySelect ? parseInt(qtySelect.value, 10) || 1 : 1;
+
+      const priceFormatted = formatTenantMoney(p.sellingPrice);
+      const svg = renderBarcodeSvg(primaryBarcode, 'CODE128', { height: 44, barWidth: 1.6 });
+
+      const singleLabelCard = `
+        <div class="print-label-item">
+          <div class="print-sku">${escapeHtml(p.sku)} &bull; ${escapeHtml(p.baseUom || 'PCS')}</div>
+          <div class="print-name">${escapeHtml(p.name)}</div>
+          <div class="print-barcode">${svg}</div>
+          <div class="print-price">${priceFormatted}</div>
+        </div>
+      `;
+
+      let printableHtml = '';
+      let pageStyles = '';
+
+      if (format.startsWith('THERMAL')) {
+        let width = '50mm';
+        let height = '30mm';
+        if (format === 'THERMAL_40X28') { width = '40mm'; height = '28mm'; }
+        if (format === 'THERMAL_58') { width = '58mm'; height = 'auto'; }
+        if (format === 'THERMAL_80') { width = '80mm'; height = 'auto'; }
+
+        pageStyles = `
+          @page { size: ${width} ${height}; margin: 0; }
+          body { width: ${width}; margin: 0; padding: 2mm; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+          .print-label-item { width: 100%; text-align: center; page-break-after: always; padding: 1mm; }
+          .print-label-item:last-child { page-break-after: avoid; }
+          .print-sku { font-size: 9px; font-weight: 600; text-transform: uppercase; }
+          .print-name { font-size: 10px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 2px; }
+          .print-barcode svg { width: 92%; max-height: 40px; margin: 0 auto; display: block; }
+          .print-price { font-size: 11px; font-weight: 800; margin-top: 1px; }
+        `;
+        printableHtml = Array.from({ length: qty }, () => singleLabelCard).join('');
+      } else {
+        // A4 Sheet Grid
+        pageStyles = `
+          @page { size: A4 portrait; margin: 10mm; }
+          body { margin: 0; padding: 0; }
+          .print-sheet-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4mm; page-break-inside: avoid; }
+          .print-label-item { border: 1px dashed #ccc; border-radius: 4px; padding: 3mm; text-align: center; page-break-inside: avoid; }
+          .print-sku { font-size: 9px; font-weight: 600; text-transform: uppercase; }
+          .print-name { font-size: 11px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 2px; }
+          .print-barcode svg { width: 92%; max-height: 44px; margin: 0 auto; display: block; }
+          .print-price { font-size: 12px; font-weight: 800; margin-top: 2px; }
+        `;
+        printableHtml = `<div class="print-sheet-grid">${Array.from({ length: qty }, () => singleLabelCard).join('')}</div>`;
+      }
+
+      printHtmlDocument(printableHtml, pageStyles);
+    }
+
+    // Barcode Label Preview & Management Modal (BUG-022, BUG-023, BUG-024, BUG-026)
     async function openBarcodeLabelModal(productId) {
       const p = (state.cachedProducts || []).find(x => x.id === productId);
       if (!p) {
@@ -5481,6 +5627,7 @@
 
       openModal({
         title: `Barcode Management & Label: ${escapeHtml(p.sku)}`,
+        maxWidth: '740px',
         bodyHtml: `
           <div style="text-align: center; padding: 24px;">
             <div class="spinner-sm"></div> Loading barcodes...
@@ -5494,32 +5641,56 @@
         const priceFormatted = formatTenantMoney(p.sellingPrice);
 
         const modalBody = `
-          <!-- Printable Label Preview -->
-          <div class="barcode-label-sheet">
-            <div class="barcode-label-card" id="printableBarcodeLabel">
-              <div class="barcode-label-sku">${escapeHtml(p.sku)} &bull; ${escapeHtml(p.baseUom || 'PCS')}</div>
-              <div class="barcode-label-title" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</div>
-              <div class="barcode-svg-container">
-                ${primaryBarcode ? renderBarcodeSvg(primaryBarcode, 'CODE128', { height: 48, barWidth: 1.8 }) : '<div style="padding:16px; color:#64748B;">No primary barcode assigned</div>'}
+          <!-- Printable Label Preview & Output Configuration -->
+          <div class="card" style="margin-bottom: 16px; background: var(--surface-bg);">
+            <div style="display: flex; gap: 16px; align-items: center; flex-wrap: wrap;">
+              <div class="barcode-label-card" id="printableBarcodeLabel" style="flex: 1; min-width: 200px; margin: 0;">
+                <div class="barcode-label-sku">${escapeHtml(p.sku)} &bull; ${escapeHtml(p.baseUom || 'PCS')}</div>
+                <div class="barcode-label-title" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</div>
+                <div class="barcode-svg-container">
+                  ${primaryBarcode ? renderBarcodeSvg(primaryBarcode, 'CODE128', { height: 44, barWidth: 1.8 }) : '<div style="padding:16px; color:#64748B;">No primary barcode assigned</div>'}
+                </div>
+                <div class="barcode-label-price">${priceFormatted}</div>
               </div>
-              <div class="barcode-label-price">${priceFormatted}</div>
+              <div style="min-width: 220px; display: flex; flex-direction: column; gap: 8px;">
+                <div style="font-weight: 600; font-size: 13px;">🖨️ Printer Setup</div>
+                <div>
+                  <label class="form-label" style="font-size: 11px; margin-bottom: 2px;">Printer Layout</label>
+                  <select class="form-select" id="labelPrintFormat" style="font-size: 12px; padding: 5px;">
+                    <option value="THERMAL_50X30" selected>Thermal (50x30mm)</option>
+                    <option value="THERMAL_40X28">Thermal (40x28mm)</option>
+                    <option value="THERMAL_58">Thermal (58mm)</option>
+                    <option value="THERMAL_80">Thermal (80mm)</option>
+                    <option value="A4_SHEET">A4 Sheet (3x8 Grid)</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="form-label" style="font-size: 11px; margin-bottom: 2px;">Quantity to Print</label>
+                  <select class="form-select" id="labelPrintQty" style="font-size: 12px; padding: 5px;">
+                    <option value="1" selected>1 Label</option>
+                    <option value="4">4 Labels</option>
+                    <option value="12">12 Labels</option>
+                    <option value="24">24 Labels</option>
+                  </select>
+                </div>
+                <button class="btn btn-primary btn-sm" style="margin-top: 4px;" onclick="printBarcodeLabels('${productId}')" ${!primaryBarcode ? 'disabled' : ''}>
+                  Print Labels
+                </button>
+              </div>
             </div>
-            <button class="btn btn-secondary btn-sm" onclick="window.print()" ${!primaryBarcode ? 'disabled' : ''}>
-              🖨️ Print Label Sheet
-            </button>
           </div>
 
-          <!-- Registered Barcodes Table -->
+          <!-- Registered Barcodes Table (Desktop) -->
           <div style="font-weight: 600; font-size: 14px; margin-bottom: 8px;">Registered Barcodes (${barcodes.length})</div>
-          <div class="table-responsive" style="margin-bottom: 16px;">
-            <table class="data-table">
+          <div class="desktop-barcode-table table-responsive" style="margin-bottom: 16px;">
+            <table class="data-table" style="width: 100%;">
               <thead>
                 <tr>
-                  <th>Barcode</th>
-                  <th>Symbology</th>
-                  <th>Primary</th>
-                  <th>Status</th>
-                  <th>Actions</th>
+                  <th style="width: 140px; white-space: nowrap;">Barcode</th>
+                  <th style="width: 85px;">Symbology</th>
+                  <th style="width: 80px;">Primary</th>
+                  <th style="width: 80px;">Status</th>
+                  <th style="min-width: 210px; text-align: right; white-space: nowrap;">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -5527,20 +5698,20 @@
                   <tr><td colspan="5" style="text-align: center; color: var(--text-secondary); padding: 12px;">No barcodes registered yet.</td></tr>
                 ` : barcodes.map(b => `
                   <tr>
-                    <td><code>${escapeHtml(b.barcode)}</code></td>
+                    <td style="white-space: nowrap;"><code style="font-size: 13px;">${escapeHtml(b.barcode)}</code></td>
                     <td><span class="badge-pill badge-blue">${escapeHtml(b.barcodeType || b.symbology || 'CODE128')}</span></td>
                     <td>${b.isPrimary ? '<span class="badge-pill badge-green">PRIMARY</span>' : '—'}</td>
                     <td><span class="badge-pill ${b.isActive ? 'badge-green' : 'badge-red'}">${b.isActive ? 'ACTIVE' : 'INACTIVE'}</span></td>
-                    <td>
-                      <div style="display: flex; gap: 4px;">
-                        ${!b.isPrimary ? `
-                          <button class="btn btn-secondary btn-sm" style="padding: 2px 6px; font-size: 11px;" onclick="setBarcodePrimary('${productId}', '${b.id}')">Make Primary</button>
+                    <td style="text-align: right; white-space: nowrap;">
+                      <div style="display: flex; gap: 4px; justify-content: flex-end;">
+                        ${!b.isPrimary && b.isActive ? `
+                          <button class="btn btn-secondary btn-sm" id="btnMakePrimary-${b.id}" style="padding: 2px 6px; font-size: 11px;" onclick="setBarcodePrimary('${productId}', '${b.id}', this)">Make Primary</button>
                         ` : ''}
-                        <button class="btn btn-secondary btn-sm" style="padding: 2px 6px; font-size: 11px;" onclick="toggleBarcodeActive('${productId}', '${b.id}', ${!b.isActive})">
+                        <button class="btn btn-secondary btn-sm" id="btnToggleActive-${b.id}" style="padding: 2px 6px; font-size: 11px;" onclick="toggleBarcodeActive('${productId}', '${b.id}', ${!b.isActive}, this)">
                           ${b.isActive ? 'Deactivate' : 'Activate'}
                         </button>
                         ${!b.isPrimary ? `
-                          <button class="btn btn-secondary btn-sm" style="padding: 2px 6px; font-size: 11px; color: var(--status-danger);" onclick="deleteBarcode('${productId}', '${b.id}')">Delete</button>
+                          <button class="btn btn-secondary btn-sm" id="btnDeleteBc-${b.id}" style="padding: 2px 6px; font-size: 11px; color: var(--status-danger);" onclick="deleteBarcode('${productId}', '${b.id}', this)">Delete</button>
                         ` : ''}
                       </div>
                     </td>
@@ -5548,6 +5719,35 @@
                 `).join('')}
               </tbody>
             </table>
+          </div>
+
+          <!-- Registered Barcodes (Mobile Cards) -->
+          <div class="mobile-barcode-cards" style="margin-bottom: 16px;">
+            ${barcodes.length === 0 ? `
+              <div style="text-align: center; color: var(--text-secondary); padding: 12px;">No barcodes registered yet.</div>
+            ` : barcodes.map(b => `
+              <div class="card" style="padding: 10px; margin-bottom: 8px; background: var(--bg-primary);">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                  <code style="font-size: 13px; font-weight: 700;">${escapeHtml(b.barcode)}</code>
+                  <div style="display: flex; gap: 4px;">
+                    <span class="badge-pill badge-blue" style="font-size: 10px;">${escapeHtml(b.barcodeType || b.symbology || 'CODE128')}</span>
+                    ${b.isPrimary ? '<span class="badge-pill badge-green" style="font-size: 10px;">PRIMARY</span>' : ''}
+                    <span class="badge-pill ${b.isActive ? 'badge-green' : 'badge-red'}" style="font-size: 10px;">${b.isActive ? 'ACTIVE' : 'INACTIVE'}</span>
+                  </div>
+                </div>
+                <div style="display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap;">
+                  ${!b.isPrimary && b.isActive ? `
+                    <button class="btn btn-secondary btn-sm" style="flex: 1; padding: 4px; font-size: 11px;" onclick="setBarcodePrimary('${productId}', '${b.id}', this)">Make Primary</button>
+                  ` : ''}
+                  <button class="btn btn-secondary btn-sm" style="flex: 1; padding: 4px; font-size: 11px;" onclick="toggleBarcodeActive('${productId}', '${b.id}', ${!b.isActive}, this)">
+                    ${b.isActive ? 'Deactivate' : 'Activate'}
+                  </button>
+                  ${!b.isPrimary ? `
+                    <button class="btn btn-secondary btn-sm" style="flex: 1; padding: 4px; font-size: 11px; color: var(--status-danger);" onclick="deleteBarcode('${productId}', '${b.id}', this)">Delete</button>
+                  ` : ''}
+                </div>
+              </div>
+            `).join('')}
           </div>
 
           <!-- Add Alternate Barcode Card -->
@@ -5574,7 +5774,7 @@
                   <option value="CUSTOM">Custom</option>
                 </select>
               </div>
-              <button class="btn btn-primary btn-sm" onclick="submitAddAlternateBarcode('${productId}')">Add</button>
+              <button class="btn btn-primary btn-sm" id="btnAddBarcodeConfirm" onclick="submitAddAlternateBarcode('${productId}')">Add</button>
             </div>
           </div>
         `;
@@ -5589,12 +5789,18 @@
     async function submitAddAlternateBarcode(productId) {
       const codeInput = document.getElementById('newAltBarcodeCode');
       const symbologySelect = document.getElementById('newAltBarcodeSymbology');
+      const addBtn = document.getElementById('btnAddBarcodeConfirm');
       const code = codeInput ? codeInput.value.trim() : '';
       const symbology = symbologySelect ? symbologySelect.value : 'CODE128';
 
       if (!code) {
         showToast('Please enter or generate a barcode', 'warning');
         return;
+      }
+
+      if (addBtn) {
+        addBtn.disabled = true;
+        addBtn.textContent = '⏳ Adding...';
       }
 
       try {
@@ -5609,23 +5815,79 @@
         });
         showToast(`Barcode ${code} added`, 'success');
         openBarcodeLabelModal(productId);
-      } catch (err) {}
+      } catch (err) {
+        showToast(`Failed to add barcode: ${err.detail || err.message}`, 'error');
+      } finally {
+        if (addBtn) {
+          addBtn.disabled = false;
+          addBtn.textContent = 'Add';
+        }
+      }
     }
 
-    async function setBarcodePrimary(productId, barcodeId) {
+    async function setBarcodePrimary(productId, barcodeId, btn) {
+      if (activeBarcodeOps.has(barcodeId)) return;
+      activeBarcodeOps.add(barcodeId);
+
+      const originalText = btn ? btn.textContent : '';
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = '⏳ Promoting...';
+      }
+
       try {
-        await apiFetch(`/v1/products/${productId}/barcodes/${barcodeId}`, {
+        const updated = await apiFetch(`/v1/products/${productId}/barcodes/${barcodeId}`, {
           method: 'PATCH',
           body: JSON.stringify({ isPrimary: true, isActive: true })
         });
         showToast('Barcode promoted to primary', 'success');
-        const res = await apiFetch('/v1/products?limit=100').catch(() => ({ data: [] }));
-        state.cachedProducts = res?.data || [];
+        // Update local cached product primary barcode immediately
+        const p = (state.cachedProducts || []).find(x => x.id === productId);
+        if (p && updated && updated.barcode) {
+          p.primaryBarcode = updated.barcode;
+        }
         openBarcodeLabelModal(productId);
-      } catch (err) {}
+      } catch (err) {
+        showToast(`Failed to make primary: ${err.detail || err.message}`, 'error');
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = originalText;
+        }
+      } finally {
+        activeBarcodeOps.delete(barcodeId);
+      }
     }
 
-    async function toggleBarcodeActive(productId, barcodeId, nextActive) {
+    async function toggleBarcodeActive(productId, barcodeId, nextActive, btn) {
+      if (activeBarcodeOps.has(barcodeId)) return;
+
+      const p = (state.cachedProducts || []).find(x => x.id === productId);
+      const originalText = btn ? btn.textContent : '';
+
+      // BUG-026: Invariant verification before sending deactivation
+      if (!nextActive) {
+        try {
+          const currentBarcodes = await apiFetch(`/v1/products/${productId}/barcodes`).catch(() => []);
+          const target = currentBarcodes.find(b => b.id === barcodeId);
+          if (target && target.isPrimary) {
+            const otherActive = currentBarcodes.filter(b => b.id !== barcodeId && b.isActive);
+            if (otherActive.length === 0) {
+              showToast('Cannot deactivate the only active barcode for this product.', 'warning');
+              return;
+            }
+            const replacement = otherActive[0];
+            const proceed = confirm(`Deactivating this primary barcode will automatically promote "${replacement.barcode}" as the new primary barcode. Do you want to proceed?`);
+            if (!proceed) return;
+          }
+        } catch {}
+      }
+
+      activeBarcodeOps.add(barcodeId);
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = nextActive ? '⏳ Activating...' : '⏳ Deactivating...';
+      }
+
       try {
         await apiFetch(`/v1/products/${productId}/barcodes/${barcodeId}`, {
           method: 'PATCH',
@@ -5633,18 +5895,43 @@
         });
         showToast(`Barcode ${nextActive ? 'activated' : 'deactivated'}`, 'success');
         openBarcodeLabelModal(productId);
-      } catch (err) {}
+      } catch (err) {
+        showToast(`Failed to update barcode: ${err.detail || err.message}`, 'error');
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = originalText;
+        }
+      } finally {
+        activeBarcodeOps.delete(barcodeId);
+      }
     }
 
-    async function deleteBarcode(productId, barcodeId) {
+    async function deleteBarcode(productId, barcodeId, btn) {
+      if (activeBarcodeOps.has(barcodeId)) return;
       if (!confirm('Are you sure you want to delete this barcode?')) return;
+
+      activeBarcodeOps.add(barcodeId);
+      const originalText = btn ? btn.textContent : '';
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = '⏳ Deleting...';
+      }
+
       try {
         await apiFetch(`/v1/products/${productId}/barcodes/${barcodeId}`, {
           method: 'DELETE'
         });
         showToast('Barcode deleted', 'success');
         openBarcodeLabelModal(productId);
-      } catch (err) {}
+      } catch (err) {
+        showToast(`Failed to delete barcode: ${err.detail || err.message}`, 'error');
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = originalText;
+        }
+      } finally {
+        activeBarcodeOps.delete(barcodeId);
+      }
     }
 
     // Camera Barcode Scanner Modal
@@ -5837,14 +6124,26 @@
 
       const numericPrice = parseFloat(unitPrice || '0');
       const safePrice = Number.isFinite(numericPrice) ? numericPrice.toFixed(4) : '0.0000';
+      const avail = parseFloat(availableQuantity !== undefined && availableQuantity !== null ? String(availableQuantity) : '0') || 0;
+      const isTracked = trackInventory !== false;
 
       const existingIndex = state.cart.findIndex(i => i.productId === productId && i.uomCode === uomCode);
       if (existingIndex >= 0) {
-        state.cart[existingIndex].qty += 1;
-        if ((parseFloat(state.cart[existingIndex].unitPrice || '0') || 0) === 0 && numericPrice > 0) {
-          state.cart[existingIndex].unitPrice = safePrice;
+        const item = state.cart[existingIndex];
+        const currentQty = item.qty;
+        if (isTracked && currentQty + 1 > avail) {
+          showToast(`Cannot add more of "${name}": stock limit reached (${avail} available)`, 'warning');
+          return;
+        }
+        item.qty += 1;
+        if ((parseFloat(item.unitPrice || '0') || 0) === 0 && numericPrice > 0) {
+          item.unitPrice = safePrice;
         }
       } else {
+        if (isTracked && avail <= 0) {
+          showToast(`"${name}" is out of stock (0 available)`, 'error');
+          return;
+        }
         state.cart.push({
           productId,
           sku,
@@ -5852,8 +6151,8 @@
           unitPrice: safePrice,
           uomCode,
           qty: 1,
-          trackInventory,
-          availableQuantity: parseFloat(availableQuantity || '0') || 0
+          trackInventory: isTracked,
+          availableQuantity: avail
         });
       }
 
@@ -5862,14 +6161,38 @@
     }
 
     function updateCartQty(index, delta) {
-      if (state.cart[index]) {
-        state.cart[index].qty += delta;
-        if (state.cart[index].qty <= 0) {
-          state.cart.splice(index, 1);
+      const item = state.cart[index];
+      if (!item) return;
+
+      if (delta > 0 && item.trackInventory) {
+        if (item.qty + delta > item.availableQuantity) {
+          showToast(`Cannot increase quantity: Only ${item.availableQuantity} available in stock for "${item.name}"`, 'warning');
+          return;
         }
-        state.activeCheckoutKey = null;
-        renderPosCartPanel();
       }
+
+      item.qty += delta;
+      if (item.qty <= 0) {
+        state.cart.splice(index, 1);
+      }
+      state.activeCheckoutKey = null;
+      renderPosCartPanel();
+    }
+
+    function setCartQty(index, rawVal) {
+      const item = state.cart[index];
+      if (!item) return;
+      let val = parseInt(rawVal, 10);
+      if (isNaN(val) || val < 1) val = 1;
+
+      if (item.trackInventory && val > item.availableQuantity) {
+        showToast(`Quantity exceeds available stock (${item.availableQuantity} PCS). Adjusted to maximum available.`, 'warning');
+        val = Math.max(1, Math.floor(item.availableQuantity));
+      }
+
+      item.qty = val;
+      state.activeCheckoutKey = null;
+      renderPosCartPanel();
     }
 
     function clearCart() {
@@ -5911,7 +6234,7 @@
             </div>
             <div class="cart-line-controls">
               <button class="qty-btn" onclick="updateCartQty(${idx}, -1)">-</button>
-              <strong style="min-width: 20px; text-align: center;">${line.qty}</strong>
+              <input type="number" min="1" max="${line.trackInventory ? Math.max(1, Math.floor(line.availableQuantity)) : 9999}" value="${line.qty}" style="width: 44px; text-align: center; border: 1px solid var(--border-subtle); border-radius: 4px; padding: 2px 4px; font-weight: 600; font-size: 13px; background: var(--bg-primary); color: var(--text-primary);" onchange="setCartQty(${idx}, this.value)" />
               <button class="qty-btn" onclick="updateCartQty(${idx}, 1)">+</button>
             </div>
             <div style="min-width: 65px; text-align: right; font-weight: 700; color: var(--text-primary); margin-left: 12px;">
@@ -5956,6 +6279,14 @@
       if (!state.cart || state.cart.length === 0) {
         showToast('Cart is empty', 'warning');
         return;
+      }
+
+      // BUG-020 Pre-validate stock before opening checkout drawer
+      for (const item of state.cart) {
+        if (item.trackInventory && item.qty > (item.availableQuantity || 0)) {
+          showToast(`Cannot proceed to checkout: "${item.name}" quantity (${item.qty}) exceeds available stock (${item.availableQuantity || 0} PCS)`, 'error');
+          return;
+        }
       }
 
       // Generate or reuse a stable checkout idempotency key for this intentional checkout attempt
@@ -6051,6 +6382,26 @@
         return;
       }
 
+      // BUG-020: Guard against stock oversubscription before sending request
+      for (const item of state.cart) {
+        if (item.trackInventory && item.qty > (item.availableQuantity || 0)) {
+          showToast(`Checkout blocked: "${item.name}" quantity (${item.qty}) exceeds available stock (${item.availableQuantity || 0})`, 'error');
+          return;
+        }
+      }
+
+      const grandTotal = calculateCartGrandTotal();
+      const method = document.getElementById('payMethod')?.value || 'CASH';
+
+      // BUG-027: Validate cash tendered is not less than grand total
+      if (method === 'CASH') {
+        const tenderedVal = parseFloat(document.getElementById('payCashTendered')?.value || '0');
+        if (isNaN(tenderedVal) || tenderedVal < grandTotal) {
+          showToast(`Tendered cash (${formatTenantMoney(tenderedVal)}) cannot be less than total amount due (${formatTenantMoney(grandTotal)})`, 'warning');
+          return;
+        }
+      }
+
       state.isSubmittingCheckout = true;
 
       const submitBtn = document.getElementById('btnSubmitPosCheckout');
@@ -6063,9 +6414,8 @@
         cancelBtn.disabled = true;
       }
 
-      const grandTotal = calculateCartGrandTotal();
-      const method = document.getElementById('payMethod')?.value || 'CASH';
-      const customerName = document.getElementById('payCustomerName')?.value.trim() || null;
+      const rawCustomerName = document.getElementById('payCustomerName')?.value.trim();
+      const customerName = rawCustomerName ? rawCustomerName : null;
 
       const lines = state.cart.map(c => ({
         productId: c.productId,
@@ -6138,7 +6488,8 @@
         closeModal();
         openReceiptModal(sale.id);
       } catch (err) {
-        showToast(`Checkout failed: ${err.message}`, 'error');
+        const errDetail = err.detail || err.message || 'Payment processing failed';
+        showToast(`Checkout failed: ${errDetail}`, 'error');
         // Restore safe retry path with the SAME stable checkout key
         if (submitBtn) {
           submitBtn.disabled = false;
@@ -6157,7 +6508,175 @@
     const activeVoidOps = new Set();
     const cachedReceipts = new Map();
 
-    // Receipt Modal & Printing (BUG-010)
+    // Isolated Receipt Printer (BUG-028)
+    function printReceiptInvoice(saleId) {
+      const receipt = cachedReceipts.get(saleId);
+      if (!receipt) {
+        showToast('Receipt details not loaded', 'error');
+        return;
+      }
+      const formatSelect = document.getElementById('receiptPrintFormat');
+      const format = formatSelect ? formatSelect.value : 'THERMAL_80';
+      const receiptCurr = receipt.currencyCode || receipt.currency || getTenantCurrency();
+
+      let pageStyles = '';
+      let printableHtml = '';
+
+      if (format === 'THERMAL_80') {
+        pageStyles = `
+          @page { size: 80mm auto; margin: 0; }
+          body { width: 80mm; margin: 0; padding: 4mm 3mm; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace, sans-serif; font-size: 12px; line-height: 1.35; color: #000; }
+          .receipt-center { text-align: center; }
+          .receipt-bold { font-weight: 700; }
+          .receipt-divider { border-top: 1px dashed #000; margin: 6px 0; }
+          .receipt-row { display: flex; justify-content: space-between; margin-bottom: 3px; }
+          .receipt-footer { text-align: center; font-size: 11px; margin-top: 10px; }
+          * { page-break-inside: avoid; }
+        `;
+      } else if (format === 'THERMAL_58') {
+        pageStyles = `
+          @page { size: 58mm auto; margin: 0; }
+          body { width: 58mm; margin: 0; padding: 3mm 2mm; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace, sans-serif; font-size: 10px; line-height: 1.3; color: #000; }
+          .receipt-center { text-align: center; }
+          .receipt-bold { font-weight: 700; }
+          .receipt-divider { border-top: 1px dashed #000; margin: 4px 0; }
+          .receipt-row { display: flex; justify-content: space-between; margin-bottom: 2px; }
+          .receipt-footer { text-align: center; font-size: 9px; margin-top: 8px; }
+          * { page-break-inside: avoid; }
+        `;
+      } else {
+        // A4 Full Page Invoice
+        pageStyles = `
+          @page { size: A4 portrait; margin: 15mm; }
+          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #111; line-height: 1.5; font-size: 13px; margin: 0; }
+          .a4-invoice { max-width: 180mm; margin: 0 auto; }
+          .a4-header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #222; padding-bottom: 15px; margin-bottom: 20px; }
+          .a4-brand { font-size: 22px; font-weight: 800; }
+          .a4-title { font-size: 20px; font-weight: 700; color: #444; }
+          .a4-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px; font-size: 12px; }
+          .a4-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+          .a4-table th { text-align: left; padding: 8px 6px; border-bottom: 2px solid #ddd; font-weight: 700; font-size: 12px; }
+          .a4-table td { padding: 8px 6px; border-bottom: 1px solid #eee; font-size: 12px; }
+          .a4-totals { width: 100%; max-width: 280px; margin-left: auto; margin-bottom: 25px; }
+          .a4-total-row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 13px; }
+          .a4-total-grand { font-size: 16px; font-weight: 800; border-top: 2px solid #222; padding-top: 6px; margin-top: 4px; }
+          .a4-footer { text-align: center; font-size: 11px; color: #666; border-top: 1px solid #ddd; padding-top: 12px; }
+          * { page-break-inside: avoid; }
+        `;
+      }
+
+      if (format === 'A4') {
+        printableHtml = `
+          <div class="a4-invoice">
+            <div class="a4-header">
+              <div>
+                <div class="a4-brand">${escapeHtml(receipt.businessName || state.tenantName || 'NexStock Retail')}</div>
+                <div style="font-size: 12px; color: #555;">${escapeHtml(receipt.branchName || state.branchName || 'Main Store')}</div>
+              </div>
+              <div style="text-align: right;">
+                <div class="a4-title">SALES RECEIPT</div>
+                <div style="font-size: 12px; font-weight: 600;">Invoice: ${escapeHtml(receipt.invoiceNumber)}</div>
+                <div style="font-size: 12px; color: #555;">Date: ${escapeHtml(receipt.formattedTimestamp || new Date().toLocaleString())}</div>
+              </div>
+            </div>
+            <div class="a4-meta">
+              <div>
+                <strong>Cashier:</strong> ${escapeHtml(receipt.cashierName || state.fullName || 'Cashier')}<br>
+                <strong>Register:</strong> ${escapeHtml(receipt.registerCode || state.registerCode || 'REG-01')}
+              </div>
+              <div style="text-align: right;">
+                <strong>Customer:</strong> ${escapeHtml(receipt.customerName || 'Walk-in Customer')}
+              </div>
+            </div>
+            <table class="a4-table">
+              <thead>
+                <tr>
+                  <th>Item / Description</th>
+                  <th style="text-align: right;">Qty</th>
+                  <th style="text-align: right;">Unit Price</th>
+                  <th style="text-align: right;">Line Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${receipt.lines.map(l => `
+                  <tr>
+                    <td><strong>${escapeHtml(l.name)}</strong></td>
+                    <td style="text-align: right;">${parseFloat(l.quantity).toFixed(0)}</td>
+                    <td style="text-align: right;">${formatTenantMoney(parseFloat(l.unitPrice || '0'), receiptCurr)}</td>
+                    <td style="text-align: right;"><strong>${formatTenantMoney(l.lineTotal, receiptCurr)}</strong></td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+            <div class="a4-totals">
+              <div class="a4-total-row"><span>Subtotal:</span><span>${formatTenantMoney(receipt.subtotalAmount, receiptCurr)}</span></div>
+              <div class="a4-total-row"><span>Tax:</span><span>${formatTenantMoney(receipt.taxAmount, receiptCurr)}</span></div>
+              <div class="a4-total-row a4-total-grand"><span>Total:</span><span>${formatTenantMoney(receipt.grandTotal, receiptCurr)}</span></div>
+              ${receipt.payments.map(p => `
+                <div class="a4-total-row" style="color: #444; font-size: 12px;">
+                  <span>Paid (${escapeHtml(p.method || p.paymentMethod)}):</span><span>${formatTenantMoney(p.amount, receiptCurr)}</span>
+                </div>
+              `).join('')}
+              ${parseFloat(receipt.changeGiven || '0') > 0 ? `
+                <div class="a4-total-row" style="font-weight: 600; color: #166534;">
+                  <span>Change Given:</span><span>${formatTenantMoney(receipt.changeGiven, receiptCurr)}</span>
+                </div>
+              ` : ''}
+            </div>
+            <div class="a4-footer">
+              ${escapeHtml(receipt.notes || 'Thank you for your business!')}
+            </div>
+          </div>
+        `;
+      } else {
+        // Thermal POS format (58mm or 80mm)
+        printableHtml = `
+          <div class="receipt-center">
+            <div class="receipt-bold" style="font-size: 14px;">${escapeHtml(receipt.businessName || state.tenantName || 'NexStock Retail')}</div>
+            <div>${escapeHtml(receipt.branchName || state.branchName || 'Main Store')}</div>
+            <div style="font-size: 10px;">Reg: ${escapeHtml(receipt.registerCode || state.registerCode || 'REG-01')} | Cashier: ${escapeHtml(receipt.cashierName || state.fullName || 'Cashier')}</div>
+          </div>
+          <div class="receipt-divider"></div>
+          <div class="receipt-row"><span>Inv:</span><strong>${escapeHtml(receipt.invoiceNumber)}</strong></div>
+          <div class="receipt-row"><span>Date:</span><span>${escapeHtml(receipt.formattedTimestamp || new Date().toLocaleString())}</span></div>
+          ${receipt.customerName ? `<div class="receipt-row"><span>Cust:</span><span>${escapeHtml(receipt.customerName)}</span></div>` : ''}
+          <div class="receipt-divider"></div>
+          <div>
+            ${receipt.lines.map(l => `
+              <div class="receipt-row">
+                <span>${escapeHtml(l.name)} x${parseFloat(l.quantity).toFixed(0)}</span>
+                <span>${formatTenantMoney(l.lineTotal, receiptCurr)}</span>
+              </div>
+            `).join('')}
+          </div>
+          <div class="receipt-divider"></div>
+          <div class="receipt-row"><span>Subtotal:</span><span>${formatTenantMoney(receipt.subtotalAmount, receiptCurr)}</span></div>
+          <div class="receipt-row"><span>Tax:</span><span>${formatTenantMoney(receipt.taxAmount, receiptCurr)}</span></div>
+          <div class="receipt-row receipt-bold" style="font-size: 13px; margin-top: 3px;">
+            <span>TOTAL:</span><span>${formatTenantMoney(receipt.grandTotal, receiptCurr)}</span>
+          </div>
+          <div class="receipt-divider"></div>
+          ${receipt.payments.map(p => `
+            <div class="receipt-row">
+              <span>Paid (${escapeHtml(p.method || p.paymentMethod)}):</span><span>${formatTenantMoney(p.amount, receiptCurr)}</span>
+            </div>
+          `).join('')}
+          ${parseFloat(receipt.changeGiven || '0') > 0 ? `
+            <div class="receipt-row" style="font-weight: 700;">
+              <span>Change:</span><span>${formatTenantMoney(receipt.changeGiven, receiptCurr)}</span>
+            </div>
+          ` : ''}
+          <div class="receipt-divider"></div>
+          <div class="receipt-footer">
+            ${escapeHtml(receipt.notes || 'Thank you for shopping with NexStock!')}
+          </div>
+        `;
+      }
+
+      printHtmlDocument(printableHtml, pageStyles);
+    }
+
+    // Receipt Modal & Printing (BUG-010 & BUG-028)
     async function openReceiptModal(saleId) {
       if (activeReceiptFetches.has(saleId)) return;
 
@@ -6205,6 +6724,15 @@
       openModal({
         title: `Receipt #${escapeHtml(receipt.invoiceNumber)}`,
         bodyHtml: `
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding: 8px 12px; background: var(--bg-primary); border-radius: var(--radius);">
+            <label style="font-size: 13px; font-weight: 600;">Print Format:</label>
+            <select class="form-select" id="receiptPrintFormat" style="width: auto; padding: 4px 8px; font-size: 12px;">
+              <option value="THERMAL_80" selected>Thermal 80mm (Standard POS)</option>
+              <option value="THERMAL_58">Thermal 58mm (Compact Receipt)</option>
+              <option value="A4">A4 Full Page Invoice</option>
+            </select>
+          </div>
+
           <div class="receipt-container" id="printableReceipt">
             <div class="receipt-center">
               <div class="receipt-bold" style="font-size: 15px;">${escapeHtml(receipt.businessName || state.tenantName || 'NexStock Retail')}</div>
@@ -6261,7 +6789,7 @@
         `,
         footerHtml: `
           <button class="btn btn-secondary" onclick="closeModal()">Close</button>
-          <button class="btn btn-primary" onclick="window.print()">Print Receipt</button>
+          <button class="btn btn-primary" id="btnPrintReceiptModal" onclick="printReceiptInvoice('${saleId}')">Print Receipt</button>
         `
       });
     }
