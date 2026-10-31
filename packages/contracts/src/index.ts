@@ -476,8 +476,12 @@ export type ValuationMethod = Static<typeof ValuationMethodSchema>;
 
 export const BarcodeTypeSchema = Type.Union([
   Type.Literal('EAN13'),
+  Type.Literal('EAN8'),
   Type.Literal('UPCA'),
+  Type.Literal('UPCE'),
   Type.Literal('CODE128'),
+  Type.Literal('CODE39'),
+  Type.Literal('ITF'),
   Type.Literal('QR'),
   Type.Literal('CUSTOM'),
 ]);
@@ -489,6 +493,7 @@ export const ProductBarcodeInputSchema = Type.Object(
     barcodeType: Type.Optional(BarcodeTypeSchema),
     uomCode: Type.Optional(Type.String({ minLength: 1, maxLength: 16 })),
     isPrimary: Type.Optional(Type.Boolean()),
+    isActive: Type.Optional(Type.Boolean()),
   },
   { additionalProperties: false },
 );
@@ -615,11 +620,105 @@ export const ProductBarcodeResponseSchema = Type.Object({
   id: UuidSchema,
   barcode: Type.String(),
   barcodeType: BarcodeTypeSchema,
+  symbology: Type.Optional(BarcodeTypeSchema),
   uomCode: Type.String(),
   isPrimary: Type.Boolean(),
+  isActive: Type.Boolean(),
 });
 export type ProductBarcodeResponse = Static<
   typeof ProductBarcodeResponseSchema
+>;
+
+export const GenerateBarcodeQuerySchema = Type.Object(
+  {
+    format: Type.Optional(BarcodeTypeSchema),
+    symbology: Type.Optional(BarcodeTypeSchema),
+    prefix: Type.Optional(Type.String({ minLength: 1, maxLength: 10 })),
+  },
+  { additionalProperties: false },
+);
+export type GenerateBarcodeQuery = Static<typeof GenerateBarcodeQuerySchema>;
+
+export const GenerateBarcodeResponseSchema = Type.Object({
+  barcode: Type.String(),
+  format: BarcodeTypeSchema,
+  symbology: Type.Optional(BarcodeTypeSchema),
+  prefix: Type.String(),
+});
+export type GenerateBarcodeResponse = Static<typeof GenerateBarcodeResponseSchema>;
+
+export const CreateProductBarcodeRequestSchema = Type.Object(
+  {
+    barcode: Type.String({ minLength: 1, maxLength: 64 }),
+    barcodeType: Type.Optional(BarcodeTypeSchema),
+    symbology: Type.Optional(BarcodeTypeSchema),
+    uomCode: Type.Optional(Type.String({ minLength: 1, maxLength: 16 })),
+    isPrimary: Type.Optional(Type.Boolean()),
+    isActive: Type.Optional(Type.Boolean()),
+  },
+  { additionalProperties: false },
+);
+export type CreateProductBarcodeRequest = Static<typeof CreateProductBarcodeRequestSchema>;
+
+export const UpdateProductBarcodeRequestSchema = Type.Object(
+  {
+    barcodeType: Type.Optional(BarcodeTypeSchema),
+    symbology: Type.Optional(BarcodeTypeSchema),
+    uomCode: Type.Optional(Type.String({ minLength: 1, maxLength: 16 })),
+    isPrimary: Type.Optional(Type.Boolean()),
+    isActive: Type.Optional(Type.Boolean()),
+  },
+  { additionalProperties: false },
+);
+export type UpdateProductBarcodeRequest = Static<typeof UpdateProductBarcodeRequestSchema>;
+
+export const UnknownBarcodeActionSchema = Type.Union([
+  Type.Literal('PROMPT'),
+  Type.Literal('IGNORE'),
+  Type.Literal('MANUAL_SEARCH'),
+]);
+export type UnknownBarcodeAction = Static<typeof UnknownBarcodeActionSchema>;
+
+export const DefaultScanModeSchema = Type.Union([
+  Type.Literal('HARDWARE'),
+  Type.Literal('CAMERA'),
+  Type.Literal('MANUAL'),
+]);
+export type DefaultScanMode = Static<typeof DefaultScanModeSchema>;
+
+export const TenantBarcodeSettingsSchema = Type.Object({
+  tenantId: UuidSchema,
+  barcodeManagementEnabled: Type.Boolean(),
+  internalGenerationEnabled: Type.Boolean(),
+  internalPrefix: Type.String({ minLength: 1, maxLength: 10 }),
+  labelsEnabled: Type.Boolean(),
+  hardwareScannerEnabled: Type.Boolean(),
+  cameraScannerEnabled: Type.Boolean(),
+  autoAddToCart: Type.Boolean(),
+  incrementOnDuplicate: Type.Boolean(),
+  unknownBarcodeAction: UnknownBarcodeActionSchema,
+  defaultScanMode: DefaultScanModeSchema,
+  updatedAt: Type.Optional(Type.String()),
+});
+export type TenantBarcodeSettings = Static<typeof TenantBarcodeSettingsSchema>;
+
+export const UpdateTenantBarcodeSettingsRequestSchema = Type.Object(
+  {
+    barcodeManagementEnabled: Type.Optional(Type.Boolean()),
+    internalGenerationEnabled: Type.Optional(Type.Boolean()),
+    internalPrefix: Type.Optional(Type.String({ minLength: 1, maxLength: 10 })),
+    labelsEnabled: Type.Optional(Type.Boolean()),
+    hardwareScannerEnabled: Type.Optional(Type.Boolean()),
+    cameraScannerEnabled: Type.Optional(Type.Boolean()),
+    autoAddToCart: Type.Optional(Type.Boolean()),
+    incrementOnDuplicate: Type.Optional(Type.Boolean()),
+    unknownBarcodeAction: Type.Optional(UnknownBarcodeActionSchema),
+    defaultScanMode: Type.Optional(DefaultScanModeSchema),
+  },
+  { additionalProperties: false },
+);
+export type UpdateTenantBarcodeSettingsRequest = Static<
+  typeof UpdateTenantBarcodeSettingsRequestSchema
 >;
 
 export const ProductUnitConversionResponseSchema = Type.Object({

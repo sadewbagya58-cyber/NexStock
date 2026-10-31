@@ -501,6 +501,13 @@ export function loadPhase5CashShiftReconciliationMigrationSql(): string {
   return sqlText;
 }
 
+export function loadPhase6BarcodeManagementMigrationSql(): string {
+  const filename = '0011_phase6_barcode_management.sql';
+  const sqlText = readFileSync(resolve(migrationsDir, filename), 'utf-8');
+  assertPostgresMigrationSqlCompatible(sqlText, filename);
+  return sqlText;
+}
+
 export function getOrderedPostgresMigrations(): readonly PostgresMigrationSpec[] {
   return [
     {
@@ -572,6 +579,13 @@ export function getOrderedPostgresMigrations(): readonly PostgresMigrationSpec[]
       name: '0010_phase5_cash_shift_reconciliation',
       filename: '0010_phase5_cash_shift_reconciliation.sql',
       sql: loadPhase5CashShiftReconciliationMigrationSql(),
+    },
+    {
+      dialect: 'postgres',
+      version: 11,
+      name: '0011_phase6_barcode_management',
+      filename: '0011_phase6_barcode_management.sql',
+      sql: loadPhase6BarcodeManagementMigrationSql(),
     },
   ];
 }

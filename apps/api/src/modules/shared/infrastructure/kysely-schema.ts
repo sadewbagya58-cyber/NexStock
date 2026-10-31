@@ -373,10 +373,28 @@ export interface ProductBarcodesTable {
   tenant_id: string;
   product_id: string;
   barcode: string;
-  barcode_type: Generated<'EAN13' | 'UPCA' | 'CODE128' | 'QR' | 'CUSTOM'>;
+  barcode_type: Generated<'EAN13' | 'EAN8' | 'UPCA' | 'UPCE' | 'CODE128' | 'CODE39' | 'ITF' | 'QR' | 'CUSTOM'>;
   uom_code: string;
   is_primary: Generated<boolean>;
+  is_active: Generated<boolean>;
   created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface TenantBarcodeSettingsTable {
+  tenant_id: string;
+  barcode_management_enabled: Generated<boolean>;
+  internal_generation_enabled: Generated<boolean>;
+  internal_prefix: Generated<string>;
+  labels_enabled: Generated<boolean>;
+  hardware_scanner_enabled: Generated<boolean>;
+  camera_scanner_enabled: Generated<boolean>;
+  auto_add_to_cart: Generated<boolean>;
+  increment_on_duplicate: Generated<boolean>;
+  unknown_barcode_action: Generated<'PROMPT' | 'IGNORE' | 'MANUAL_SEARCH'>;
+  default_scan_mode: Generated<'HARDWARE' | 'CAMERA' | 'MANUAL'>;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
 }
 
 export interface ProductUnitConversionsTable {
@@ -759,4 +777,5 @@ export interface NexStockDatabase {
   inventory_cost_layers: InventoryCostLayersTable;
   stocktake_sessions: StocktakeSessionsTable;
   stocktake_lines: StocktakeLinesTable;
+  tenant_barcode_settings: TenantBarcodeSettingsTable;
 }

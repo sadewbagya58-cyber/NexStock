@@ -625,6 +625,7 @@ async function hydrateProductDetails(
     barcodeType: b.barcode_type,
     uomCode: b.uom_code,
     isPrimary: b.is_primary,
+    isActive: b.is_active ?? true,
   }));
 
   const unitConversions: ProductUnitConversionResponse[] = uomRows.map((u) => ({
@@ -857,6 +858,7 @@ export async function createProduct(
     barcodeType: BarcodeType;
     uomCode: string;
     isPrimary: boolean;
+    isActive: boolean;
   }> = [];
   const seenBarcodes = new Set<string>();
 
@@ -867,6 +869,7 @@ export async function createProduct(
       barcodeType: 'CODE128',
       uomCode: baseUom,
       isPrimary: true,
+      isActive: true,
     });
   }
 
@@ -903,6 +906,7 @@ export async function createProduct(
       barcodeType: alt.barcodeType ?? 'CODE128',
       uomCode: targetUom,
       isPrimary: false,
+      isActive: alt.isActive !== false,
     });
   }
 
@@ -1029,7 +1033,9 @@ export async function createProduct(
           barcode_type: bc.barcodeType,
           uom_code: bc.uomCode,
           is_primary: bc.isPrimary,
+          is_active: bc.isActive,
           created_at: now,
+          updated_at: now,
         })
         .execute();
     } catch (err: unknown) {
@@ -1456,6 +1462,7 @@ export async function updateProduct(
       barcodeType: BarcodeType;
       uomCode: string;
       isPrimary: boolean;
+      isActive: boolean;
     }> = [];
     const seenBarcodes = new Set<string>();
 
@@ -1466,6 +1473,7 @@ export async function updateProduct(
         barcodeType: 'CODE128',
         uomCode: existing.base_uom,
         isPrimary: true,
+        isActive: true,
       });
     }
 
@@ -1497,6 +1505,7 @@ export async function updateProduct(
         barcodeType: alt.barcodeType ?? 'CODE128',
         uomCode: targetUom,
         isPrimary: false,
+        isActive: alt.isActive !== false,
       });
     }
 
@@ -1540,7 +1549,9 @@ export async function updateProduct(
           barcode_type: bc.barcodeType,
           uom_code: bc.uomCode,
           is_primary: bc.isPrimary,
+          is_active: bc.isActive,
           created_at: now,
+          updated_at: now,
         })
         .execute();
     }

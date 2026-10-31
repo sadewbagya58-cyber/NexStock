@@ -1451,4 +1451,65 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       expect(html).toContain('renderMovementsView()');
     });
   });
+
+  describe('18. Phase 6 — Universal Barcode Management & Dual-Mode POS Scanning System', () => {
+    it('verifies public/index.html includes all Universal Barcode and Dual-Mode POS Scanning components', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // 1. Barcode Settings in Org Settings
+      expect(html).toContain('settingHwScanner');
+      expect(html).toContain('settingCamScanner');
+      expect(html).toContain('settingInternalGen');
+      expect(html).toContain('settingAutoCart');
+      expect(html).toContain('settingIncDup');
+      expect(html).toContain('settingPrefix');
+      expect(html).toContain('saveTenantBarcodeSettings');
+      expect(html).toContain('/v1/settings/barcode');
+
+      // 2. Vector SVG Barcode Generator and Label Printing
+      expect(html).toContain('renderBarcodeSvg');
+      expect(html).toContain('CODE128_PATTERNS');
+      expect(html).toContain('openBarcodeLabelModal');
+      expect(html).toContain('printableBarcodeLabel');
+      expect(html).toContain('@media print');
+
+      // 3. Product Catalog Barcode Management Actions
+      expect(html).toContain('🏷️ Barcode');
+      expect(html).toContain('generateBarcodeForInput');
+      expect(html).toContain('btnGenNewProdBarcode');
+
+      // 4. Dual-Mode POS Scanning & Audio Synthesizer
+      expect(html).toContain('btnPosCameraScan');
+      expect(html).toContain('openPosCameraScannerModal');
+      expect(html).toContain('closePosCameraScannerModal');
+      expect(html).toContain('posCameraVideo');
+      expect(html).toContain('camera-reticle');
+      expect(html).toContain('playScanChime');
+      expect(html).toContain('openUnknownBarcodeModal');
+      expect(html).toContain('bindUnknownBarcodeToProduct');
+      expect(html).toContain('openCreateProductModalWithBarcode');
+    });
+
+    it('verifies BarcodeScannerBuffer keystroke burst detection and Enter dispatch', () => {
+      const scanner = new BarcodeScannerBuffer(50);
+      let t = 1000;
+
+      // Burst scan: 'N', 'B', '-', '0', '0', '1', 'Enter' spaced 15ms apart
+      expect(scanner.handleKeyDown({ key: 'N', timeStamp: (t += 15) })).toBeNull();
+      expect(scanner.handleKeyDown({ key: 'B', timeStamp: (t += 15) })).toBeNull();
+      expect(scanner.handleKeyDown({ key: '-', timeStamp: (t += 15) })).toBeNull();
+      expect(scanner.handleKeyDown({ key: '0', timeStamp: (t += 15) })).toBeNull();
+      expect(scanner.handleKeyDown({ key: '0', timeStamp: (t += 15) })).toBeNull();
+      expect(scanner.handleKeyDown({ key: '1', timeStamp: (t += 15) })).toBeNull();
+
+      const result = scanner.handleKeyDown({ key: 'Enter', timeStamp: (t += 15) });
+      expect(result).toBe('NB-001');
+
+      // Slow manual typing: > 50ms resets buffer
+      expect(scanner.handleKeyDown({ key: 'A', timeStamp: 2000 })).toBeNull();
+      expect(scanner.handleKeyDown({ key: 'B', timeStamp: 2100 })).toBeNull();
+      expect(scanner.handleKeyDown({ key: 'Enter', timeStamp: 2110 })).toBeNull();
+    });
+  });
 });

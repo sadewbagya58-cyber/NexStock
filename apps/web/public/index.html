@@ -628,6 +628,130 @@
     .receipt-row { display: flex; justify-content: space-between; margin-bottom: 4px; }
     .receipt-bold { font-weight: bold; }
 
+    /* Barcode Labels & Print Layout */
+    .barcode-label-sheet {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+      padding: 16px;
+      background: var(--surface-bg);
+      border-radius: var(--radius);
+      margin-bottom: 16px;
+    }
+    .barcode-label-card {
+      background: #FFFFFF;
+      color: #000000;
+      border: 1px dashed #94A3B8;
+      border-radius: 6px;
+      padding: 14px 20px;
+      text-align: center;
+      width: 280px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.06);
+    }
+    .barcode-label-sku {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      color: #475569;
+    }
+    .barcode-label-title {
+      font-size: 13px;
+      font-weight: 600;
+      margin: 2px 0 6px 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      color: #0F172A;
+    }
+    .barcode-label-price {
+      font-size: 15px;
+      font-weight: 700;
+      color: #0F172A;
+      margin-top: 4px;
+    }
+    .barcode-svg-container {
+      display: flex;
+      justify-content: center;
+      margin: 6px 0;
+    }
+    .barcode-svg-container svg {
+      max-width: 100%;
+      height: auto;
+    }
+
+    /* Dual-Mode POS Camera Scanner */
+    .camera-scanner-modal {
+      position: relative;
+      width: 100%;
+      max-width: 480px;
+      margin: 0 auto;
+      overflow: hidden;
+      border-radius: var(--radius);
+      background: #000000;
+    }
+    .camera-video-container {
+      position: relative;
+      width: 100%;
+      height: 300px;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #000;
+    }
+    .camera-video-container video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .camera-reticle {
+      position: absolute;
+      width: 240px;
+      height: 150px;
+      border: 2px solid rgba(255, 255, 255, 0.7);
+      border-radius: 8px;
+      box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45);
+      pointer-events: none;
+    }
+    .camera-reticle::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+      background: #ef4444;
+      box-shadow: 0 0 8px #ef4444;
+      animation: laserScan 1.8s ease-in-out infinite alternate;
+    }
+    @keyframes laserScan {
+      0% { top: 0; opacity: 0.8; }
+      50% { opacity: 1; }
+      100% { top: 100%; opacity: 0.8; }
+    }
+
+    /* Print Styles */
+    @media print {
+      body * {
+        visibility: hidden !important;
+      }
+      #printableReceipt, #printableReceipt * {
+        visibility: visible !important;
+      }
+      #printableBarcodeLabel, #printableBarcodeLabel * {
+        visibility: visible !important;
+      }
+      #printableReceipt, #printableBarcodeLabel {
+        position: absolute !important;
+        left: 0 !important;
+        top: 0 !important;
+        width: 100% !important;
+        margin: 0 !important;
+        padding: 8px !important;
+        border: none !important;
+        box-shadow: none !important;
+      }
+    }
+
     /* Toast Notifications */
     .toast-container {
       position: fixed;
@@ -3537,6 +3661,7 @@
                             <td>
                               <div style="display: flex; gap: 6px;">
                                 <button class="btn btn-secondary btn-sm" onclick="openEditProductModal('${p.id}')">Edit</button>
+                                <button class="btn btn-secondary btn-sm" title="Manage Barcodes &amp; Print Label" onclick="openBarcodeLabelModal('${p.id}')">🏷️ Barcode</button>
                                 ${isActive ? `
                                   <button class="btn btn-secondary btn-sm" onclick="archiveProduct('${p.id}', '${sku}')">Archive</button>
                                 ` : ''}
@@ -3591,8 +3716,9 @@
                           </span>
                         </div>
                       </div>
-                      <div class="entity-card-footer" style="display: flex; gap: 8px;">
+                      <div class="entity-card-footer" style="display: flex; gap: 6px;">
                         <button class="btn btn-secondary btn-sm" style="flex: 1;" onclick="openEditProductModal('${p.id}')">Edit</button>
+                        <button class="btn btn-secondary btn-sm" style="flex: 1;" onclick="openBarcodeLabelModal('${p.id}')">🏷️ Barcode</button>
                         ${isActive ? `
                           <button class="btn btn-secondary btn-sm" style="flex: 1;" onclick="archiveProduct('${p.id}', '${sku}')">Archive</button>
                         ` : ''}
@@ -3661,8 +3787,19 @@
               <input type="text" class="form-input" id="newProdUom" value="PCS" required>
             </div>
             <div class="form-group">
-              <label class="form-label">Primary Barcode</label>
-              <input type="text" class="form-input" id="newProdBarcode" placeholder="e.g. 012345678999">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <label class="form-label" style="margin-bottom: 0;">Primary Barcode</label>
+                <button type="button" class="btn btn-secondary btn-sm" id="btnGenNewProdBarcode" style="padding: 1px 6px; font-size: 11px;" onclick="generateBarcodeForInput('newProdBarcode', 'newProdBarcodeSymbology')">⚡ Generate</button>
+              </div>
+              <div style="display: flex; gap: 6px;">
+                <select class="form-select" id="newProdBarcodeSymbology" style="width: 95px; font-size: 11px; padding: 4px;">
+                  <option value="CODE128" selected>Code 128</option>
+                  <option value="EAN13">EAN-13</option>
+                  <option value="EAN8">EAN-8</option>
+                  <option value="UPCA">UPC-A</option>
+                </select>
+                <input type="text" class="form-input" id="newProdBarcode" placeholder="e.g. NB-001001" style="flex: 1;">
+              </div>
             </div>
           </div>
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
@@ -3795,8 +3932,16 @@
             </select>
           </div>
           <div class="form-group">
-            <label class="form-label">Primary Barcode</label>
-            <input type="text" class="form-input" id="editProdBarcode" value="${escapeHtml(p.primaryBarcode || '')}" placeholder="e.g. 012345678999">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+              <label class="form-label" style="margin-bottom: 0;">Primary Barcode</label>
+              <button type="button" class="btn btn-secondary btn-sm" id="btnGenEditProdBarcode" style="padding: 1px 6px; font-size: 11px;" onclick="generateBarcodeForInput('editProdBarcode')">⚡ Generate</button>
+            </div>
+            <input type="text" class="form-input" id="editProdBarcode" value="${escapeHtml(p.primaryBarcode || '')}" placeholder="e.g. NB-001001">
+            <div style="margin-top: 6px; font-size: 12px;">
+              <a href="javascript:void(0)" onclick="closeModal(); openBarcodeLabelModal('${productId}');" style="color: var(--accent-primary); text-decoration: underline; font-weight: 500;">
+                🏷️ Manage Additional Barcodes &amp; Print Labels &rarr;
+              </a>
+            </div>
           </div>
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
             <div class="form-group">
@@ -4799,9 +4944,16 @@
           <div class="pos-layout">
             <!-- Catalog Panel -->
             <div class="pos-catalog-panel">
-              <div style="display: flex; gap: 10px; margin-bottom: 8px;">
-                <input type="text" class="form-input" id="posBarcodeScannerInput" placeholder="Scan barcode or type SKU/Name and press Enter..." autofocus>
+              <div style="display: flex; gap: 8px; margin-bottom: 8px; align-items: center;">
+                <div style="position: relative; flex: 1;">
+                  <input type="text" class="form-input" id="posBarcodeScannerInput" placeholder="Scan barcode or type SKU/Name and press Enter..." autofocus style="padding-right: 32px;">
+                  <span style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); font-size: 14px; opacity: 0.5;">🔍</span>
+                </div>
                 <button class="btn btn-secondary" onclick="handlePosManualSearch()">Find</button>
+                <button class="btn btn-primary" id="btnPosCameraScan" onclick="openPosCameraScannerModal()" title="Scan barcode with camera" style="display: flex; align-items: center; gap: 6px; white-space: nowrap;">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>
+                  <span>Camera</span>
+                </button>
               </div>
 
               ${!state.warehouseId ? `
@@ -4912,31 +5064,556 @@
     }
 
     async function executeBarcodeScan(barcodeOrSku) {
+      if (!barcodeOrSku || !barcodeOrSku.trim()) return;
+      const cleanCode = barcodeOrSku.trim();
+
       if (!state.warehouseId) {
         showToast('Please select a branch and warehouse before searching products', 'warning');
         return;
       }
       try {
-        const results = await apiFetch(`/v1/pos/products/search?warehouseId=${encodeURIComponent(state.warehouseId)}&barcode=${encodeURIComponent(barcodeOrSku)}`, { silent: true }).catch(() => []);
+        // 1. Search by exact barcode (active barcode table, primary barcode, or serial number)
+        const results = await apiFetch(`/v1/pos/products/search?warehouseId=${encodeURIComponent(state.warehouseId)}&barcode=${encodeURIComponent(cleanCode)}`, { silent: true }).catch(() => []);
         if (results && results.length > 0) {
           const p = results[0];
           const price = p.retailPrice || p.sellingPrice || '0.0000';
+          playScanChime(true);
           addToCart(p.id, p.sku, p.name, price, p.baseUom, p.trackInventory, p.availableQuantity);
           showToast(`Scanned: ${p.name}`, 'success');
-        } else {
-          // Fallback to text query
-          const textResults = await apiFetch(`/v1/pos/products/search?warehouseId=${encodeURIComponent(state.warehouseId)}&q=${encodeURIComponent(barcodeOrSku)}`, { silent: true }).catch(() => []);
-          if (textResults && textResults.length > 0) {
-            const p = textResults[0];
-            const price = p.retailPrice || p.sellingPrice || '0.0000';
-            addToCart(p.id, p.sku, p.name, price, p.baseUom, p.trackInventory, p.availableQuantity);
-            showToast(`Added: ${p.name}`, 'success');
-          } else {
-            showToast(`No product matching "${barcodeOrSku}"`, 'error');
-          }
+          return;
         }
+
+        // 2. Fallback to text query (SKU or name match)
+        const textResults = await apiFetch(`/v1/pos/products/search?warehouseId=${encodeURIComponent(state.warehouseId)}&q=${encodeURIComponent(cleanCode)}`, { silent: true }).catch(() => []);
+        if (textResults && textResults.length > 0) {
+          const p = textResults[0];
+          const price = p.retailPrice || p.sellingPrice || '0.0000';
+          playScanChime(true);
+          addToCart(p.id, p.sku, p.name, price, p.baseUom, p.trackInventory, p.availableQuantity);
+          showToast(`Added: ${p.name}`, 'success');
+          return;
+        }
+
+        // 3. Unrecognized Barcode
+        playScanChime(false);
+        showToast(`No product matching "${cleanCode}"`, 'error');
+        openUnknownBarcodeModal(cleanCode);
+      } catch (err) {
+        playScanChime(false);
+      }
+    }
+
+    function openUnknownBarcodeModal(scannedCode) {
+      const activeProducts = state.cachedProducts || [];
+      openModal({
+        title: 'Unrecognized Barcode',
+        bodyHtml: `
+          <div style="text-align: center; margin-bottom: 16px;">
+            <div style="font-size: 32px; margin-bottom: 8px;">🏷️❓</div>
+            <div style="font-weight: 600; font-size: 15px; margin-bottom: 4px;">Barcode Not Found</div>
+            <div style="font-size: 13px; color: var(--text-secondary);">
+              Scanned code <code>${escapeHtml(scannedCode)}</code> is not linked to any product.
+            </div>
+          </div>
+
+          <div class="card" style="margin-bottom: 14px; background: var(--surface-bg);">
+            <div style="font-weight: 600; font-size: 13px; margin-bottom: 8px;">Option 1: Assign to Existing Product</div>
+            <div style="display: flex; gap: 8px;">
+              <select class="form-select" id="unknownBcTargetProduct" style="flex: 1;">
+                <option value="">Select a product to bind barcode...</option>
+                ${activeProducts.map(p => `<option value="${p.id}">${escapeHtml(p.sku)} — ${escapeHtml(p.name)}</option>`).join('')}
+              </select>
+              <button class="btn btn-primary btn-sm" onclick="bindUnknownBarcodeToProduct('${escapeHtml(scannedCode)}')">Assign &amp; Add</button>
+            </div>
+          </div>
+
+          <div class="card" style="background: var(--surface-bg);">
+            <div style="font-weight: 600; font-size: 13px; margin-bottom: 8px;">Option 2: Create New Product with this Barcode</div>
+            <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 8px;">
+              Add a brand new item to your catalog with this barcode assigned automatically.
+            </p>
+            <button class="btn btn-secondary btn-sm" onclick="closeModal(); openCreateProductModalWithBarcode('${escapeHtml(scannedCode)}');">
+              + Create Product with "${escapeHtml(scannedCode)}"
+            </button>
+          </div>
+        `,
+        footerHtml: `
+          <button class="btn btn-secondary" onclick="closeModal()">Dismiss</button>
+        `
+      });
+    }
+
+    async function bindUnknownBarcodeToProduct(barcode) {
+      const selectEl = document.getElementById('unknownBcTargetProduct');
+      const productId = selectEl ? selectEl.value : '';
+      if (!productId) {
+        showToast('Please select a product to assign this barcode', 'warning');
+        return;
+      }
+      try {
+        await apiFetch(`/v1/products/${productId}/barcodes`, {
+          method: 'POST',
+          body: JSON.stringify({
+            barcode,
+            symbology: 'CODE128',
+            isPrimary: false,
+            isActive: true
+          })
+        });
+        showToast('Barcode linked successfully', 'success');
+        closeModal();
+        await executeBarcodeScan(barcode);
       } catch (err) {}
     }
+
+    function openCreateProductModalWithBarcode(barcode) {
+      openCreateProductModal();
+      setTimeout(() => {
+        const input = document.getElementById('newProdBarcode');
+        if (input) input.value = barcode;
+      }, 50);
+    }
+
+    // Barcode Generator helper for modals
+    async function generateBarcodeForInput(inputId, symbologySelectId) {
+      const input = document.getElementById(inputId);
+      const symbologySelect = symbologySelectId ? document.getElementById(symbologySelectId) : null;
+      const symbology = symbologySelect ? symbologySelect.value : 'CODE128';
+
+      const btn = event?.currentTarget;
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = '⏳';
+      }
+
+      try {
+        const res = await apiFetch(`/v1/products/generate-barcode?symbology=${encodeURIComponent(symbology)}`, { method: 'POST' });
+        if (res && res.barcode && input) {
+          input.value = res.barcode;
+          showToast(`Generated: ${res.barcode}`, 'success');
+        }
+      } catch (err) {
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = '⚡ Generate';
+        }
+      }
+    }
+
+    // Vector SVG Barcode Generator (Code 128 Set B pure JS)
+    const CODE128_PATTERNS = [
+      '212222','222122','222221','121223','121322','131222','122213','122312','132212','221213',
+      '221312','231212','112232','122132','122231','113222','123122','123221','223211','221132',
+      '221231','213212','223112','312131','311222','321122','321221','312212','322112','322211',
+      '212123','212321','232121','111323','131123','131321','112313','132113','132311','211313',
+      '231113','231311','112133','112331','132131','113123','113321','133121','313121','211331',
+      '231131','213113','213311','213131','311123','311321','331121','312113','312311','332111',
+      '314111','221411','431111','111224','111422','121124','121421','141122','141221','112214',
+      '112412','122114','122411','142112','142211','241211','221114','413111','241112','134111',
+      '111242','121142','121241','114212','124112','124211','411212','421112','421211','212141',
+      '214121','412121','111143','111341','131141','114113','114311','411113','411311','113141',
+      '114131','311141','411131','211412','211214','211232','2331112'
+    ];
+
+    function renderBarcodeSvg(code, symbology = 'CODE128', options = {}) {
+      if (!code) return '<div style="color:var(--text-secondary); font-size:12px;">(No barcode)</div>';
+      const height = options.height || 54;
+      const barWidth = options.barWidth || 2;
+      const quietZone = 14;
+
+      let check = 104; // Code 128 Set B Start
+      const indices = [104];
+      for (let i = 0; i < code.length; i++) {
+        const c = code.charCodeAt(i) - 32;
+        if (c >= 0 && c <= 95) {
+          indices.push(c);
+          check += c * (i + 1);
+        }
+      }
+      indices.push(check % 103);
+      indices.push(106); // Stop
+
+      let bits = '';
+      for (const idx of indices) {
+        const pat = CODE128_PATTERNS[idx] || CODE128_PATTERNS[0];
+        let isBar = true;
+        for (let j = 0; j < pat.length; j++) {
+          const w = parseInt(pat[j], 10);
+          bits += (isBar ? '1' : '0').repeat(w);
+          isBar = !isBar;
+        }
+      }
+
+      const totalWidth = bits.length * barWidth + (quietZone * 2);
+      const totalHeight = height + 20;
+
+      let rects = '';
+      for (let i = 0; i < bits.length; i++) {
+        if (bits[i] === '1') {
+          const x = quietZone + i * barWidth;
+          rects += `<rect x="${x}" y="0" width="${barWidth}" height="${height}" fill="#000000" />`;
+        }
+      }
+
+      const textX = totalWidth / 2;
+      const textY = height + 15;
+      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${totalWidth} ${totalHeight}" width="${totalWidth}" height="${totalHeight}" style="background:#FFFFFF; max-width:100%; height:auto;">${rects}<text x="${textX}" y="${textY}" text-anchor="middle" font-family="monospace" font-size="12" font-weight="bold" fill="#000000">${escapeHtml(code)}</text></svg>`;
+    }
+
+    // Barcode Label Preview & Management Modal
+    async function openBarcodeLabelModal(productId) {
+      const p = (state.cachedProducts || []).find(x => x.id === productId);
+      if (!p) {
+        showToast('Product not found', 'error');
+        return;
+      }
+
+      openModal({
+        title: `Barcode Management & Label: ${escapeHtml(p.sku)}`,
+        bodyHtml: `
+          <div style="text-align: center; padding: 24px;">
+            <div class="spinner-sm"></div> Loading barcodes...
+          </div>
+        `
+      });
+
+      try {
+        const barcodes = await apiFetch(`/v1/products/${productId}/barcodes`).catch(() => []);
+        const primaryBarcode = barcodes.find(b => b.isPrimary)?.barcode || p.primaryBarcode || '';
+        const priceFormatted = formatTenantMoney(p.sellingPrice);
+
+        const modalBody = `
+          <!-- Printable Label Preview -->
+          <div class="barcode-label-sheet">
+            <div class="barcode-label-card" id="printableBarcodeLabel">
+              <div class="barcode-label-sku">${escapeHtml(p.sku)} &bull; ${escapeHtml(p.baseUom || 'PCS')}</div>
+              <div class="barcode-label-title" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</div>
+              <div class="barcode-svg-container">
+                ${primaryBarcode ? renderBarcodeSvg(primaryBarcode, 'CODE128', { height: 48, barWidth: 1.8 }) : '<div style="padding:16px; color:#64748B;">No primary barcode assigned</div>'}
+              </div>
+              <div class="barcode-label-price">${priceFormatted}</div>
+            </div>
+            <button class="btn btn-secondary btn-sm" onclick="window.print()" ${!primaryBarcode ? 'disabled' : ''}>
+              🖨️ Print Label Sheet
+            </button>
+          </div>
+
+          <!-- Registered Barcodes Table -->
+          <div style="font-weight: 600; font-size: 14px; margin-bottom: 8px;">Registered Barcodes (${barcodes.length})</div>
+          <div class="table-responsive" style="margin-bottom: 16px;">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Barcode</th>
+                  <th>Symbology</th>
+                  <th>Primary</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${barcodes.length === 0 ? `
+                  <tr><td colspan="5" style="text-align: center; color: var(--text-secondary); padding: 12px;">No barcodes registered yet.</td></tr>
+                ` : barcodes.map(b => `
+                  <tr>
+                    <td><code>${escapeHtml(b.barcode)}</code></td>
+                    <td><span class="badge-pill badge-blue">${escapeHtml(b.barcodeType || b.symbology || 'CODE128')}</span></td>
+                    <td>${b.isPrimary ? '<span class="badge-pill badge-green">PRIMARY</span>' : '—'}</td>
+                    <td><span class="badge-pill ${b.isActive ? 'badge-green' : 'badge-red'}">${b.isActive ? 'ACTIVE' : 'INACTIVE'}</span></td>
+                    <td>
+                      <div style="display: flex; gap: 4px;">
+                        ${!b.isPrimary ? `
+                          <button class="btn btn-secondary btn-sm" style="padding: 2px 6px; font-size: 11px;" onclick="setBarcodePrimary('${productId}', '${b.id}')">Make Primary</button>
+                        ` : ''}
+                        <button class="btn btn-secondary btn-sm" style="padding: 2px 6px; font-size: 11px;" onclick="toggleBarcodeActive('${productId}', '${b.id}', ${!b.isActive})">
+                          ${b.isActive ? 'Deactivate' : 'Activate'}
+                        </button>
+                        ${!b.isPrimary ? `
+                          <button class="btn btn-secondary btn-sm" style="padding: 2px 6px; font-size: 11px; color: var(--status-danger);" onclick="deleteBarcode('${productId}', '${b.id}')">Delete</button>
+                        ` : ''}
+                      </div>
+                    </td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Add Alternate Barcode Card -->
+          <div class="card" style="background: var(--surface-bg);">
+            <div style="font-weight: 600; font-size: 13px; margin-bottom: 8px;">+ Add Additional Barcode</div>
+            <div style="display: grid; grid-template-columns: 1fr 110px auto; gap: 8px; align-items: flex-end;">
+              <div>
+                <label class="form-label" style="font-size: 11px;">Barcode Code</label>
+                <div style="display: flex; gap: 4px;">
+                  <input type="text" class="form-input" id="newAltBarcodeCode" placeholder="Enter or scan code...">
+                  <button type="button" class="btn btn-secondary btn-sm" onclick="generateBarcodeForInput('newAltBarcodeCode', 'newAltBarcodeSymbology')" title="Generate unique code">⚡</button>
+                </div>
+              </div>
+              <div>
+                <label class="form-label" style="font-size: 11px;">Symbology</label>
+                <select class="form-select" id="newAltBarcodeSymbology">
+                  <option value="CODE128" selected>Code 128</option>
+                  <option value="EAN13">EAN-13</option>
+                  <option value="EAN8">EAN-8</option>
+                  <option value="UPCA">UPC-A</option>
+                  <option value="CUSTOM">Custom</option>
+                </select>
+              </div>
+              <button class="btn btn-primary btn-sm" onclick="submitAddAlternateBarcode('${productId}')">Add</button>
+            </div>
+          </div>
+        `;
+
+        const modalBodyEl = document.getElementById('modalBody');
+        if (modalBodyEl) modalBodyEl.innerHTML = modalBody;
+      } catch (err) {
+        showToast(`Failed to load barcodes: ${err.message}`, 'error');
+      }
+    }
+
+    async function submitAddAlternateBarcode(productId) {
+      const codeInput = document.getElementById('newAltBarcodeCode');
+      const symbologySelect = document.getElementById('newAltBarcodeSymbology');
+      const code = codeInput ? codeInput.value.trim() : '';
+      const symbology = symbologySelect ? symbologySelect.value : 'CODE128';
+
+      if (!code) {
+        showToast('Please enter or generate a barcode', 'warning');
+        return;
+      }
+
+      try {
+        await apiFetch(`/v1/products/${productId}/barcodes`, {
+          method: 'POST',
+          body: JSON.stringify({
+            barcode: code,
+            symbology,
+            isPrimary: false,
+            isActive: true
+          })
+        });
+        showToast(`Barcode ${code} added`, 'success');
+        openBarcodeLabelModal(productId);
+      } catch (err) {}
+    }
+
+    async function setBarcodePrimary(productId, barcodeId) {
+      try {
+        await apiFetch(`/v1/products/${productId}/barcodes/${barcodeId}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ isPrimary: true, isActive: true })
+        });
+        showToast('Barcode promoted to primary', 'success');
+        const res = await apiFetch('/v1/products?limit=100').catch(() => ({ data: [] }));
+        state.cachedProducts = res?.data || [];
+        openBarcodeLabelModal(productId);
+      } catch (err) {}
+    }
+
+    async function toggleBarcodeActive(productId, barcodeId, nextActive) {
+      try {
+        await apiFetch(`/v1/products/${productId}/barcodes/${barcodeId}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ isActive: nextActive })
+        });
+        showToast(`Barcode ${nextActive ? 'activated' : 'deactivated'}`, 'success');
+        openBarcodeLabelModal(productId);
+      } catch (err) {}
+    }
+
+    async function deleteBarcode(productId, barcodeId) {
+      if (!confirm('Are you sure you want to delete this barcode?')) return;
+      try {
+        await apiFetch(`/v1/products/${productId}/barcodes/${barcodeId}`, {
+          method: 'DELETE'
+        });
+        showToast('Barcode deleted', 'success');
+        openBarcodeLabelModal(productId);
+      } catch (err) {}
+    }
+
+    // Camera Barcode Scanner Modal
+    let posCameraStream = null;
+    let posCameraAnimationId = null;
+
+    async function openPosCameraScannerModal() {
+      openModal({
+        title: '📷 Camera Barcode Scanner',
+        bodyHtml: `
+          <div class="camera-scanner-modal">
+            <div class="camera-video-container">
+              <video id="posCameraVideo" autoplay playsinline muted></video>
+              <div class="camera-reticle"></div>
+            </div>
+          </div>
+          <div style="margin-top: 12px; text-align: center; font-size: 13px; color: var(--text-secondary);">
+            Point camera directly at any barcode or QR code.
+          </div>
+          <div style="margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-subtle); display: flex; gap: 8px;">
+            <input type="text" class="form-input" id="cameraManualFallbackInput" placeholder="Manual test barcode or scan..." style="flex: 1;">
+            <button class="btn btn-secondary btn-sm" onclick="executeCameraManualScan()">Scan Code</button>
+          </div>
+        `,
+        footerHtml: `
+          <button class="btn btn-secondary" onclick="closePosCameraScannerModal()">Close Camera</button>
+        `
+      });
+
+      try {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          showToast('Camera access is not supported on this device/browser', 'warning');
+          return;
+        }
+
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { ideal: 'environment' },
+            width: { ideal: 1280 }
+          }
+        });
+        posCameraStream = stream;
+
+        const videoEl = document.getElementById('posCameraVideo');
+        if (videoEl) {
+          videoEl.srcObject = stream;
+          await videoEl.play().catch(() => {});
+        }
+
+        if ('BarcodeDetector' in window) {
+          const detector = new window.BarcodeDetector({
+            formats: ['ean_13', 'ean_8', 'code_128', 'code_39', 'upc_a', 'upc_e', 'qr_code']
+          });
+
+          let isProcessing = false;
+          async function detectFrame() {
+            if (!posCameraStream) return;
+            if (videoEl && videoEl.readyState >= 2 && !isProcessing) {
+              isProcessing = true;
+              try {
+                const barcodes = await detector.detect(videoEl);
+                if (barcodes && barcodes.length > 0) {
+                  const detectedCode = barcodes[0].rawValue;
+                  closePosCameraScannerModal();
+                  await executeBarcodeScan(detectedCode);
+                  return;
+                }
+              } catch (e) {}
+              isProcessing = false;
+            }
+            posCameraAnimationId = requestAnimationFrame(detectFrame);
+          }
+          posCameraAnimationId = requestAnimationFrame(detectFrame);
+        }
+      } catch (err) {
+        showToast(`Camera could not be started: ${err.message}`, 'error');
+      }
+    }
+
+    function executeCameraManualScan() {
+      const input = document.getElementById('cameraManualFallbackInput');
+      const val = input ? input.value.trim() : '';
+      if (!val) {
+        showToast('Please enter a barcode number', 'warning');
+        return;
+      }
+      closePosCameraScannerModal();
+      executeBarcodeScan(val);
+    }
+
+    function closePosCameraScannerModal() {
+      if (posCameraAnimationId) {
+        cancelAnimationFrame(posCameraAnimationId);
+        posCameraAnimationId = null;
+      }
+      if (posCameraStream) {
+        posCameraStream.getTracks().forEach(t => t.stop());
+        posCameraStream = null;
+      }
+      closeModal();
+    }
+
+    // Web Audio API Chime Synthesizer
+    let scanAudioCtx = null;
+    function playScanChime(success = true) {
+      try {
+        if (!scanAudioCtx) {
+          scanAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        if (scanAudioCtx.state === 'suspended') {
+          scanAudioCtx.resume();
+        }
+        const now = scanAudioCtx.currentTime;
+        const osc = scanAudioCtx.createOscillator();
+        const gain = scanAudioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(scanAudioCtx.destination);
+
+        if (success) {
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(880, now);
+          osc.frequency.exponentialRampToValueAtTime(1320, now + 0.08);
+          gain.gain.setValueAtTime(0.12, now);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+          osc.start(now);
+          osc.stop(now + 0.12);
+        } else {
+          osc.type = 'sawtooth';
+          osc.frequency.setValueAtTime(220, now);
+          osc.frequency.setValueAtTime(180, now + 0.08);
+          gain.gain.setValueAtTime(0.15, now);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+          osc.start(now);
+          osc.stop(now + 0.18);
+        }
+      } catch (e) {}
+    }
+
+    // Hardware Scanner Wedge Keystroke Burst Listener
+    let hardwareBarcodeBuffer = '';
+    let lastHardwareKeypress = 0;
+    let lastDispatchedHardwareCode = '';
+    let lastDispatchedHardwareTime = 0;
+
+    window.addEventListener('keydown', (e) => {
+      const now = Date.now();
+      const targetTag = (e.target && e.target.tagName) ? e.target.tagName.toLowerCase() : '';
+      const isInput = targetTag === 'input' || targetTag === 'textarea' || targetTag === 'select';
+      const isPosScannerInput = e.target && e.target.id === 'posBarcodeScannerInput';
+
+      if (isInput && !isPosScannerInput) {
+        return;
+      }
+
+      if (now - lastHardwareKeypress > 60) {
+        hardwareBarcodeBuffer = '';
+      }
+      lastHardwareKeypress = now;
+
+      if (e.key === 'Enter') {
+        if (hardwareBarcodeBuffer.length >= 3) {
+          e.preventDefault();
+          const scanned = hardwareBarcodeBuffer.trim();
+          hardwareBarcodeBuffer = '';
+
+          if (scanned === lastDispatchedHardwareCode && (now - lastDispatchedHardwareTime < 300)) {
+            return;
+          }
+          lastDispatchedHardwareCode = scanned;
+          lastDispatchedHardwareTime = now;
+
+          if (state.currentView === 'pos-checkout') {
+            executeBarcodeScan(scanned);
+          }
+        }
+        return;
+      }
+
+      if (e.key && e.key.length === 1) {
+        hardwareBarcodeBuffer += e.key;
+      }
+    });
 
     function addToCart(productId, sku, name, unitPrice, uomCode, trackInventory, availableQuantity) {
       if (!state.activeShift) {
@@ -6153,14 +6830,27 @@
     async function renderOrgSettingsView() {
       const container = document.getElementById('mainContainer');
       try {
-        const entRes = await apiFetch('/v1/subscriptions/entitlement').catch(() => ({
-          planCode: 'GROWTH',
-          status: 'ACTIVE',
-          maxBranches: 10,
-          maxWarehouses: 20,
-          maxUsers: 50,
-          maxSkus: 10000
-        }));
+        const [entRes, barcodeSettings] = await Promise.all([
+          apiFetch('/v1/subscriptions/entitlement').catch(() => ({
+            planCode: 'GROWTH',
+            status: 'ACTIVE',
+            maxBranches: 10,
+            maxWarehouses: 20,
+            maxUsers: 50,
+            maxSkus: 10000
+          })),
+          apiFetch('/v1/settings/barcode').catch(() => ({
+            barcodeManagementEnabled: true,
+            internalGenerationEnabled: true,
+            internalPrefix: 'NB',
+            hardwareScannerEnabled: true,
+            cameraScannerEnabled: true,
+            autoAddToCart: true,
+            incrementOnDuplicate: true,
+            unknownBarcodeAction: 'PROMPT',
+            defaultScanMode: 'HARDWARE'
+          }))
+        ]);
 
         container.innerHTML = `
           <div class="view-header">
@@ -6219,9 +6909,106 @@
               </div>
             </div>
           </div>
+
+          <!-- Barcode & Scanner Configuration Card -->
+          <div class="card" style="margin-top: 16px;">
+            <div class="card-title">
+              <span>Barcode &amp; Dual-Mode POS Scanning System</span>
+              <span class="badge-pill badge-blue">Universal POS</span>
+            </div>
+            <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 14px;">
+              Configure physical USB/Bluetooth barcode scanner wedges, HTML5 camera scanning, internal SKU barcode generation, and checkout auto-add workflows. Barcode scanning is completely optional; manual checkout always remains active.
+            </div>
+
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px;">
+              <div style="display: flex; flex-direction: column; gap: 10px;">
+                <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+                  <input type="checkbox" id="settingHwScanner" ${barcodeSettings.hardwareScannerEnabled !== false ? 'checked' : ''}>
+                  <strong>Hardware Scanner Wedge (USB / BT)</strong>
+                </label>
+                <div style="font-size: 12px; color: var(--text-secondary); margin-left: 24px;">
+                  Listens for rapid keystroke bursts from physical handheld laser/CCD scanners.
+                </div>
+
+                <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; margin-top: 4px;">
+                  <input type="checkbox" id="settingCamScanner" ${barcodeSettings.cameraScannerEnabled !== false ? 'checked' : ''}>
+                  <strong>HTML5 Device Camera Scanner</strong>
+                </label>
+                <div style="font-size: 12px; color: var(--text-secondary); margin-left: 24px;">
+                  Enables live mobile/tablet camera scanning with laser reticle viewfinder.
+                </div>
+
+                <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; margin-top: 4px;">
+                  <input type="checkbox" id="settingInternalGen" ${barcodeSettings.internalGenerationEnabled !== false ? 'checked' : ''}>
+                  <strong>Internal Collision-Free Generator</strong>
+                </label>
+                <div style="font-size: 12px; color: var(--text-secondary); margin-left: 24px;">
+                  Generates unique Code 128 / GS1 check-digit EAN barcodes with 1-click.
+                </div>
+              </div>
+
+              <div style="display: flex; flex-direction: column; gap: 10px;">
+                <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+                  <input type="checkbox" id="settingAutoCart" ${barcodeSettings.autoAddToCart !== false ? 'checked' : ''}>
+                  <strong>Auto Add-to-Cart on Scan</strong>
+                </label>
+                <div style="font-size: 12px; color: var(--text-secondary); margin-left: 24px;">
+                  Immediately places recognized products into the active checkout cart.
+                </div>
+
+                <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; margin-top: 4px;">
+                  <input type="checkbox" id="settingIncDup" ${barcodeSettings.incrementOnDuplicate !== false ? 'checked' : ''}>
+                  <strong>Increment Quantity on Duplicate Scan</strong>
+                </label>
+                <div style="font-size: 12px; color: var(--text-secondary); margin-left: 24px;">
+                  Repeated scans of the same product increment its line quantity by 1.
+                </div>
+
+                <div class="form-group" style="margin-top: 6px;">
+                  <label class="form-label">Internal Barcode Prefix</label>
+                  <input type="text" class="form-input" id="settingPrefix" value="${escapeHtml(barcodeSettings.internalPrefix || 'NB')}" maxlength="8" style="width: 140px;">
+                </div>
+              </div>
+            </div>
+
+            <div style="margin-top: 16px; border-top: 1px solid var(--border-subtle); padding-top: 14px; display: flex; justify-content: flex-end;">
+              <button class="btn btn-primary" id="btnSaveBarcodeSettings" onclick="saveTenantBarcodeSettings()">Save Barcode Settings</button>
+            </div>
+          </div>
         `;
       } catch (err) {
         container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load settings: ${err.message}</div>`;
+      }
+    }
+
+    async function saveTenantBarcodeSettings() {
+      const btn = document.getElementById('btnSaveBarcodeSettings');
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Saving...';
+      }
+
+      const payload = {
+        hardwareScannerEnabled: document.getElementById('settingHwScanner').checked,
+        cameraScannerEnabled: document.getElementById('settingCamScanner').checked,
+        internalGenerationEnabled: document.getElementById('settingInternalGen').checked,
+        autoAddToCart: document.getElementById('settingAutoCart').checked,
+        incrementOnDuplicate: document.getElementById('settingIncDup').checked,
+        internalPrefix: (document.getElementById('settingPrefix')?.value || 'NB').trim().toUpperCase(),
+      };
+
+      try {
+        await apiFetch('/v1/settings/barcode', {
+          method: 'PUT',
+          body: JSON.stringify(payload)
+        });
+        showToast('Barcode settings updated successfully', 'success');
+      } catch (err) {
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = 'Save Barcode Settings';
+        }
       }
     }
 

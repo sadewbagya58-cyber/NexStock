@@ -16,6 +16,7 @@ import {
   CreateExchangeRateRequestSchema,
   CreatePosSaleRequestSchema,
   CreateProductRequestSchema,
+  CreateProductBarcodeRequestSchema,
   CreateStocktakeSessionRequestSchema,
   CreateSupplierRequestSchema,
   CreateWarehouseRequestSchema,
@@ -25,6 +26,9 @@ import {
   DecimalQuantityStringSchema,
   FefoSelectionResponseSchema,
   FifoCostLayerResponseSchema,
+  type GenerateBarcodeQuery,
+  GenerateBarcodeQuerySchema,
+  GenerateBarcodeResponseSchema,
   GetActivePosShiftQuerySchema,
   HealthStatusResponseSchema,
   IdempotentMutationHeadersSchema,
@@ -55,6 +59,7 @@ import {
   PostStockMovementRequestSchema,
   ProblemDetailsSchema,
   ProductResponseSchema,
+  ProductBarcodeResponseSchema,
   QuarantineBatchRequestSchema,
   ReceiptResponseSchema,
   RecordStocktakeCountRequestSchema,
@@ -77,12 +82,15 @@ import {
   SyncPushBatchRequestSchema,
   SyncPushBatchResponseSchema,
   TenantContextHeadersSchema,
+  TenantBarcodeSettingsSchema,
   TenantMembershipSummarySchema,
   TransitionSerialStatusRequestSchema,
   UpdateCategoryRequestSchema,
   UpdateProductRequestSchema,
+  UpdateProductBarcodeRequestSchema,
   UpdatePosRegisterRequestSchema,
   UpdateSupplierRequestSchema,
+  UpdateTenantBarcodeSettingsRequestSchema,
   UpdateWarehouseRequestSchema,
   UpsertLocalizationSettingsRequestSchema,
   UserMeResponseSchema,
@@ -95,16 +103,23 @@ import { Type } from '@sinclair/typebox';
 import Fastify, { type FastifyInstance } from 'fastify';
 import type { Kysely } from 'kysely';
 import {
+  addProductBarcode,
   archiveCategory,
   archiveProduct,
   createCategory,
   createProduct,
+  deleteProductBarcode,
+  generateInternalBarcode,
   getCategoryById,
   getProductById,
+  getTenantBarcodeSettings,
   listCategories,
+  listProductBarcodes,
   listProducts,
   updateCategory,
   updateProduct,
+  updateProductBarcode,
+  updateTenantBarcodeSettings,
 } from './modules/cat/index.js';
 import {
   convertTenantCurrencyAmount,
@@ -1937,6 +1952,257 @@ export async function buildApp(
         options.db,
         { tenantId, userId: principal.userId, traceId },
         (trx) => archiveProduct(trx, request.params.productId),
+      );
+    },
+  );
+
+  // =========================================================================
+  // Phase 6: Universal Barcode Management & Dual-Mode POS Scanning
+  // =========================================================================
+
+  // 1. Generate Collision-Free Internal Barcode
+  app.post(
+    '/v1/products/generate-barcode',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        querystring: Type.Optional(GenerateBarcodeQuerySchema),
+        response: {
+          200: GenerateBarcodeResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      const queryParams = (request.query as GenerateBarcodeQuery) || {};
+      const bodyParams = (request.body as GenerateBarcodeQuery) || {};
+      const mergedInput: GenerateBarcodeQuery = {
+        ...queryParams,
+        ...bodyParams,
+      };
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => generateInternalBarcode(trx, mergedInput),
+      );
+    },
+  );
+
+  // 2. List Product Barcodes
+  app.get(
+    '/v1/products/:productId/barcodes',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ productId: UuidSchema }),
+        response: {
+          200: Type.Array(ProductBarcodeResponseSchema),
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => listProductBarcodes(trx, request.params.productId),
+      );
+    },
+  );
+
+  // 3. Register Product Barcode
+  app.post(
+    '/v1/products/:productId/barcodes',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ productId: UuidSchema }),
+        body: CreateProductBarcodeRequestSchema,
+        response: {
+          201: ProductBarcodeResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      const created = await withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => addProductBarcode(trx, request.params.productId, request.body),
+      );
+
+      return reply.status(201).send(created);
+    },
+  );
+
+  // 4. Update Product Barcode (Toggle active, make primary, update symbology)
+  app.patch(
+    '/v1/products/:productId/barcodes/:barcodeId',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ productId: UuidSchema, barcodeId: UuidSchema }),
+        body: UpdateProductBarcodeRequestSchema,
+        response: {
+          200: ProductBarcodeResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          updateProductBarcode(
+            trx,
+            request.params.productId,
+            request.params.barcodeId,
+            request.body,
+          ),
+      );
+    },
+  );
+
+  // 5. Delete Product Barcode
+  app.delete(
+    '/v1/products/:productId/barcodes/:barcodeId',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ productId: UuidSchema, barcodeId: UuidSchema }),
+        response: {
+          200: Type.Object({ success: Type.Boolean() }),
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          deleteProductBarcode(
+            trx,
+            request.params.productId,
+            request.params.barcodeId,
+          ),
+      );
+    },
+  );
+
+  // 6. Get Tenant Barcode Settings
+  app.get(
+    '/v1/settings/barcode',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        response: {
+          200: TenantBarcodeSettingsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => getTenantBarcodeSettings(trx),
+      );
+    },
+  );
+
+  // 7. Update Tenant Barcode Settings
+  app.put(
+    '/v1/settings/barcode',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        body: UpdateTenantBarcodeSettingsRequestSchema,
+        response: {
+          200: TenantBarcodeSettingsSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => updateTenantBarcodeSettings(trx, request.body),
       );
     },
   );

@@ -285,6 +285,11 @@ describe('@nexstock/api — Milestone 0 Foundation, RLS, Idempotency & Sync Inva
           name: '0010_phase5_cash_shift_reconciliation',
           filename: '0010_phase5_cash_shift_reconciliation.sql',
         },
+        {
+          version: 11,
+          name: '0011_phase6_barcode_management',
+          filename: '0011_phase6_barcode_management.sql',
+        },
       ]);
     });
 
@@ -353,6 +358,7 @@ describe('@nexstock/api — Milestone 0 Foundation, RLS, Idempotency & Sync Inva
         '0008_phase5_currencies_rls_and_seeds.sql',
         '0009_phase5_subscription_plans_and_repair.sql',
         '0010_phase5_cash_shift_reconciliation.sql',
+        '0011_phase6_barcode_management.sql',
       ]);
 
       await expect(

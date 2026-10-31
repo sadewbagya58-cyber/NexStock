@@ -756,19 +756,32 @@ export async function searchPosProducts(
       .select(['product_id'])
       .where('tenant_id', '=', trx.tenantId)
       .where('barcode', '=', trimmedBarcode)
+      .where('is_active', '=', true)
       .execute();
 
     if (barcodeMatches.length > 0) {
       const productIds = barcodeMatches.map((b) => b.product_id);
       dbQuery = dbQuery.where('products.id', 'in', productIds);
     } else {
-      // Also try matching SKU directly
-      dbQuery = dbQuery.where((eb) =>
-        eb.or([
-          eb('products.sku', '=', trimmedBarcode),
-          eb('products.name', 'ilike', `%${trimmedBarcode}%`),
-        ]),
-      );
+      // Check if it's an individual serial number scan
+      const serialMatches = await trx.db
+        .selectFrom('inventory_serials')
+        .select(['product_id'])
+        .where('tenant_id', '=', trx.tenantId)
+        .where('serial_number', '=', trimmedBarcode.toUpperCase())
+        .where('status', '=', 'IN_STOCK')
+        .execute();
+
+      if (serialMatches.length > 0) {
+        dbQuery = dbQuery.where(
+          'products.id',
+          'in',
+          serialMatches.map((s) => s.product_id),
+        );
+      } else {
+        // Also check if scanned code matches products.sku exactly
+        dbQuery = dbQuery.where('products.sku', '=', trimmedBarcode);
+      }
     }
   } else if (query.q) {
     const trimmedQ = query.q.trim();
@@ -777,6 +790,7 @@ export async function searchPosProducts(
       .select(['product_id'])
       .where('tenant_id', '=', trx.tenantId)
       .where('barcode', 'ilike', `%${trimmedQ}%`)
+      .where('is_active', '=', true)
       .execute();
 
     const matchedIds = matchedBarcodeProductIds.map((b) => b.product_id);
@@ -812,6 +826,7 @@ export async function searchPosProducts(
     .select(['product_id', 'barcode'])
     .where('tenant_id', '=', trx.tenantId)
     .where('product_id', 'in', productIds)
+    .where('is_active', '=', true)
     .execute();
 
   const barcodesByProduct = new Map<string, string[]>();
