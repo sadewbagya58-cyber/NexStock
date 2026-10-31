@@ -8,6 +8,7 @@ import {
   type UpdateProductBarcodeRequest,
   type UpdateTenantBarcodeSettingsRequest,
 } from '@nexstock/contracts';
+import { sql } from 'kysely';
 import { assertAuthorized } from '../../iam/index.js';
 import {
   AppError,
@@ -39,8 +40,20 @@ export function calculateEanCheckDigit(digits: string): string {
   return rem === 0 ? '0' : String(10 - rem);
 }
 
+export const SUPPORTED_GENERATION_SYMBOLOGIES: readonly BarcodeType[] = [
+  'CODE128',
+  'CODE39',
+  'EAN13',
+  'EAN8',
+  'UPCA',
+  'UPCE',
+  'ITF',
+  'QR',
+  'CUSTOM',
+];
+
 /**
- * Validates check digit of an EAN-13, EAN-8, or UPC-A barcode.
+ * Validates check digit or format of a barcode for supported symbologies.
  */
 export function validateBarcodeCheckDigit(barcode: string, format: BarcodeType): boolean {
   const clean = barcode.trim();
@@ -60,6 +73,25 @@ export function validateBarcodeCheckDigit(barcode: string, format: BarcodeType):
     const expected = calculateEanCheckDigit(payload);
     return clean[11] === expected;
   }
+  if (format === 'UPCE' && clean.length === 8 && /^\d+$/.test(clean)) {
+    const payload = clean.slice(0, 7);
+    const expected = calculateEanCheckDigit(payload);
+    return clean[7] === expected;
+  }
+  if (format === 'ITF' && clean.length % 2 === 0 && /^\d+$/.test(clean)) {
+    if (clean.length === 14) {
+      const payload = clean.slice(0, 13);
+      const expected = calculateEanCheckDigit(payload);
+      return clean[13] === expected;
+    }
+    return true;
+  }
+  if (format === 'CODE39') {
+    return /^[A-Z0-9\-. $/+%]+$/.test(clean);
+  }
+  if (format === 'CODE128') {
+    return /^[\x20-\x7E]+$/.test(clean);
+  }
   return true;
 }
 
@@ -74,11 +106,22 @@ export async function generateInternalBarcode(
 
   const settings = await getTenantBarcodeSettings(trx);
   const format: BarcodeType = query?.format ?? query?.symbology ?? 'CODE128';
-  const prefix = (query?.prefix ?? settings.internalPrefix ?? 'NB').trim().toUpperCase();
+
+  if (!SUPPORTED_GENERATION_SYMBOLOGIES.includes(format)) {
+    throw new AppError({
+      statusCode: 400,
+      errorCode: 'CAT_UNSUPPORTED_SYMBOLOGY',
+      title: 'Unsupported Barcode Symbology',
+      detail: `Symbology "${format}" is not supported for internal generation. Supported: ${SUPPORTED_GENERATION_SYMBOLOGIES.join(', ')}.`,
+    });
+  }
+
+  const rawPrefix = (query?.prefix ?? settings.internalPrefix ?? 'NB').trim().toUpperCase();
+  const prefix = rawPrefix || 'NB';
 
   let candidateBarcode = '';
   let attempts = 0;
-  const maxAttempts = 15;
+  const maxAttempts = 20;
 
   while (attempts < maxAttempts) {
     attempts++;
@@ -112,13 +155,44 @@ export async function generateInternalBarcode(
         randomDigits += Math.floor(Math.random() * 10).toString();
       }
       const base11 = (numPrefix + randomDigits).slice(0, 11);
-      const checkDigit = calculateEanCheckDigit(base11);
+      const checkDigit = calculateEanCheckDigit('0' + base11);
       candidateBarcode = base11 + checkDigit;
+    } else if (format === 'UPCE') {
+      // UPC-E: 8 numeric digits ('0' + 6 random digits + check digit)
+      let randomDigits = '';
+      for (let i = 0; i < 6; i++) {
+        randomDigits += Math.floor(Math.random() * 10).toString();
+      }
+      const base7 = '0' + randomDigits;
+      const checkDigit = calculateEanCheckDigit(base7);
+      candidateBarcode = base7 + checkDigit;
+    } else if (format === 'ITF') {
+      // ITF-14: 14 numeric digits ('1' packaging indicator + 12 random digits + check digit)
+      const numPrefix = /^\d{1,3}$/.test(prefix) ? prefix : '1';
+      const randomLength = 13 - numPrefix.length;
+      let randomDigits = '';
+      for (let i = 0; i < randomLength; i++) {
+        randomDigits += Math.floor(Math.random() * 10).toString();
+      }
+      const base13 = (numPrefix + randomDigits).slice(0, 13);
+      const checkDigit = calculateEanCheckDigit(base13);
+      candidateBarcode = base13 + checkDigit;
+    } else if (format === 'CODE39') {
+      // Code 39: uppercase alphanumeric with hyphens
+      const cleanPrefix = prefix.replace(/[^A-Z0-9]/g, '') || 'NB';
+      const timestampPart = Date.now().toString().slice(-6);
+      const randomPart = Math.random().toString(36).substring(2, 6).toUpperCase();
+      candidateBarcode = `${cleanPrefix}-${timestampPart}${randomPart}`;
     } else {
-      // CODE128 / Default alphanumeric
+      // CODE128 / QR / CUSTOM
       const timestampPart = Date.now().toString().slice(-6);
       const randomPart = Math.random().toString(36).substring(2, 6).toUpperCase();
       candidateBarcode = `${prefix}-${timestampPart}${randomPart}`;
+    }
+
+    // Verify candidate passes format and checksum validation
+    if (!validateBarcodeCheckDigit(candidateBarcode, format)) {
+      continue;
     }
 
     // Verify collision resistance within tenant
@@ -145,8 +219,8 @@ export async function generateInternalBarcode(
 
   if (attempts >= maxAttempts) {
     throw new AppError({
-      statusCode: 500,
-      errorCode: 'ERR_INTERNAL_SERVER_ERROR',
+      statusCode: 422,
+      errorCode: 'CAT_BARCODE_COLLISION_EXHAUSTED',
       title: 'Barcode Generation Failed',
       detail: 'Could not generate a unique collision-free barcode within maximum attempts. Please try again.',
     });
@@ -523,31 +597,7 @@ export async function deleteProductBarcode(
 export async function getTenantBarcodeSettings(
   trx: TenantTransactionContext,
 ): Promise<TenantBarcodeSettings> {
-  const row = await trx.db
-    .selectFrom('tenant_barcode_settings')
-    .selectAll()
-    .where('tenant_id', '=', trx.tenantId)
-    .executeTakeFirst();
-
-  if (row) {
-    return {
-      tenantId: row.tenant_id,
-      barcodeManagementEnabled: row.barcode_management_enabled,
-      internalGenerationEnabled: row.internal_generation_enabled,
-      internalPrefix: row.internal_prefix,
-      labelsEnabled: row.labels_enabled,
-      hardwareScannerEnabled: row.hardware_scanner_enabled,
-      cameraScannerEnabled: row.camera_scanner_enabled,
-      autoAddToCart: row.auto_add_to_cart,
-      incrementOnDuplicate: row.increment_on_duplicate,
-      unknownBarcodeAction: row.unknown_barcode_action as 'PROMPT' | 'IGNORE' | 'MANUAL_SEARCH',
-      defaultScanMode: row.default_scan_mode as 'HARDWARE' | 'CAMERA' | 'MANUAL',
-      ...(row.updated_at ? { updatedAt: new Date(row.updated_at).toISOString() } : {}),
-    };
-  }
-
-  // Default settings
-  return {
+  const defaultSettings: TenantBarcodeSettings = {
     tenantId: trx.tenantId,
     barcodeManagementEnabled: true,
     internalGenerationEnabled: true,
@@ -560,6 +610,43 @@ export async function getTenantBarcodeSettings(
     unknownBarcodeAction: 'PROMPT',
     defaultScanMode: 'HARDWARE',
   };
+
+  try {
+    const tableExists = await sql<{ reg: string | null }>`
+      SELECT to_regclass('public.tenant_barcode_settings')::text as reg
+    `.execute(trx);
+
+    if (!tableExists.rows[0]?.reg) {
+      return defaultSettings;
+    }
+
+    const row = await trx.db
+      .selectFrom('tenant_barcode_settings')
+      .selectAll()
+      .where('tenant_id', '=', trx.tenantId)
+      .executeTakeFirst();
+
+    if (row) {
+      return {
+        tenantId: row.tenant_id,
+        barcodeManagementEnabled: row.barcode_management_enabled,
+        internalGenerationEnabled: row.internal_generation_enabled,
+        internalPrefix: row.internal_prefix,
+        labelsEnabled: row.labels_enabled,
+        hardwareScannerEnabled: row.hardware_scanner_enabled,
+        cameraScannerEnabled: row.camera_scanner_enabled,
+        autoAddToCart: row.auto_add_to_cart,
+        incrementOnDuplicate: row.increment_on_duplicate,
+        unknownBarcodeAction: row.unknown_barcode_action as 'PROMPT' | 'IGNORE' | 'MANUAL_SEARCH',
+        defaultScanMode: row.default_scan_mode as 'HARDWARE' | 'CAMERA' | 'MANUAL',
+        ...(row.updated_at ? { updatedAt: new Date(row.updated_at).toISOString() } : {}),
+      };
+    }
+
+    return defaultSettings;
+  } catch {
+    return defaultSettings;
+  }
 }
 
 /**
@@ -570,6 +657,19 @@ export async function updateTenantBarcodeSettings(
   input: UpdateTenantBarcodeSettingsRequest,
 ): Promise<TenantBarcodeSettings> {
   await assertAuthorized(trx, { permission: 'cat:product:manage' });
+
+  const tableExists = await sql<{ reg: string | null }>`
+    SELECT to_regclass('public.tenant_barcode_settings')::text as reg
+  `.execute(trx);
+
+  if (!tableExists.rows[0]?.reg) {
+    throw new AppError({
+      statusCode: 400,
+      errorCode: 'CAT_SETTINGS_NOT_AVAILABLE',
+      title: 'Tenant Settings Table Unavailable',
+      detail: 'The tenant barcode settings table is not yet migrated in database. Please run migration 0011.',
+    });
+  }
 
   const current = await getTenantBarcodeSettings(trx);
   const now = new Date();

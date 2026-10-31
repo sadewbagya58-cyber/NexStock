@@ -508,6 +508,13 @@ export function loadPhase6BarcodeManagementMigrationSql(): string {
   return sqlText;
 }
 
+export function loadPhase6ProductImagesMigrationSql(): string {
+  const filename = '0012_phase6_product_images.sql';
+  const sqlText = readFileSync(resolve(migrationsDir, filename), 'utf-8');
+  assertPostgresMigrationSqlCompatible(sqlText, filename);
+  return sqlText;
+}
+
 export function getOrderedPostgresMigrations(): readonly PostgresMigrationSpec[] {
   return [
     {
@@ -586,6 +593,13 @@ export function getOrderedPostgresMigrations(): readonly PostgresMigrationSpec[]
       name: '0011_phase6_barcode_management',
       filename: '0011_phase6_barcode_management.sql',
       sql: loadPhase6BarcodeManagementMigrationSql(),
+    },
+    {
+      dialect: 'postgres',
+      version: 12,
+      name: '0012_phase6_product_images',
+      filename: '0012_phase6_product_images.sql',
+      sql: loadPhase6ProductImagesMigrationSql(),
     },
   ];
 }

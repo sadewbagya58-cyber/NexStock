@@ -3621,6 +3621,7 @@
                   <table class="data-table" id="productsTable">
                     <thead>
                       <tr>
+                        <th style="width: 44px; text-align: center;">Photo</th>
                         <th>SKU</th>
                         <th>Product Name</th>
                         <th>Base UoM</th>
@@ -3642,9 +3643,18 @@
                         const priceFormatted = formatTenantMoney(p.sellingPrice);
                         const isTracked = p.trackInventory !== false;
                         const isActive = p.status === 'ACTIVE' || p.isActive === true;
+                        const imgUrl = p.imageUrl ? escapeHtml(p.imageUrl) : null;
 
                         return `
                           <tr data-sku="${sku.toLowerCase()}" data-name="${name.toLowerCase()}" data-barcode="${barcode.toLowerCase()}">
+                            <td style="text-align: center; vertical-align: middle;">
+                              ${imgUrl ? `
+                                <img src="${imgUrl}" alt="${sku}" style="width: 36px; height: 36px; border-radius: 6px; object-fit: cover; border: 1px solid var(--border-subtle); display: inline-block;" onerror="this.onerror=null; this.style.display='none'; if(this.nextElementSibling) this.nextElementSibling.style.display='inline-flex';" />
+                                <div style="display: none; width: 36px; height: 36px; border-radius: 6px; background: var(--bg-hover); align-items: center; justify-content: center; font-size: 15px; border: 1px solid var(--border-subtle); margin: 0 auto;">📦</div>
+                              ` : `
+                                <div style="width: 36px; height: 36px; border-radius: 6px; background: var(--bg-hover); display: inline-flex; align-items: center; justify-content: center; font-size: 15px; border: 1px solid var(--border-subtle); color: var(--text-secondary); margin: 0 auto;">📦</div>
+                              `}
+                            </td>
                             <td><strong>${sku}</strong></td>
                             <td>${name}</td>
                             <td><span class="badge-pill badge-blue">${uom}</span></td>
@@ -3685,11 +3695,22 @@
                   const priceFormatted = formatTenantMoney(p.sellingPrice);
                   const isTracked = p.trackInventory !== false;
                   const isActive = p.status === 'ACTIVE' || p.isActive === true;
+                  const imgUrl = p.imageUrl ? escapeHtml(p.imageUrl) : null;
 
                   return `
                     <div class="entity-card" data-sku="${sku.toLowerCase()}" data-name="${name.toLowerCase()}" data-barcode="${barcode.toLowerCase()}">
                       <div class="entity-card-header">
-                        <span class="entity-card-code"><strong>${sku}</strong></span>
+                        <div style="display: flex; gap: 10px; align-items: center;">
+                          ${imgUrl ? `
+                            <img src="${imgUrl}" alt="${sku}" style="width: 40px; height: 40px; border-radius: 6px; object-fit: cover; border: 1px solid var(--border-subtle);" onerror="this.style.display='none'" />
+                          ` : `
+                            <div style="width: 40px; height: 40px; border-radius: 6px; background: var(--bg-hover); display: flex; align-items: center; justify-content: center; font-size: 16px; border: 1px solid var(--border-subtle); flex-shrink: 0;">📦</div>
+                          `}
+                          <div>
+                            <span class="entity-card-code"><strong>${sku}</strong></span>
+                            <div class="entity-card-title" style="margin: 2px 0 0 0; font-size: 14px;">${name}</div>
+                          </div>
+                        </div>
                         <span class="badge-pill ${isActive ? 'badge-green' : 'badge-red'}">${isActive ? 'ACTIVE' : 'ARCHIVED'}</span>
                       </div>
                       <div class="entity-card-title">${name}</div>
@@ -3774,6 +3795,22 @@
             </select>
           </div>
           <div class="form-group">
+            <label class="form-label">Product Image (Optional)</label>
+            <div id="newProdImageContainer" style="display: flex; gap: 12px; align-items: center;">
+              <div id="newProdImagePreviewWrapper" style="display: none; position: relative;">
+                <img id="newProdImagePreview" src="" alt="Preview" style="width: 64px; height: 64px; border-radius: 8px; object-fit: cover; border: 1px solid var(--border-subtle);" />
+                <button type="button" onclick="removeProductImage('new')" style="position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; border-radius: 50%; background: #ef4444; color: white; border: none; font-size: 11px; cursor: pointer; display: flex; align-items: center; justify-content: center; line-height: 1;" title="Remove image">&times;</button>
+              </div>
+              <div id="newProdImageDropzone" style="flex: 1; border: 2px dashed var(--border-subtle); border-radius: 8px; padding: 12px; text-align: center; cursor: pointer; background: var(--bg-hover);" onclick="document.getElementById('newProdImageFileInput').click()" ondragover="handleProductImageDragOver(event)" ondragleave="handleProductImageDragLeave(event)" ondrop="handleProductImageDrop(event, 'new')">
+                <div style="font-size: 12px; color: var(--text-secondary);"><span style="color: var(--accent-primary); font-weight: 500;">Click to upload image</span> or drag and drop</div>
+                <div style="font-size: 11px; color: var(--text-tertiary); margin-top: 2px;">JPEG, PNG, or WebP (max 5MB)</div>
+              </div>
+              <input type="file" id="newProdImageFileInput" accept="image/jpeg,image/png,image/webp" style="display: none;" onchange="handleProductImageSelected(event, 'new')">
+              <input type="hidden" id="newProdImageUrl" value="">
+            </div>
+            <div id="newProdImageStatus" style="font-size: 11px; color: var(--text-secondary); margin-top: 4px; display: none;"></div>
+          </div>
+          <div class="form-group">
             <label class="form-label">Tracking Mode *</label>
             <select class="form-select" id="newProdTrackingMode">
               <option value="NONE" selected>NONE — Standard Inventory (No Batches / Serials)</option>
@@ -3794,9 +3831,12 @@
               <div style="display: flex; gap: 6px;">
                 <select class="form-select" id="newProdBarcodeSymbology" style="width: 95px; font-size: 11px; padding: 4px;">
                   <option value="CODE128" selected>Code 128</option>
+                  <option value="CODE39">Code 39</option>
                   <option value="EAN13">EAN-13</option>
                   <option value="EAN8">EAN-8</option>
                   <option value="UPCA">UPC-A</option>
+                  <option value="UPCE">UPC-E</option>
+                  <option value="ITF">ITF</option>
                 </select>
                 <input type="text" class="form-input" id="newProdBarcode" placeholder="e.g. NB-001001" style="flex: 1;">
               </div>
@@ -3837,6 +3877,7 @@
       const price = parseFloat(document.getElementById('newProdPrice').value || '0').toFixed(4);
       const trackInventory = document.getElementById('newProdTrackStock').checked;
       const trackingMode = document.getElementById('newProdTrackingMode')?.value || 'NONE';
+      const imageUrl = document.getElementById('newProdImageUrl')?.value.trim() || null;
 
       if (!sku || !name) {
         showToast('SKU and Product Name are required', 'error');
@@ -3867,7 +3908,8 @@
             sellingPrice: price,
             trackInventory,
             trackingMode,
-            ...(barcode ? { primaryBarcode: barcode } : {})
+            ...(barcode ? { primaryBarcode: barcode } : {}),
+            ...(imageUrl ? { imageUrl } : {})
           })
         });
 
@@ -3924,6 +3966,23 @@
             </select>
           </div>
           <div class="form-group">
+            <label class="form-label">Product Image (Optional)</label>
+            <div id="editProdImageContainer" style="display: flex; gap: 12px; align-items: center;">
+              <div id="editProdImagePreviewWrapper" style="${p.imageUrl ? 'display: block;' : 'display: none;'} position: relative;">
+                <img id="editProdImagePreview" src="${p.imageUrl ? escapeHtml(p.imageUrl) : ''}" alt="Preview" style="width: 64px; height: 64px; border-radius: 8px; object-fit: cover; border: 1px solid var(--border-subtle);" />
+                <button type="button" onclick="removeProductImage('edit')" style="position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; border-radius: 50%; background: #ef4444; color: white; border: none; font-size: 11px; cursor: pointer; display: flex; align-items: center; justify-content: center; line-height: 1;" title="Remove image">&times;</button>
+              </div>
+              <div id="editProdImageDropzone" style="flex: 1; border: 2px dashed var(--border-subtle); border-radius: 8px; padding: 12px; text-align: center; cursor: pointer; background: var(--bg-hover);" onclick="document.getElementById('editProdImageFileInput').click()" ondragover="handleProductImageDragOver(event)" ondragleave="handleProductImageDragLeave(event)" ondrop="handleProductImageDrop(event, 'edit')">
+                <div style="font-size: 12px; color: var(--text-secondary);"><span style="color: var(--accent-primary); font-weight: 500;">Click to ${p.imageUrl ? 'replace image' : 'upload image'}</span> or drag and drop</div>
+                <div style="font-size: 11px; color: var(--text-tertiary); margin-top: 2px;">JPEG, PNG, or WebP (max 5MB)</div>
+              </div>
+              <input type="file" id="editProdImageFileInput" accept="image/jpeg,image/png,image/webp" style="display: none;" onchange="handleProductImageSelected(event, 'edit')">
+              <input type="hidden" id="editProdImageUrl" value="${p.imageUrl ? escapeHtml(p.imageUrl) : ''}">
+              <input type="hidden" id="editProdImageAction" value="keep">
+            </div>
+            <div id="editProdImageStatus" style="font-size: 11px; color: var(--text-secondary); margin-top: 4px; display: none;"></div>
+          </div>
+          <div class="form-group">
             <label class="form-label">Tracking Mode *</label>
             <select class="form-select" id="editProdTrackingMode">
               <option value="NONE" ${p.trackingMode === 'NONE' || !p.trackingMode ? 'selected' : ''}>NONE — Standard Inventory (No Batches / Serials)</option>
@@ -3934,9 +3993,20 @@
           <div class="form-group">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
               <label class="form-label" style="margin-bottom: 0;">Primary Barcode</label>
-              <button type="button" class="btn btn-secondary btn-sm" id="btnGenEditProdBarcode" style="padding: 1px 6px; font-size: 11px;" onclick="generateBarcodeForInput('editProdBarcode')">⚡ Generate</button>
+              <button type="button" class="btn btn-secondary btn-sm" id="btnGenEditProdBarcode" style="padding: 1px 6px; font-size: 11px;" onclick="generateBarcodeForInput('editProdBarcode', 'editProdBarcodeSymbology')">⚡ Generate</button>
             </div>
-            <input type="text" class="form-input" id="editProdBarcode" value="${escapeHtml(p.primaryBarcode || '')}" placeholder="e.g. NB-001001">
+            <div style="display: flex; gap: 6px;">
+              <select class="form-select" id="editProdBarcodeSymbology" style="width: 95px; font-size: 11px; padding: 4px;">
+                <option value="CODE128" selected>Code 128</option>
+                <option value="CODE39">Code 39</option>
+                <option value="EAN13">EAN-13</option>
+                <option value="EAN8">EAN-8</option>
+                <option value="UPCA">UPC-A</option>
+                <option value="UPCE">UPC-E</option>
+                <option value="ITF">ITF</option>
+              </select>
+              <input type="text" class="form-input" id="editProdBarcode" value="${escapeHtml(p.primaryBarcode || '')}" placeholder="e.g. NB-001001" style="flex: 1;">
+            </div>
             <div style="margin-top: 6px; font-size: 12px;">
               <a href="javascript:void(0)" onclick="closeModal(); openBarcodeLabelModal('${productId}');" style="color: var(--accent-primary); text-decoration: underline; font-weight: 500;">
                 🏷️ Manage Additional Barcodes &amp; Print Labels &rarr;
@@ -3977,6 +4047,8 @@
       const price = parseFloat(document.getElementById('editProdPrice').value || '0').toFixed(4);
       const isActive = document.getElementById('editProdIsActive').checked;
       const trackingMode = document.getElementById('editProdTrackingMode')?.value;
+      const imageAction = document.getElementById('editProdImageAction')?.value || 'keep';
+      const newImageUrl = document.getElementById('editProdImageUrl')?.value.trim() || null;
 
       if (!sku || !name) {
         showToast('SKU and Product Name are required', 'error');
@@ -3990,19 +4062,27 @@
         submitBtn.textContent = 'Saving...';
       }
 
+      const patchPayload = {
+        sku,
+        name,
+        categoryId,
+        purchaseCost: cost,
+        sellingPrice: price,
+        primaryBarcode: barcode,
+        isActive,
+        ...(trackingMode ? { trackingMode } : {})
+      };
+
+      if (imageAction === 'remove') {
+        patchPayload.imageUrl = null;
+      } else if (imageAction === 'replace' && newImageUrl) {
+        patchPayload.imageUrl = newImageUrl;
+      }
+
       try {
         await apiFetch(`/v1/products/${productId}`, {
           method: 'PATCH',
-          body: JSON.stringify({
-            sku,
-            name,
-            categoryId,
-            purchaseCost: cost,
-            sellingPrice: price,
-            primaryBarcode: barcode,
-            isActive,
-            ...(trackingMode ? { trackingMode } : {})
-          })
+          body: JSON.stringify(patchPayload)
         });
 
         showToast(`Product "${name}" updated successfully`, 'success');
@@ -4969,16 +5049,22 @@
                     </div>
                   ` : products.map(p => {
                     const price = p.retailPrice || p.sellingPrice || '0.0000';
+                    const imgUrl = p.imageUrl ? escapeHtml(p.imageUrl) : null;
                     return `
                     <div class="pos-product-card" onclick="addToCart('${p.id}', '${escapeHtml(p.sku)}', '${escapeHtml(p.name)}', '${price}', '${escapeHtml(p.baseUom)}', ${Boolean(p.trackInventory)}, '${p.availableQuantity}')">
-                      <div>
-                        <div class="pos-product-name">${escapeHtml(p.name)}</div>
-                        <div class="pos-product-sku">${escapeHtml(p.sku)}</div>
-                        <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">
-                          ${p.trackInventory ? `Stock: <strong>${parseFloat(p.availableQuantity || '0').toFixed(0)}</strong>` : 'Service (No Stock)'}
+                      <div style="display: flex; gap: 8px; align-items: flex-start;">
+                        ${imgUrl ? `
+                          <img src="${imgUrl}" alt="${escapeHtml(p.name)}" style="width: 40px; height: 40px; border-radius: 6px; object-fit: cover; border: 1px solid var(--border-subtle); flex-shrink: 0; background: var(--bg-hover);" onerror="this.style.display='none'" />
+                        ` : ''}
+                        <div style="flex: 1; min-width: 0;">
+                          <div class="pos-product-name" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(p.name)}</div>
+                          <div class="pos-product-sku">${escapeHtml(p.sku)}</div>
+                          <div style="font-size: 11px; color: var(--text-secondary); margin-top: 2px;">
+                            ${p.trackInventory ? `Stock: <strong>${parseFloat(p.availableQuantity || '0').toFixed(0)}</strong>` : 'Service (No Stock)'}
+                          </div>
                         </div>
                       </div>
-                      <div class="pos-product-price">${formatTenantMoney(price)}</div>
+                      <div class="pos-product-price" style="margin-top: 6px;">${formatTenantMoney(price)}</div>
                     </div>
                   `;}).join('')}
                 </div>
@@ -5174,31 +5260,155 @@
       }, 50);
     }
 
-    // Barcode Generator helper for modals
+    // Barcode Generator helper for modals (BUG-017)
     async function generateBarcodeForInput(inputId, symbologySelectId) {
       const input = document.getElementById(inputId);
       const symbologySelect = symbologySelectId ? document.getElementById(symbologySelectId) : null;
       const symbology = symbologySelect ? symbologySelect.value : 'CODE128';
 
-      const btn = event?.currentTarget;
-      if (btn) {
+      const btn = (event && event.currentTarget) || document.activeElement;
+      if (btn && btn.tagName === 'BUTTON') {
         btn.disabled = true;
         btn.textContent = '⏳';
       }
 
       try {
-        const res = await apiFetch(`/v1/products/generate-barcode?symbology=${encodeURIComponent(symbology)}`, { method: 'POST' });
+        const res = await apiFetch(`/v1/products/generate-barcode?symbology=${encodeURIComponent(symbology)}`, {
+          method: 'POST',
+          body: JSON.stringify({ symbology })
+        });
         if (res && res.barcode && input) {
           input.value = res.barcode;
+          if (res.symbology && symbologySelect) {
+            symbologySelect.value = res.symbology;
+          }
           showToast(`Generated: ${res.barcode}`, 'success');
         }
       } catch (err) {
+        showToast(err.message || 'Failed to generate barcode', 'error');
       } finally {
-        if (btn) {
+        if (btn && btn.tagName === 'BUTTON') {
           btn.disabled = false;
           btn.textContent = '⚡ Generate';
         }
       }
+    }
+
+    // Product Image Upload & Management Helpers (BUG-018)
+    async function handleProductImageSelected(event, mode) {
+      const file = event.target?.files?.[0];
+      if (!file) return;
+
+      const allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
+      if (!allowedTypes.includes(file.type)) {
+        showToast('Invalid file type. Only JPEG, PNG, and WebP images are allowed.', 'error');
+        event.target.value = '';
+        return;
+      }
+
+      const maxSize = 5 * 1024 * 1024; // 5 MB
+      if (file.size > maxSize) {
+        showToast(`Image exceeds 5MB limit (${(file.size / (1024 * 1024)).toFixed(2)} MB). Please choose a smaller image.`, 'error');
+        event.target.value = '';
+        return;
+      }
+
+      const previewEl = document.getElementById(`${mode}ProdImagePreview`);
+      const previewWrapper = document.getElementById(`${mode}ProdImagePreviewWrapper`);
+      const statusEl = document.getElementById(`${mode}ProdImageStatus`);
+      const hiddenUrlInput = document.getElementById(`${mode}ProdImageUrl`);
+      const actionInput = document.getElementById(`${mode}ProdImageAction`);
+
+      // Read as base64
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        const dataUrl = e.target.result;
+        if (previewEl) previewEl.src = dataUrl;
+        if (previewWrapper) previewWrapper.style.display = 'block';
+        if (statusEl) {
+          statusEl.style.display = 'block';
+          statusEl.style.color = 'var(--text-secondary)';
+          statusEl.textContent = 'Uploading image... ⏳';
+        }
+
+        try {
+          const base64Data = String(dataUrl).split(',')[1];
+          const uploadRes = await apiFetch('/v1/products/upload-image', {
+            method: 'POST',
+            body: JSON.stringify({
+              filename: file.name,
+              mimeType: file.type,
+              dataBase64: base64Data,
+            }),
+          });
+
+          if (uploadRes && uploadRes.imageUrl) {
+            if (hiddenUrlInput) hiddenUrlInput.value = uploadRes.imageUrl;
+            if (actionInput) actionInput.value = 'replace';
+            if (statusEl) {
+              statusEl.style.color = '#10b981';
+              statusEl.textContent = 'Image uploaded successfully ✓';
+            }
+            showToast('Product image uploaded', 'success');
+          }
+        } catch (err) {
+          if (statusEl) {
+            statusEl.style.color = '#ef4444';
+            statusEl.textContent = `Upload failed: ${err.message}`;
+          }
+          showToast(`Image upload failed: ${err.message}`, 'error');
+          if (previewWrapper) previewWrapper.style.display = 'none';
+          if (hiddenUrlInput) hiddenUrlInput.value = '';
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function removeProductImage(mode) {
+      const previewEl = document.getElementById(`${mode}ProdImagePreview`);
+      const previewWrapper = document.getElementById(`${mode}ProdImagePreviewWrapper`);
+      const statusEl = document.getElementById(`${mode}ProdImageStatus`);
+      const hiddenUrlInput = document.getElementById(`${mode}ProdImageUrl`);
+      const fileInput = document.getElementById(`${mode}ProdImageFileInput`);
+      const actionInput = document.getElementById(`${mode}ProdImageAction`);
+
+      if (previewEl) previewEl.src = '';
+      if (previewWrapper) previewWrapper.style.display = 'none';
+      if (hiddenUrlInput) hiddenUrlInput.value = '';
+      if (fileInput) fileInput.value = '';
+      if (actionInput) actionInput.value = 'remove';
+      if (statusEl) {
+        statusEl.style.display = 'block';
+        statusEl.style.color = 'var(--text-secondary)';
+        statusEl.textContent = 'Image removed';
+      }
+    }
+
+    function handleProductImageDrop(event, mode) {
+      event.preventDefault();
+      event.stopPropagation();
+      const dropzone = event.currentTarget;
+      if (dropzone) dropzone.style.borderColor = 'var(--border-subtle)';
+
+      if (event.dataTransfer?.files?.length > 0) {
+        const fileInput = document.getElementById(`${mode}ProdImageFileInput`);
+        if (fileInput) {
+          fileInput.files = event.dataTransfer.files;
+          handleProductImageSelected({ target: fileInput }, mode);
+        }
+      }
+    }
+
+    function handleProductImageDragOver(event) {
+      event.preventDefault();
+      event.stopPropagation();
+      event.currentTarget.style.borderColor = 'var(--accent-primary)';
+    }
+
+    function handleProductImageDragLeave(event) {
+      event.preventDefault();
+      event.stopPropagation();
+      event.currentTarget.style.borderColor = 'var(--border-subtle)';
     }
 
     // Vector SVG Barcode Generator (Code 128 Set B pure JS)
@@ -5355,9 +5565,12 @@
                 <label class="form-label" style="font-size: 11px;">Symbology</label>
                 <select class="form-select" id="newAltBarcodeSymbology">
                   <option value="CODE128" selected>Code 128</option>
+                  <option value="CODE39">Code 39</option>
                   <option value="EAN13">EAN-13</option>
                   <option value="EAN8">EAN-8</option>
                   <option value="UPCA">UPC-A</option>
+                  <option value="UPCE">UPC-E</option>
+                  <option value="ITF">ITF</option>
                   <option value="CUSTOM">Custom</option>
                 </select>
               </div>

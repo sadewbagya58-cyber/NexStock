@@ -737,6 +737,7 @@ export async function searchPosProducts(
       'products.track_inventory as track_inventory',
       'products.tracking_mode as tracking_mode',
       'products.valuation_method as valuation_method',
+      'products.image_url as image_url',
       'categories.name as category_name',
       'inventory_balances.qty_on_hand as qty_on_hand',
       'inventory_balances.qty_reserved as qty_reserved',
@@ -860,6 +861,7 @@ export async function searchPosProducts(
       availableQuantity: availableQtyStr,
       barcodes: barcodesByProduct.get(r.product_id) ?? [],
       categoryName: r.category_name ?? null,
+      imageUrl: r.image_url ?? null,
     };
   });
 }

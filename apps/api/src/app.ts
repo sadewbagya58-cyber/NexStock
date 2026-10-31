@@ -92,6 +92,8 @@ import {
   UpdateSupplierRequestSchema,
   UpdateTenantBarcodeSettingsRequestSchema,
   UpdateWarehouseRequestSchema,
+  UploadProductImageRequestSchema,
+  UploadProductImageResponseSchema,
   UpsertLocalizationSettingsRequestSchema,
   UserMeResponseSchema,
   UuidSchema,
@@ -112,6 +114,7 @@ import {
   generateInternalBarcode,
   getCategoryById,
   getProductById,
+  getProductMediaAsset,
   getTenantBarcodeSettings,
   listCategories,
   listProductBarcodes,
@@ -120,6 +123,7 @@ import {
   updateProduct,
   updateProductBarcode,
   updateTenantBarcodeSettings,
+  uploadProductImage,
 } from './modules/cat/index.js';
 import {
   convertTenantCurrencyAmount,
@@ -407,6 +411,33 @@ export async function buildApp(
           errorCode: 'ERR_VALIDATION_FAILED',
           traceId,
           extensions: { validation: fastifyErr.validation },
+        });
+    }
+
+    if (
+      fastifyErr.statusCode &&
+      fastifyErr.statusCode >= 400 &&
+      fastifyErr.statusCode < 500
+    ) {
+      console.warn('[NexStock Request Error]', {
+        traceId,
+        route: request.url,
+        method: request.method,
+        status: fastifyErr.statusCode,
+        message: sanitizeLogMessage(fastifyErr.message ?? 'Client request rejected'),
+      });
+
+      return reply
+        .status(fastifyErr.statusCode)
+        .header('content-type', 'application/problem+json')
+        .send({
+          type: 'https://api.nexstock.io/errors/err-bad-request',
+          title: 'Bad Request',
+          status: fastifyErr.statusCode,
+          detail: fastifyErr.message ?? 'Client request rejected.',
+          instance: request.url,
+          errorCode: 'ERR_BAD_REQUEST',
+          traceId,
         });
     }
 
@@ -1960,7 +1991,7 @@ export async function buildApp(
   // Phase 6: Universal Barcode Management & Dual-Mode POS Scanning
   // =========================================================================
 
-  // 1. Generate Collision-Free Internal Barcode
+  // 1. Generate Collision-Free Internal Barcode (POST or GET)
   app.post(
     '/v1/products/generate-barcode',
     {
@@ -1996,6 +2027,109 @@ export async function buildApp(
         { tenantId, userId: principal.userId, traceId },
         (trx) => generateInternalBarcode(trx, mergedInput),
       );
+    },
+  );
+
+  app.get(
+    '/v1/products/generate-barcode',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        querystring: Type.Optional(GenerateBarcodeQuerySchema),
+        response: {
+          200: GenerateBarcodeResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      const queryParams = (request.query as GenerateBarcodeQuery) || {};
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => generateInternalBarcode(trx, queryParams),
+      );
+    },
+  );
+
+  // 1b. Upload Product Image (BUG-018)
+  app.post(
+    '/v1/products/upload-image',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        body: UploadProductImageRequestSchema,
+        response: {
+          201: UploadProductImageResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      const result = await withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => uploadProductImage(trx, request.body),
+      );
+
+      return reply.status(201).send(result);
+    },
+  );
+
+  // 1c. Media Asset Content Delivery (BUG-018)
+  app.get(
+    '/v1/media/:tenantId/:mediaFilename',
+    {
+      schema: {
+        params: Type.Object({
+          tenantId: UuidSchema,
+          mediaFilename: Type.String({ minLength: 1, maxLength: 255 }),
+        }),
+      },
+    },
+    async (request, reply) => {
+      const { tenantId, mediaFilename } = request.params;
+      const mediaId = mediaFilename.split('.')[0] || '';
+
+      const asset = await getProductMediaAsset(options.db, tenantId, mediaId);
+      if (!asset) {
+        return reply.status(404).send({
+          type: 'https://api.nexstock.io/errors/err-not-found',
+          title: 'Media Asset Not Found',
+          status: 404,
+          detail: `Media asset "${mediaFilename}" was not found.`,
+          instance: request.url,
+          errorCode: 'ERR_NOT_FOUND',
+        });
+      }
+
+      return reply
+        .header('content-type', asset.mimeType)
+        .header('content-length', asset.buffer.length)
+        .header('cache-control', 'public, max-age=86400, stale-while-revalidate=604800')
+        .header('content-disposition', `inline; filename="${asset.fileName}"`)
+        .send(asset.buffer);
     },
   );
 

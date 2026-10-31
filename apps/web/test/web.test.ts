@@ -1512,4 +1512,60 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       expect(scanner.handleKeyDown({ key: 'Enter', timeStamp: 2110 })).toBeNull();
     });
   });
+
+  describe('19. BUG-017 & BUG-018 — Barcode Generation & Product Image Upload Frontend Controls', () => {
+    it('verifies public/index.html includes Product Image Upload, Dropzone, Previews & Catalog display (BUG-018)', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // 1. Image upload dropzone, file input, and previews in Create Product modal
+      expect(html).toContain('newProdImageDropzone');
+      expect(html).toContain('newProdImageFileInput');
+      expect(html).toContain('newProdImagePreview');
+      expect(html).toContain('newProdImageUrl');
+      expect(html).toContain('removeProductImage(\'new\')');
+
+      // 2. Image upload dropzone, replacement, and removal in Edit Product modal
+      expect(html).toContain('editProdImageDropzone');
+      expect(html).toContain('editProdImageFileInput');
+      expect(html).toContain('editProdImagePreview');
+      expect(html).toContain('editProdImageUrl');
+      expect(html).toContain('editProdImageAction');
+      expect(html).toContain('removeProductImage(\'edit\')');
+
+      // 3. Image upload helper functions & API call
+      expect(html).toContain('handleProductImageSelected');
+      expect(html).toContain('handleProductImageDrop');
+      expect(html).toContain('/v1/products/upload-image');
+
+      // 4. Product catalog photo column & fallback emoji
+      expect(html).toContain('<th style="width: 44px; text-align: center;">Photo</th>');
+      expect(html).toContain('📦');
+
+      // 5. POS Product card thumbnail integration
+      expect(html).toContain('pos-product-card');
+      expect(html).toContain('p.imageUrl');
+    });
+
+    it('verifies public/index.html includes Barcode Generator symbology options & error handling (BUG-017)', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // Primary Barcode Generator controls in Edit Modal
+      expect(html).toContain('btnGenEditProdBarcode');
+      expect(html).toContain('editProdBarcodeSymbology');
+
+      // Symbology options in dropdowns
+      expect(html).toContain('value="CODE128"');
+      expect(html).toContain('value="CODE39"');
+      expect(html).toContain('value="EAN13"');
+      expect(html).toContain('value="EAN8"');
+      expect(html).toContain('value="UPCA"');
+      expect(html).toContain('value="UPCE"');
+      expect(html).toContain('value="ITF"');
+
+      // POST body in generateBarcodeForInput
+      expect(html).toContain('body: JSON.stringify({ symbology })');
+    });
+  });
 });

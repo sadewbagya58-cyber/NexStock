@@ -397,6 +397,17 @@ export interface TenantBarcodeSettingsTable {
   updated_at: Generated<Date>;
 }
 
+export interface ProductMediaAssetsTable {
+  id: string;
+  tenant_id: string;
+  file_name: string;
+  mime_type: 'image/jpeg' | 'image/png' | 'image/webp';
+  file_size: number;
+  storage_path: string;
+  data_base64: string;
+  created_at: Generated<Date>;
+}
+
 export interface ProductUnitConversionsTable {
   id: string;
   tenant_id: string;
@@ -778,4 +789,5 @@ export interface NexStockDatabase {
   stocktake_sessions: StocktakeSessionsTable;
   stocktake_lines: StocktakeLinesTable;
   tenant_barcode_settings: TenantBarcodeSettingsTable;
+  product_media_assets: ProductMediaAssetsTable;
 }

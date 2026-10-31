@@ -378,6 +378,117 @@ describe('@nexstock/api — Phase 6: Universal Barcode Management & Dual-Mode PO
       expect(body.symbology).toBe('CODE128');
       expect(body.barcode.startsWith('NB-')).toBe(true);
     });
+
+    it('generates valid Code 39 barcodes with uppercase alphanumeric characters', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/products/generate-barcode?symbology=CODE39',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expect(body.symbology).toBe('CODE39');
+      expect(validateBarcodeCheckDigit(body.barcode, 'CODE39')).toBe(true);
+    });
+
+    it('generates valid UPC-A barcodes with GS1 checksum', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/products/generate-barcode?symbology=UPCA',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expect(body.symbology).toBe('UPCA');
+      expect(body.barcode).toHaveLength(12);
+      expect(validateBarcodeCheckDigit(body.barcode, 'UPCA')).toBe(true);
+    });
+
+    it('generates valid UPC-E barcodes (8 digits)', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/products/generate-barcode?symbology=UPCE',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expect(body.symbology).toBe('UPCE');
+      expect(body.barcode).toHaveLength(8);
+      expect(validateBarcodeCheckDigit(body.barcode, 'UPCE')).toBe(true);
+    });
+
+    it('generates valid ITF barcodes with an even number of numeric digits', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/products/generate-barcode?symbology=ITF',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expect(body.symbology).toBe('ITF');
+      expect(body.barcode.length % 2).toBe(0);
+      expect(/^\d+$/.test(body.barcode)).toBe(true);
+      expect(validateBarcodeCheckDigit(body.barcode, 'ITF')).toBe(true);
+    });
+
+    it('BUG-017 regression: supports generation via GET and POST with empty or JSON body without HTTP 500', async () => {
+      // 1. GET generation
+      const getRes = await app.inject({
+        method: 'GET',
+        url: '/v1/products/generate-barcode?symbology=CODE128',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+      expect(getRes.statusCode).toBe(200);
+      expect(getRes.json().barcode).toBeDefined();
+
+      // 2. POST with content-type: application/json and body: { symbology: 'CODE128' }
+      const postJsonRes = await app.inject({
+        method: 'POST',
+        url: '/v1/products/generate-barcode',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+          'content-type': 'application/json',
+        },
+        payload: { symbology: 'CODE128' },
+      });
+      expect(postJsonRes.statusCode).toBe(200);
+      expect(postJsonRes.json().barcode).toBeDefined();
+    });
+
+    it('rejects unsupported symbology with structured 400 Bad Request', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/products/generate-barcode?symbology=NON_EXISTENT_FORMAT',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+
+      expect(res.statusCode).toBe(400);
+      const body = res.json();
+      expect(body.status).toBe(400);
+    });
   });
 
   // ===========================================================================
@@ -791,6 +902,335 @@ describe('@nexstock/api — Phase 6: Universal Barcode Management & Dual-Mode PO
       const results = res.json();
       expect(results.length).toBe(1);
       expect(results[0].sku).toBe('MANUAL-PROD-002');
+    });
+  });
+
+  // ===========================================================================
+  // 6. BUG-018: Product Image Upload, Validation, Storage & Catalog Display
+  // ===========================================================================
+  describe('6. Product Image Upload, Magic Byte Validation & Display (BUG-018)', () => {
+    // Valid image mock buffers with exact binary magic bytes
+    const validJpegBuffer = Buffer.from([
+      0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01,
+      0x01, 0x01, 0x00, 0x48, 0x00, 0x48, 0x00, 0x00, 0xff, 0xdb, 0x00, 0x43,
+    ]);
+    const validPngBuffer = Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
+      0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+    ]);
+    const validWebpBuffer = Buffer.from([
+      0x52, 0x49, 0x46, 0x46, 0x24, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50,
+      0x56, 0x50, 0x38, 0x20, 0x18, 0x00, 0x00, 0x00, 0x30, 0x01, 0x00, 0x9d,
+    ]);
+    const corruptBuffer = Buffer.from([
+      0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b,
+    ]);
+
+    let uploadedJpegUrl: string;
+    let uploadedPngUrl: string;
+    let imageTestProductId: string;
+
+    it('uploads a valid JPEG image with verified magic bytes and returns tenant-isolated URL', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/products/upload-image',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+          'content-type': 'application/json',
+        },
+        payload: {
+          filename: 'mouse-photo.jpg',
+          mimeType: 'image/jpeg',
+          dataBase64: validJpegBuffer.toString('base64'),
+        },
+      });
+
+      expect(res.statusCode).toBe(201);
+      const body = res.json();
+      expect(body.imageUrl).toContain(`/v1/media/${TENANT_ALPHA_ID}/`);
+      expect(body.mimeType).toBe('image/jpeg');
+      expect(body.size).toBe(validJpegBuffer.length);
+      uploadedJpegUrl = body.imageUrl;
+    });
+
+    it('uploads a valid PNG image with verified magic bytes', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/products/upload-image',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+          'content-type': 'application/json',
+        },
+        payload: {
+          filename: 'keyboard-photo.png',
+          mimeType: 'image/png',
+          dataBase64: validPngBuffer.toString('base64'),
+        },
+      });
+
+      expect(res.statusCode).toBe(201);
+      const body = res.json();
+      expect(body.imageUrl).toContain(`/v1/media/${TENANT_ALPHA_ID}/`);
+      expect(body.mimeType).toBe('image/png');
+      uploadedPngUrl = body.imageUrl;
+    });
+
+    it('uploads a valid WebP image with verified magic bytes', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/products/upload-image',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+          'content-type': 'application/json',
+        },
+        payload: {
+          filename: 'headset.webp',
+          mimeType: 'image/webp',
+          dataBase64: validWebpBuffer.toString('base64'),
+        },
+      });
+
+      expect(res.statusCode).toBe(201);
+      const body = res.json();
+      expect(body.imageUrl).toContain(`/v1/media/${TENANT_ALPHA_ID}/`);
+      expect(body.mimeType).toBe('image/webp');
+    });
+
+    it('rejects corrupt or mismatched binary magic bytes with HTTP 400 CAT_INVALID_IMAGE_TYPE', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/products/upload-image',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+          'content-type': 'application/json',
+        },
+        payload: {
+          filename: 'corrupted.jpg',
+          mimeType: 'image/jpeg',
+          dataBase64: corruptBuffer.toString('base64'),
+        },
+      });
+
+      expect(res.statusCode).toBe(400);
+      const body = res.json();
+      expect(body.errorCode).toBe('CAT_INVALID_IMAGE_TYPE');
+    });
+
+    it('rejects files exceeding the 5MB size limit with HTTP 400 CAT_IMAGE_TOO_LARGE', async () => {
+      // 5MB + 1024 bytes buffer
+      const oversizedBuf = Buffer.alloc(5 * 1024 * 1024 + 1024);
+      // Give it JPEG magic bytes
+      oversizedBuf[0] = 0xff;
+      oversizedBuf[1] = 0xd8;
+      oversizedBuf[2] = 0xff;
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/products/upload-image',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+          'content-type': 'application/json',
+        },
+        payload: {
+          filename: 'huge-file.jpg',
+          mimeType: 'image/jpeg',
+          dataBase64: oversizedBuf.toString('base64'),
+        },
+      });
+
+      expect([400, 413]).toContain(res.statusCode);
+    });
+
+    it('rejects unauthorized upload attempt by user without cat:product:manage permission', async () => {
+      const unauthUserId = generateUuidV7();
+      const unauthToken = issueToken(unauthUserId, 'unauthorized@example.com');
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/products/upload-image',
+        headers: {
+          authorization: `Bearer ${unauthToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+          'content-type': 'application/json',
+        },
+        payload: {
+          filename: 'unauthorized.jpg',
+          mimeType: 'image/jpeg',
+          dataBase64: validJpegBuffer.toString('base64'),
+        },
+      });
+
+      expect([401, 403]).toContain(res.statusCode);
+    });
+
+    it('serves the uploaded image via content delivery route with correct MIME and cache headers', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: uploadedJpegUrl,
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.headers['content-type']).toBe('image/jpeg');
+      expect(res.headers['cache-control']).toContain('public');
+      expect(res.rawPayload.length).toBe(validJpegBuffer.length);
+    });
+
+    it('returns 404 for nonexistent media assets', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: `/v1/media/${TENANT_ALPHA_ID}/0192b4c0-9999-7000-8000-000000000001.jpg`,
+      });
+
+      expect(res.statusCode).toBe(404);
+      expect(res.json().errorCode).toBe('ERR_NOT_FOUND');
+    });
+
+    it('preserves multi-tenant isolation: Tenant Beta cannot retrieve Tenant Alpha private media', async () => {
+      const alphaAssetFilename = uploadedJpegUrl.split('/').pop()!;
+      const crossTenantUrl = `/v1/media/${TENANT_BETA_ID}/${alphaAssetFilename}`;
+
+      const res = await app.inject({
+        method: 'GET',
+        url: crossTenantUrl,
+      });
+
+      expect(res.statusCode).toBe(404);
+    });
+
+    it('creates a product with optional uploaded image and persists imageUrl', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/products',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+          'idempotency-key': '0192b4c0-9999-7000-8000-000000000011',
+          'content-type': 'application/json',
+        },
+        payload: {
+          sku: 'IMG-PROD-001',
+          name: 'Optical Gaming Mouse with Photo',
+          baseUom: 'PCS',
+          purchaseCost: '1500.0000',
+          sellingPrice: '2500.0000',
+          trackInventory: true,
+          trackingMode: 'NONE',
+          imageUrl: uploadedJpegUrl,
+        },
+      });
+
+      expect(res.statusCode).toBe(201);
+      const product = res.json();
+      expect(product.sku).toBe('IMG-PROD-001');
+      expect(product.imageUrl).toBe(uploadedJpegUrl);
+      imageTestProductId = product.id;
+    });
+
+    it('edits an existing product: replaces the image with a new uploaded PNG', async () => {
+      const res = await app.inject({
+        method: 'PATCH',
+        url: `/v1/products/${imageTestProductId}`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+          'content-type': 'application/json',
+        },
+        payload: {
+          imageUrl: uploadedPngUrl,
+        },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const updated = res.json();
+      expect(updated.imageUrl).toBe(uploadedPngUrl);
+    });
+
+    it('edits unrelated metadata while preserving the existing image when imageUrl is omitted', async () => {
+      const res = await app.inject({
+        method: 'PATCH',
+        url: `/v1/products/${imageTestProductId}`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+          'content-type': 'application/json',
+        },
+        payload: {
+          sellingPrice: '2800.0000',
+        },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const updated = res.json();
+      expect(updated.sellingPrice).toBe('2800.0000');
+      // Preserved existing PNG image
+      expect(updated.imageUrl).toBe(uploadedPngUrl);
+    });
+
+    it('edits product to remove the image safely when imageUrl is explicitly null', async () => {
+      const res = await app.inject({
+        method: 'PATCH',
+        url: `/v1/products/${imageTestProductId}`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+          'content-type': 'application/json',
+        },
+        payload: {
+          imageUrl: null,
+        },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const updated = res.json();
+      expect(updated.imageUrl).toBeNull();
+    });
+
+    it('returns imageUrl in POS product search results and supports fallback for imageless products', async () => {
+      // Re-assign image to test product
+      await app.inject({
+        method: 'PATCH',
+        url: `/v1/products/${imageTestProductId}`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+          'content-type': 'application/json',
+        },
+        payload: {
+          imageUrl: uploadedJpegUrl,
+        },
+      });
+
+      const res = await app.inject({
+        method: 'GET',
+        url: `/v1/pos/products/search?warehouseId=${alphaWarehouseId}&q=IMG-PROD-001`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const items = res.json();
+      expect(items.length).toBe(1);
+      expect(items[0].sku).toBe('IMG-PROD-001');
+      expect(items[0].imageUrl).toBe(uploadedJpegUrl);
+
+      // Verify product created without image returns null and functions with zero friction
+      const imagelessRes = await app.inject({
+        method: 'GET',
+        url: `/v1/pos/products/search?warehouseId=${alphaWarehouseId}&q=MANUAL-PROD`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+
+      expect(imagelessRes.statusCode).toBe(200);
+      expect(imagelessRes.json()[0].imageUrl).toBeNull();
     });
   });
 });

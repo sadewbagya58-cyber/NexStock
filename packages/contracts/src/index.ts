@@ -63,6 +63,11 @@ export const ErrorCodeSchema = Type.Union([
   Type.Literal('CAT_DUPLICATE_BARCODE'),
   Type.Literal('CAT_INVALID_UOM_CONVERSION'),
   Type.Literal('CAT_INVALID_TRACKING_MODE_TRANSITION'),
+  Type.Literal('CAT_UNSUPPORTED_SYMBOLOGY'),
+  Type.Literal('CAT_BARCODE_COLLISION_EXHAUSTED'),
+  Type.Literal('CAT_SETTINGS_NOT_AVAILABLE'),
+  Type.Literal('CAT_INVALID_IMAGE_TYPE'),
+  Type.Literal('CAT_IMAGE_TOO_LARGE'),
   Type.Literal('PUR_DUPLICATE_SUPPLIER_CODE'),
   Type.Literal('PUR_DUPLICATE_SUPPLIER_TAX_ID'),
   Type.Literal('PUR_DUPLICATE_SUPPLIER_PRODUCT'),
@@ -530,7 +535,7 @@ export const CreateProductRequestSchema = Type.Object(
     reorderPoint: Type.Optional(DecimalQuantityStringSchema),
     reorderQty: Type.Optional(DecimalQuantityStringSchema),
     imageUrl: Type.Optional(
-      Type.Union([Type.String({ maxLength: 500 }), Type.Null()]),
+      Type.Union([Type.String({ maxLength: 2048 }), Type.Null()]),
     ),
     imageAlt: Type.Optional(
       Type.Union([Type.String({ maxLength: 200 }), Type.Null()]),
@@ -566,7 +571,7 @@ export const UpdateProductRequestSchema = Type.Object(
     reorderPoint: Type.Optional(DecimalQuantityStringSchema),
     reorderQty: Type.Optional(DecimalQuantityStringSchema),
     imageUrl: Type.Optional(
-      Type.Union([Type.String({ maxLength: 500 }), Type.Null()]),
+      Type.Union([Type.String({ maxLength: 2048 }), Type.Null()]),
     ),
     imageAlt: Type.Optional(
       Type.Union([Type.String({ maxLength: 200 }), Type.Null()]),
@@ -761,6 +766,28 @@ export const ProductResponseSchema = Type.Object({
   archivedAt: Type.Union([IsoTimestampSchema, Type.Null()]),
 });
 export type ProductResponse = Static<typeof ProductResponseSchema>;
+
+export const UploadProductImageRequestSchema = Type.Object(
+  {
+    filename: Type.String({ minLength: 1, maxLength: 255 }),
+    mimeType: Type.Union([
+      Type.Literal('image/jpeg'),
+      Type.Literal('image/png'),
+      Type.Literal('image/webp'),
+    ]),
+    dataBase64: Type.String({ minLength: 1 }),
+  },
+  { additionalProperties: false },
+);
+export type UploadProductImageRequest = Static<typeof UploadProductImageRequestSchema>;
+
+export const UploadProductImageResponseSchema = Type.Object({
+  imageUrl: Type.String(),
+  mimeType: Type.String(),
+  size: Type.Number(),
+  storagePath: Type.String(),
+});
+export type UploadProductImageResponse = Static<typeof UploadProductImageResponseSchema>;
 
 // 3. Supplier Contracts (/v1/suppliers)
 export const CreateSupplierRequestSchema = Type.Object(
@@ -1260,6 +1287,7 @@ export const PosProductItemResponseSchema = Type.Object({
   availableQuantity: DecimalQuantityStringSchema,
   barcodes: Type.Array(Type.String()),
   categoryName: Type.Union([Type.String(), Type.Null()]),
+  imageUrl: Type.Optional(Type.Union([Type.String(), Type.Null()])),
 });
 export type PosProductItemResponse = Static<
   typeof PosProductItemResponseSchema
