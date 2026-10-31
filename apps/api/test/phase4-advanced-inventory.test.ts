@@ -1944,4 +1944,431 @@ describe('@nexstock/api — Phase 4: Advanced Inventory (Batches, Expiry, Serial
       expect(mRes.json().data).toHaveLength(0);
     });
   });
+
+  describe('7. BUG-016 — Serial Registration Stock Ledger & Balances Integration', () => {
+    let qaSerialProductId: string;
+    let nonTrackableSerialProductId: string;
+
+    beforeAll(async () => {
+      // 1. Create dedicated SERIAL product matching QA-SERIAL-001
+      const pRes = await app.inject({
+        method: 'POST',
+        url: '/v1/products',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+        payload: {
+          sku: 'QA-SERIAL-001',
+          name: 'Serial Tracking QA Test',
+          productType: 'STANDARD',
+          baseUom: 'PCS',
+          purchaseCost: '2500.0000',
+          sellingPrice: '3500.0000',
+          categoryId: alphaCategoryId,
+          taxGroupId: alphaTaxGroupId,
+          trackInventory: true,
+          trackingMode: 'SERIAL',
+          valuationMethod: 'FIFO',
+        },
+      });
+      expect(pRes.statusCode).toBe(201);
+      qaSerialProductId = pRes.json().id;
+
+      // 2. Create a non-trackable product
+      const pNonTrackRes = await app.inject({
+        method: 'POST',
+        url: '/v1/products',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+        payload: {
+          sku: 'QA-NONTRACK-SERIAL-PROD',
+          name: 'Non Trackable Serial Product',
+          productType: 'SERVICE',
+          baseUom: 'PCS',
+          purchaseCost: '10.0000',
+          sellingPrice: '20.0000',
+          categoryId: alphaCategoryId,
+          taxGroupId: alphaTaxGroupId,
+          trackInventory: false,
+          trackingMode: 'NONE',
+          valuationMethod: 'MOVING_AVG',
+        },
+      });
+      expect(pNonTrackRes.statusCode).toBe(201);
+      nonTrackableSerialProductId = pNonTrackRes.json().id;
+    });
+
+    it('registers single serial, creates 1 serial record, 1 STOCK_IN ledger entry, and sets inventory balance to 1', async () => {
+      const serialKey = generateUuidV7();
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/inventory/serials',
+        headers: {
+          authorization: `Bearer ${alphaManagerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+          'idempotency-key': serialKey,
+        },
+        payload: {
+          branchId: alphaBranchId,
+          warehouseId: alphaWarehouseId,
+          productId: qaSerialProductId,
+          serialNumbers: ['QA-SN-SINGLE-01'],
+          unitCost: '2500.0000',
+        },
+      });
+
+      expect(res.statusCode).toBe(201);
+      const serials = res.json();
+      expect(serials).toHaveLength(1);
+      expect(serials[0].serialNumber).toBe('QA-SN-SINGLE-01');
+      expect(serials[0].status).toBe('IN_STOCK');
+      expect(serials[0].lastMovementId).toBeDefined();
+      const movementId = serials[0].lastMovementId;
+
+      // 1. Verify stock_ledger_entries row
+      await withTenantTransaction(
+        harness.db,
+        {
+          tenantId: TENANT_ALPHA_ID,
+          userId: TENANT_ALPHA_MANAGER,
+          traceId: 'verify_single_serial_ledger',
+        },
+        async (trx) => {
+          const ledgerEntries = await trx.db
+            .selectFrom('stock_ledger_entries')
+            .selectAll()
+            .where('tenant_id', '=', TENANT_ALPHA_ID)
+            .where('id', '=', movementId)
+            .execute();
+
+          expect(ledgerEntries).toHaveLength(1);
+          const entry = ledgerEntries[0]!;
+          expect(entry.movement_type).toBe('STOCK_IN');
+          expect(entry.qty_delta).toBe('1.000000');
+          expect(entry.balance_before).toBe('0.000000');
+          expect(entry.balance_after).toBe('1.000000');
+          expect(entry.reference_type).toBe('SERIAL_REGISTRATION');
+          expect(Number(entry.unit_cost)).toBe(2500);
+
+          // 2. Verify inventory_balances row
+          const balanceRow = await trx.db
+            .selectFrom('inventory_balances')
+            .selectAll()
+            .where('tenant_id', '=', TENANT_ALPHA_ID)
+            .where('warehouse_id', '=', alphaWarehouseId)
+            .where('product_id', '=', qaSerialProductId)
+            .executeTakeFirst();
+
+          expect(balanceRow).toBeDefined();
+          expect(balanceRow!.qty_on_hand).toBe('1.000000');
+          expect(balanceRow!.last_ledger_entry_id).toBe(movementId);
+        },
+      );
+    });
+
+    it('registers 3 serials (SN-10001, SN-10002, SN-10003), creating 3 records, 1 STOCK_IN +3 ledger entry, and updates balance to 4', async () => {
+      const serialKey = generateUuidV7();
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/inventory/serials',
+        headers: {
+          authorization: `Bearer ${alphaManagerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+          'idempotency-key': serialKey,
+        },
+        payload: {
+          branchId: alphaBranchId,
+          warehouseId: alphaWarehouseId,
+          productId: qaSerialProductId,
+          serialNumbers: ['SN-10001', 'SN-10002', 'SN-10003'],
+          unitCost: '2500.0000',
+        },
+      });
+
+      expect(res.statusCode).toBe(201);
+      const serials = res.json();
+      expect(serials).toHaveLength(3);
+      expect(serials.every((s: { status: string }) => s.status === 'IN_STOCK')).toBe(true);
+      const movementId = serials[0].lastMovementId;
+      expect(movementId).toBeDefined();
+      expect(serials.every((s: { lastMovementId: string }) => s.lastMovementId === movementId)).toBe(true);
+
+      // Verify DB state
+      await withTenantTransaction(
+        harness.db,
+        {
+          tenantId: TENANT_ALPHA_ID,
+          userId: TENANT_ALPHA_MANAGER,
+          traceId: 'verify_triple_serial_ledger',
+        },
+        async (trx) => {
+          // Exactly 1 new movement for the 3 serials
+          const movementRow = await trx.db
+            .selectFrom('stock_ledger_entries')
+            .selectAll()
+            .where('tenant_id', '=', TENANT_ALPHA_ID)
+            .where('id', '=', movementId)
+            .executeTakeFirst();
+
+          expect(movementRow).toBeDefined();
+          expect(movementRow!.movement_type).toBe('STOCK_IN');
+          expect(movementRow!.qty_delta).toBe('3.000000');
+          expect(movementRow!.balance_before).toBe('1.000000');
+          expect(movementRow!.balance_after).toBe('4.000000');
+          expect(movementRow!.reference_type).toBe('SERIAL_REGISTRATION');
+          expect(Number(movementRow!.unit_cost)).toBe(2500);
+
+          // Balance is exactly 4
+          const balanceRow = await trx.db
+            .selectFrom('inventory_balances')
+            .selectAll()
+            .where('tenant_id', '=', TENANT_ALPHA_ID)
+            .where('warehouse_id', '=', alphaWarehouseId)
+            .where('product_id', '=', qaSerialProductId)
+            .executeTakeFirst();
+
+          expect(balanceRow).toBeDefined();
+          expect(balanceRow!.qty_on_hand).toBe('4.000000');
+        },
+      );
+
+      // Verify GET /v1/inventory/balances returns 4
+      const balRes = await app.inject({
+        method: 'GET',
+        url: `/v1/inventory/balances?warehouseId=${alphaWarehouseId}&productId=${qaSerialProductId}`,
+        headers: {
+          authorization: `Bearer ${alphaManagerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+      expect(balRes.statusCode).toBe(200);
+      expect(Number(balRes.json().data[0].qtyOnHand)).toBe(4);
+    });
+
+    it('rejects duplicate serial numbers within the same request (400 ERR_VALIDATION_FAILED)', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/inventory/serials',
+        headers: {
+          authorization: `Bearer ${alphaManagerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+          'idempotency-key': generateUuidV7(),
+        },
+        payload: {
+          branchId: alphaBranchId,
+          warehouseId: alphaWarehouseId,
+          productId: qaSerialProductId,
+          serialNumbers: ['SN-DUP-INTERNAL', 'SN-DUP-INTERNAL'],
+          unitCost: '2500.0000',
+        },
+      });
+
+      expect(res.statusCode).toBe(400);
+      expect(res.json().errorCode).toBe('ERR_VALIDATION_FAILED');
+    });
+
+    it('rejects duplicate serial number against existing database serial (409 INV_SERIAL_DUPLICATE) with no stock delta', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/inventory/serials',
+        headers: {
+          authorization: `Bearer ${alphaManagerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+          'idempotency-key': generateUuidV7(),
+        },
+        payload: {
+          branchId: alphaBranchId,
+          warehouseId: alphaWarehouseId,
+          productId: qaSerialProductId,
+          serialNumbers: ['SN-10001'],
+          unitCost: '2500.0000',
+        },
+      });
+
+      expect(res.statusCode).toBe(409);
+      expect(res.json().errorCode).toBe('INV_SERIAL_DUPLICATE');
+
+      // Balance remains 4
+      await withTenantTransaction(
+        harness.db,
+        {
+          tenantId: TENANT_ALPHA_ID,
+          userId: TENANT_ALPHA_MANAGER,
+          traceId: 'verify_no_change_on_duplicate',
+        },
+        async (trx) => {
+          const balanceRow = await trx.db
+            .selectFrom('inventory_balances')
+            .selectAll()
+            .where('tenant_id', '=', TENANT_ALPHA_ID)
+            .where('warehouse_id', '=', alphaWarehouseId)
+            .where('product_id', '=', qaSerialProductId)
+            .executeTakeFirst();
+          expect(balanceRow!.qty_on_hand).toBe('4.000000');
+        },
+      );
+    });
+
+    it('replays duplicate submission with Idempotency-Key without duplicating ledger entries or stock count', async () => {
+      const idempotencyKey = generateUuidV7();
+
+      // First call
+      const firstRes = await app.inject({
+        method: 'POST',
+        url: '/v1/inventory/serials',
+        headers: {
+          authorization: `Bearer ${alphaManagerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+          'idempotency-key': idempotencyKey,
+        },
+        payload: {
+          branchId: alphaBranchId,
+          warehouseId: alphaWarehouseId,
+          productId: qaSerialProductId,
+          serialNumbers: ['SN-IDEMP-01', 'SN-IDEMP-02'],
+          unitCost: '2500.0000',
+        },
+      });
+
+      expect(firstRes.statusCode).toBe(201);
+      const firstSerials = firstRes.json();
+      expect(firstSerials).toHaveLength(2);
+
+      // Second duplicate call with same idempotency key
+      const secondRes = await app.inject({
+        method: 'POST',
+        url: '/v1/inventory/serials',
+        headers: {
+          authorization: `Bearer ${alphaManagerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+          'idempotency-key': idempotencyKey,
+        },
+        payload: {
+          branchId: alphaBranchId,
+          warehouseId: alphaWarehouseId,
+          productId: qaSerialProductId,
+          serialNumbers: ['SN-IDEMP-01', 'SN-IDEMP-02'],
+          unitCost: '2500.0000',
+        },
+      });
+
+      expect(secondRes.statusCode).toBe(201);
+      expect(secondRes.headers['x-idempotent-replayed']).toBe('true');
+      expect(secondRes.json()).toHaveLength(2);
+
+      // Verify balance increased by only 2 (4 + 2 = 6, NOT 8)
+      await withTenantTransaction(
+        harness.db,
+        {
+          tenantId: TENANT_ALPHA_ID,
+          userId: TENANT_ALPHA_MANAGER,
+          traceId: 'verify_idemp_serial',
+        },
+        async (trx) => {
+          const balanceRow = await trx.db
+            .selectFrom('inventory_balances')
+            .selectAll()
+            .where('tenant_id', '=', TENANT_ALPHA_ID)
+            .where('warehouse_id', '=', alphaWarehouseId)
+            .where('product_id', '=', qaSerialProductId)
+            .executeTakeFirst();
+
+          expect(balanceRow!.qty_on_hand).toBe('6.000000');
+        },
+      );
+    });
+
+    it('rejects serial registration for non-serial-tracked product (422 INV_PRODUCT_NOT_SERIAL_TRACKED)', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/inventory/serials',
+        headers: {
+          authorization: `Bearer ${alphaManagerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+          'idempotency-key': generateUuidV7(),
+        },
+        payload: {
+          branchId: alphaBranchId,
+          warehouseId: alphaWarehouseId,
+          productId: nonBatchProductId,
+          serialNumbers: ['SN-NONSERIAL-01'],
+          unitCost: '10.0000',
+        },
+      });
+
+      expect(res.statusCode).toBe(422);
+      expect(res.json().errorCode).toBe('INV_PRODUCT_NOT_SERIAL_TRACKED');
+    });
+
+    it('rejects serial registration for non-trackable product (422 INV_PRODUCT_NOT_SERIAL_TRACKED or INV_PRODUCT_NOT_TRACKABLE)', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/inventory/serials',
+        headers: {
+          authorization: `Bearer ${alphaManagerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+          'idempotency-key': generateUuidV7(),
+        },
+        payload: {
+          branchId: alphaBranchId,
+          warehouseId: alphaWarehouseId,
+          productId: nonTrackableSerialProductId,
+          serialNumbers: ['SN-NONTRACK-01'],
+          unitCost: '10.0000',
+        },
+      });
+
+      expect(res.statusCode).toBe(422);
+    });
+
+    it('rejects serial registration if warehouse does not belong to branch (400 ERR_VALIDATION_FAILED)', async () => {
+      const dummyBranchId = generateUuidV7();
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/inventory/serials',
+        headers: {
+          authorization: `Bearer ${alphaManagerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+          'idempotency-key': generateUuidV7(),
+        },
+        payload: {
+          branchId: dummyBranchId,
+          warehouseId: alphaWarehouseId,
+          productId: qaSerialProductId,
+          serialNumbers: ['SN-BADBRANCH-01'],
+          unitCost: '100.0000',
+        },
+      });
+
+      expect(res.statusCode).toBe(400);
+      expect(res.json().errorCode).toBe('ERR_VALIDATION_FAILED');
+    });
+
+    it('enforces multi-tenant isolation: Tenant Beta cannot see Tenant Alpha serials or stock ledger', async () => {
+      const sRes = await app.inject({
+        method: 'GET',
+        url: `/v1/inventory/serials?productId=${qaSerialProductId}`,
+        headers: {
+          authorization: `Bearer ${betaOwnerToken}`,
+          'x-tenant-id': TENANT_BETA_ID,
+        },
+      });
+      expect(sRes.statusCode).toBe(200);
+      expect(sRes.json().data).toHaveLength(0);
+
+      const mRes = await app.inject({
+        method: 'GET',
+        url: `/v1/inventory/movements?productId=${qaSerialProductId}`,
+        headers: {
+          authorization: `Bearer ${betaOwnerToken}`,
+          'x-tenant-id': TENANT_BETA_ID,
+        },
+      });
+      expect(mRes.statusCode).toBe(200);
+      expect(mRes.json().data).toHaveLength(0);
+    });
+  });
 });

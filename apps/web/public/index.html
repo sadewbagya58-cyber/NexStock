@@ -6754,7 +6754,7 @@
           </div>
           <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px;">
             <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-            <button type="submit" class="btn btn-primary">Intake Serials</button>
+            <button type="submit" id="btnSubmitRegisterSerials" class="btn btn-primary">Intake Serials</button>
           </div>
         </form>
       `;
@@ -6762,12 +6762,22 @@
       openModal(html);
       document.getElementById('registerSerialsForm').onsubmit = async (e) => {
         e.preventDefault();
+        const submitBtn = document.getElementById('btnSubmitRegisterSerials');
+        if (submitBtn) {
+          submitBtn.disabled = true;
+          submitBtn.textContent = 'Saving...';
+        }
+
         try {
           const raw = document.getElementById('regSerialNumbers').value;
           const serialNumbers = raw.split(/[\n,]/).map(s => s.trim().toUpperCase()).filter(Boolean);
 
           if (serialNumbers.length === 0) {
             showToast('Please enter at least one serial number', 'error');
+            if (submitBtn) {
+              submitBtn.disabled = false;
+              submitBtn.textContent = 'Intake Serials';
+            }
             return;
           }
 
@@ -6779,16 +6789,28 @@
             unitCost: parseFloat(document.getElementById('regSerialCost').value).toFixed(4)
           };
 
+          const idempotencyKey = crypto.randomUUID();
+
           await apiFetch('/v1/inventory/serials', {
             method: 'POST',
+            headers: {
+              'idempotency-key': idempotencyKey
+            },
             body: JSON.stringify(payload)
           });
 
-          showToast(`Successfully registered ${serialNumbers.length} serial numbers`, 'success');
+          showToast(`Successfully registered ${serialNumbers.length} serials and recorded stock intake in ledger`, 'success');
           closeModal();
           renderSerialsView();
+          if (typeof renderBalancesView === 'function') renderBalancesView();
+          if (typeof renderMovementsView === 'function') renderMovementsView();
         } catch (err) {
           showToast(`Error registering serials: ${err.message}`, 'error');
+        } finally {
+          if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Intake Serials';
+          }
         }
       };
     }

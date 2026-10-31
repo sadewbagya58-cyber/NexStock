@@ -2655,10 +2655,37 @@ export async function buildApp(
       const idempotencyKey = request.headers['idempotency-key'];
       const traceId = String(request.id);
 
+      if (idempotencyKey) {
+        const outcome = await withTenantTransaction(
+          options.db,
+          { tenantId, userId: principal.userId, traceId },
+          (trx) =>
+            executeIdempotentMutation({
+              trx,
+              idempotencyKey,
+              endpoint: 'POST /v1/inventory/serials',
+              requestPayload: request.body,
+              execute: async (innerTrx) => {
+                const body = await registerSerialStock(
+                  innerTrx,
+                  idempotencyKey,
+                  request.body,
+                );
+                return { statusCode: 201, body };
+              },
+            }),
+        );
+
+        return reply
+          .status(outcome.statusCode as 201)
+          .header('x-idempotent-replayed', String(outcome.replayed))
+          .send(outcome.body);
+      }
+
       const result = await withTenantTransaction(
         options.db,
         { tenantId, userId: principal.userId, traceId },
-        (trx) => registerSerialStock(trx, idempotencyKey, request.body),
+        (trx) => registerSerialStock(trx, generateUuidV7(), request.body),
       );
 
       reply.status(201);

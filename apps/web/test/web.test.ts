@@ -1418,4 +1418,37 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       expect(html).toContain('Batch created and inventory intake recorded successfully');
     });
   });
+
+  describe('17. BUG-016 — Serial Registration Stock Ledger & Balances Integration', () => {
+    it('verifies public/index.html includes in-flight button state, idempotency-key, and multi-view refresh for serial intake', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // 1. Modal and creation functions exist
+      expect(html).toContain('openRegisterSerialsModal');
+      expect(html).toContain('btnSubmitRegisterSerials');
+      expect(html).toContain('/v1/inventory/serials');
+
+      // 2. branchId and warehouseId included in payload
+      expect(html).toContain('branchId: state.branchId');
+      expect(html).toContain('warehouseId: state.warehouseId');
+
+      // 3. Idempotency Key header included
+      expect(html).toContain("const idempotencyKey = crypto.randomUUID()");
+      expect(html).toContain("'idempotency-key': idempotencyKey");
+
+      // 4. In-flight button disabled and label updated to Saving...
+      expect(html).toContain('submitBtn.disabled = true');
+      expect(html).toContain("submitBtn.textContent = 'Saving...'");
+
+      // 5. Success toast notifies user of serial intake in ledger
+      expect(html).toContain('showToast(');
+      expect(html).toContain('recorded stock intake in ledger');
+
+      // 6. Refreshes Serials, Balances, and Movements views
+      expect(html).toContain('renderSerialsView()');
+      expect(html).toContain('renderBalancesView()');
+      expect(html).toContain('renderMovementsView()');
+    });
+  });
 });

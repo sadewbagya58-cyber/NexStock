@@ -6,7 +6,7 @@ import type {
   SerialStatus,
   TransitionSerialStatusRequest,
 } from '@nexstock/contracts';
-import { Money } from '@nexstock/domain-core';
+import { Money, Quantity } from '@nexstock/domain-core';
 import type { Selectable } from 'kysely';
 import type { CursorPaginatedResult } from '../../cat/index.js';
 import { assertAuthorized } from '../../iam/index.js';
@@ -18,6 +18,7 @@ import {
   generateUuidV7,
 } from '../../shared/index.js';
 import { assertSubscriptionEntitlement } from '../../sub/index.js';
+import { postStockMovement } from './inv.service.js';
 
 const ALLOWED_TRANSITIONS: Record<SerialStatus, ReadonlySet<SerialStatus>> = {
   IN_STOCK: new Set(['RESERVED', 'SOLD', 'QUARANTINED', 'DAMAGED', 'WRITTEN_OFF']),
@@ -86,7 +87,15 @@ export async function registerSerialStock(
 
   const product = await trx.db
     .selectFrom('products')
-    .select(['id', 'sku', 'track_inventory', 'tracking_mode', 'status'])
+    .select([
+      'id',
+      'sku',
+      'track_inventory',
+      'tracking_mode',
+      'status',
+      'base_uom',
+      'purchase_cost',
+    ])
     .where('tenant_id', '=', trx.tenantId)
     .where('id', '=', input.productId)
     .executeTakeFirst();
@@ -109,6 +118,15 @@ export async function registerSerialStock(
     });
   }
 
+  if (!product.track_inventory) {
+    throw new AppError({
+      statusCode: 422,
+      errorCode: 'INV_PRODUCT_NOT_TRACKABLE',
+      title: 'Product Does Not Track Stock',
+      detail: `Product "${product.sku}" is configured with track_inventory=false.`,
+    });
+  }
+
   const warehouse = await trx.db
     .selectFrom('warehouses')
     .select(['id', 'is_active', 'branch_id'])
@@ -125,8 +143,82 @@ export async function registerSerialStock(
     });
   }
 
+  let belongsToBranch = warehouse.branch_id === input.branchId;
+  if (!belongsToBranch) {
+    const link = await trx.db
+      .selectFrom('branch_warehouse_links')
+      .select(['id'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('branch_id', '=', input.branchId)
+      .where('warehouse_id', '=', input.warehouseId)
+      .executeTakeFirst();
+    belongsToBranch = Boolean(link);
+  }
+  if (!belongsToBranch) {
+    throw new AppError({
+      statusCode: 400,
+      errorCode: 'ERR_VALIDATION_FAILED',
+      title: 'Warehouse Not Linked to Branch',
+      detail: `Warehouse "${input.warehouseId}" does not belong to branch "${input.branchId}".`,
+    });
+  }
+
+  if (input.supplierId) {
+    const supplierRow = await trx.db
+      .selectFrom('suppliers')
+      .select(['id', 'status'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('id', '=', input.supplierId)
+      .executeTakeFirst();
+
+    if (!supplierRow) {
+      throw new AppError({
+        statusCode: 404,
+        errorCode: 'ERR_NOT_FOUND',
+        title: 'Supplier Not Found',
+        detail: `Supplier "${input.supplierId}" was not found in tenant "${trx.tenantId}".`,
+      });
+    }
+  }
+
+  if (input.batchId) {
+    const batchRow = await trx.db
+      .selectFrom('inventory_batches')
+      .select(['id', 'status', 'warehouse_id'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('id', '=', input.batchId)
+      .where('product_id', '=', input.productId)
+      .executeTakeFirst();
+
+    if (!batchRow) {
+      throw new AppError({
+        statusCode: 404,
+        errorCode: 'ERR_NOT_FOUND',
+        title: 'Batch Not Found',
+        detail: `Batch "${input.batchId}" not found for product "${product.sku}".`,
+      });
+    }
+    if (batchRow.warehouse_id !== input.warehouseId) {
+      throw new AppError({
+        statusCode: 400,
+        errorCode: 'ERR_VALIDATION_FAILED',
+        title: 'Batch Warehouse Mismatch',
+        detail: `Batch "${input.batchId}" belongs to warehouse "${batchRow.warehouse_id}", not "${input.warehouseId}".`,
+      });
+    }
+  }
+
   // Validate serial numbers array
   const rawSerials = input.serialNumbers.map((s) => s.trim().toUpperCase());
+  if (rawSerials.length === 0 || rawSerials.some((s) => !s)) {
+    throw new AppError({
+      statusCode: 400,
+      errorCode: 'ERR_VALIDATION_FAILED',
+      title: 'Invalid Serial Numbers',
+      detail: 'Serial numbers array cannot be empty or contain blank entries.',
+    });
+  }
+
   const uniqueSerials = Array.from(new Set(rawSerials));
   if (uniqueSerials.length !== rawSerials.length) {
     throw new AppError({
@@ -169,6 +261,32 @@ export async function registerSerialStock(
     });
   }
 
+  // Post the authoritative STOCK_IN movement for the batch of serials
+  const intakeQty = Quantity.fromInteger(uniqueSerials.length);
+  const movementKey = generateUuidV7();
+
+  const movement = await postStockMovement(
+    trx,
+    movementKey,
+    {
+      branchId: input.branchId,
+      warehouseId: input.warehouseId,
+      productId: input.productId,
+      batchId: input.batchId ?? null,
+      movementType: 'STOCK_IN',
+      quantity: intakeQty.toDecimalString(),
+      uomCode: product.base_uom,
+      unitCost: unitCostMoney.toDecimalString(),
+      referenceType: 'SERIAL_REGISTRATION',
+      referenceId: idempotencyKey,
+      reason:
+        input.notes?.trim() ||
+        `Initial serial registration intake (${uniqueSerials.length} units)`,
+      supplierId: input.supplierId ?? null,
+    },
+    { skipPermissionCheck: true },
+  );
+
   const now = new Date();
   const createdSerials: SerialResponse[] = [];
 
@@ -189,7 +307,7 @@ export async function registerSerialStock(
         currency_code: baseCurrency,
         received_at: now,
         sold_at: null,
-        last_movement_id: null,
+        last_movement_id: movement.id,
         last_sale_invoice_id: null,
         notes: input.notes ?? null,
         created_at: now,
@@ -206,7 +324,7 @@ export async function registerSerialStock(
         from_status: 'NONE',
         to_status: 'IN_STOCK',
         reference_type: 'INITIAL_REGISTRATION',
-        reference_id: idempotencyKey,
+        reference_id: movement.id,
         actor_user_id: trx.userId,
         notes: input.notes ?? 'Initial Serial Registration',
         occurred_at: now,
@@ -226,7 +344,7 @@ export async function registerSerialStock(
       currencyCode: baseCurrency as CurrencyCode,
       receivedAt: now.toISOString(),
       soldAt: null,
-      lastMovementId: null,
+      lastMovementId: movement.id,
       lastSaleInvoiceId: null,
       notes: input.notes ?? null,
       createdAt: now.toISOString(),
@@ -244,6 +362,7 @@ export async function registerSerialStock(
       branchId: input.branchId,
       count: uniqueSerials.length,
       sampleSerials: uniqueSerials.slice(0, 5),
+      movementId: movement.id,
     },
   });
 
