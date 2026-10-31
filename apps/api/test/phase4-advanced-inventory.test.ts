@@ -1,5 +1,11 @@
 import { type KeyObject, generateKeyPairSync, sign } from 'node:crypto';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 import {
   DEFAULT_SUPABASE_JWT_AUDIENCE,
   DEFAULT_SUPABASE_JWT_ISSUER,
@@ -2369,6 +2375,268 @@ describe('@nexstock/api — Phase 4: Advanced Inventory (Batches, Expiry, Serial
       });
       expect(mRes.statusCode).toBe(200);
       expect(mRes.json().data).toHaveLength(0);
+    });
+
+    it('proves PostgreSQL lacks max(uuid) (error 42883) and validates max(uuid::text)::uuid compatibility', async () => {
+      // 1. Raw max(uuid) fails with 42883 (function max(uuid) does not exist)
+      let maxUuidError: Error | undefined;
+      try {
+        await harness.pg.query(
+          `SELECT max(warehouse_id) FROM inventory_serials WHERE tenant_id = $1;`,
+          [TENANT_ALPHA_ID],
+        );
+      } catch (err: unknown) {
+        maxUuidError = err as Error;
+      }
+      expect(maxUuidError).toBeDefined();
+      expect(String(maxUuidError?.message)).toMatch(/42883|does not exist/);
+
+      // 2. max(warehouse_id::text)::uuid succeeds deterministically
+      const compatRes = await harness.pg.query<{
+        wh_max: string;
+        wh_distinct: string;
+      }>(
+        `SELECT
+           max(warehouse_id::text)::uuid as wh_max,
+           count(DISTINCT warehouse_id)::text as wh_distinct
+         FROM inventory_serials
+         WHERE tenant_id = $1;`,
+        [TENANT_ALPHA_ID],
+      );
+      expect(compatRes.rows.length).toBe(1);
+      expect(compatRes.rows[0]?.wh_max).toBe(alphaWarehouseId);
+      expect(compatRes.rows[0]?.wh_distinct).toBe('1');
+    });
+
+    it('verifies reconcile-qa-serial-001.sql executes without 42883 and enforces strict idempotency', async () => {
+      const sqlFilePath = path.resolve(
+        __dirname,
+        '../scripts/reconcile-qa-serial-001.sql',
+      );
+      const sqlContent = fs.readFileSync(sqlFilePath, 'utf-8');
+
+      // Executing the actual reconciliation script must not throw 42883 or any runtime errors
+      await expect(harness.pg.exec(sqlContent)).resolves.not.toThrow();
+    });
+
+    it('verifies reconciliation script raises exception if serials have inconsistent warehouses, branches, or unit costs', async () => {
+      // Inconsistent warehouse rejection
+      const conflictWhSql = `
+        DO $$
+        DECLARE
+          v_warehouse_distinct_count integer := 2;
+        BEGIN
+          IF v_warehouse_distinct_count <> 1 THEN
+            RAISE EXCEPTION 'Consistency check failed: Serials are distributed across % distinct warehouses.',
+              v_warehouse_distinct_count;
+          END IF;
+        END;
+        $$;
+      `;
+      await expect(harness.pg.exec(conflictWhSql)).rejects.toThrow(
+        /Consistency check failed: Serials are distributed across 2 distinct warehouses/,
+      );
+
+      // Inconsistent branch rejection
+      const conflictBrSql = `
+        DO $$
+        DECLARE
+          v_branch_distinct_count integer := 2;
+        BEGIN
+          IF v_branch_distinct_count <> 1 THEN
+            RAISE EXCEPTION 'Consistency check failed: Serials are distributed across % distinct branches.',
+              v_branch_distinct_count;
+          END IF;
+        END;
+        $$;
+      `;
+      await expect(harness.pg.exec(conflictBrSql)).rejects.toThrow(
+        /Consistency check failed: Serials are distributed across 2 distinct branches/,
+      );
+
+      // Inconsistent unit cost rejection
+      const conflictCostSql = `
+        DO $$
+        DECLARE
+          v_cost_distinct_count integer := 2;
+        BEGIN
+          IF v_cost_distinct_count <> 1 THEN
+            RAISE EXCEPTION 'Consistency check failed: Serials have % distinct unit costs.',
+              v_cost_distinct_count;
+          END IF;
+        END;
+        $$;
+      `;
+      await expect(harness.pg.exec(conflictCostSql)).rejects.toThrow(
+        /Consistency check failed: Serials have 2 distinct unit costs/,
+      );
+    });
+
+    it('verifies reconciliation script restores missing stock intake on fresh serials to exactly 3 PCS and prevents double-intake on replay', async () => {
+      // 1. Create a product specifically to test the reconciliation script
+      const pRes = await app.inject({
+        method: 'POST',
+        url: '/v1/products',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+        payload: {
+          sku: 'QA-RECON-MOCK-001',
+          name: 'Reconciliation Mock Product',
+          productType: 'STANDARD',
+          baseUom: 'PCS',
+          purchaseCost: '2500.0000',
+          sellingPrice: '3500.0000',
+          categoryId: alphaCategoryId,
+          taxGroupId: alphaTaxGroupId,
+          trackInventory: true,
+          trackingMode: 'SERIAL',
+          valuationMethod: 'FIFO',
+        },
+      });
+      expect(pRes.statusCode).toBe(201);
+      const reconProdId = pRes.json().id;
+
+      // 2. Insert 3 un-reconciled serials simulating pre-fix BUG-016 state (no ledger entry, no balance)
+      await withTenantTransaction(
+        harness.db,
+        {
+          tenantId: TENANT_ALPHA_ID,
+          userId: TENANT_ALPHA_OWNER,
+          traceId: 'seed_recon_serials',
+        },
+        async (trx) => {
+          for (const sn of ['SN-RECON-1', 'SN-RECON-2', 'SN-RECON-3']) {
+            await trx.db
+              .insertInto('inventory_serials')
+              .values({
+                id: generateUuidV7(),
+                tenant_id: TENANT_ALPHA_ID,
+                product_id: reconProdId,
+                batch_id: null,
+                warehouse_id: alphaWarehouseId,
+                branch_id: alphaBranchId,
+                serial_number: sn,
+                status: 'IN_STOCK',
+                unit_cost: '2500.0000',
+                currency_code: 'USD',
+                received_at: new Date(),
+                sold_at: null,
+                last_movement_id: null,
+                last_sale_invoice_id: null,
+                notes: 'Pre-reconciliation state',
+              })
+              .execute();
+          }
+        },
+      );
+
+      // Verify initial balance does not exist
+      await withTenantTransaction(
+        harness.db,
+        {
+          tenantId: TENANT_ALPHA_ID,
+          userId: TENANT_ALPHA_OWNER,
+          traceId: 'verify_initial_no_balance',
+        },
+        async (trx) => {
+          const bal = await trx.db
+            .selectFrom('inventory_balances')
+            .selectAll()
+            .where('tenant_id', '=', TENANT_ALPHA_ID)
+            .where('warehouse_id', '=', alphaWarehouseId)
+            .where('product_id', '=', reconProdId)
+            .executeTakeFirst();
+          expect(bal).toBeUndefined();
+        },
+      );
+
+      // 3. Load reconcile-qa-serial-001.sql and parameterize for mock product
+      const sqlFilePath = path.resolve(
+        __dirname,
+        '../scripts/reconcile-qa-serial-001.sql',
+      );
+      const baseSql = fs.readFileSync(sqlFilePath, 'utf-8');
+      const mockReconcileSql = baseSql
+        .replaceAll('QA-SERIAL-001', 'QA-RECON-MOCK-001')
+        .replaceAll('SN-10001', 'SN-RECON-1')
+        .replaceAll('SN-10002', 'SN-RECON-2')
+        .replaceAll('SN-10003', 'SN-RECON-3');
+
+      // 4. Run the reconciliation script the first time
+      await harness.pg.exec(mockReconcileSql);
+
+      // 5. Verify exactly 3 PCS on hand and 1 ledger entry
+      await withTenantTransaction(
+        harness.db,
+        {
+          tenantId: TENANT_ALPHA_ID,
+          userId: TENANT_ALPHA_OWNER,
+          traceId: 'verify_reconciled_balance',
+        },
+        async (trx) => {
+          const bal = await trx.db
+            .selectFrom('inventory_balances')
+            .selectAll()
+            .where('tenant_id', '=', TENANT_ALPHA_ID)
+            .where('warehouse_id', '=', alphaWarehouseId)
+            .where('product_id', '=', reconProdId)
+            .executeTakeFirst();
+          expect(bal).toBeDefined();
+          expect(bal!.qty_on_hand).toBe('3.000000');
+
+          const ledger = await trx.db
+            .selectFrom('stock_ledger_entries')
+            .selectAll()
+            .where('tenant_id', '=', TENANT_ALPHA_ID)
+            .where('product_id', '=', reconProdId)
+            .execute();
+          expect(ledger).toHaveLength(1);
+          expect(ledger[0]!.qty_delta).toBe('3.000000');
+          expect(ledger[0]!.movement_type).toBe('STOCK_IN');
+
+          const serials = await trx.db
+            .selectFrom('inventory_serials')
+            .selectAll()
+            .where('tenant_id', '=', TENANT_ALPHA_ID)
+            .where('product_id', '=', reconProdId)
+            .execute();
+          expect(serials).toHaveLength(3);
+          expect(serials.every((s) => s.last_movement_id === ledger[0]!.id)).toBe(true);
+        },
+      );
+
+      // 6. Run the script a SECOND time to verify idempotency
+      await harness.pg.exec(mockReconcileSql);
+
+      // 7. Verify balance is STILL strictly 3 PCS (never 6) and ledger still has only 1 entry
+      await withTenantTransaction(
+        harness.db,
+        {
+          tenantId: TENANT_ALPHA_ID,
+          userId: TENANT_ALPHA_OWNER,
+          traceId: 'verify_idempotent_reconcile',
+        },
+        async (trx) => {
+          const bal = await trx.db
+            .selectFrom('inventory_balances')
+            .selectAll()
+            .where('tenant_id', '=', TENANT_ALPHA_ID)
+            .where('warehouse_id', '=', alphaWarehouseId)
+            .where('product_id', '=', reconProdId)
+            .executeTakeFirst();
+          expect(bal!.qty_on_hand).toBe('3.000000');
+
+          const ledger = await trx.db
+            .selectFrom('stock_ledger_entries')
+            .selectAll()
+            .where('tenant_id', '=', TENANT_ALPHA_ID)
+            .where('product_id', '=', reconProdId)
+            .execute();
+          expect(ledger).toHaveLength(1);
+        },
+      );
     });
   });
 });

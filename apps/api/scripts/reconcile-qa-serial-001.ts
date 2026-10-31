@@ -81,17 +81,23 @@ export async function reconcileSerialStockIntake(options: {
     const branchId = serialRows[0]!.branch_id;
     const unitCost = String(serialRows[0]!.unit_cost);
 
-    // Verify all serials are in the same warehouse and have status IN_STOCK
+    // Verify all serials are in the same warehouse, branch, have identical unit cost, and status IN_STOCK
     for (const s of serialRows) {
       if (s.warehouse_id !== warehouseId) {
         throw new Error(`Serial "${s.serial_number}" belongs to warehouse "${s.warehouse_id}", expected "${warehouseId}".`);
+      }
+      if (s.branch_id !== branchId) {
+        throw new Error(`Serial "${s.serial_number}" belongs to branch "${s.branch_id}", expected "${branchId}".`);
+      }
+      if (String(s.unit_cost) !== unitCost) {
+        throw new Error(`Serial "${s.serial_number}" has unit cost "${s.unit_cost}", expected "${unitCost}".`);
       }
       if (s.status !== 'IN_STOCK') {
         throw new Error(`Serial "${s.serial_number}" has status "${s.status}", expected "IN_STOCK".`);
       }
     }
 
-    // 3. Check for existing stock ledger entries referencing these serials
+    // 3. Check for existing stock ledger entries referencing these serials or reconciliation reference
     const serialIds = serialRows.map((s) => s.id);
     const existingLedgerBySerial = await db
       .selectFrom('stock_ledger_entries')
@@ -100,8 +106,16 @@ export async function reconcileSerialStockIntake(options: {
       .where('serial_id', 'in', serialIds)
       .execute();
 
-    if (existingLedgerBySerial.length > 0) {
-      console.log(`[Reconcile] Notice: Product "${targetSku}" already has ${existingLedgerBySerial.length} stock ledger entries linked directly to these serials.`);
+    const existingReconcileLedger = await db
+      .selectFrom('stock_ledger_entries')
+      .selectAll()
+      .where('tenant_id', '=', product.tenant_id)
+      .where('reference_type', '=', 'SERIAL_REGISTRATION')
+      .where('reference_id', '=', `RECONCILE-${targetSku}`)
+      .execute();
+
+    if (existingLedgerBySerial.length > 0 || existingReconcileLedger.length > 0) {
+      console.log(`[Reconcile] Notice: Product "${targetSku}" already has stock ledger entries recorded.`);
       return {
         dryRun: options.dryRun,
         sku: targetSku,
@@ -124,6 +138,20 @@ export async function reconcileSerialStockIntake(options: {
 
     const balanceBefore = existingBalance ? String(existingBalance.qty_on_hand) : '0.000000';
     const targetIntakeQty = String(targetSerials.length);
+
+    if (Number(balanceBefore) >= Number(targetIntakeQty)) {
+      console.log(`[Reconcile] Notice: Product "${targetSku}" already has balance ${balanceBefore} >= target intake qty ${targetIntakeQty}.`);
+      return {
+        dryRun: options.dryRun,
+        sku: targetSku,
+        serialNumbers: targetSerials,
+        serialCount: targetSerials.length,
+        previousBalanceOnHand: balanceBefore,
+        reconciledBalanceOnHand: balanceBefore,
+        ledgerEntryCreated: false,
+      };
+    }
+
     const expectedBalanceAfter = String(Number(balanceBefore) + Number(targetIntakeQty));
 
     // Find tenant user

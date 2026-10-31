@@ -4,18 +4,25 @@
 -- Target Serials: SN-10001, SN-10002, SN-10003 (3 Units)
 --
 -- Safety Guarantees:
--- 1. Idempotent: Exits cleanly if a stock_ledger_entries row already exists for these serials.
--- 2. Atomic: Entire operation runs inside a single TRANSACTION block.
--- 3. Invariant-Preserving: Satisfies stock_ledger_entries_immutable_trg and
+-- 1. Idempotent: Exits cleanly if a stock_ledger_entries row already exists for these serials
+--    or if inventory balance is already >= 3 PCS.
+-- 2. Atomic: Entire operation runs inside a single TRANSACTION DO block.
+-- 3. PostgreSQL UUID Compatibility: Uses COUNT(DISTINCT ...) and deterministic selection /
+--    text casting instead of unsupported MAX(uuid).
+-- 4. Consistency Verified: Validates that warehouse, branch, and unit-cost are 100% uniform
+--    across all serial records before applying stock movements.
+-- 5. Invariant-Preserving: Satisfies stock_ledger_entries_immutable_trg and
 --    inventory_balances trigger requirements.
--- 4. Quantity Preservation: Verifies final qty_on_hand is exactly 3 PCS (not 6).
+-- 6. Quantity Preservation: Verifies final qty_on_hand is exactly 3 PCS (never 6).
 -- ============================================================================
 
 DO $$
 DECLARE
   v_product RECORD;
   v_serial_count integer;
-  v_warehouse RECORD;
+  v_warehouse_distinct_count integer;
+  v_branch_distinct_count integer;
+  v_cost_distinct_count integer;
   v_existing_balance RECORD;
   v_movement_id uuid;
   v_idempotency_key uuid;
@@ -23,7 +30,7 @@ DECLARE
   v_balance_before numeric(18, 6);
   v_balance_after numeric(18, 6);
   v_qty numeric(18, 6) := 3.000000;
-  v_unit_cost numeric(19, 4) := 2500.0000;
+  v_unit_cost numeric(19, 4);
   v_now timestamptz := clock_timestamp();
   v_warehouse_id uuid;
   v_branch_id uuid;
@@ -40,9 +47,24 @@ BEGIN
     RETURN;
   END IF;
 
-  -- 2. Verify all 3 Serials exist in IN_STOCK status
-  SELECT count(*), max(warehouse_id), max(branch_id), max(unit_cost)
-  INTO v_serial_count, v_warehouse_id, v_branch_id, v_unit_cost
+  -- 2. Verify all 3 Serials exist in IN_STOCK status and validate warehouse, branch, and cost consistency.
+  -- Note: PostgreSQL does not support MAX(uuid); we use COUNT(DISTINCT ...) and text casting / deterministic selection.
+  SELECT
+    count(*),
+    count(DISTINCT warehouse_id),
+    count(DISTINCT branch_id),
+    count(DISTINCT unit_cost),
+    max(warehouse_id::text)::uuid,
+    max(branch_id::text)::uuid,
+    max(unit_cost)
+  INTO
+    v_serial_count,
+    v_warehouse_distinct_count,
+    v_branch_distinct_count,
+    v_cost_distinct_count,
+    v_warehouse_id,
+    v_branch_id,
+    v_unit_cost
   FROM inventory_serials
   WHERE tenant_id = v_product.tenant_id
     AND product_id = v_product.id
@@ -55,7 +77,51 @@ BEGIN
     RETURN;
   END IF;
 
-  -- 3. Check for existing balance
+  -- Consistency verification: all 3 serials must belong to the exact same warehouse, branch, and unit cost.
+  IF v_warehouse_distinct_count <> 1 THEN
+    RAISE EXCEPTION 'Consistency check failed: Serials are distributed across % distinct warehouses.',
+      v_warehouse_distinct_count;
+  END IF;
+
+  IF v_branch_distinct_count <> 1 THEN
+    RAISE EXCEPTION 'Consistency check failed: Serials are distributed across % distinct branches.',
+      v_branch_distinct_count;
+  END IF;
+
+  IF v_cost_distinct_count <> 1 THEN
+    RAISE EXCEPTION 'Consistency check failed: Serials have % distinct unit costs.',
+      v_cost_distinct_count;
+  END IF;
+
+  IF v_warehouse_id IS NULL OR v_branch_id IS NULL THEN
+    RAISE EXCEPTION 'Consistency check failed: Serial warehouse_id or branch_id is NULL.';
+  END IF;
+
+  -- Deterministically select uniform attributes from the lowest serial number
+  SELECT warehouse_id, branch_id, unit_cost
+  INTO v_warehouse_id, v_branch_id, v_unit_cost
+  FROM inventory_serials
+  WHERE tenant_id = v_product.tenant_id
+    AND product_id = v_product.id
+    AND serial_number IN ('SN-10001', 'SN-10002', 'SN-10003')
+    AND status = 'IN_STOCK'
+  ORDER BY serial_number ASC
+  LIMIT 1;
+
+  -- 3. Check for existing reconciliation ledger entry (Idempotency)
+  PERFORM 1
+  FROM stock_ledger_entries
+  WHERE tenant_id = v_product.tenant_id
+    AND reference_type = 'SERIAL_REGISTRATION'
+    AND reference_id = 'RECONCILE-QA-SERIAL-001'
+  LIMIT 1;
+
+  IF FOUND THEN
+    RAISE NOTICE 'Reconciliation skipped: Stock ledger entry for RECONCILE-QA-SERIAL-001 already exists.';
+    RETURN;
+  END IF;
+
+  -- Check existing inventory balance
   SELECT id, qty_on_hand, sync_version
   INTO v_existing_balance
   FROM inventory_balances
@@ -66,7 +132,7 @@ BEGIN
   v_balance_before := COALESCE(v_existing_balance.qty_on_hand, 0.000000);
 
   IF v_balance_before >= 3.000000 THEN
-    RAISE NOTICE 'Reconciliation skipped: Inventory balance already has % PCS on hand.', v_balance_before;
+    RAISE NOTICE 'Reconciliation skipped: Inventory balance already has % PCS on hand (target is 3 PCS).', v_balance_before;
     RETURN;
   END IF;
 
