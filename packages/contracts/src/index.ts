@@ -775,6 +775,7 @@ export const UploadProductImageRequestSchema = Type.Object(
     filename: Type.String({ minLength: 1, maxLength: 255 }),
     mimeType: Type.Union([
       Type.Literal('image/jpeg'),
+      Type.Literal('image/jpg'),
       Type.Literal('image/png'),
       Type.Literal('image/webp'),
     ]),

@@ -1677,4 +1677,59 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       expect(html).toContain('const customerName = rawCustomerName ? rawCustomerName : null;');
     });
   });
+
+  describe('21. Phase 6 Production QA Remediation — BUG-019, BUG-029, BUG-030', () => {
+    it('BUG-019: verifies apiFetch parses RFC 9457 problem+json and file input accepts image/jpg with normalization', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // Problem+json content-type matching in apiFetch
+      expect(html).toContain("contentType.includes('json')");
+
+      // File input accept attributes include image/jpg and extensions
+      expect(html).toContain('accept="image/jpeg,image/png,image/webp,image/jpg,.jpg,.jpeg,.png,.webp"');
+
+      // Client-side image/jpg MIME normalization to image/jpeg
+      expect(html).toContain("if (mimeType === 'image/jpg')");
+      expect(html).toContain("mimeType = 'image/jpeg';");
+    });
+
+    it('BUG-029: verifies single card-based layout in Barcode Management modal with no duplicate table', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // Upper desktop table layout must be completely removed
+      expect(html).not.toContain('desktop-barcode-table');
+
+      // Exactly one card list layout is present
+      expect(html).toContain('class="barcode-card-list" id="barcodeCardList"');
+
+      // Required action button IDs are preserved
+      expect(html).toContain('id="btnMakePrimary-${b.id}"');
+      expect(html).toContain('id="btnToggleActive-${b.id}"');
+      expect(html).toContain('id="btnDeleteBc-${b.id}"');
+    });
+
+    it('BUG-030: verifies dashboard initial loader, synchronous token initialization, and URL hash routing', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // Initial loading state in #mainContainer prevents blank screen
+      expect(html).toContain('id="initialAppLoader"');
+      expect(html).toContain('Loading NexStock...');
+
+      // Synchronous credential read into state prevents unauthenticated bounces
+      expect(html).toContain('storedSessionToken');
+      expect(html).toContain('storedActiveTenantId');
+
+      // URL Hash Routing and Route Resolver
+      expect(html).toContain('const VALID_VIEWS = [');
+      expect(html).toContain('function getRouteFromLocation()');
+      expect(html).toContain("window.addEventListener('hashchange'");
+
+      // Pending target view preservation during asynchronous initialization
+      expect(html).toContain('state.pendingTargetView');
+      expect(html).toContain("targetRoute = state.pendingTargetView || getRouteFromLocation() || 'dashboard'");
+    });
+  });
 });

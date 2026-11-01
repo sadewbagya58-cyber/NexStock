@@ -79,7 +79,13 @@ export async function uploadProductImage(
     });
   }
 
-  if (!ALLOWED_MIME_TYPES.includes(input.mimeType)) {
+  type AllowedMimeType = (typeof ALLOWED_MIME_TYPES)[number];
+  const rawMime = (input.mimeType || '').toLowerCase().trim();
+  const normalizedMimeType = (
+    rawMime === 'image/jpg' ? 'image/jpeg' : rawMime
+  ) as AllowedMimeType;
+
+  if (!ALLOWED_MIME_TYPES.includes(normalizedMimeType)) {
     throw new AppError({
       statusCode: 400,
       errorCode: 'CAT_INVALID_IMAGE_TYPE',
@@ -88,9 +94,13 @@ export async function uploadProductImage(
     });
   }
 
+  const rawBase64 = input.dataBase64.includes(',')
+    ? input.dataBase64.split(',')[1]!
+    : input.dataBase64;
+
   let buffer: Buffer;
   try {
-    buffer = Buffer.from(input.dataBase64, 'base64');
+    buffer = Buffer.from(rawBase64, 'base64');
   } catch {
     throw new AppError({
       statusCode: 400,
@@ -109,7 +119,7 @@ export async function uploadProductImage(
     });
   }
 
-  if (buffer.length < 12 || !verifyImageMagicBytes(buffer, input.mimeType)) {
+  if (buffer.length < 12 || !verifyImageMagicBytes(buffer, normalizedMimeType)) {
     throw new AppError({
       statusCode: 400,
       errorCode: 'CAT_INVALID_IMAGE_TYPE',
@@ -119,7 +129,7 @@ export async function uploadProductImage(
   }
 
   const ext =
-    input.mimeType === 'image/jpeg' ? 'jpg' : input.mimeType === 'image/png' ? 'png' : 'webp';
+    normalizedMimeType === 'image/jpeg' ? 'jpg' : normalizedMimeType === 'image/png' ? 'png' : 'webp';
   const mediaId = generateUuidV7();
   const storagePath = `${trx.tenantId}/products/${mediaId}.${ext}`;
 
@@ -129,10 +139,10 @@ export async function uploadProductImage(
       id: mediaId,
       tenant_id: trx.tenantId,
       file_name: filename,
-      mime_type: input.mimeType,
+      mime_type: normalizedMimeType,
       file_size: buffer.length,
       storage_path: storagePath,
-      data_base64: input.dataBase64,
+      data_base64: rawBase64,
       created_at: new Date(),
     })
     .execute();
@@ -143,7 +153,7 @@ export async function uploadProductImage(
     resourceId: mediaId,
     metadata: {
       fileName: filename,
-      mimeType: input.mimeType,
+      mimeType: normalizedMimeType,
       fileSize: buffer.length,
       storagePath,
     },
@@ -153,7 +163,7 @@ export async function uploadProductImage(
 
   return {
     imageUrl,
-    mimeType: input.mimeType,
+    mimeType: normalizedMimeType,
     size: buffer.length,
     storagePath,
   };

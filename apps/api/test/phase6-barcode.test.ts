@@ -1000,6 +1000,56 @@ describe('@nexstock/api — Phase 6: Universal Barcode Management & Dual-Mode PO
       expect(body.mimeType).toBe('image/webp');
     });
 
+    it('BUG-019: accepts image/jpg MIME and normalizes it to image/jpeg with base64 data URL prefix stripping', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/products/upload-image',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+          'content-type': 'application/json',
+        },
+        payload: {
+          filename: 'camera-photo.jpg',
+          mimeType: 'image/jpg',
+          dataBase64: `data:image/jpeg;base64,${validJpegBuffer.toString('base64')}`,
+        },
+      });
+
+      expect(res.statusCode).toBe(201);
+      const body = res.json();
+      expect(body.imageUrl).toContain(`/v1/media/${TENANT_ALPHA_ID}/`);
+      expect(body.mimeType).toBe('image/jpeg');
+    });
+
+    it('BUG-019: successfully uploads 3MB image without triggering Fastify 1MB default body limit', async () => {
+      // 3MB buffer with valid JPEG magic bytes
+      const largeJpegBuf = Buffer.alloc(3 * 1024 * 1024);
+      largeJpegBuf[0] = 0xff;
+      largeJpegBuf[1] = 0xd8;
+      largeJpegBuf[2] = 0xff;
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/products/upload-image',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+          'content-type': 'application/json',
+        },
+        payload: {
+          filename: 'high-res-product.jpg',
+          mimeType: 'image/jpeg',
+          dataBase64: largeJpegBuf.toString('base64'),
+        },
+      });
+
+      expect(res.statusCode).toBe(201);
+      const body = res.json();
+      expect(body.imageUrl).toContain(`/v1/media/${TENANT_ALPHA_ID}/`);
+      expect(body.size).toBe(3 * 1024 * 1024);
+    });
+
     it('rejects corrupt or mismatched binary magic bytes with HTTP 400 CAT_INVALID_IMAGE_TYPE', async () => {
       const res = await app.inject({
         method: 'POST',

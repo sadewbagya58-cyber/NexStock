@@ -313,6 +313,7 @@ export async function buildApp(
   const app = Fastify({
     logger: false,
     genReqId: () => `req_${generateUuidV7()}`,
+    bodyLimit: 10 * 1024 * 1024,
     ajv: {
       customOptions: {
         coerceTypes: false,
@@ -2063,10 +2064,11 @@ export async function buildApp(
     },
   );
 
-  // 1b. Upload Product Image (BUG-018)
+  // 1b. Upload Product Image (BUG-018 & BUG-019)
   app.post(
     '/v1/products/upload-image',
     {
+      bodyLimit: 10 * 1024 * 1024,
       schema: {
         headers: AuthenticatedTenantHeadersSchema,
         body: UploadProductImageRequestSchema,
