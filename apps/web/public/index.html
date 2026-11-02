@@ -713,6 +713,15 @@
       border-radius: 8px;
       box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45);
       pointer-events: none;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+    .camera-reticle.scan-success {
+      border-color: #10b981 !important;
+      box-shadow: 0 0 20px rgba(16, 185, 129, 0.85), 0 0 0 9999px rgba(0, 0, 0, 0.45) !important;
+    }
+    .camera-reticle.scan-paused {
+      border-color: #f59e0b !important;
+      opacity: 0.65;
     }
     .camera-reticle::before {
       content: '';
@@ -723,10 +732,90 @@
       box-shadow: 0 0 8px #ef4444;
       animation: laserScan 1.8s ease-in-out infinite alternate;
     }
+    .camera-reticle.scan-paused::before {
+      display: none;
+    }
     @keyframes laserScan {
       0% { top: 0; opacity: 0.8; }
       50% { opacity: 1; }
       100% { top: 100%; opacity: 0.8; }
+    }
+
+    /* Modern SaaS Toggle Switches & Barcode Settings Grid (BUG-032) */
+    .switch-group {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .switch-group:last-child {
+      border-bottom: none;
+    }
+    .modern-switch {
+      position: relative;
+      display: inline-block;
+      width: 44px;
+      height: 24px;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+    .modern-switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+    .modern-slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background-color: var(--border-strong);
+      transition: .25s ease;
+      border-radius: 24px;
+    }
+    .modern-slider:before {
+      position: absolute;
+      content: "";
+      height: 18px;
+      width: 18px;
+      left: 3px;
+      bottom: 3px;
+      background-color: white;
+      transition: .25s ease;
+      border-radius: 50%;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+    }
+    .modern-switch input:checked + .modern-slider {
+      background-color: var(--accent-primary);
+    }
+    .modern-switch input:checked + .modern-slider:before {
+      transform: translateX(20px);
+    }
+    .modern-switch input:focus + .modern-slider {
+      box-shadow: 0 0 1px var(--accent-primary);
+    }
+    .scanner-stat-card {
+      background: var(--surface-bg);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      padding: 10px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .scanner-stat-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-secondary);
+      font-weight: 600;
+    }
+    .scanner-stat-value {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text-primary);
+      font-family: monospace;
+      word-break: break-all;
     }
 
     /* Print Styles */
@@ -2087,6 +2176,40 @@
       activeCheckoutKey: null
     };
 
+    // Synchronous Cache Restoration for Cold Start Elimination (BUG-030)
+    try {
+      const cachedMembershipStr = (typeof localStorage !== 'undefined') ? localStorage.getItem('nexstock_active_membership') : null;
+      if (cachedMembershipStr) {
+        const cachedM = JSON.parse(cachedMembershipStr);
+        if (cachedM && cachedM.tenantId) {
+          state.tenantId = cachedM.tenantId;
+          state.tenantName = cachedM.businessName || cachedM.tenantName || 'My Business';
+          state.currency = cachedM.baseCurrency || cachedM.currency || state.currency;
+          state.userRole = cachedM.role || cachedM.roleName || 'MEMBER';
+          state.plan = cachedM.status || cachedM.plan || 'TRIAL';
+          state.timezone = cachedM.timezone || state.timezone;
+          state.countryCode = cachedM.countryCode || cachedM.country || 'US';
+          const hq = (cachedM.branches || []).find(b => b.isHeadquarters) || (cachedM.branches || [])[0];
+          if (hq) {
+            state.branchId = hq.id;
+            state.branchName = hq.name;
+            state.warehouseId = hq.defaultWarehouseId || '';
+          }
+        }
+      }
+      const cachedUserStr = (typeof localStorage !== 'undefined') ? localStorage.getItem('nexstock_user_profile') : null;
+      if (cachedUserStr) {
+        const cachedUser = JSON.parse(cachedUserStr);
+        if (cachedUser) {
+          state.user = cachedUser;
+          state.fullName = cachedUser.fullName || cachedUser.email || '';
+          state.userEmail = cachedUser.email || '';
+        }
+      }
+    } catch (e) {
+      console.warn('Unable to restore cached membership/user profile', e);
+    }
+
     // Helper: JWT Expiry Decoder (client-side read of standard exp claim)
     function getTokenExpiry(jwtToken) {
       try {
@@ -2373,6 +2496,12 @@
       state.plan = membership.status || membership.plan || 'TRIAL';
       state.userRole = membership.role || membership.roleName || 'MEMBER';
       localStorage.setItem('nexstock_active_tenant_id', membership.tenantId);
+      try {
+        localStorage.setItem('nexstock_active_membership', JSON.stringify(membership));
+        if (state.user) {
+          localStorage.setItem('nexstock_user_profile', JSON.stringify(state.user));
+        }
+      } catch {}
 
       const hq = (membership.branches || []).find(b => b.isHeadquarters) || (membership.branches || [])[0];
       if (hq) {
@@ -2465,6 +2594,15 @@
         localStorage.removeItem('nexstock_active_tenant_id');
         localStorage.removeItem('nexstock_active_currency');
         localStorage.removeItem('nexstock_active_timezone');
+        localStorage.removeItem('nexstock_active_membership');
+        localStorage.removeItem('nexstock_user_profile');
+      } catch {}
+
+      // Cleanly stop any active camera scanner
+      try {
+        if (typeof closePosCameraScannerModal === 'function') {
+          closePosCameraScannerModal();
+        }
       } catch {}
 
       // Synchronously reset state
@@ -2577,6 +2715,13 @@
         viewName = 'dashboard';
       }
       state.activeView = viewName;
+
+      // Stop any active camera streams on view navigation (BUG-033)
+      try {
+        if (typeof closePosCameraScannerModal === 'function' && typeof posCameraStream !== 'undefined' && posCameraStream) {
+          closePosCameraScannerModal();
+        }
+      } catch {}
 
       // Synchronize URL hash for browser history & bookmarking without full reloads
       if (typeof window !== 'undefined' && window.location) {
@@ -4189,6 +4334,16 @@
           body: JSON.stringify(patchPayload)
         });
 
+        // Update local cached product immediately (BUG-019)
+        const cachedP = (state.cachedProducts || []).find(x => x.id === productId);
+        if (cachedP) {
+          cachedP.name = name;
+          cachedP.sku = sku;
+          if (barcode !== undefined && barcode !== null) cachedP.primaryBarcode = barcode;
+          if (imageAction === 'remove') cachedP.imageUrl = null;
+          else if (imageAction === 'replace' && newImageUrl) cachedP.imageUrl = newImageUrl;
+        }
+
         showToast(`Product "${name}" updated successfully`, 'success');
         closeModal();
         renderProductsView();
@@ -5467,8 +5622,9 @@
       const statusEl = document.getElementById(`${mode}ProdImageStatus`);
       const hiddenUrlInput = document.getElementById(`${mode}ProdImageUrl`);
       const actionInput = document.getElementById(`${mode}ProdImageAction`);
+      const submitBtn = document.getElementById(mode === 'new' ? 'btnSubmitCreateProduct' : 'btnSubmitEditProduct');
 
-      // Read as base64
+      // Read as base64 and show preview immediately (BUG-019)
       const reader = new FileReader();
       reader.onload = async (e) => {
         const dataUrl = e.target.result;
@@ -5478,6 +5634,11 @@
           statusEl.style.display = 'block';
           statusEl.style.color = 'var(--text-secondary)';
           statusEl.textContent = 'Uploading image... ⏳';
+        }
+        if (submitBtn) {
+          submitBtn.disabled = true;
+          submitBtn.dataset.originalText = submitBtn.textContent;
+          submitBtn.textContent = 'Uploading Image...';
         }
 
         try {
@@ -5508,6 +5669,11 @@
           showToast(`Image upload failed: ${err.message}`, 'error');
           if (previewWrapper) previewWrapper.style.display = 'none';
           if (hiddenUrlInput) hiddenUrlInput.value = '';
+        } finally {
+          if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = submitBtn.dataset.originalText || (mode === 'new' ? 'Create Product' : 'Save Changes');
+          }
         }
       };
       reader.readAsDataURL(file);
@@ -5740,7 +5906,11 @@
 
       try {
         const barcodes = await apiFetch(`/v1/products/${productId}/barcodes`).catch(() => []);
-        const primaryBarcode = barcodes.find(b => b.isPrimary)?.barcode || p.primaryBarcode || '';
+        const primaryBarcodeObj = barcodes.find(b => b.isPrimary);
+        const primaryBarcode = primaryBarcodeObj?.barcode || p.primaryBarcode || '';
+        if (p && primaryBarcodeObj?.barcode) {
+          p.primaryBarcode = primaryBarcodeObj.barcode;
+        }
         const priceFormatted = formatTenantMoney(p.sellingPrice);
 
         const modalBody = `
@@ -6001,30 +6171,59 @@
       }
     }
 
-    // Camera Barcode Scanner Modal
+    // Continuous Camera Barcode Scanner Modal (BUG-033)
     let posCameraStream = null;
     let posCameraAnimationId = null;
+    let isCameraPaused = false;
+    let isCameraTorchOn = false;
+    let cameraScanCount = 0;
+    const cameraScanCooldowns = new Map();
+    let cameraLastGlobalScanTime = 0;
 
     async function openPosCameraScannerModal() {
+      cameraScanCount = 0;
+      isCameraPaused = false;
+      isCameraTorchOn = false;
+      cameraScanCooldowns.clear();
+      cameraLastGlobalScanTime = 0;
+
       openModal({
-        title: '📷 Camera Barcode Scanner',
+        title: '📷 Continuous POS Camera Scanner',
+        maxWidth: '540px',
         bodyHtml: `
-          <div class="camera-scanner-modal">
-            <div class="camera-video-container">
+          <div class="camera-scanner-modal" style="position: relative; border-radius: 8px; overflow: hidden;">
+            <div class="camera-video-container" style="position: relative;">
               <video id="posCameraVideo" autoplay playsinline muted></video>
-              <div class="camera-reticle"></div>
+              <div class="camera-reticle" id="posCameraReticle"></div>
+              <div id="posCameraScanFeedback" style="display: none; position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%); background: rgba(16, 185, 129, 0.95); color: white; padding: 6px 14px; border-radius: 20px; font-weight: 600; font-size: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); z-index: 10; pointer-events: none; white-space: nowrap;"></div>
+              <div style="position: absolute; top: 10px; left: 10px; z-index: 10; display: flex; gap: 6px;">
+                <span class="badge-pill badge-blue" style="font-size: 11px;">Continuous Mode</span>
+              </div>
+              <div style="position: absolute; top: 10px; right: 10px; z-index: 10;">
+                <span class="badge-pill badge-green" id="cameraScanCountBadge" style="font-size: 11px;">0 Items Scanned</span>
+              </div>
             </div>
           </div>
-          <div style="margin-top: 12px; text-align: center; font-size: 13px; color: var(--text-secondary);">
-            Point camera directly at any barcode or QR code.
+          <div style="margin-top: 10px; display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap;">
+            <div style="font-size: 12px; color: var(--text-secondary);">
+              Keep camera pointed at barcodes. Each scan automatically adds to cart.
+            </div>
+            <div style="display: flex; gap: 6px;">
+              <button type="button" class="btn btn-secondary btn-sm" id="btnToggleCameraPause" onclick="toggleCameraPause()" style="font-size: 11px; padding: 4px 8px;">
+                <span id="cameraPauseIcon">⏸️</span> <span id="cameraPauseText">Pause</span>
+              </button>
+              <button type="button" class="btn btn-secondary btn-sm" id="btnToggleCameraTorch" onclick="toggleCameraTorch()" style="display: none; font-size: 11px; padding: 4px 8px;">
+                🔦 Torch
+              </button>
+            </div>
           </div>
-          <div style="margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-subtle); display: flex; gap: 8px;">
-            <input type="text" class="form-input" id="cameraManualFallbackInput" placeholder="Manual test barcode or scan..." style="flex: 1;">
-            <button class="btn btn-secondary btn-sm" onclick="executeCameraManualScan()">Scan Code</button>
+          <div style="margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border-subtle); display: flex; gap: 8px;">
+            <input type="text" class="form-input" id="cameraManualFallbackInput" placeholder="Manual test barcode or damaged label..." style="flex: 1; font-size: 12px;" onkeydown="if(event.key==='Enter'){event.preventDefault();executeCameraManualScan();}">
+            <button class="btn btn-secondary btn-sm" onclick="executeCameraManualScan()">Add Code</button>
           </div>
         `,
         footerHtml: `
-          <button class="btn btn-secondary" onclick="closePosCameraScannerModal()">Close Camera</button>
+          <button class="btn btn-primary" onclick="closePosCameraScannerModal()">✓ Done Scanning</button>
         `
       });
 
@@ -6048,6 +6247,16 @@
           await videoEl.play().catch(() => {});
         }
 
+        // Check torch capability
+        const track = stream.getVideoTracks()[0];
+        if (track && typeof track.getCapabilities === 'function') {
+          const caps = track.getCapabilities();
+          if (caps && 'torch' in caps) {
+            const torchBtn = document.getElementById('btnToggleCameraTorch');
+            if (torchBtn) torchBtn.style.display = 'inline-flex';
+          }
+        }
+
         if ('BarcodeDetector' in window) {
           const detector = new window.BarcodeDetector({
             formats: ['ean_13', 'ean_8', 'code_128', 'code_39', 'upc_a', 'upc_e', 'qr_code']
@@ -6056,25 +6265,93 @@
           let isProcessing = false;
           async function detectFrame() {
             if (!posCameraStream) return;
-            if (videoEl && videoEl.readyState >= 2 && !isProcessing) {
+            if (videoEl && videoEl.readyState >= 2 && !isProcessing && !isCameraPaused) {
               isProcessing = true;
               try {
                 const barcodes = await detector.detect(videoEl);
                 if (barcodes && barcodes.length > 0) {
                   const detectedCode = barcodes[0].rawValue;
-                  closePosCameraScannerModal();
-                  await executeBarcodeScan(detectedCode);
-                  return;
+                  const now = Date.now();
+                  const lastCodeTime = cameraScanCooldowns.get(detectedCode) || 0;
+
+                  // Duplicate barcode cooldown: 1800ms; Different barcode cooldown: 800ms
+                  if (now - lastCodeTime >= 1800 && now - cameraLastGlobalScanTime >= 800) {
+                    cameraScanCooldowns.set(detectedCode, now);
+                    cameraLastGlobalScanTime = now;
+                    cameraScanCount++;
+
+                    // Visual feedback
+                    const reticle = document.getElementById('posCameraReticle');
+                    if (reticle) {
+                      reticle.classList.add('scan-success');
+                      setTimeout(() => { if (reticle) reticle.classList.remove('scan-success'); }, 600);
+                    }
+
+                    // Audio feedback
+                    playScanChime(true);
+
+                    // Update UI status pill and item counter
+                    const badge = document.getElementById('cameraScanCountBadge');
+                    if (badge) badge.textContent = `${cameraScanCount} Item${cameraScanCount === 1 ? '' : 's'} Scanned`;
+
+                    const feedback = document.getElementById('posCameraScanFeedback');
+                    if (feedback) {
+                      feedback.textContent = `Scanned: ${detectedCode} ✓`;
+                      feedback.style.display = 'block';
+                      setTimeout(() => { if (feedback) feedback.style.display = 'none'; }, 1800);
+                    }
+
+                    // Continuous mode: Add to cart without closing the camera modal!
+                    executeBarcodeScan(detectedCode);
+                  }
                 }
               } catch (e) {}
               isProcessing = false;
             }
-            posCameraAnimationId = requestAnimationFrame(detectFrame);
+            if (posCameraStream) {
+              posCameraAnimationId = requestAnimationFrame(detectFrame);
+            }
           }
           posCameraAnimationId = requestAnimationFrame(detectFrame);
         }
       } catch (err) {
         showToast(`Camera could not be started: ${err.message}`, 'error');
+      }
+    }
+
+    function toggleCameraPause() {
+      isCameraPaused = !isCameraPaused;
+      const btnText = document.getElementById('cameraPauseText');
+      const btnIcon = document.getElementById('cameraPauseIcon');
+      const reticle = document.getElementById('posCameraReticle');
+      if (isCameraPaused) {
+        if (btnText) btnText.textContent = 'Resume';
+        if (btnIcon) btnIcon.textContent = '▶️';
+        if (reticle) reticle.classList.add('scan-paused');
+        showToast('Camera scanning paused', 'info');
+      } else {
+        if (btnText) btnText.textContent = 'Pause';
+        if (btnIcon) btnIcon.textContent = '⏸️';
+        if (reticle) reticle.classList.remove('scan-paused');
+      }
+    }
+
+    async function toggleCameraTorch() {
+      if (!posCameraStream) return;
+      const track = posCameraStream.getVideoTracks()[0];
+      if (!track) return;
+      try {
+        isCameraTorchOn = !isCameraTorchOn;
+        await track.applyConstraints({
+          advanced: [{ torch: isCameraTorchOn }]
+        });
+        const btn = document.getElementById('btnToggleCameraTorch');
+        if (btn) {
+          btn.style.background = isCameraTorchOn ? 'var(--accent-primary)' : '';
+          btn.style.color = isCameraTorchOn ? '#fff' : '';
+        }
+      } catch (e) {
+        console.warn('Torch not supported on this track', e);
       }
     }
 
@@ -6085,7 +6362,10 @@
         showToast('Please enter a barcode number', 'warning');
         return;
       }
-      closePosCameraScannerModal();
+      input.value = '';
+      cameraScanCount++;
+      const badge = document.getElementById('cameraScanCountBadge');
+      if (badge) badge.textContent = `${cameraScanCount} Item${cameraScanCount === 1 ? '' : 's'} Scanned`;
       executeBarcodeScan(val);
     }
 
@@ -6095,9 +6375,15 @@
         posCameraAnimationId = null;
       }
       if (posCameraStream) {
-        posCameraStream.getTracks().forEach(t => t.stop());
+        posCameraStream.getTracks().forEach(t => {
+          try { t.stop(); } catch {}
+        });
         posCameraStream = null;
       }
+      isCameraPaused = false;
+      isCameraTorchOn = false;
+      cameraScanCooldowns.clear();
+      cameraLastGlobalScanTime = 0;
       closeModal();
     }
 
@@ -6137,9 +6423,10 @@
       } catch (e) {}
     }
 
-    // Hardware Scanner Wedge Keystroke Burst Listener
+    // Hardware Scanner Wedge Keystroke Burst Listener & Diagnostics (BUG-031)
     let hardwareBarcodeBuffer = '';
     let lastHardwareKeypress = 0;
+    let hardwareBurstStartTime = 0;
     let lastDispatchedHardwareCode = '';
     let lastDispatchedHardwareTime = 0;
 
@@ -6148,13 +6435,15 @@
       const targetTag = (e.target && e.target.tagName) ? e.target.tagName.toLowerCase() : '';
       const isInput = targetTag === 'input' || targetTag === 'textarea' || targetTag === 'select';
       const isPosScannerInput = e.target && e.target.id === 'posBarcodeScannerInput';
+      const isTestConsoleInput = e.target && e.target.id === 'hardwareScannerTestInput';
 
-      if (isInput && !isPosScannerInput) {
+      if (isInput && !isPosScannerInput && !isTestConsoleInput) {
         return;
       }
 
-      if (now - lastHardwareKeypress > 60) {
+      if (now - lastHardwareKeypress > 65) {
         hardwareBarcodeBuffer = '';
+        hardwareBurstStartTime = now;
       }
       lastHardwareKeypress = now;
 
@@ -6162,7 +6451,13 @@
         if (hardwareBarcodeBuffer.length >= 3) {
           e.preventDefault();
           const scanned = hardwareBarcodeBuffer.trim();
+          const burstDuration = Math.max(1, now - hardwareBurstStartTime);
+          const charsCount = scanned.length;
+          const msPerChar = (burstDuration / charsCount).toFixed(1);
           hardwareBarcodeBuffer = '';
+
+          // Update Scanner Test Console if rendered on screen (BUG-031)
+          updateHardwareScannerTestConsole(scanned, burstDuration, charsCount, msPerChar);
 
           if (scanned === lastDispatchedHardwareCode && (now - lastDispatchedHardwareTime < 300)) {
             return;
@@ -6170,7 +6465,8 @@
           lastDispatchedHardwareCode = scanned;
           lastDispatchedHardwareTime = now;
 
-          if (state.currentView === 'pos-checkout') {
+          // BUG-031 FIX: Check state.activeView === 'pos-checkout' instead of undefined state.currentView
+          if (state.activeView === 'pos-checkout') {
             executeBarcodeScan(scanned);
           }
         }
@@ -6178,9 +6474,133 @@
       }
 
       if (e.key && e.key.length === 1) {
+        if (!hardwareBarcodeBuffer) {
+          hardwareBurstStartTime = now;
+        }
         hardwareBarcodeBuffer += e.key;
       }
     });
+
+    // Scanner Test Console & WebHID Helpers (BUG-031)
+    function updateHardwareScannerTestConsole(code, duration, chars, msPerChar) {
+      const valEl = document.getElementById('testScannerCodeVal');
+      const timeEl = document.getElementById('testScannerDurationVal');
+      const charsEl = document.getElementById('testScannerCharsVal');
+      const rateEl = document.getElementById('testScannerRateVal');
+      const symbEl = document.getElementById('testScannerSymbologyVal');
+      const statusPill = document.getElementById('testScannerStatusPill');
+
+      if (!valEl) return;
+
+      valEl.textContent = code;
+      if (timeEl) timeEl.textContent = `${duration} ms`;
+      if (charsEl) charsEl.textContent = `${chars} chars`;
+      if (rateEl) {
+        const isFastHw = parseFloat(msPerChar) <= 35;
+        rateEl.innerHTML = `${msPerChar} ms/char <span class="badge-pill ${isFastHw ? 'badge-green' : 'badge-yellow'}" style="font-size: 10px; margin-left: 4px;">${isFastHw ? '⚡ USB/BT Scanner' : '⌨️ Manual Entry'}</span>`;
+      }
+      if (symbEl) {
+        let detected = 'Code 128 / Custom';
+        if (/^\d{13}$/.test(code)) detected = 'EAN-13 (GS1 Standard)';
+        else if (/^\d{8}$/.test(code)) detected = 'EAN-8 (GS1 Compact)';
+        else if (/^\d{12}$/.test(code)) detected = 'UPC-A (North America)';
+        else if (/^[A-Z0-9\-\.\ \$\/\+\%]+$/.test(code)) detected = 'Code 39 / Alphanumeric';
+        symbEl.textContent = detected;
+      }
+      if (statusPill) {
+        statusPill.className = 'badge-pill badge-green';
+        statusPill.textContent = '✓ Scanned Successfully';
+      }
+      playScanChime(true);
+    }
+
+    function resetScannerTestConsole() {
+      const valEl = document.getElementById('testScannerCodeVal');
+      const timeEl = document.getElementById('testScannerDurationVal');
+      const charsEl = document.getElementById('testScannerCharsVal');
+      const rateEl = document.getElementById('testScannerRateVal');
+      const symbEl = document.getElementById('testScannerSymbologyVal');
+      const statusPill = document.getElementById('testScannerStatusPill');
+      const input = document.getElementById('hardwareScannerTestInput');
+
+      if (valEl) valEl.textContent = '—';
+      if (timeEl) timeEl.textContent = '—';
+      if (charsEl) charsEl.textContent = '—';
+      if (rateEl) rateEl.textContent = '—';
+      if (symbEl) symbEl.textContent = '—';
+      if (statusPill) {
+        statusPill.className = 'badge-pill badge-blue';
+        statusPill.textContent = 'Waiting for scan...';
+      }
+      if (input) {
+        input.value = '';
+        input.focus();
+      }
+    }
+
+    async function connectWebHidScanner() {
+      if (!('hid' in navigator)) {
+        showToast('WebHID is not supported in this browser. Standard USB/Bluetooth keyboard-wedge mode is active and works automatically!', 'info');
+        return;
+      }
+      try {
+        const devices = await navigator.hid.requestDevice({ filters: [] });
+        if (devices && devices.length > 0) {
+          const device = devices[0];
+          await device.open();
+          showToast(`Connected to WebHID device: ${device.productName || 'Barcode Scanner'}`, 'success');
+          const badge = document.getElementById('webhidStatusBadge');
+          if (badge) {
+            badge.className = 'badge-pill badge-green';
+            badge.textContent = `Connected: ${device.productName || 'HID Scanner'}`;
+          }
+        }
+      } catch (err) {
+        if (err.name !== 'AbortError') {
+          showToast(`WebHID pairing notice: ${err.message}`, 'info');
+        }
+      }
+    }
+
+    function openHardwareScannerGuideModal() {
+      openModal({
+        title: '📦 Physical Barcode Scanner Setup Guide',
+        maxWidth: '650px',
+        bodyHtml: `
+          <div style="display: flex; flex-direction: column; gap: 14px;">
+            <div class="card" style="background: var(--surface-bg);">
+              <div style="font-weight: 600; font-size: 14px; margin-bottom: 6px;">1. Standard USB Plug &amp; Play Scanners</div>
+              <div style="font-size: 13px; color: var(--text-secondary); line-height: 1.5;">
+                • Connect the scanner to any USB port on your POS terminal, PC, or Mac.<br>
+                • 99% of barcode scanners (Honeywell, Zebra, Netum, Eyoyo, Symcode) operate in <strong>USB HID Keyboard Emulation</strong> by default.<br>
+                • No driver installation is required. The scanner behaves like an ultra-fast keyboard.<br>
+                • Ensure your scanner suffix is configured with <code>Enter</code> (Carriage Return), which is standard in factory defaults.
+              </div>
+            </div>
+
+            <div class="card" style="background: var(--surface-bg);">
+              <div style="font-weight: 600; font-size: 14px; margin-bottom: 6px;">2. Bluetooth &amp; Wireless Scanners</div>
+              <div style="font-size: 13px; color: var(--text-secondary); line-height: 1.5;">
+                • Put your wireless scanner into <strong>Bluetooth HID Mode</strong> (scan the pairing barcode from its manual).<br>
+                • Open your device's Bluetooth settings (Windows, macOS, iPadOS, Android) and pair with the scanner.<br>
+                • Once paired, open NexStock POS. Keystrokes are captured automatically.
+              </div>
+            </div>
+
+            <div class="card" style="background: var(--surface-bg);">
+              <div style="font-weight: 600; font-size: 14px; margin-bottom: 6px;">3. Test Your Scanner Live</div>
+              <div style="font-size: 13px; color: var(--text-secondary); line-height: 1.5;">
+                • Use the <strong>Interactive Scanner Test Console</strong> below to verify barcode burst speed.<br>
+                • Scanners will show a <span class="badge-pill badge-green" style="font-size: 11px;">⚡ USB/BT Scanner</span> badge indicating high-speed keystroke transmission (&lt;35ms/char).
+              </div>
+            </div>
+          </div>
+        `,
+        footerHtml: `
+          <button class="btn btn-primary" onclick="closeModal()">Got It</button>
+        `
+      });
+    }
 
     function addToCart(productId, sku, name, unitPrice, uomCode, trackInventory, availableQuantity) {
       if (!state.activeShift) {
@@ -7718,69 +8138,175 @@
             </div>
           </div>
 
-          <!-- Barcode & Scanner Configuration Card -->
-          <div class="card" style="margin-top: 16px;">
-            <div class="card-title">
-              <span>Barcode &amp; Dual-Mode POS Scanning System</span>
-              <span class="badge-pill badge-blue">Universal POS</span>
-            </div>
-            <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 14px;">
-              Configure physical USB/Bluetooth barcode scanner wedges, HTML5 camera scanning, internal SKU barcode generation, and checkout auto-add workflows. Barcode scanning is completely optional; manual checkout always remains active.
-            </div>
-
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px;">
-              <div style="display: flex; flex-direction: column; gap: 10px;">
-                <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
-                  <input type="checkbox" id="settingHwScanner" ${barcodeSettings.hardwareScannerEnabled !== false ? 'checked' : ''}>
-                  <strong>Hardware Scanner Wedge (USB / BT)</strong>
-                </label>
-                <div style="font-size: 12px; color: var(--text-secondary); margin-left: 24px;">
-                  Listens for rapid keystroke bursts from physical handheld laser/CCD scanners.
-                </div>
-
-                <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; margin-top: 4px;">
-                  <input type="checkbox" id="settingCamScanner" ${barcodeSettings.cameraScannerEnabled !== false ? 'checked' : ''}>
-                  <strong>HTML5 Device Camera Scanner</strong>
-                </label>
-                <div style="font-size: 12px; color: var(--text-secondary); margin-left: 24px;">
-                  Enables live mobile/tablet camera scanning with laser reticle viewfinder.
-                </div>
-
-                <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; margin-top: 4px;">
-                  <input type="checkbox" id="settingInternalGen" ${barcodeSettings.internalGenerationEnabled !== false ? 'checked' : ''}>
-                  <strong>Internal Collision-Free Generator</strong>
-                </label>
-                <div style="font-size: 12px; color: var(--text-secondary); margin-left: 24px;">
-                  Generates unique Code 128 / GS1 check-digit EAN barcodes with 1-click.
+          <!-- Barcode & Scanner Configuration System (BUG-031 & BUG-032 Modern Redesign) -->
+          <div style="margin-top: 24px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
+              <div>
+                <h2 style="font-size: 18px; font-weight: 700; color: var(--text-primary); margin: 0;">Barcode &amp; Dual-Mode POS Scanning System</h2>
+                <div style="font-size: 13px; color: var(--text-secondary); margin-top: 2px;">
+                  Configure physical handheld USB/Bluetooth barcode scanners, camera scanning, collision-free internal generation, and checkout automation.
                 </div>
               </div>
-
-              <div style="display: flex; flex-direction: column; gap: 10px;">
-                <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
-                  <input type="checkbox" id="settingAutoCart" ${barcodeSettings.autoAddToCart !== false ? 'checked' : ''}>
-                  <strong>Auto Add-to-Cart on Scan</strong>
-                </label>
-                <div style="font-size: 12px; color: var(--text-secondary); margin-left: 24px;">
-                  Immediately places recognized products into the active checkout cart.
-                </div>
-
-                <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; margin-top: 4px;">
-                  <input type="checkbox" id="settingIncDup" ${barcodeSettings.incrementOnDuplicate !== false ? 'checked' : ''}>
-                  <strong>Increment Quantity on Duplicate Scan</strong>
-                </label>
-                <div style="font-size: 12px; color: var(--text-secondary); margin-left: 24px;">
-                  Repeated scans of the same product increment its line quantity by 1.
-                </div>
-
-                <div class="form-group" style="margin-top: 6px;">
-                  <label class="form-label">Internal Barcode Prefix</label>
-                  <input type="text" class="form-input" id="settingPrefix" value="${escapeHtml(barcodeSettings.internalPrefix || 'NB')}" maxlength="8" style="width: 140px;">
-                </div>
-              </div>
-            </div>
-
-            <div style="margin-top: 16px; border-top: 1px solid var(--border-subtle); padding-top: 14px; display: flex; justify-content: flex-end;">
               <button class="btn btn-primary" id="btnSaveBarcodeSettings" onclick="saveTenantBarcodeSettings()">Save Barcode Settings</button>
+            </div>
+
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px;">
+              <!-- Card 1: Hardware Scanners & POS Input Engines -->
+              <div class="card" style="margin: 0; display: flex; flex-direction: column;">
+                <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
+                  <span>Hardware Scanners &amp; Input Engines</span>
+                  <span class="badge-pill badge-blue">Input Engine</span>
+                </div>
+                <div style="flex: 1;">
+                  <div class="switch-group">
+                    <label class="modern-switch">
+                      <input type="checkbox" id="settingHwScanner" ${barcodeSettings.hardwareScannerEnabled !== false ? 'checked' : ''}>
+                      <span class="modern-slider"></span>
+                    </label>
+                    <div style="flex: 1;">
+                      <div style="font-weight: 600; font-size: 13px;">Hardware Scanner Wedge (USB / BT)</div>
+                      <div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">
+                        Listens for rapid keystroke bursts from physical handheld laser/CCD scanners in POS Checkout.
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="switch-group">
+                    <label class="modern-switch">
+                      <input type="checkbox" id="settingCamScanner" ${barcodeSettings.cameraScannerEnabled !== false ? 'checked' : ''}>
+                      <span class="modern-slider"></span>
+                    </label>
+                    <div style="flex: 1;">
+                      <div style="font-weight: 600; font-size: 13px;">HTML5 Continuous Camera Scanner</div>
+                      <div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">
+                        Continuous mobile &amp; tablet camera scanning with laser reticle and cooldown debouncing.
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style="margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-subtle); display: flex; flex-direction: column; gap: 8px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                      <span style="font-size: 12px; font-weight: 600; color: var(--text-secondary);">Direct WebHID Engine:</span>
+                      <span class="badge-pill badge-green" id="webhidStatusBadge">Available</span>
+                    </div>
+                    <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                      <button type="button" class="btn btn-secondary btn-sm" onclick="openHardwareScannerGuideModal()" style="font-size: 11px;">📖 Setup Guide</button>
+                      <button type="button" class="btn btn-secondary btn-sm" onclick="connectWebHidScanner()" style="font-size: 11px;">🔌 Pair WebHID Device</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Card 2: POS Checkout Behaviors -->
+              <div class="card" style="margin: 0; display: flex; flex-direction: column;">
+                <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
+                  <span>POS Checkout Behaviors</span>
+                  <span class="badge-pill badge-green">Automation</span>
+                </div>
+                <div style="flex: 1;">
+                  <div class="switch-group">
+                    <label class="modern-switch">
+                      <input type="checkbox" id="settingAutoCart" ${barcodeSettings.autoAddToCart !== false ? 'checked' : ''}>
+                      <span class="modern-slider"></span>
+                    </label>
+                    <div style="flex: 1;">
+                      <div style="font-weight: 600; font-size: 13px;">Auto Add-to-Cart on Scan</div>
+                      <div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">
+                        Immediately places recognized product into the active cashier register cart.
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="switch-group">
+                    <label class="modern-switch">
+                      <input type="checkbox" id="settingIncDup" ${barcodeSettings.incrementOnDuplicate !== false ? 'checked' : ''}>
+                      <span class="modern-slider"></span>
+                    </label>
+                    <div style="flex: 1;">
+                      <div style="font-weight: 600; font-size: 13px;">Increment Quantity on Duplicate Scan</div>
+                      <div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">
+                        Repeated scans of the same product increment its line quantity by 1 automatically.
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style="margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-subtle); font-size: 12px; color: var(--text-secondary);">
+                    Manual product catalog selection and search bar always remain available simultaneously with barcode scanning.
+                  </div>
+                </div>
+              </div>
+
+              <!-- Card 3: Internal SKU & Barcode Generator -->
+              <div class="card" style="margin: 0; display: flex; flex-direction: column;">
+                <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
+                  <span>Internal SKU &amp; Barcode Generator</span>
+                  <span class="badge-pill badge-blue">Generator</span>
+                </div>
+                <div style="flex: 1;">
+                  <div class="switch-group">
+                    <label class="modern-switch">
+                      <input type="checkbox" id="settingInternalGen" ${barcodeSettings.internalGenerationEnabled !== false ? 'checked' : ''}>
+                      <span class="modern-slider"></span>
+                    </label>
+                    <div style="flex: 1;">
+                      <div style="font-weight: 600; font-size: 13px;">Internal Collision-Free Generator</div>
+                      <div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">
+                        Provides 1-click unique barcode creation across Code 128, Code 39, and GS1 EAN formats.
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="form-group" style="margin-top: 14px; margin-bottom: 0;">
+                    <label class="form-label">Internal Barcode Prefix</label>
+                    <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                      <input type="text" class="form-input" id="settingPrefix" value="${escapeHtml(barcodeSettings.internalPrefix || 'NB')}" maxlength="8" style="width: 120px;" oninput="updateBarcodePrefixPreview(this.value)">
+                      <span id="barcodePrefixSamplePill" class="badge-pill badge-blue" style="font-size: 12px; font-family: monospace;">Example: ${(barcodeSettings.internalPrefix || 'NB').toUpperCase()}-10000000001</span>
+                    </div>
+                    <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">
+                      Prefix applied when creating unique internal barcodes for private-label inventory.
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Card 4: Interactive Hardware Scanner Test Console (BUG-031) -->
+              <div class="card" style="margin: 0; display: flex; flex-direction: column;" id="scannerTestConsoleCard">
+                <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
+                  <span>Hardware Scanner Test Console</span>
+                  <span class="badge-pill badge-blue" id="testScannerStatusPill">Ready for Scan</span>
+                </div>
+                <div style="flex: 1; display: flex; flex-direction: column; gap: 10px;">
+                  <div class="form-group" style="margin-bottom: 0;">
+                    <div style="display: flex; gap: 6px;">
+                      <input type="text" class="form-input" id="hardwareScannerTestInput" placeholder="Click here and scan any barcode with physical scanner..." style="font-size: 12px;">
+                      <button type="button" class="btn btn-secondary btn-sm" onclick="resetScannerTestConsole()">Clear</button>
+                    </div>
+                  </div>
+
+                  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                    <div class="scanner-stat-card">
+                      <div class="scanner-stat-label">Decoded Barcode</div>
+                      <div class="scanner-stat-value" id="testScannerCodeVal">—</div>
+                    </div>
+                    <div class="scanner-stat-card">
+                      <div class="scanner-stat-label">Inferred Symbology</div>
+                      <div class="scanner-stat-value" id="testScannerSymbologyVal" style="font-size: 12px;">—</div>
+                    </div>
+                    <div class="scanner-stat-card">
+                      <div class="scanner-stat-label">Burst Duration</div>
+                      <div class="scanner-stat-value" id="testScannerDurationVal">—</div>
+                    </div>
+                    <div class="scanner-stat-card">
+                      <div class="scanner-stat-label">Transmission Speed</div>
+                      <div class="scanner-stat-value" id="testScannerRateVal" style="font-size: 12px;">—</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div style="margin-top: 16px; display: flex; justify-content: flex-end;">
+              <button class="btn btn-primary" id="btnSaveBarcodeSettingsBottom" onclick="saveTenantBarcodeSettings()">Save Barcode Settings</button>
             </div>
           </div>
         `;
@@ -7789,12 +8315,23 @@
       }
     }
 
-    async function saveTenantBarcodeSettings() {
-      const btn = document.getElementById('btnSaveBarcodeSettings');
-      if (btn) {
-        btn.disabled = true;
-        btn.textContent = 'Saving...';
+    function updateBarcodePrefixPreview(val) {
+      const clean = (val || 'NB').trim().toUpperCase();
+      const sample = document.getElementById('barcodePrefixSamplePill');
+      if (sample) {
+        sample.textContent = `Example: ${clean}-10000000001`;
       }
+    }
+
+    async function saveTenantBarcodeSettings() {
+      const btn1 = document.getElementById('btnSaveBarcodeSettings');
+      const btn2 = document.getElementById('btnSaveBarcodeSettingsBottom');
+      [btn1, btn2].forEach(b => {
+        if (b) {
+          b.disabled = true;
+          b.textContent = 'Saving...';
+        }
+      });
 
       const payload = {
         hardwareScannerEnabled: document.getElementById('settingHwScanner').checked,
@@ -7813,10 +8350,12 @@
         showToast('Barcode settings updated successfully', 'success');
       } catch (err) {
       } finally {
-        if (btn) {
-          btn.disabled = false;
-          btn.textContent = 'Save Barcode Settings';
-        }
+        [btn1, btn2].forEach(b => {
+          if (b) {
+            b.disabled = false;
+            b.textContent = 'Save Barcode Settings';
+          }
+        });
       }
     }
 
@@ -9157,6 +9696,36 @@
         return;
       }
 
+      // Fast-path synchronous render if membership cache exists (BUG-030)
+      const hasCachedMembership = Boolean(state.tenantId && state.userRole);
+      if (hasCachedMembership) {
+        state.isInitializing = false;
+        const initialRoute = state.pendingTargetView || getRouteFromLocation() || 'dashboard';
+        state.pendingTargetView = null;
+        renderView(initialRoute);
+      }
+
+      // Display helpful connection status if cold boot exceeds 8s on first-time load
+      let coldBootTimer = null;
+      if (!hasCachedMembership) {
+        coldBootTimer = setTimeout(() => {
+          const loader = document.getElementById('initialAppLoader');
+          if (loader && state.isInitializing) {
+            loader.innerHTML = `
+              <div class="spinner-sm" style="width: 32px; height: 32px; border-width: 3px;"></div>
+              <div style="font-size: 14px; font-weight: 600; color: var(--text-primary);">Waking up NexStock cloud server...</div>
+              <div style="font-size: 12px; color: var(--text-secondary); max-width: 320px; text-align: center;">
+                The free-tier cloud service may take 30-50 seconds to boot from inactivity. Your session is active.
+              </div>
+              <div style="display: flex; gap: 8px; margin-top: 8px;">
+                <button class="btn btn-secondary btn-sm" onclick="location.reload()">Retry Now</button>
+                <button class="btn btn-secondary btn-sm" onclick="handleSignOut()">Sign In Again</button>
+              </div>
+            `;
+          }
+        }, 8000);
+      }
+
       try {
         let activeToken = storedToken;
 
@@ -9170,15 +9739,29 @@
 
         let res = null;
         if (activeToken) {
-          res = await fetch(`${state.apiBaseUrl}/v1/auth/me`, {
-            headers: {
-              'Authorization': `Bearer ${activeToken}`,
-              'Content-Type': 'application/json'
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 12000); // 12s timeout for cold starts
+
+          try {
+            res = await fetch(`${state.apiBaseUrl}/v1/auth/me`, {
+              headers: {
+                'Authorization': `Bearer ${activeToken}`,
+                'Content-Type': 'application/json'
+              },
+              signal: controller.signal
+            });
+          } catch (fetchErr) {
+            if (fetchErr.name === 'AbortError') {
+              console.warn('GET /v1/auth/me timed out after 12s (server cold start)');
+            } else {
+              throw fetchErr;
             }
-          });
+          } finally {
+            clearTimeout(timeoutId);
+          }
 
           // If /v1/auth/me returns 401, attempt token refresh before giving up
-          if (res.status === 401 && storedRefreshToken) {
+          if (res && res.status === 401 && storedRefreshToken) {
             const refreshed = await refreshAccessToken();
             if (refreshed === true && state.token) {
               activeToken = state.token;
@@ -9187,13 +9770,15 @@
                   'Authorization': `Bearer ${activeToken}`,
                   'Content-Type': 'application/json'
                 }
-              });
+              }).catch(() => null);
             } else if (refreshed === false) {
-              // Server confirmed refresh token is invalid or expired
+              if (coldBootTimer) clearTimeout(coldBootTimer);
               state.isInitializing = false;
               state.pendingTargetView = null;
               localStorage.removeItem('nexstock_session_token');
               localStorage.removeItem('nexstock_refresh_token');
+              localStorage.removeItem('nexstock_active_membership');
+              localStorage.removeItem('nexstock_user_profile');
               state.token = '';
               showToast('Your session has expired. Please sign in again.', 'warning');
               renderView('welcome');
@@ -9201,6 +9786,8 @@
             }
           }
         }
+
+        if (coldBootTimer) clearTimeout(coldBootTimer);
 
         if (res && res.ok) {
           const data = await res.json();
@@ -9210,11 +9797,18 @@
           state.userEmail = data.user.email;
           state.memberships = data.memberships || [];
 
+          try {
+            localStorage.setItem('nexstock_user_profile', JSON.stringify(data.user));
+          } catch {}
+
           const userNameEl = document.getElementById('topbarUserName');
           if (userNameEl) userNameEl.innerText = state.fullName;
 
-          document.getElementById('topbarSyncStatus').innerText = '● Connected';
-          document.getElementById('topbarSyncStatus').className = 'badge-pill badge-green';
+          const syncStatusEl = document.getElementById('topbarSyncStatus');
+          if (syncStatusEl) {
+            syncStatusEl.innerText = '● Connected';
+            syncStatusEl.className = 'badge-pill badge-green';
+          }
 
           state.isInitializing = false;
 
@@ -9227,18 +9821,22 @@
           const activeMembership = state.memberships.find(m => m.tenantId === savedTenantId) || state.memberships[0];
           await selectActiveTenant(activeMembership);
 
-          const targetRoute = state.pendingTargetView || getRouteFromLocation() || 'dashboard';
-          state.pendingTargetView = null;
-          renderView(targetRoute);
+          // Only re-navigate if we have not already rendered the view via cached fast-path
+          if (!hasCachedMembership || state.activeView === 'welcome') {
+            const targetRoute = state.pendingTargetView || getRouteFromLocation() || 'dashboard';
+            state.pendingTargetView = null;
+            renderView(targetRoute);
+          }
           return;
         }
 
         if (res && (res.status === 401 || res.status === 403)) {
-          // Token is genuinely invalid and refresh was not possible or failed
           state.isInitializing = false;
           state.pendingTargetView = null;
           localStorage.removeItem('nexstock_session_token');
           localStorage.removeItem('nexstock_refresh_token');
+          localStorage.removeItem('nexstock_active_membership');
+          localStorage.removeItem('nexstock_user_profile');
           state.token = '';
           showToast('Your session has expired. Please sign in again.', 'warning');
           renderView('welcome');
@@ -9255,16 +9853,19 @@
         }
         showToast('Connecting to server... Your session is preserved.', 'warning');
 
-        const savedTenantId = localStorage.getItem('nexstock_active_tenant_id');
-        const savedCurrency = localStorage.getItem('nexstock_active_currency');
-        if (savedTenantId) {
-          state.tenantId = savedTenantId;
-          state.currency = savedCurrency || 'USD';
+        if (!hasCachedMembership) {
+          const savedTenantId = localStorage.getItem('nexstock_active_tenant_id');
+          const savedCurrency = localStorage.getItem('nexstock_active_currency');
+          if (savedTenantId) {
+            state.tenantId = savedTenantId;
+            state.currency = savedCurrency || 'USD';
+          }
+          const targetRoute = state.pendingTargetView || getRouteFromLocation() || 'dashboard';
+          state.pendingTargetView = null;
+          renderView(targetRoute);
         }
-        const targetRoute = state.pendingTargetView || getRouteFromLocation() || 'dashboard';
-        state.pendingTargetView = null;
-        renderView(targetRoute);
       } catch (err) {
+        if (coldBootTimer) clearTimeout(coldBootTimer);
         // Network offline / connection failed: PRESERVE SESSION!
         state.isInitializing = false;
         state.token = storedToken;
@@ -9275,16 +9876,18 @@
         }
         showToast('Network offline. Your session is preserved.', 'info');
 
-        const savedTenantId = localStorage.getItem('nexstock_active_tenant_id');
-        const savedCurrency = localStorage.getItem('nexstock_active_currency');
-        const targetRoute = state.pendingTargetView || getRouteFromLocation() || 'dashboard';
-        state.pendingTargetView = null;
-        if (savedTenantId) {
-          state.tenantId = savedTenantId;
-          state.currency = savedCurrency || 'USD';
-          renderView(targetRoute);
-        } else {
-          renderView('welcome');
+        if (!hasCachedMembership) {
+          const savedTenantId = localStorage.getItem('nexstock_active_tenant_id');
+          const savedCurrency = localStorage.getItem('nexstock_active_currency');
+          const targetRoute = state.pendingTargetView || getRouteFromLocation() || 'dashboard';
+          state.pendingTargetView = null;
+          if (savedTenantId) {
+            state.tenantId = savedTenantId;
+            state.currency = savedCurrency || 'USD';
+            renderView(targetRoute);
+          } else {
+            renderView('welcome');
+          }
         }
       }
     }

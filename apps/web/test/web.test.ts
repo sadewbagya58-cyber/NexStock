@@ -1678,8 +1678,8 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
     });
   });
 
-  describe('21. Phase 6 Production QA Remediation — BUG-019, BUG-029, BUG-030', () => {
-    it('BUG-019: verifies apiFetch parses RFC 9457 problem+json and file input accepts image/jpg with normalization', () => {
+  describe('21. Phase 6 Production QA Remediation — BUG-019, BUG-029, BUG-030, BUG-031, BUG-032, BUG-033', () => {
+    it('BUG-019: verifies product image upload, submit button guard, and cached catalog update', () => {
       const indexPath = resolve(WEB_ROOT, 'public/index.html');
       const html = readFileSync(indexPath, 'utf8');
 
@@ -1692,6 +1692,12 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       // Client-side image/jpg MIME normalization to image/jpeg
       expect(html).toContain("if (mimeType === 'image/jpg')");
       expect(html).toContain("mimeType = 'image/jpeg';");
+
+      // In-flight upload button disabling
+      expect(html).toContain("submitBtn.textContent = 'Uploading Image...';");
+
+      // Direct cachedProducts update in submitEditProduct
+      expect(html).toContain("cachedP.imageUrl = newImageUrl");
     });
 
     it('BUG-029: verifies single card-based layout in Barcode Management modal with no duplicate table', () => {
@@ -1708,6 +1714,9 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       expect(html).toContain('id="btnMakePrimary-${b.id}"');
       expect(html).toContain('id="btnToggleActive-${b.id}"');
       expect(html).toContain('id="btnDeleteBc-${b.id}"');
+
+      // Primary barcode is updated on product cache
+      expect(html).toContain('p.primaryBarcode = primaryBarcodeObj.barcode');
     });
 
     it('BUG-030: verifies dashboard initial loader, synchronous token initialization, and URL hash routing', () => {
@@ -1722,6 +1731,16 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       expect(html).toContain('storedSessionToken');
       expect(html).toContain('storedActiveTenantId');
 
+      // Synchronous membership and user profile cache restoration
+      expect(html).toContain("localStorage.getItem('nexstock_active_membership')");
+      expect(html).toContain("localStorage.getItem('nexstock_user_profile')");
+
+      // AbortController timeout for /v1/auth/me to avoid hanging cold starts
+      expect(html).toContain('setTimeout(() => controller.abort(), 12000)');
+
+      // 8-second cold boot status alert
+      expect(html).toContain('Waking up NexStock cloud server...');
+
       // URL Hash Routing and Route Resolver
       expect(html).toContain('const VALID_VIEWS = [');
       expect(html).toContain('function getRouteFromLocation()');
@@ -1729,7 +1748,80 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
 
       // Pending target view preservation during asynchronous initialization
       expect(html).toContain('state.pendingTargetView');
-      expect(html).toContain("targetRoute = state.pendingTargetView || getRouteFromLocation() || 'dashboard'");
+    });
+
+    it('BUG-031: verifies physical hardware scanner wedge global listener, test console, and setup guide', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // Global hardware wedge keydown listener uses state.activeView === 'pos-checkout'
+      expect(html).toContain("if (state.activeView === 'pos-checkout')");
+      expect(html).not.toContain("state.currentView === 'pos-checkout'");
+
+      // Dedicated Interactive Scanner Test Console
+      expect(html).toContain('id="hardwareScannerTestInput"');
+      expect(html).toContain('id="testScannerCodeVal"');
+      expect(html).toContain('id="testScannerDurationVal"');
+      expect(html).toContain('id="testScannerRateVal"');
+      expect(html).toContain('id="testScannerSymbologyVal"');
+      expect(html).toContain('function updateHardwareScannerTestConsole(');
+      expect(html).toContain('function resetScannerTestConsole(');
+
+      // Hardware Scanner Setup Guide Modal
+      expect(html).toContain('function openHardwareScannerGuideModal()');
+      expect(html).toContain('Physical Barcode Scanner Setup Guide');
+
+      // WebHID Direct Connection option
+      expect(html).toContain('function connectWebHidScanner()');
+      expect(html).toContain('id="webhidStatusBadge"');
+    });
+
+    it('BUG-032: verifies Barcode Settings mobile UI/UX with 4 grouped cards, modern toggles, and prefix preview', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // Modern CSS classes for toggle switches
+      expect(html).toContain('.modern-switch');
+      expect(html).toContain('.modern-slider');
+      expect(html).toContain('.switch-group');
+      expect(html).toContain('.scanner-stat-card');
+
+      // 4 structured cards in Barcode Settings
+      expect(html).toContain('Hardware Scanners &amp; Input Engines');
+      expect(html).toContain('POS Checkout Behaviors');
+      expect(html).toContain('Internal SKU &amp; Barcode Generator');
+      expect(html).toContain('Hardware Scanner Test Console');
+
+      // Live prefix preview pill
+      expect(html).toContain('id="barcodePrefixSamplePill"');
+      expect(html).toContain('function updateBarcodePrefixPreview(');
+    });
+
+    it('BUG-033: verifies continuous camera scanning mode with debounced cooldown, pause/torch controls, and clean stop', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // Continuous camera scanning does NOT close modal on barcode detection
+      expect(html).toContain('cameraScanCooldowns');
+      expect(html).toContain('now - lastCodeTime >= 1800');
+      expect(html).toContain('executeBarcodeScan(detectedCode);');
+
+      // Visual and audio feedback
+      expect(html).toContain('.camera-reticle.scan-success');
+      expect(html).toContain("reticle.classList.add('scan-success')");
+      expect(html).toContain('playScanChime(true);');
+      expect(html).toContain('id="cameraScanCountBadge"');
+      expect(html).toContain('id="posCameraScanFeedback"');
+
+      // In-modal controls
+      expect(html).toContain('function toggleCameraPause()');
+      expect(html).toContain('function toggleCameraTorch()');
+      expect(html).toContain('id="btnToggleCameraPause"');
+      expect(html).toContain('id="btnToggleCameraTorch"');
+
+      // Clean cleanup on close, navigation, and logout
+      expect(html).toContain('function closePosCameraScannerModal()');
+      expect(html).toContain('posCameraStream.getTracks().forEach');
     });
   });
 });

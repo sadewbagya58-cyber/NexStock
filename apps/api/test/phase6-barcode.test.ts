@@ -1756,5 +1756,42 @@ describe('@nexstock/api — Phase 6: Universal Barcode Management & Dual-Mode PO
       expect(receipt.payments[0].method).toBe('CASH');
       expect(parseFloat(receipt.changeGiven)).toBe(50);
     });
+
+    // --- BUG-019: Binary Magic Bytes Auto-Detection & MIME Reconciliation ---
+    it('BUG-019: auto-reconciles mismatched client MIME type with genuine binary magic bytes', async () => {
+      // JPEG binary buffer disguised with declared 'image/png' MIME (common mobile upload discrepancy)
+      const jpegBuffer = Buffer.from([
+        0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01,
+        0x01, 0x01, 0x00, 0x48, 0x00, 0x48, 0x00, 0x00, 0xff, 0xd9,
+      ]);
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/products/upload-image',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+          'content-type': 'application/json',
+        },
+        payload: {
+          filename: 'photo_camera_capture.png',
+          mimeType: 'image/png', // Declared as PNG by mobile file-picker
+          dataBase64: jpegBuffer.toString('base64'), // Actually JPEG binary
+        },
+      });
+
+      expect(res.statusCode).toBe(201);
+      const body = res.json();
+      expect(body.imageUrl).toContain(`/v1/media/${TENANT_ALPHA_ID}/`);
+      expect(body.mimeType).toBe('image/jpeg'); // Auto-reconciled to genuine JPEG format!
+
+      // Verify content delivery serves with the reconciled image/jpeg content-type
+      const mediaRes = await app.inject({
+        method: 'GET',
+        url: body.imageUrl,
+      });
+      expect(mediaRes.statusCode).toBe(200);
+      expect(mediaRes.headers['content-type']).toBe('image/jpeg');
+    });
   });
 });
