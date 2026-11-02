@@ -26,6 +26,7 @@ import {
   CURRENCY_MINOR_UNITS,
   getCurrencyMinorUnits,
   resolveMediaUrl,
+  PHASE7_HRM_NAV_ITEMS,
 } from '../src/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -1822,6 +1823,103 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       // Clean cleanup on close, navigation, and logout
       expect(html).toContain('function closePosCameraScannerModal()');
       expect(html).toContain('posCameraStream.getTracks().forEach');
+    });
+  });
+
+  describe('14. Phase 7.1: Employee & Flexible Payroll Management Web Shell', () => {
+    it('verifies ALL_SPA_VIEW_IDS includes employees, payroll, and payroll-reports', () => {
+      expect(ALL_SPA_VIEW_IDS).toContain('employees');
+      expect(ALL_SPA_VIEW_IDS).toContain('payroll');
+      expect(ALL_SPA_VIEW_IDS).toContain('payroll-reports');
+    });
+
+    it('verifies PHASE7_HRM_NAV_ITEMS contains valid route definitions and permission guards', () => {
+      expect(PHASE7_HRM_NAV_ITEMS.length).toBe(3);
+      expect(PHASE7_HRM_NAV_ITEMS.map((item) => item.id)).toEqual([
+        'employees',
+        'payroll',
+        'payroll-reports',
+      ]);
+      expect(PHASE7_HRM_NAV_ITEMS[0].requiredPermission).toBe('hrm:employee:read');
+      expect(PHASE7_HRM_NAV_ITEMS[1].requiredPermission).toBe('hrm:payroll:read');
+      expect(PHASE7_HRM_NAV_ITEMS[2].requiredPermission).toBe('hrm:payroll:read');
+    });
+
+    it('verifies public/index.html includes sidebar navigation and routing for HRM views', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // Sidebar section and nav items
+      expect(html).toContain('HR &amp; Payroll');
+      expect(html).toContain('data-view="employees"');
+      expect(html).toContain('data-view="payroll"');
+      expect(html).toContain('data-view="payroll-reports"');
+
+      // Routing switch cases
+      expect(html).toContain("case 'employees':");
+      expect(html).toContain("case 'payroll':");
+      expect(html).toContain("case 'payroll-reports':");
+      expect(html).toContain('renderEmployeesView();');
+      expect(html).toContain('renderPayrollView();');
+      expect(html).toContain('renderPayrollReportsView();');
+    });
+
+    it('verifies Employee Directory and Profiles UI functions and modals exist in index.html', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // Employee directory functions
+      expect(html).toContain('function renderEmployeesView()');
+      expect(html).toContain('function openCreateEmployeeModal()');
+      expect(html).toContain('function submitCreateEmployee()');
+      expect(html).toContain('function openEditEmployeeModal(');
+      expect(html).toContain('function submitEditEmployee(');
+      expect(html).toContain('function openUpdateEmployeeStatusModal(');
+      expect(html).toContain('function submitUpdateEmployeeStatus(');
+      expect(html).toContain('function openEmployeeProfileModal(');
+
+      // User account linking and unlinking
+      expect(html).toContain('function openLinkEmployeeUserModal(');
+      expect(html).toContain('function submitLinkEmployeeUser(');
+      expect(html).toContain('function unlinkEmployeeUser(');
+
+      // Documents management
+      expect(html).toContain('function openEmployeeDocumentsModal(');
+      expect(html).toContain('function submitUploadDocument(');
+      expect(html).toContain('function deleteEmployeeDocumentConfirm(');
+
+      // Salary structure builder
+      expect(html).toContain('function openEmployeeSalaryModal(');
+      expect(html).toContain('function addSalaryComponentRow(');
+      expect(html).toContain('function previewSalaryTotals(');
+      expect(html).toContain('function submitEmployeeSalary(');
+    });
+
+    it('verifies Flexible Payroll and Payslip Generation UI functions exist in index.html', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // Payroll run lifecycle functions
+      expect(html).toContain('function renderPayrollView()');
+      expect(html).toContain('function openCreatePayrollRunModal()');
+      expect(html).toContain('function submitCreatePayrollRun()');
+      expect(html).toContain('function openPayrollRunDetailModal(');
+      expect(html).toContain('function openAdjustPayrollItemModal(');
+      expect(html).toContain('function submitAdjustPayrollItem(');
+      expect(html).toContain('function submitPayrollRunAction(');
+      expect(html).toContain('function approvePayrollRunAction(');
+      expect(html).toContain('function cancelPayrollRunAction(');
+
+      // Payment disbursement
+      expect(html).toContain('function openRecordPayrollPaymentModal(');
+      expect(html).toContain('function submitRecordPayrollPayment(');
+
+      // Payslip printing with printHtmlDocument
+      expect(html).toContain('function openPayslipModal(');
+      expect(html).toContain("printHtmlDocument(document.getElementById('payslipPrintArea').outerHTML");
+
+      // Payroll reports view
+      expect(html).toContain('function renderPayrollReportsView()');
     });
   });
 });

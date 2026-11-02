@@ -13,17 +13,25 @@ import {
   CreateBatchRequestSchema,
   CreateBranchRequestSchema,
   CreateCategoryRequestSchema,
+  CreateEmployeeRequestSchema,
   CreateExchangeRateRequestSchema,
+  CreatePayrollRunRequestSchema,
   CreatePosSaleRequestSchema,
-  CreateProductRequestSchema,
+  CreatePosShiftAdjustmentRequestSchema,
   CreateProductBarcodeRequestSchema,
+  CreateProductRequestSchema,
+  CreateSalaryStructureRequestSchema,
   CreateStocktakeSessionRequestSchema,
   CreateSupplierRequestSchema,
   CreateWarehouseRequestSchema,
-  CreatePosShiftAdjustmentRequestSchema,
   CurrencyCodeSchema,
   DecimalMoneyStringSchema,
   DecimalQuantityStringSchema,
+  EmployeeDocumentResponseSchema,
+  EmployeeListResponseSchema,
+  EmployeeProfileResponseSchema,
+  EmployeeResponseSchema,
+  EmploymentStatusSchema,
   FefoSelectionResponseSchema,
   FifoCostLayerResponseSchema,
   type GenerateBarcodeQuery,
@@ -35,6 +43,7 @@ import {
   InventoryBalanceResponseSchema,
   InventoryReconciliationResponseSchema,
   InventoryValuationResponseSchema,
+  LinkEmployeeUserRequestSchema,
   LinkSupplierProductRequestSchema,
   ListBatchesQuerySchema,
   ListCategoriesQuerySchema,
@@ -52,22 +61,31 @@ import {
   OnboardBusinessResponseSchema,
   OpenPosShiftRequestSchema,
   PasswordResetRequestSchema,
+  PayrollFrequencySchema,
+  PayrollPaymentResponseSchema,
+  PayrollReportSummaryResponseSchema,
+  PayrollRunItemResponseSchema,
+  PayrollRunResponseSchema,
+  PayrollRunStatusSchema,
+  PayslipResponseSchema,
   PosProductItemResponseSchema,
   PosProductSearchQuerySchema,
   PosRegisterSummaryResponseSchema,
   PosShiftResponseSchema,
   PostStockMovementRequestSchema,
   ProblemDetailsSchema,
-  ProductResponseSchema,
   ProductBarcodeResponseSchema,
+  ProductResponseSchema,
   QuarantineBatchRequestSchema,
   ReceiptResponseSchema,
+  RecordPayrollPaymentRequestSchema,
   RecordStocktakeCountRequestSchema,
   RecordSubscriptionPaymentRequestSchema,
   RefreshTokenRequestSchema,
   RegisterSerialStockRequestSchema,
   ReverseStockMovementRequestSchema,
   ReviewStocktakeRequestSchema,
+  SalaryStructureResponseSchema,
   SalesInvoiceResponseSchema,
   SalesSummaryQuerySchema,
   SalesSummaryResponseSchema,
@@ -81,17 +99,21 @@ import {
   SupplierResponseSchema,
   SyncPushBatchRequestSchema,
   SyncPushBatchResponseSchema,
-  TenantContextHeadersSchema,
   TenantBarcodeSettingsSchema,
+  TenantContextHeadersSchema,
   TenantMembershipSummarySchema,
   TransitionSerialStatusRequestSchema,
   UpdateCategoryRequestSchema,
-  UpdateProductRequestSchema,
-  UpdateProductBarcodeRequestSchema,
+  UpdateEmployeeRequestSchema,
+  UpdateEmployeeStatusRequestSchema,
+  UpdatePayrollItemRequestSchema,
   UpdatePosRegisterRequestSchema,
+  UpdateProductBarcodeRequestSchema,
+  UpdateProductRequestSchema,
   UpdateSupplierRequestSchema,
   UpdateTenantBarcodeSettingsRequestSchema,
   UpdateWarehouseRequestSchema,
+  UploadEmployeeDocumentRequestSchema,
   UploadProductImageRequestSchema,
   UploadProductImageResponseSchema,
   UpsertLocalizationSettingsRequestSchema,
@@ -207,6 +229,34 @@ import {
   updatePosRegister,
   voidSale,
 } from './modules/pos/index.js';
+import {
+  approvePayrollRun,
+  cancelPayrollRun,
+  createEmployee,
+  createPayrollRun,
+  createSalaryStructure,
+  deleteEmployeeDocument,
+  generatePayslip,
+  getActiveSalaryStructure,
+  getEmployeeActivity,
+  getEmployeeById,
+  getEmployeeDocument,
+  getEmployeeDocumentContent,
+  getEmployeeProfile,
+  getPayrollRunById,
+  getPayrollSummaryReport,
+  getSalaryStructureHistory,
+  linkEmployeeUser,
+  listEmployeeDocuments,
+  listEmployees,
+  listPayrollRuns,
+  recordPayrollPayment,
+  submitPayrollRunForApproval,
+  updateEmployee,
+  updateEmployeeStatus,
+  updatePayrollItemAdjustments,
+  uploadEmployeeDocument,
+} from './modules/hrm/index.js';
 import {
   AppError,
   type NexStockDatabase,
@@ -3988,6 +4038,973 @@ export async function buildApp(
         options.db,
         { tenantId, userId: principal.userId, traceId },
         (trx) => getReceiptData(trx, request.params.saleId),
+      );
+    },
+  );
+
+  // ============================================================================
+  // Phase 7.1 HRM & Flexible Payroll API Routes
+  // ============================================================================
+
+  // 1. Create Employee
+  app.post(
+    '/v1/employees',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        body: CreateEmployeeRequestSchema,
+        response: {
+          201: EmployeeResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      const employee = await withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => createEmployee(trx, request.body),
+      );
+      return reply.status(201).send(employee);
+    },
+  );
+
+  // 2. List Employees
+  app.get(
+    '/v1/employees',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        querystring: Type.Object({
+          search: Type.Optional(Type.String()),
+          status: Type.Optional(EmploymentStatusSchema),
+          department: Type.Optional(Type.String()),
+          branchId: Type.Optional(UuidSchema),
+          limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 200 })),
+          offset: Type.Optional(Type.Integer({ minimum: 0 })),
+        }),
+        response: {
+          200: EmployeeListResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          listEmployees(trx, {
+            search: request.query.search,
+            status: request.query.status,
+            department: request.query.department,
+            branchId: request.query.branchId,
+            limit: request.query.limit,
+            offset: request.query.offset,
+          }),
+      );
+    },
+  );
+
+  // 3. Get Employee By ID
+  app.get(
+    '/v1/employees/:employeeId',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ employeeId: UuidSchema }),
+        response: {
+          200: EmployeeResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => getEmployeeById(trx, request.params.employeeId),
+      );
+    },
+  );
+
+  // 4. Update Employee
+  app.patch(
+    '/v1/employees/:employeeId',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ employeeId: UuidSchema }),
+        body: UpdateEmployeeRequestSchema,
+        response: {
+          200: EmployeeResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => updateEmployee(trx, request.params.employeeId, request.body),
+      );
+    },
+  );
+
+  // 5. Update Employee Status
+  app.post(
+    '/v1/employees/:employeeId/status',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ employeeId: UuidSchema }),
+        body: UpdateEmployeeStatusRequestSchema,
+        response: {
+          200: EmployeeResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          updateEmployeeStatus(
+            trx,
+            request.params.employeeId,
+            request.body.status,
+            request.body.reason,
+          ),
+      );
+    },
+  );
+
+  // 6. Link / Unlink User Account
+  app.post(
+    '/v1/employees/:employeeId/link-user',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ employeeId: UuidSchema }),
+        body: LinkEmployeeUserRequestSchema,
+        response: {
+          200: EmployeeResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          linkEmployeeUser(trx, request.params.employeeId, request.body.userId),
+      );
+    },
+  );
+
+  // 7. Get Employee Profile
+  app.get(
+    '/v1/employees/:employeeId/profile',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ employeeId: UuidSchema }),
+        response: {
+          200: EmployeeProfileResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => getEmployeeProfile(trx, request.params.employeeId),
+      );
+    },
+  );
+
+  // 8. Get Employee Activity History
+  app.get(
+    '/v1/employees/:employeeId/activity',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ employeeId: UuidSchema }),
+        response: {
+          200: Type.Array(
+            Type.Object({
+              id: Type.String(),
+              timestamp: Type.String(),
+              activityType: Type.String(),
+              description: Type.String(),
+              referenceId: Type.Optional(Type.String()),
+              details: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
+            }),
+          ),
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => getEmployeeActivity(trx, request.params.employeeId),
+      );
+    },
+  );
+
+  // 9. Upload Document
+  app.post(
+    '/v1/employees/:employeeId/documents',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ employeeId: UuidSchema }),
+        body: UploadEmployeeDocumentRequestSchema,
+        response: {
+          201: EmployeeDocumentResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          413: ProblemDetailsSchema,
+          415: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      const doc = await withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          uploadEmployeeDocument(trx, request.params.employeeId, request.body),
+      );
+      return reply.status(201).send(doc);
+    },
+  );
+
+  // 10. List Documents
+  app.get(
+    '/v1/employees/:employeeId/documents',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ employeeId: UuidSchema }),
+        response: {
+          200: Type.Array(EmployeeDocumentResponseSchema),
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => listEmployeeDocuments(trx, request.params.employeeId),
+      );
+    },
+  );
+
+  // 11. Get Document Metadata
+  app.get(
+    '/v1/employees/:employeeId/documents/:documentId',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({
+          employeeId: UuidSchema,
+          documentId: UuidSchema,
+        }),
+        response: {
+          200: EmployeeDocumentResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          getEmployeeDocument(
+            trx,
+            request.params.employeeId,
+            request.params.documentId,
+          ),
+      );
+    },
+  );
+
+  // 12. Get Document Content (Preview / Download)
+  app.get(
+    '/v1/employees/:employeeId/documents/:documentId/content',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({
+          employeeId: UuidSchema,
+          documentId: UuidSchema,
+        }),
+        response: {
+          200: Type.Object({
+            fileName: Type.String(),
+            mimeType: Type.String(),
+            fileSize: Type.Integer(),
+            dataBase64: Type.String(),
+          }),
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          getEmployeeDocumentContent(
+            trx,
+            request.params.employeeId,
+            request.params.documentId,
+          ),
+      );
+    },
+  );
+
+  // 13. Delete Document
+  app.delete(
+    '/v1/employees/:employeeId/documents/:documentId',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({
+          employeeId: UuidSchema,
+          documentId: UuidSchema,
+        }),
+        response: {
+          200: Type.Object({ success: Type.Boolean() }),
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          deleteEmployeeDocument(
+            trx,
+            request.params.employeeId,
+            request.params.documentId,
+          ),
+      );
+    },
+  );
+
+  // 14. Create / Replace Salary Structure
+  app.post(
+    '/v1/employees/:employeeId/salary-structure',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ employeeId: UuidSchema }),
+        body: CreateSalaryStructureRequestSchema,
+        response: {
+          201: SalaryStructureResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      const structure = await withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          createSalaryStructure(
+            trx,
+            request.params.employeeId,
+            request.body,
+          ),
+      );
+      return reply.status(201).send(structure);
+    },
+  );
+
+  // 15. Get Active Salary Structure
+  app.get(
+    '/v1/employees/:employeeId/salary-structure',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ employeeId: UuidSchema }),
+        response: {
+          200: Type.Union([SalaryStructureResponseSchema, Type.Null()]),
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => getActiveSalaryStructure(trx, request.params.employeeId),
+      );
+    },
+  );
+
+  // 16. Get Salary Structure History
+  app.get(
+    '/v1/employees/:employeeId/salary-structure/history',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ employeeId: UuidSchema }),
+        response: {
+          200: Type.Array(SalaryStructureResponseSchema),
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => getSalaryStructureHistory(trx, request.params.employeeId),
+      );
+    },
+  );
+
+  // 17. Create Payroll Run
+  app.post(
+    '/v1/payroll/runs',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        body: CreatePayrollRunRequestSchema,
+        response: {
+          201: PayrollRunResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      const run = await withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => createPayrollRun(trx, request.body),
+      );
+      return reply.status(201).send(run);
+    },
+  );
+
+  // 18. List Payroll Runs
+  app.get(
+    '/v1/payroll/runs',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        querystring: Type.Object({
+          frequency: Type.Optional(PayrollFrequencySchema),
+          status: Type.Optional(PayrollRunStatusSchema),
+          limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
+          offset: Type.Optional(Type.Integer({ minimum: 0 })),
+        }),
+        response: {
+          200: Type.Array(PayrollRunResponseSchema),
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          listPayrollRuns(trx, {
+            frequency: request.query.frequency,
+            status: request.query.status,
+            limit: request.query.limit,
+            offset: request.query.offset,
+          }),
+      );
+    },
+  );
+
+  // 19. Get Payroll Run by ID
+  app.get(
+    '/v1/payroll/runs/:runId',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ runId: UuidSchema }),
+        response: {
+          200: PayrollRunResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => getPayrollRunById(trx, request.params.runId),
+      );
+    },
+  );
+
+  // 20. Update Payroll Item Adjustments
+  app.patch(
+    '/v1/payroll/runs/:runId/items/:itemId',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({
+          runId: UuidSchema,
+          itemId: UuidSchema,
+        }),
+        body: UpdatePayrollItemRequestSchema,
+        response: {
+          200: PayrollRunItemResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          updatePayrollItemAdjustments(
+            trx,
+            request.params.runId,
+            request.params.itemId,
+            request.body,
+          ),
+      );
+    },
+  );
+
+  // 21. Submit Payroll Run for Approval
+  app.post(
+    '/v1/payroll/runs/:runId/submit',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ runId: UuidSchema }),
+        response: {
+          200: PayrollRunResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => submitPayrollRunForApproval(trx, request.params.runId),
+      );
+    },
+  );
+
+  // 22. Approve Payroll Run
+  app.post(
+    '/v1/payroll/runs/:runId/approve',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ runId: UuidSchema }),
+        response: {
+          200: PayrollRunResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => approvePayrollRun(trx, request.params.runId),
+      );
+    },
+  );
+
+  // 23. Cancel Payroll Run
+  app.post(
+    '/v1/payroll/runs/:runId/cancel',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ runId: UuidSchema }),
+        body: Type.Optional(Type.Object({ reason: Type.Optional(Type.String()) })),
+        response: {
+          200: PayrollRunResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          cancelPayrollRun(trx, request.params.runId, request.body?.reason),
+      );
+    },
+  );
+
+  // 24. Record Payroll Payment
+  app.post(
+    '/v1/payroll/runs/:runId/payments',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ runId: UuidSchema }),
+        body: RecordPayrollPaymentRequestSchema,
+        response: {
+          201: PayrollPaymentResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      const payment = await withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          recordPayrollPayment(trx, request.params.runId, request.body),
+      );
+      return reply.status(201).send(payment);
+    },
+  );
+
+  // 25. Generate Payslip
+  app.get(
+    '/v1/payroll/runs/:runId/payslips/:employeeId',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({
+          runId: UuidSchema,
+          employeeId: UuidSchema,
+        }),
+        response: {
+          200: PayslipResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          generatePayslip(
+            trx,
+            request.params.runId,
+            request.params.employeeId,
+          ),
+      );
+    },
+  );
+
+  // 26. Payroll Summary Report
+  app.get(
+    '/v1/payroll/reports/summary',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        querystring: Type.Object({
+          startDate: Type.Optional(Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' })),
+          endDate: Type.Optional(Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' })),
+          frequency: Type.Optional(PayrollFrequencySchema),
+        }),
+        response: {
+          200: PayrollReportSummaryResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          getPayrollSummaryReport(trx, {
+            startDate: request.query.startDate,
+            endDate: request.query.endDate,
+            frequency: request.query.frequency,
+          }),
       );
     },
   );

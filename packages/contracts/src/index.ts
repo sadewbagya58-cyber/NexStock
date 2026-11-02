@@ -126,6 +126,19 @@ export const ErrorCodeSchema = Type.Union([
   Type.Literal('ORG_DUPLICATE_SLUG'),
   Type.Literal('ORG_DUPLICATE_BRANCH_CODE'),
   Type.Literal('ORG_TENANT_NOT_FOUND'),
+  Type.Literal('HRM_EMPLOYEE_NOT_FOUND'),
+  Type.Literal('HRM_DUPLICATE_EMPLOYEE_CODE'),
+  Type.Literal('HRM_USER_ALREADY_LINKED'),
+  Type.Literal('HRM_DOCUMENT_NOT_FOUND'),
+  Type.Literal('HRM_INVALID_DOCUMENT_TYPE'),
+  Type.Literal('HRM_DOCUMENT_TOO_LARGE'),
+  Type.Literal('HRM_SALARY_STRUCTURE_NOT_FOUND'),
+  Type.Literal('HRM_PAYROLL_RUN_NOT_FOUND'),
+  Type.Literal('HRM_PAYROLL_RUN_ALREADY_EXISTS'),
+  Type.Literal('HRM_PAYROLL_RUN_IMMUTABLE'),
+  Type.Literal('HRM_PAYROLL_ITEM_NOT_FOUND'),
+  Type.Literal('HRM_INVALID_PAYROLL_STATUS_TRANSITION'),
+  Type.Literal('HRM_OVERPAYMENT_NOT_ALLOWED'),
   Type.Literal('ERR_INTERNAL_SERVER_ERROR'),
 ]);
 export type ErrorCode = Static<typeof ErrorCodeSchema>;
@@ -2021,5 +2034,473 @@ export const OnboardBusinessResponseSchema = Type.Object({
 export type OnboardBusinessResponse = Static<
   typeof OnboardBusinessResponseSchema
 >;
+
+// ============================================================================
+// Phase 7.1 HRM & Flexible Payroll Wire Contracts
+// ============================================================================
+
+export const EmploymentStatusSchema = Type.Union([
+  Type.Literal('ACTIVE'),
+  Type.Literal('PROBATION'),
+  Type.Literal('INACTIVE'),
+  Type.Literal('SUSPENDED'),
+  Type.Literal('TERMINATED'),
+]);
+export type EmploymentStatus = Static<typeof EmploymentStatusSchema>;
+
+export const PayrollFrequencySchema = Type.Union([
+  Type.Literal('MONTHLY'),
+  Type.Literal('WEEKLY'),
+  Type.Literal('DAILY'),
+]);
+export type PayrollFrequency = Static<typeof PayrollFrequencySchema>;
+
+export const DocumentCategorySchema = Type.Union([
+  Type.Literal('NIC_PASSPORT'),
+  Type.Literal('CONTRACT'),
+  Type.Literal('CERTIFICATE'),
+  Type.Literal('RESUME'),
+  Type.Literal('OTHER'),
+]);
+export type DocumentCategory = Static<typeof DocumentCategorySchema>;
+
+export const SalaryPaymentMethodSchema = Type.Union([
+  Type.Literal('BANK_TRANSFER'),
+  Type.Literal('CASH'),
+  Type.Literal('CHEQUE'),
+]);
+export type SalaryPaymentMethod = Static<typeof SalaryPaymentMethodSchema>;
+
+export const SalaryComponentTypeSchema = Type.Union([
+  Type.Literal('EARNING'),
+  Type.Literal('DEDUCTION'),
+]);
+export type SalaryComponentType = Static<typeof SalaryComponentTypeSchema>;
+
+export const SalaryCalculationTypeSchema = Type.Union([
+  Type.Literal('FIXED_AMOUNT'),
+  Type.Literal('PERCENTAGE_OF_BASIC'),
+]);
+export type SalaryCalculationType = Static<typeof SalaryCalculationTypeSchema>;
+
+export const PayrollRunStatusSchema = Type.Union([
+  Type.Literal('DRAFT'),
+  Type.Literal('PENDING_APPROVAL'),
+  Type.Literal('APPROVED'),
+  Type.Literal('PARTIALLY_PAID'),
+  Type.Literal('PAID'),
+  Type.Literal('CANCELLED'),
+]);
+export type PayrollRunStatus = Static<typeof PayrollRunStatusSchema>;
+
+export const PayrollPaymentStatusSchema = Type.Union([
+  Type.Literal('UNPAID'),
+  Type.Literal('PARTIALLY_PAID'),
+  Type.Literal('PAID'),
+]);
+export type PayrollPaymentStatus = Static<typeof PayrollPaymentStatusSchema>;
+
+export const CreateEmployeeRequestSchema = Type.Object(
+  {
+    employeeCode: Type.String({ minLength: 1, maxLength: 50 }),
+    firstName: Type.String({ minLength: 1, maxLength: 100 }),
+    lastName: Type.String({ minLength: 1, maxLength: 100 }),
+    displayName: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
+    email: Type.Optional(Type.String({ maxLength: 255 })),
+    phone: Type.Optional(Type.String({ maxLength: 50 })),
+    nationalId: Type.Optional(Type.String({ maxLength: 50 })),
+    gender: Type.Optional(Type.String({ maxLength: 20 })),
+    dateOfBirth: Type.Optional(Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' })),
+    joinedDate: Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' }),
+    designation: Type.String({ minLength: 1, maxLength: 100 }),
+    department: Type.String({ minLength: 1, maxLength: 100 }),
+    employmentStatus: Type.Optional(EmploymentStatusSchema),
+    payrollFrequency: Type.Optional(PayrollFrequencySchema),
+    primaryBranchId: Type.Optional(UuidSchema),
+    primaryWarehouseId: Type.Optional(UuidSchema),
+    branchIds: Type.Optional(Type.Array(UuidSchema)),
+    warehouseIds: Type.Optional(Type.Array(UuidSchema)),
+    linkedUserId: Type.Optional(UuidSchema),
+    avatarUrl: Type.Optional(Type.String()),
+    bankName: Type.Optional(Type.String({ maxLength: 100 })),
+    bankAccountNumber: Type.Optional(Type.String({ maxLength: 100 })),
+    bankBranch: Type.Optional(Type.String({ maxLength: 100 })),
+    epfNumber: Type.Optional(Type.String({ maxLength: 100 })),
+    addressLine1: Type.Optional(Type.String()),
+    addressLine2: Type.Optional(Type.String()),
+    city: Type.Optional(Type.String()),
+    emergencyContactName: Type.Optional(Type.String()),
+    emergencyContactPhone: Type.Optional(Type.String()),
+    notes: Type.Optional(Type.String()),
+  },
+  { additionalProperties: false },
+);
+export type CreateEmployeeRequest = Static<typeof CreateEmployeeRequestSchema>;
+
+export const UpdateEmployeeRequestSchema = Type.Partial(CreateEmployeeRequestSchema);
+export type UpdateEmployeeRequest = Static<typeof UpdateEmployeeRequestSchema>;
+
+export const UpdateEmployeeStatusRequestSchema = Type.Object(
+  {
+    status: EmploymentStatusSchema,
+    reason: Type.Optional(Type.String()),
+  },
+  { additionalProperties: false },
+);
+export type UpdateEmployeeStatusRequest = Static<
+  typeof UpdateEmployeeStatusRequestSchema
+>;
+
+export const LinkEmployeeUserRequestSchema = Type.Object(
+  {
+    userId: Type.Union([UuidSchema, Type.Null()]),
+  },
+  { additionalProperties: false },
+);
+export type LinkEmployeeUserRequest = Static<
+  typeof LinkEmployeeUserRequestSchema
+>;
+
+export const EmployeeResponseSchema = Type.Object({
+  id: UuidSchema,
+  tenantId: UuidSchema,
+  employeeCode: Type.String(),
+  firstName: Type.String(),
+  lastName: Type.String(),
+  displayName: Type.String(),
+  email: Type.Union([Type.String(), Type.Null()]),
+  phone: Type.Union([Type.String(), Type.Null()]),
+  nationalId: Type.Union([Type.String(), Type.Null()]),
+  gender: Type.Union([Type.String(), Type.Null()]),
+  dateOfBirth: Type.Union([Type.String(), Type.Null()]),
+  joinedDate: Type.String(),
+  designation: Type.String(),
+  department: Type.String(),
+  employmentStatus: EmploymentStatusSchema,
+  payrollFrequency: PayrollFrequencySchema,
+  primaryBranchId: Type.Union([UuidSchema, Type.Null()]),
+  primaryBranchName: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  primaryWarehouseId: Type.Union([UuidSchema, Type.Null()]),
+  primaryWarehouseName: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  branchIds: Type.Array(UuidSchema),
+  warehouseIds: Type.Array(UuidSchema),
+  linkedUserId: Type.Union([UuidSchema, Type.Null()]),
+  linkedUserEmail: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  avatarUrl: Type.Union([Type.String(), Type.Null()]),
+  bankName: Type.Union([Type.String(), Type.Null()]),
+  bankAccountNumber: Type.Union([Type.String(), Type.Null()]),
+  bankBranch: Type.Union([Type.String(), Type.Null()]),
+  epfNumber: Type.Union([Type.String(), Type.Null()]),
+  addressLine1: Type.Union([Type.String(), Type.Null()]),
+  addressLine2: Type.Union([Type.String(), Type.Null()]),
+  city: Type.Union([Type.String(), Type.Null()]),
+  emergencyContactName: Type.Union([Type.String(), Type.Null()]),
+  emergencyContactPhone: Type.Union([Type.String(), Type.Null()]),
+  notes: Type.Union([Type.String(), Type.Null()]),
+  createdAt: IsoTimestampSchema,
+  updatedAt: IsoTimestampSchema,
+});
+export type EmployeeResponse = Static<typeof EmployeeResponseSchema>;
+
+export const EmployeeListResponseSchema = Type.Object({
+  items: Type.Array(EmployeeResponseSchema),
+  total: Type.Integer({ minimum: 0 }),
+});
+export type EmployeeListResponse = Static<typeof EmployeeListResponseSchema>;
+
+export const UploadEmployeeDocumentRequestSchema = Type.Object(
+  {
+    documentCategory: DocumentCategorySchema,
+    documentTitle: Type.String({ minLength: 1, maxLength: 200 }),
+    fileName: Type.String({ minLength: 1, maxLength: 255 }),
+    mimeType: Type.String({ minLength: 3, maxLength: 100 }),
+    dataBase64: Type.String({ minLength: 1 }),
+    notes: Type.Optional(Type.String()),
+  },
+  { additionalProperties: false },
+);
+export type UploadEmployeeDocumentRequest = Static<
+  typeof UploadEmployeeDocumentRequestSchema
+>;
+
+export const EmployeeDocumentResponseSchema = Type.Object({
+  id: UuidSchema,
+  employeeId: UuidSchema,
+  documentCategory: DocumentCategorySchema,
+  documentTitle: Type.String(),
+  fileName: Type.String(),
+  fileSize: Type.Integer({ minimum: 1 }),
+  mimeType: Type.String(),
+  storagePath: Type.String(),
+  uploadedByUserId: UuidSchema,
+  notes: Type.Union([Type.String(), Type.Null()]),
+  createdAt: IsoTimestampSchema,
+  updatedAt: IsoTimestampSchema,
+});
+export type EmployeeDocumentResponse = Static<
+  typeof EmployeeDocumentResponseSchema
+>;
+
+export const SalaryComponentInputSchema = Type.Object(
+  {
+    componentType: SalaryComponentTypeSchema,
+    componentName: Type.String({ minLength: 1, maxLength: 100 }),
+    calculationType: SalaryCalculationTypeSchema,
+    componentValue: DecimalMoneyStringSchema,
+    isTaxable: Type.Optional(Type.Boolean()),
+    isStatutory: Type.Optional(Type.Boolean()),
+    isEnabled: Type.Optional(Type.Boolean()),
+  },
+  { additionalProperties: false },
+);
+export type SalaryComponentInput = Static<typeof SalaryComponentInputSchema>;
+
+export const SalaryComponentResponseSchema = Type.Object({
+  id: UuidSchema,
+  structureId: UuidSchema,
+  componentType: SalaryComponentTypeSchema,
+  componentName: Type.String(),
+  calculationType: SalaryCalculationTypeSchema,
+  componentValue: DecimalMoneyStringSchema,
+  isTaxable: Type.Boolean(),
+  isStatutory: Type.Boolean(),
+  isEnabled: Type.Boolean(),
+});
+export type SalaryComponentResponse = Static<
+  typeof SalaryComponentResponseSchema
+>;
+
+export const CreateSalaryStructureRequestSchema = Type.Object(
+  {
+    effectiveFrom: Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' }),
+    basicSalary: DecimalMoneyStringSchema,
+    currencyCode: CurrencyCodeSchema,
+    paymentMethod: Type.Optional(SalaryPaymentMethodSchema),
+    notes: Type.Optional(Type.String()),
+    components: Type.Array(SalaryComponentInputSchema),
+  },
+  { additionalProperties: false },
+);
+export type CreateSalaryStructureRequest = Static<
+  typeof CreateSalaryStructureRequestSchema
+>;
+
+export const SalaryStructureResponseSchema = Type.Object({
+  id: UuidSchema,
+  employeeId: UuidSchema,
+  effectiveFrom: Type.String(),
+  basicSalary: DecimalMoneyStringSchema,
+  currencyCode: CurrencyCodeSchema,
+  paymentMethod: SalaryPaymentMethodSchema,
+  isActive: Type.Boolean(),
+  notes: Type.Union([Type.String(), Type.Null()]),
+  components: Type.Array(SalaryComponentResponseSchema),
+  createdAt: IsoTimestampSchema,
+  updatedAt: IsoTimestampSchema,
+});
+export type SalaryStructureResponse = Static<
+  typeof SalaryStructureResponseSchema
+>;
+
+export const EmployeeActivityItemSchema = Type.Object({
+  id: Type.String(),
+  timestamp: IsoTimestampSchema,
+  activityType: Type.String(),
+  description: Type.String(),
+  referenceId: Type.Optional(Type.String()),
+  details: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
+});
+export type EmployeeActivityItem = Static<typeof EmployeeActivityItemSchema>;
+
+export const EmployeeProfileResponseSchema = Type.Object({
+  employee: EmployeeResponseSchema,
+  activeSalaryStructure: Type.Union([SalaryStructureResponseSchema, Type.Null()]),
+  documents: Type.Array(EmployeeDocumentResponseSchema),
+  recentActivity: Type.Array(EmployeeActivityItemSchema),
+});
+export type EmployeeProfileResponse = Static<
+  typeof EmployeeProfileResponseSchema
+>;
+
+export const CreatePayrollRunRequestSchema = Type.Object(
+  {
+    frequency: PayrollFrequencySchema,
+    periodStart: Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' }),
+    periodEnd: Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' }),
+    paymentDate: Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' }),
+    currencyCode: CurrencyCodeSchema,
+    notes: Type.Optional(Type.String()),
+  },
+  { additionalProperties: false },
+);
+export type CreatePayrollRunRequest = Static<
+  typeof CreatePayrollRunRequestSchema
+>;
+
+export const UpdatePayrollItemRequestSchema = Type.Object(
+  {
+    overtimeHours: Type.Optional(DecimalQuantityStringSchema),
+    overtimePay: Type.Optional(DecimalMoneyStringSchema),
+    bonusPay: Type.Optional(DecimalMoneyStringSchema),
+    commissionsPay: Type.Optional(DecimalMoneyStringSchema),
+    notes: Type.Optional(Type.String()),
+  },
+  { additionalProperties: false },
+);
+export type UpdatePayrollItemRequest = Static<
+  typeof UpdatePayrollItemRequestSchema
+>;
+
+export const PayrollRunItemResponseSchema = Type.Object({
+  id: UuidSchema,
+  payrollRunId: UuidSchema,
+  employeeId: UuidSchema,
+  employeeCode: Type.String(),
+  employeeName: Type.String(),
+  department: Type.String(),
+  designation: Type.String(),
+  basicSalary: DecimalMoneyStringSchema,
+  allowancesTotal: DecimalMoneyStringSchema,
+  overtimeHours: DecimalQuantityStringSchema,
+  overtimePay: DecimalMoneyStringSchema,
+  bonusPay: DecimalMoneyStringSchema,
+  commissionsPay: DecimalMoneyStringSchema,
+  grossPay: DecimalMoneyStringSchema,
+  deductionsTotal: DecimalMoneyStringSchema,
+  netPay: DecimalMoneyStringSchema,
+  paidAmount: DecimalMoneyStringSchema,
+  paymentStatus: PayrollPaymentStatusSchema,
+  componentsSnapshot: Type.Array(Type.Any()),
+  notes: Type.Union([Type.String(), Type.Null()]),
+});
+export type PayrollRunItemResponse = Static<
+  typeof PayrollRunItemResponseSchema
+>;
+
+export const PayrollRunResponseSchema = Type.Object({
+  id: UuidSchema,
+  runNumber: Type.String(),
+  frequency: PayrollFrequencySchema,
+  periodStart: Type.String(),
+  periodEnd: Type.String(),
+  paymentDate: Type.String(),
+  currencyCode: CurrencyCodeSchema,
+  status: PayrollRunStatusSchema,
+  totalGrossPay: DecimalMoneyStringSchema,
+  totalDeductions: DecimalMoneyStringSchema,
+  totalNetPay: DecimalMoneyStringSchema,
+  totalPaidAmount: DecimalMoneyStringSchema,
+  employeeCount: Type.Integer({ minimum: 0 }),
+  createdByUserId: UuidSchema,
+  approvedByUserId: Type.Union([UuidSchema, Type.Null()]),
+  approvedAt: Type.Union([IsoTimestampSchema, Type.Null()]),
+  notes: Type.Union([Type.String(), Type.Null()]),
+  items: Type.Optional(Type.Array(PayrollRunItemResponseSchema)),
+  createdAt: IsoTimestampSchema,
+  updatedAt: IsoTimestampSchema,
+});
+export type PayrollRunResponse = Static<typeof PayrollRunResponseSchema>;
+
+export const RecordPayrollPaymentRequestSchema = Type.Object(
+  {
+    itemId: UuidSchema,
+    paymentMethod: SalaryPaymentMethodSchema,
+    paymentAmount: DecimalMoneyStringSchema,
+    currencyCode: CurrencyCodeSchema,
+    paymentDate: Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' }),
+    referenceNumber: Type.Optional(Type.String({ maxLength: 100 })),
+    notes: Type.Optional(Type.String()),
+  },
+  { additionalProperties: false },
+);
+export type RecordPayrollPaymentRequest = Static<
+  typeof RecordPayrollPaymentRequestSchema
+>;
+
+export const PayrollPaymentResponseSchema = Type.Object({
+  id: UuidSchema,
+  payrollRunId: UuidSchema,
+  payrollItemId: UuidSchema,
+  employeeId: UuidSchema,
+  paymentMethod: SalaryPaymentMethodSchema,
+  paymentAmount: DecimalMoneyStringSchema,
+  currencyCode: CurrencyCodeSchema,
+  paymentDate: Type.String(),
+  referenceNumber: Type.Union([Type.String(), Type.Null()]),
+  recordedByUserId: UuidSchema,
+  notes: Type.Union([Type.String(), Type.Null()]),
+  createdAt: IsoTimestampSchema,
+});
+export type PayrollPaymentResponse = Static<
+  typeof PayrollPaymentResponseSchema
+>;
+
+export const PayslipEarningsBreakdownSchema = Type.Object({
+  name: Type.String(),
+  amount: DecimalMoneyStringSchema,
+  type: Type.String(),
+});
+
+export const PayslipDeductionsBreakdownSchema = Type.Object({
+  name: Type.String(),
+  amount: DecimalMoneyStringSchema,
+  type: Type.String(),
+});
+
+export const PayslipResponseSchema = Type.Object({
+  tenantName: Type.String(),
+  runNumber: Type.String(),
+  frequency: PayrollFrequencySchema,
+  periodStart: Type.String(),
+  periodEnd: Type.String(),
+  paymentDate: Type.String(),
+  currencyCode: CurrencyCodeSchema,
+  employee: Type.Object({
+    id: UuidSchema,
+    employeeCode: Type.String(),
+    fullName: Type.String(),
+    designation: Type.String(),
+    department: Type.String(),
+    bankName: Type.Union([Type.String(), Type.Null()]),
+    bankAccountNumber: Type.Union([Type.String(), Type.Null()]),
+    epfNumber: Type.Union([Type.String(), Type.Null()]),
+  }),
+  item: PayrollRunItemResponseSchema,
+  earningsBreakdown: Type.Array(PayslipEarningsBreakdownSchema),
+  deductionsBreakdown: Type.Array(PayslipDeductionsBreakdownSchema),
+});
+export type PayslipResponse = Static<typeof PayslipResponseSchema>;
+
+export const PayrollReportSummaryResponseSchema = Type.Object({
+  totalGross: DecimalMoneyStringSchema,
+  totalDeductions: DecimalMoneyStringSchema,
+  totalNet: DecimalMoneyStringSchema,
+  totalPaid: DecimalMoneyStringSchema,
+  totalUnpaid: DecimalMoneyStringSchema,
+  runsCount: Type.Integer({ minimum: 0 }),
+  employeesPaidCount: Type.Integer({ minimum: 0 }),
+  byDepartment: Type.Array(
+    Type.Object({
+      department: Type.String(),
+      employeeCount: Type.Integer({ minimum: 0 }),
+      gross: DecimalMoneyStringSchema,
+      net: DecimalMoneyStringSchema,
+      paid: DecimalMoneyStringSchema,
+    }),
+  ),
+  byFrequency: Type.Array(
+    Type.Object({
+      frequency: PayrollFrequencySchema,
+      runsCount: Type.Integer({ minimum: 0 }),
+      gross: DecimalMoneyStringSchema,
+      net: DecimalMoneyStringSchema,
+      paid: DecimalMoneyStringSchema,
+    }),
+  ),
+});
+export type PayrollReportSummaryResponse = Static<
+  typeof PayrollReportSummaryResponseSchema
+>;
+
 
 

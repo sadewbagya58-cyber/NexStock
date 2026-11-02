@@ -300,6 +300,11 @@ describe('@nexstock/api — Milestone 0 Foundation, RLS, Idempotency & Sync Inva
           name: '0013_phase6_barcode_integrity',
           filename: '0013_phase6_barcode_integrity.sql',
         },
+        {
+          version: 14,
+          name: '0014_phase7_employees_and_payroll',
+          filename: '0014_phase7_employees_and_payroll.sql',
+        },
       ]);
     });
 
@@ -371,6 +376,7 @@ describe('@nexstock/api — Milestone 0 Foundation, RLS, Idempotency & Sync Inva
         '0011_phase6_barcode_management.sql',
         '0012_phase6_product_images.sql',
         '0013_phase6_barcode_integrity.sql',
+        '0014_phase7_employees_and_payroll.sql',
       ]);
 
       await expect(

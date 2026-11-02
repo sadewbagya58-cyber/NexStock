@@ -741,6 +741,200 @@ export interface StocktakeLinesTable {
   notes: string | null;
 }
 
+// ============================================================================
+// Phase 7.1 Tables (HRM, Employee Management & Flexible Payroll)
+// ============================================================================
+
+export type EmploymentStatus =
+  | 'ACTIVE'
+  | 'PROBATION'
+  | 'INACTIVE'
+  | 'SUSPENDED'
+  | 'TERMINATED';
+
+export type PayrollFrequency = 'MONTHLY' | 'WEEKLY' | 'DAILY';
+
+export type DocumentCategory =
+  | 'NIC_PASSPORT'
+  | 'CONTRACT'
+  | 'CERTIFICATE'
+  | 'RESUME'
+  | 'OTHER';
+
+export type SalaryPaymentMethod = 'BANK_TRANSFER' | 'CASH' | 'CHEQUE';
+
+export type SalaryComponentType = 'EARNING' | 'DEDUCTION';
+
+export type SalaryCalculationType = 'FIXED_AMOUNT' | 'PERCENTAGE_OF_BASIC';
+
+export type PayrollRunStatus =
+  | 'DRAFT'
+  | 'PENDING_APPROVAL'
+  | 'APPROVED'
+  | 'PARTIALLY_PAID'
+  | 'PAID'
+  | 'CANCELLED';
+
+export type PayrollPaymentStatus = 'UNPAID' | 'PARTIALLY_PAID' | 'PAID';
+
+export interface EmployeesTable {
+  id: string;
+  tenant_id: string;
+  employee_code: string;
+  first_name: string;
+  last_name: string;
+  display_name: string;
+  email: string | null;
+  phone: string | null;
+  national_id: string | null;
+  gender: string | null;
+  date_of_birth: ColumnType<Date | string | null, Date | string | null, Date | string | null>;
+  joined_date: ColumnType<Date | string, Date | string, Date | string>;
+  designation: string;
+  department: string;
+  employment_status: Generated<EmploymentStatus>;
+  payroll_frequency: Generated<PayrollFrequency>;
+  primary_branch_id: string | null;
+  primary_warehouse_id: string | null;
+  linked_user_id: string | null;
+  avatar_url: string | null;
+  bank_name: string | null;
+  bank_account_number: string | null;
+  bank_branch: string | null;
+  epf_number: string | null;
+  address_line1: string | null;
+  address_line2: string | null;
+  city: string | null;
+  emergency_contact_name: string | null;
+  emergency_contact_phone: string | null;
+  notes: string | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface EmployeeBranchAssignmentsTable {
+  id: string;
+  tenant_id: string;
+  employee_id: string;
+  branch_id: string;
+  is_primary: Generated<boolean>;
+  assigned_at: Generated<Date>;
+}
+
+export interface EmployeeWarehouseAssignmentsTable {
+  id: string;
+  tenant_id: string;
+  employee_id: string;
+  warehouse_id: string;
+  is_primary: Generated<boolean>;
+  assigned_at: Generated<Date>;
+}
+
+export interface EmployeeDocumentsTable {
+  id: string;
+  tenant_id: string;
+  employee_id: string;
+  document_category: DocumentCategory;
+  document_title: string;
+  file_name: string;
+  file_size: number;
+  mime_type: string;
+  storage_path: string;
+  data_base64: string;
+  uploaded_by_user_id: string;
+  notes: string | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface EmployeeSalaryStructuresTable {
+  id: string;
+  tenant_id: string;
+  employee_id: string;
+  effective_from: ColumnType<Date | string, Date | string, Date | string>;
+  basic_salary: string;
+  currency_code: string;
+  payment_method: Generated<SalaryPaymentMethod>;
+  is_active: Generated<boolean>;
+  notes: string | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface EmployeeSalaryComponentsTable {
+  id: string;
+  tenant_id: string;
+  structure_id: string;
+  component_type: SalaryComponentType;
+  component_name: string;
+  calculation_type: SalaryCalculationType;
+  component_value: string;
+  is_taxable: Generated<boolean>;
+  is_statutory: Generated<boolean>;
+  is_enabled: Generated<boolean>;
+}
+
+export interface PayrollRunsTable {
+  id: string;
+  tenant_id: string;
+  run_number: string;
+  frequency: PayrollFrequency;
+  period_start: ColumnType<Date | string, Date | string, Date | string>;
+  period_end: ColumnType<Date | string, Date | string, Date | string>;
+  payment_date: ColumnType<Date | string, Date | string, Date | string>;
+  currency_code: string;
+  status: Generated<PayrollRunStatus>;
+  total_gross_pay: Generated<string>;
+  total_deductions: Generated<string>;
+  total_net_pay: Generated<string>;
+  total_paid_amount: Generated<string>;
+  employee_count: Generated<number>;
+  created_by_user_id: string;
+  approved_by_user_id: string | null;
+  approved_at: ColumnType<Date | string | null, Date | string | null, Date | string | null>;
+  notes: string | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface PayrollItemsTable {
+  id: string;
+  tenant_id: string;
+  payroll_run_id: string;
+  employee_id: string;
+  basic_salary: Generated<string>;
+  allowances_total: Generated<string>;
+  overtime_hours: Generated<string>;
+  overtime_pay: Generated<string>;
+  bonus_pay: Generated<string>;
+  commissions_pay: Generated<string>;
+  gross_pay: Generated<string>;
+  deductions_total: Generated<string>;
+  net_pay: Generated<string>;
+  paid_amount: Generated<string>;
+  payment_status: Generated<PayrollPaymentStatus>;
+  components_snapshot: Generated<unknown>;
+  notes: string | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface PayrollPaymentsTable {
+  id: string;
+  tenant_id: string;
+  payroll_run_id: string;
+  payroll_item_id: string;
+  employee_id: string;
+  payment_method: SalaryPaymentMethod;
+  payment_amount: string;
+  currency_code: string;
+  payment_date: ColumnType<Date | string, Date | string, Date | string>;
+  reference_number: string | null;
+  recorded_by_user_id: string;
+  notes: string | null;
+  created_at: Generated<Date>;
+}
+
 export interface NexStockDatabase {
   schema_migrations: SchemaMigrationsTable;
   idempotency_keys: IdempotencyKeysTable;
@@ -790,4 +984,13 @@ export interface NexStockDatabase {
   stocktake_lines: StocktakeLinesTable;
   tenant_barcode_settings: TenantBarcodeSettingsTable;
   product_media_assets: ProductMediaAssetsTable;
+  employees: EmployeesTable;
+  employee_branch_assignments: EmployeeBranchAssignmentsTable;
+  employee_warehouse_assignments: EmployeeWarehouseAssignmentsTable;
+  employee_documents: EmployeeDocumentsTable;
+  employee_salary_structures: EmployeeSalaryStructuresTable;
+  employee_salary_components: EmployeeSalaryComponentsTable;
+  payroll_runs: PayrollRunsTable;
+  payroll_items: PayrollItemsTable;
+  payroll_payments: PayrollPaymentsTable;
 }

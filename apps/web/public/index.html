@@ -1938,6 +1938,20 @@
         Sales History
       </a>
 
+      <div class="nav-section-title">HR &amp; Payroll</div>
+      <a class="nav-link" data-view="employees">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+        Employees
+      </a>
+      <a class="nav-link" data-view="payroll">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"></rect><line x1="2" y1="10" x2="22" y2="10"></line><line x1="7" y1="15" x2="7.01" y2="15"></line><line x1="12" y1="15" x2="17" y2="15"></line></svg>
+        Payroll Runs
+      </a>
+      <a class="nav-link" data-view="payroll-reports">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
+        Payroll Reports
+      </a>
+
       <div class="nav-section-title">Organization</div>
       <a class="nav-link" data-view="org-settings">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
@@ -2126,6 +2140,9 @@
       'pos-registers',
       'pos-shifts',
       'pos-sales',
+      'employees',
+      'payroll',
+      'payroll-reports',
       'org-settings'
     ];
 
@@ -2816,6 +2833,9 @@
         case 'pos-registers': renderPosRegistersView(); break;
         case 'pos-shifts': renderPosShiftsView(); break;
         case 'pos-sales': renderPosSalesView(); break;
+        case 'employees': renderEmployeesView(); break;
+        case 'payroll': renderPayrollView(); break;
+        case 'payroll-reports': renderPayrollReportsView(); break;
         case 'org-settings': renderOrgSettingsView(); break;
         default: renderDashboardView();
       }
@@ -9641,6 +9661,2450 @@
         openModal(html);
       } catch (err) {
         showToast(`Failed to load details: ${err.message}`, 'error');
+      }
+    }
+
+    // =========================================================================
+    // PHASE 7.1: EMPLOYEE MANAGEMENT & FLEXIBLE PAYROLL UI MODULE
+    // =========================================================================
+
+    state.employeeFilters = {
+      search: '',
+      status: '',
+      department: ''
+    };
+
+    state.payrollFilters = {
+      frequency: '',
+      status: ''
+    };
+
+    // --- 1. EMPLOYEE DIRECTORY VIEW ---
+    async function renderEmployeesView() {
+      const container = document.getElementById('mainContainer');
+      container.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-secondary);"><div class="spinner-sm" style="display:inline-block; margin-bottom: 8px;"></div><div>Loading employees...</div></div>';
+
+      try {
+        let queryUrl = '/v1/employees?limit=100';
+        if (state.employeeFilters.search) {
+          queryUrl += `&search=${encodeURIComponent(state.employeeFilters.search)}`;
+        }
+        if (state.employeeFilters.status) {
+          queryUrl += `&status=${encodeURIComponent(state.employeeFilters.status)}`;
+        }
+        if (state.employeeFilters.department) {
+          queryUrl += `&department=${encodeURIComponent(state.employeeFilters.department)}`;
+        }
+
+        const res = await apiFetch(queryUrl).catch(() => ({ items: [], total: 0 }));
+        const employees = res.items || [];
+        state.cachedEmployees = employees;
+
+        // Extract departments for filter dropdown
+        const allDepts = Array.from(new Set(employees.map(e => e.department).filter(Boolean)));
+
+        const activeCount = employees.filter(e => e.employmentStatus === 'ACTIVE').length;
+        const probationCount = employees.filter(e => e.employmentStatus === 'PROBATION').length;
+        const inactiveCount = employees.filter(e => ['INACTIVE', 'SUSPENDED', 'TERMINATED'].includes(e.employmentStatus)).length;
+
+        container.innerHTML = `
+          <div class="view-header">
+            <div>
+              <h1 class="view-title">Employee Directory</h1>
+              <div class="view-subtitle">Manage staff profiles, department structures, documents, and branch assignments</div>
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <button class="btn btn-primary" id="btnOpenCreateEmployee" onclick="openCreateEmployeeModal()">+ Add Employee</button>
+            </div>
+          </div>
+
+          <!-- KPI Metric Cards -->
+          <div class="kpi-grid" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); margin-bottom: 16px;">
+            <div class="kpi-card">
+              <div class="kpi-label">Total Staff</div>
+              <div class="kpi-value">${employees.length}</div>
+              <div class="kpi-trend" style="color: var(--text-secondary);">Enrolled personnel</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Active Employees</div>
+              <div class="kpi-value" style="color: var(--status-success);">${activeCount}</div>
+              <div class="kpi-trend" style="color: var(--status-success);">In good standing</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">On Probation</div>
+              <div class="kpi-value" style="color: var(--status-warning);">${probationCount}</div>
+              <div class="kpi-trend" style="color: var(--status-warning);">Under review</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Inactive / Suspended</div>
+              <div class="kpi-value" style="color: var(--text-secondary);">${inactiveCount}</div>
+              <div class="kpi-trend" style="color: var(--text-secondary);">Archived / On leave</div>
+            </div>
+          </div>
+
+          <!-- Filter & Search Controls -->
+          <div class="card" style="margin-bottom: 16px; padding: 14px 18px;">
+            <div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between;">
+              <div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center; flex: 1;">
+                <div style="position: relative; min-width: 240px; flex: 1;">
+                  <input type="text" class="form-input" id="empSearchInput" placeholder="Search by name, code, email, designation..." value="${escapeHtml(state.employeeFilters.search || '')}" onkeydown="if(event.key==='Enter') applyEmployeeFilters()">
+                </div>
+                <div style="min-width: 150px;">
+                  <select class="form-select" id="empStatusFilter" onchange="applyEmployeeFilters()">
+                    <option value="">All Employment Statuses</option>
+                    <option value="ACTIVE" ${state.employeeFilters.status === 'ACTIVE' ? 'selected' : ''}>Active</option>
+                    <option value="PROBATION" ${state.employeeFilters.status === 'PROBATION' ? 'selected' : ''}>Probation</option>
+                    <option value="INACTIVE" ${state.employeeFilters.status === 'INACTIVE' ? 'selected' : ''}>Inactive</option>
+                    <option value="SUSPENDED" ${state.employeeFilters.status === 'SUSPENDED' ? 'selected' : ''}>Suspended</option>
+                    <option value="TERMINATED" ${state.employeeFilters.status === 'TERMINATED' ? 'selected' : ''}>Terminated</option>
+                  </select>
+                </div>
+                <div style="min-width: 150px;">
+                  <select class="form-select" id="empDeptFilter" onchange="applyEmployeeFilters()">
+                    <option value="">All Departments</option>
+                    ${allDepts.map(d => `<option value="${escapeHtml(d)}" ${state.employeeFilters.department === d ? 'selected' : ''}>${escapeHtml(d)}</option>`).join('')}
+                  </select>
+                </div>
+              </div>
+              <div style="display: flex; gap: 8px;">
+                <button class="btn btn-secondary btn-sm" onclick="applyEmployeeFilters()">Search</button>
+                <button class="btn btn-secondary btn-sm" onclick="resetEmployeeFilters()">Reset</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Employee Table / Cards -->
+          <div class="card">
+            ${employees.length === 0 ? `
+              <div class="empty-state-card" style="padding: 40px; text-align: center;">
+                <div style="font-size: 40px; margin-bottom: 12px;">👥</div>
+                <div class="empty-state-title" style="font-size: 18px; font-weight: 600; margin-bottom: 6px;">No Employees Found</div>
+                <p class="empty-state-desc" style="color: var(--text-secondary); margin-bottom: 16px;">
+                  ${state.employeeFilters.search || state.employeeFilters.status || state.employeeFilters.department
+                    ? 'No staff members match the selected filters. Try clearing your search parameters.'
+                    : 'Start building your team by registering your first employee profile.'}
+                </p>
+                <button class="btn btn-primary" onclick="openCreateEmployeeModal()">+ Add First Employee</button>
+              </div>
+            ` : `
+              <div class="desktop-table-container">
+                <div class="table-responsive">
+                  <table class="data-table">
+                    <thead>
+                      <tr>
+                        <th>Employee</th>
+                        <th>Role &amp; Department</th>
+                        <th>Pay Frequency</th>
+                        <th>Contact</th>
+                        <th>Branch &amp; Warehouse</th>
+                        <th>Joined Date</th>
+                        <th>Status</th>
+                        <th style="text-align: right;">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${employees.map(emp => {
+                        const statusBadge = getStatusBadgeHtml(emp.employmentStatus);
+                        const freqBadge = getFrequencyBadgeHtml(emp.payrollFrequency);
+                        const initials = getInitials(emp.displayName || `${emp.firstName} ${emp.lastName}`);
+
+                        return `
+                          <tr>
+                            <td>
+                              <div style="display: flex; align-items: center; gap: 10px;">
+                                <div style="width: 36px; height: 36px; border-radius: 50%; background: var(--accent-light); color: var(--accent-primary); font-weight: 700; display: flex; align-items: center; justify-content: center; font-size: 13px; flex-shrink: 0;">
+                                  ${initials}
+                                </div>
+                                <div>
+                                  <div style="font-weight: 600; color: var(--text-primary); cursor: pointer;" onclick="openEmployeeProfileModal('${emp.id}')">${escapeHtml(emp.displayName)}</div>
+                                  <div style="font-size: 11px; color: var(--text-secondary); font-family: monospace;">${escapeHtml(emp.employeeCode)}</div>
+                                </div>
+                              </div>
+                            </td>
+                            <td>
+                              <div style="font-weight: 500;">${escapeHtml(emp.designation)}</div>
+                              <div style="font-size: 11px; color: var(--text-secondary);">${escapeHtml(emp.department)}</div>
+                            </td>
+                            <td>${freqBadge}</td>
+                            <td>
+                              <div style="font-size: 12px;">${emp.email ? `<a href="mailto:${escapeHtml(emp.email)}" style="color: var(--accent-primary); text-decoration: none;">${escapeHtml(emp.email)}</a>` : '—'}</div>
+                              <div style="font-size: 11px; color: var(--text-secondary);">${escapeHtml(emp.phone || '')}</div>
+                            </td>
+                            <td>
+                              <div style="font-size: 12px; font-weight: 500;">${escapeHtml(emp.primaryBranchName || 'HQ Branch')}</div>
+                              <div style="font-size: 11px; color: var(--text-secondary);">${escapeHtml(emp.primaryWarehouseName || 'Main Depot')}</div>
+                            </td>
+                            <td style="font-size: 12px; color: var(--text-secondary);">${escapeHtml(emp.joinedDate)}</td>
+                            <td>${statusBadge}</td>
+                            <td style="text-align: right;">
+                              <div style="display: inline-flex; gap: 6px;">
+                                <button class="btn btn-secondary btn-sm" onclick="openEmployeeProfileModal('${emp.id}')" title="View Full Profile">Profile</button>
+                                <button class="btn btn-secondary btn-sm" onclick="openEditEmployeeModal('${emp.id}')" title="Edit Employee Details">Edit</button>
+                                <button class="btn btn-secondary btn-sm" onclick="openEmployeeSalaryModal('${emp.id}')" title="Manage Salary Structure">Salary</button>
+                                <button class="btn btn-secondary btn-sm" onclick="openEmployeeDocumentsModal('${emp.id}')" title="Manage Employee Documents">Docs</button>
+                                <button class="btn btn-secondary btn-sm" onclick="openUpdateEmployeeStatusModal('${emp.id}')" title="Change Employment Status">Status</button>
+                              </div>
+                            </td>
+                          </tr>
+                        `;
+                      }).join('')}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            `}
+          </div>
+        `;
+      } catch (err) {
+        container.innerHTML = `
+          <div style="padding: 40px; text-align: center; color: var(--status-danger);">
+            <div style="font-size: 16px; font-weight: 600; margin-bottom: 8px;">Failed to load employee directory</div>
+            <div style="font-size: 13px; margin-bottom: 16px;">${escapeHtml(err.message)}</div>
+            <button class="btn btn-primary btn-sm" onclick="renderEmployeesView()">Try Again</button>
+          </div>
+        `;
+      }
+    }
+
+    function applyEmployeeFilters() {
+      const searchEl = document.getElementById('empSearchInput');
+      const statusEl = document.getElementById('empStatusFilter');
+      const deptEl = document.getElementById('empDeptFilter');
+      state.employeeFilters.search = searchEl ? searchEl.value.trim() : '';
+      state.employeeFilters.status = statusEl ? statusEl.value : '';
+      state.employeeFilters.department = deptEl ? deptEl.value : '';
+      renderEmployeesView();
+    }
+
+    function resetEmployeeFilters() {
+      state.employeeFilters = { search: '', status: '', department: '' };
+      renderEmployeesView();
+    }
+
+    function getInitials(name) {
+      if (!name) return '??';
+      const parts = name.trim().split(/\s+/);
+      if (parts.length >= 2) {
+        return (parts[0][0] + parts[1][0]).toUpperCase();
+      }
+      return name.substring(0, 2).toUpperCase();
+    }
+
+    function getStatusBadgeHtml(status) {
+      switch (status) {
+        case 'ACTIVE':
+          return '<span class="badge-pill badge-green">Active</span>';
+        case 'PROBATION':
+          return '<span class="badge-pill badge-yellow">Probation</span>';
+        case 'SUSPENDED':
+          return '<span class="badge-pill badge-red">Suspended</span>';
+        case 'INACTIVE':
+          return '<span class="badge-pill" style="background: #E2E8F0; color: #475569;">Inactive</span>';
+        case 'TERMINATED':
+          return '<span class="badge-pill" style="background: #1E293B; color: #FFF;">Terminated</span>';
+        default:
+          return `<span class="badge-pill badge-blue">${escapeHtml(status || 'Active')}</span>`;
+      }
+    }
+
+    function getFrequencyBadgeHtml(freq) {
+      switch (freq) {
+        case 'MONTHLY':
+          return '<span class="badge-pill badge-blue">Monthly</span>';
+        case 'WEEKLY':
+          return '<span class="badge-pill" style="background: #F3E8FF; color: #7E22CE;">Weekly</span>';
+        case 'DAILY':
+          return '<span class="badge-pill" style="background: #E0F2FE; color: #0284C7;">Daily</span>';
+        default:
+          return `<span class="badge-pill">${escapeHtml(freq || 'Monthly')}</span>`;
+      }
+    }
+
+    // --- 2. CREATE EMPLOYEE MODAL ---
+    async function openCreateEmployeeModal() {
+      // Fetch branches and warehouses for assignment dropdowns
+      let branches = [];
+      let warehouses = [];
+      try {
+        const [bRes, wRes] = await Promise.all([
+          apiFetch('/v1/org/branches').catch(() => []),
+          apiFetch('/v1/org/warehouses').catch(() => [])
+        ]);
+        branches = Array.isArray(bRes) ? bRes : (bRes.data || []);
+        warehouses = Array.isArray(wRes) ? wRes : (wRes.data || []);
+      } catch {}
+
+      openModal({
+        title: 'Add New Employee',
+        maxWidth: '680px',
+        bodyHtml: `
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+            <div class="form-group">
+              <label class="form-label">Employee Code *</label>
+              <input type="text" class="form-input" id="newEmpCode" placeholder="EMP-001" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Joined Date *</label>
+              <input type="date" class="form-input" id="newEmpJoinedDate" value="${new Date().toISOString().substring(0, 10)}" required>
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+            <div class="form-group">
+              <label class="form-label">First Name *</label>
+              <input type="text" class="form-input" id="newEmpFirstName" placeholder="Jane" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Last Name *</label>
+              <input type="text" class="form-input" id="newEmpLastName" placeholder="Doe" required>
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+            <div class="form-group">
+              <label class="form-label">Job Designation *</label>
+              <input type="text" class="form-input" id="newEmpDesignation" placeholder="Store Manager / Cashier" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Department *</label>
+              <input type="text" class="form-input" id="newEmpDepartment" placeholder="Retail Operations / Logistics" required>
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+            <div class="form-group">
+              <label class="form-label">Payroll Frequency *</label>
+              <select class="form-select" id="newEmpFrequency">
+                <option value="MONTHLY" selected>Monthly Payroll</option>
+                <option value="WEEKLY">Weekly Payroll</option>
+                <option value="DAILY">Daily Payroll</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Employment Status *</label>
+              <select class="form-select" id="newEmpStatus">
+                <option value="ACTIVE" selected>Active</option>
+                <option value="PROBATION">Probation</option>
+                <option value="INACTIVE">Inactive</option>
+              </select>
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+            <div class="form-group">
+              <label class="form-label">Email Address</label>
+              <input type="email" class="form-input" id="newEmpEmail" placeholder="jane.doe@company.com">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Phone Number</label>
+              <input type="text" class="form-input" id="newEmpPhone" placeholder="+1-555-0144">
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+            <div class="form-group">
+              <label class="form-label">National ID / Passport</label>
+              <input type="text" class="form-input" id="newEmpNationalId" placeholder="NIC / Passport #">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Date of Birth</label>
+              <input type="date" class="form-input" id="newEmpDob">
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+            <div class="form-group">
+              <label class="form-label">Primary Branch</label>
+              <select class="form-select" id="newEmpBranch">
+                <option value="">Default Branch</option>
+                ${branches.map(b => `<option value="${b.id}">${escapeHtml(b.name || b.code)}</option>`).join('')}
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Primary Warehouse</label>
+              <select class="form-select" id="newEmpWarehouse">
+                <option value="">Default Warehouse</option>
+                ${warehouses.map(w => `<option value="${w.id}">${escapeHtml(w.name || w.code)}</option>`).join('')}
+              </select>
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px;">
+            <div class="form-group">
+              <label class="form-label">Bank Name</label>
+              <input type="text" class="form-input" id="newEmpBankName" placeholder="Bank Name">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Bank Account #</label>
+              <input type="text" class="form-input" id="newEmpBankAccount" placeholder="Account Number">
+            </div>
+            <div class="form-group">
+              <label class="form-label">EPF / Tax Number</label>
+              <input type="text" class="form-input" id="newEmpEpf" placeholder="EPF / Social Security #">
+            </div>
+          </div>
+        `,
+        footerHtml: `
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-primary" id="btnSubmitCreateEmp" onclick="submitCreateEmployee()">Create Employee</button>
+        `
+      });
+    }
+
+    async function submitCreateEmployee() {
+      const btn = document.getElementById('btnSubmitCreateEmp');
+      const code = document.getElementById('newEmpCode').value.trim();
+      const firstName = document.getElementById('newEmpFirstName').value.trim();
+      const lastName = document.getElementById('newEmpLastName').value.trim();
+      const designation = document.getElementById('newEmpDesignation').value.trim();
+      const department = document.getElementById('newEmpDepartment').value.trim();
+      const joinedDate = document.getElementById('newEmpJoinedDate').value;
+      const frequency = document.getElementById('newEmpFrequency').value;
+      const status = document.getElementById('newEmpStatus').value;
+      const email = document.getElementById('newEmpEmail').value.trim() || undefined;
+      const phone = document.getElementById('newEmpPhone').value.trim() || undefined;
+      const nationalId = document.getElementById('newEmpNationalId').value.trim() || undefined;
+      const dob = document.getElementById('newEmpDob').value || undefined;
+      const branchId = document.getElementById('newEmpBranch').value || undefined;
+      const warehouseId = document.getElementById('newEmpWarehouse').value || undefined;
+      const bankName = document.getElementById('newEmpBankName').value.trim() || undefined;
+      const bankAccount = document.getElementById('newEmpBankAccount').value.trim() || undefined;
+      const epfNumber = document.getElementById('newEmpEpf').value.trim() || undefined;
+
+      if (!code || !firstName || !lastName || !designation || !department || !joinedDate) {
+        return showToast('Please fill in all required fields marked with *', 'error');
+      }
+
+      try {
+        if (btn) {
+          btn.disabled = true;
+          btn.innerText = 'Creating Employee...';
+        }
+
+        const payload = {
+          employeeCode: code,
+          firstName,
+          lastName,
+          displayName: `${firstName} ${lastName}`,
+          designation,
+          department,
+          joinedDate,
+          payrollFrequency: frequency,
+          employmentStatus: status,
+          email,
+          phone,
+          nationalId,
+          dateOfBirth: dob,
+          primaryBranchId: branchId,
+          primaryWarehouseId: warehouseId,
+          bankName,
+          bankAccountNumber: bankAccount,
+          epfNumber
+        };
+
+        await apiFetch('/v1/employees', {
+          method: 'POST',
+          body: JSON.stringify(payload)
+        });
+
+        showToast(`Employee ${firstName} ${lastName} (${code}) enrolled successfully!`, 'success');
+        closeModal();
+        renderEmployeesView();
+      } catch (err) {
+        showToast(err.message || 'Failed to create employee', 'error');
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerText = 'Create Employee';
+        }
+      }
+    }
+
+    // --- 3. EDIT EMPLOYEE DETAILS MODAL ---
+    async function openEditEmployeeModal(employeeId) {
+      try {
+        const emp = await apiFetch(`/v1/employees/${employeeId}`);
+
+        openModal({
+          title: `Edit Employee: ${emp.displayName} (${emp.employeeCode})`,
+          maxWidth: '680px',
+          bodyHtml: `
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+              <div class="form-group">
+                <label class="form-label">Employee Code *</label>
+                <input type="text" class="form-input" id="editEmpCode" value="${escapeHtml(emp.employeeCode)}" required>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Joined Date *</label>
+                <input type="date" class="form-input" id="editEmpJoinedDate" value="${escapeHtml(emp.joinedDate)}" required>
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+              <div class="form-group">
+                <label class="form-label">First Name *</label>
+                <input type="text" class="form-input" id="editEmpFirstName" value="${escapeHtml(emp.firstName)}" required>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Last Name *</label>
+                <input type="text" class="form-input" id="editEmpLastName" value="${escapeHtml(emp.lastName)}" required>
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+              <div class="form-group">
+                <label class="form-label">Designation *</label>
+                <input type="text" class="form-input" id="editEmpDesignation" value="${escapeHtml(emp.designation)}" required>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Department *</label>
+                <input type="text" class="form-input" id="editEmpDepartment" value="${escapeHtml(emp.department)}" required>
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+              <div class="form-group">
+                <label class="form-label">Payroll Frequency *</label>
+                <select class="form-select" id="editEmpFrequency">
+                  <option value="MONTHLY" ${emp.payrollFrequency === 'MONTHLY' ? 'selected' : ''}>Monthly Payroll</option>
+                  <option value="WEEKLY" ${emp.payrollFrequency === 'WEEKLY' ? 'selected' : ''}>Weekly Payroll</option>
+                  <option value="DAILY" ${emp.payrollFrequency === 'DAILY' ? 'selected' : ''}>Daily Payroll</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Employment Status *</label>
+                <select class="form-select" id="editEmpStatus">
+                  <option value="ACTIVE" ${emp.employmentStatus === 'ACTIVE' ? 'selected' : ''}>Active</option>
+                  <option value="PROBATION" ${emp.employmentStatus === 'PROBATION' ? 'selected' : ''}>Probation</option>
+                  <option value="INACTIVE" ${emp.employmentStatus === 'INACTIVE' ? 'selected' : ''}>Inactive</option>
+                  <option value="SUSPENDED" ${emp.employmentStatus === 'SUSPENDED' ? 'selected' : ''}>Suspended</option>
+                  <option value="TERMINATED" ${emp.employmentStatus === 'TERMINATED' ? 'selected' : ''}>Terminated</option>
+                </select>
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+              <div class="form-group">
+                <label class="form-label">Email Address</label>
+                <input type="email" class="form-input" id="editEmpEmail" value="${escapeHtml(emp.email || '')}">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Phone Number</label>
+                <input type="text" class="form-input" id="editEmpPhone" value="${escapeHtml(emp.phone || '')}">
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+              <div class="form-group">
+                <label class="form-label">National ID / Passport</label>
+                <input type="text" class="form-input" id="editEmpNationalId" value="${escapeHtml(emp.nationalId || '')}">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Date of Birth</label>
+                <input type="date" class="form-input" id="editEmpDob" value="${escapeHtml(emp.dateOfBirth || '')}">
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px;">
+              <div class="form-group">
+                <label class="form-label">Bank Name</label>
+                <input type="text" class="form-input" id="editEmpBankName" value="${escapeHtml(emp.bankName || '')}">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Bank Account #</label>
+                <input type="text" class="form-input" id="editEmpBankAccount" value="${escapeHtml(emp.bankAccountNumber || '')}">
+              </div>
+              <div class="form-group">
+                <label class="form-label">EPF / Tax Number</label>
+                <input type="text" class="form-input" id="editEmpEpf" value="${escapeHtml(emp.epfNumber || '')}">
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Address Line 1</label>
+              <input type="text" class="form-input" id="editEmpAddress" value="${escapeHtml(emp.addressLine1 || '')}">
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Internal Notes</label>
+              <textarea class="form-textarea" id="editEmpNotes" rows="2">${escapeHtml(emp.notes || '')}</textarea>
+            </div>
+          `,
+          footerHtml: `
+            <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+            <button class="btn btn-primary" id="btnSubmitEditEmp" onclick="submitEditEmployee('${employeeId}')">Save Changes</button>
+          `
+        });
+      } catch (err) {
+        showToast(`Failed to load employee: ${err.message}`, 'error');
+      }
+    }
+
+    async function submitEditEmployee(employeeId) {
+      const btn = document.getElementById('btnSubmitEditEmp');
+      const code = document.getElementById('editEmpCode').value.trim();
+      const firstName = document.getElementById('editEmpFirstName').value.trim();
+      const lastName = document.getElementById('editEmpLastName').value.trim();
+      const designation = document.getElementById('editEmpDesignation').value.trim();
+      const department = document.getElementById('editEmpDepartment').value.trim();
+      const joinedDate = document.getElementById('editEmpJoinedDate').value;
+      const frequency = document.getElementById('editEmpFrequency').value;
+      const status = document.getElementById('editEmpStatus').value;
+      const email = document.getElementById('editEmpEmail').value.trim() || null;
+      const phone = document.getElementById('editEmpPhone').value.trim() || null;
+      const nationalId = document.getElementById('editEmpNationalId').value.trim() || null;
+      const dob = document.getElementById('editEmpDob').value || null;
+      const bankName = document.getElementById('editEmpBankName').value.trim() || null;
+      const bankAccount = document.getElementById('editEmpBankAccount').value.trim() || null;
+      const epfNumber = document.getElementById('editEmpEpf').value.trim() || null;
+      const address = document.getElementById('editEmpAddress').value.trim() || null;
+      const notes = document.getElementById('editEmpNotes').value.trim() || null;
+
+      if (!code || !firstName || !lastName || !designation || !department) {
+        return showToast('Please fill in all required fields marked with *', 'error');
+      }
+
+      try {
+        if (btn) {
+          btn.disabled = true;
+          btn.innerText = 'Saving...';
+        }
+
+        await apiFetch(`/v1/employees/${employeeId}`, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            employeeCode: code,
+            firstName,
+            lastName,
+            displayName: `${firstName} ${lastName}`,
+            designation,
+            department,
+            joinedDate,
+            payrollFrequency: frequency,
+            employmentStatus: status,
+            email,
+            phone,
+            nationalId,
+            dateOfBirth: dob,
+            bankName,
+            bankAccountNumber: bankAccount,
+            epfNumber,
+            addressLine1: address,
+            notes
+          })
+        });
+
+        showToast('Employee profile updated successfully', 'success');
+        closeModal();
+        renderEmployeesView();
+      } catch (err) {
+        showToast(err.message || 'Failed to update employee', 'error');
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerText = 'Save Changes';
+        }
+      }
+    }
+
+    // --- 4. UPDATE EMPLOYEE STATUS MODAL ---
+    async function openUpdateEmployeeStatusModal(employeeId) {
+      const emp = (state.cachedEmployees || []).find(e => e.id === employeeId);
+      const name = emp ? emp.displayName : 'Employee';
+      const currentStatus = emp ? emp.employmentStatus : 'ACTIVE';
+
+      openModal({
+        title: `Change Status: ${name}`,
+        maxWidth: '480px',
+        bodyHtml: `
+          <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px;">
+            Current status: ${getStatusBadgeHtml(currentStatus)}
+          </div>
+          <div class="form-group">
+            <label class="form-label">New Employment Status *</label>
+            <select class="form-select" id="newStatusSelect">
+              <option value="ACTIVE" ${currentStatus === 'ACTIVE' ? 'selected' : ''}>Active</option>
+              <option value="PROBATION" ${currentStatus === 'PROBATION' ? 'selected' : ''}>Probation</option>
+              <option value="INACTIVE" ${currentStatus === 'INACTIVE' ? 'selected' : ''}>Inactive / On Leave</option>
+              <option value="SUSPENDED" ${currentStatus === 'SUSPENDED' ? 'selected' : ''}>Suspended</option>
+              <option value="TERMINATED" ${currentStatus === 'TERMINATED' ? 'selected' : ''}>Terminated</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Reason / Audit Note</label>
+            <textarea class="form-textarea" id="statusChangeReason" placeholder="Enter reason for status transition..." rows="3"></textarea>
+          </div>
+        `,
+        footerHtml: `
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-primary" id="btnSubmitStatusChange" onclick="submitUpdateEmployeeStatus('${employeeId}')">Update Status</button>
+        `
+      });
+    }
+
+    async function submitUpdateEmployeeStatus(employeeId) {
+      const btn = document.getElementById('btnSubmitStatusChange');
+      const status = document.getElementById('newStatusSelect').value;
+      const reason = document.getElementById('statusChangeReason').value.trim() || undefined;
+
+      try {
+        if (btn) {
+          btn.disabled = true;
+          btn.innerText = 'Updating...';
+        }
+
+        await apiFetch(`/v1/employees/${employeeId}/status`, {
+          method: 'POST',
+          body: JSON.stringify({ status, reason })
+        });
+
+        showToast(`Employment status updated to ${status}`, 'success');
+        closeModal();
+        renderEmployeesView();
+      } catch (err) {
+        showToast(err.message || 'Failed to update status', 'error');
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerText = 'Update Status';
+        }
+      }
+    }
+
+    // --- 5. FULL EMPLOYEE PROFILE MODAL ---
+    async function openEmployeeProfileModal(employeeId) {
+      try {
+        const profile = await apiFetch(`/v1/employees/${employeeId}/profile`);
+        const emp = profile.employee;
+        const salary = profile.activeSalaryStructure;
+        const docs = profile.documents || [];
+        const activity = profile.recentActivity || [];
+
+        openModal({
+          title: `Employee Profile: ${emp.displayName}`,
+          maxWidth: '780px',
+          bodyHtml: `
+            <!-- Top Summary Header -->
+            <div style="display: flex; gap: 16px; align-items: center; padding: 14px 18px; background: var(--bg-primary); border-radius: var(--radius); margin-bottom: 20px;">
+              <div style="width: 52px; height: 52px; border-radius: 50%; background: var(--accent-light); color: var(--accent-primary); font-weight: 700; font-size: 18px; display: flex; align-items: center; justify-content: center;">
+                ${getInitials(emp.displayName)}
+              </div>
+              <div style="flex: 1;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                  <span style="font-size: 18px; font-weight: 700; color: var(--text-primary);">${escapeHtml(emp.displayName)}</span>
+                  ${getStatusBadgeHtml(emp.employmentStatus)}
+                  ${getFrequencyBadgeHtml(emp.payrollFrequency)}
+                </div>
+                <div style="font-size: 13px; color: var(--text-secondary); margin-top: 2px;">
+                  ${escapeHtml(emp.designation)} &bull; <strong>${escapeHtml(emp.department)}</strong> &bull; Code: <span style="font-family: monospace;">${escapeHtml(emp.employeeCode)}</span>
+                </div>
+              </div>
+              <div style="display: flex; gap: 8px;">
+                <button class="btn btn-secondary btn-sm" onclick="openEditEmployeeModal('${emp.id}')">Edit</button>
+              </div>
+            </div>
+
+            <!-- Profile Tabs -->
+            <div style="display: flex; gap: 8px; border-bottom: 1px solid var(--border-subtle); margin-bottom: 16px;" id="profileTabNav">
+              <button class="btn btn-sm btn-secondary profile-tab-btn active" onclick="switchProfileTab('tabOverview')">Overview</button>
+              <button class="btn btn-sm btn-secondary profile-tab-btn" onclick="switchProfileTab('tabSalary')">Compensation &amp; Salary</button>
+              <button class="btn btn-sm btn-secondary profile-tab-btn" onclick="switchProfileTab('tabDocs')">Documents (${docs.length})</button>
+              <button class="btn btn-sm btn-secondary profile-tab-btn" onclick="switchProfileTab('tabActivity')">Activity Log (${activity.length})</button>
+            </div>
+
+            <!-- TAB 1: OVERVIEW -->
+            <div id="tabOverview" class="profile-tab-content">
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+                <div class="card" style="padding: 14px 16px;">
+                  <div style="font-weight: 600; font-size: 13px; margin-bottom: 10px; color: var(--text-secondary);">PERSONAL &amp; CONTACT DETAILS</div>
+                  <div style="font-size: 13px; line-height: 1.8;">
+                    <div><strong>Email:</strong> ${escapeHtml(emp.email || '—')}</div>
+                    <div><strong>Phone:</strong> ${escapeHtml(emp.phone || '—')}</div>
+                    <div><strong>National ID:</strong> ${escapeHtml(emp.nationalId || '—')}</div>
+                    <div><strong>Date of Birth:</strong> ${escapeHtml(emp.dateOfBirth || '—')}</div>
+                    <div><strong>Address:</strong> ${escapeHtml(emp.addressLine1 || '—')}</div>
+                  </div>
+                </div>
+
+                <div class="card" style="padding: 14px 16px;">
+                  <div style="font-weight: 600; font-size: 13px; margin-bottom: 10px; color: var(--text-secondary);">BANKING &amp; STATUTORY DETAILS</div>
+                  <div style="font-size: 13px; line-height: 1.8;">
+                    <div><strong>Bank:</strong> ${escapeHtml(emp.bankName || '—')}</div>
+                    <div><strong>Account #:</strong> ${escapeHtml(emp.bankAccountNumber || '—')}</div>
+                    <div><strong>Branch:</strong> ${escapeHtml(emp.bankBranch || '—')}</div>
+                    <div><strong>EPF / Tax #:</strong> ${escapeHtml(emp.epfNumber || '—')}</div>
+                    <div><strong>Joined Date:</strong> ${escapeHtml(emp.joinedDate)}</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Location & Account Linking -->
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                <div class="card" style="padding: 14px 16px;">
+                  <div style="font-weight: 600; font-size: 13px; margin-bottom: 10px; color: var(--text-secondary);">LOCATION ASSIGNMENTS</div>
+                  <div style="font-size: 13px; line-height: 1.8;">
+                    <div><strong>Primary Branch:</strong> ${escapeHtml(emp.primaryBranchName || 'HQ Branch')}</div>
+                    <div><strong>Primary Warehouse:</strong> ${escapeHtml(emp.primaryWarehouseName || 'Main Depot')}</div>
+                    <div><strong>Assigned Locations:</strong> ${emp.branchIds.length} branch(es), ${emp.warehouseIds.length} warehouse(s)</div>
+                  </div>
+                </div>
+
+                <div class="card" style="padding: 14px 16px;">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <div style="font-weight: 600; font-size: 13px; color: var(--text-secondary);">SYSTEM USER ACCOUNT</div>
+                    ${emp.linkedUserId
+                      ? `<button class="btn btn-secondary btn-sm" onclick="unlinkEmployeeUser('${emp.id}')">Unlink</button>`
+                      : `<button class="btn btn-primary btn-sm" onclick="openLinkEmployeeUserModal('${emp.id}')">Link Account</button>`}
+                  </div>
+                  <div style="font-size: 13px; line-height: 1.8;">
+                    ${emp.linkedUserId ? `
+                      <div style="color: var(--status-success); font-weight: 500;">&bull; Linked to System User</div>
+                      <div><strong>Email:</strong> ${escapeHtml(emp.linkedUserEmail || '—')}</div>
+                      <div style="font-size: 11px; font-family: monospace; color: var(--text-secondary);">UID: ${escapeHtml(emp.linkedUserId)}</div>
+                    ` : `
+                      <div style="color: var(--text-secondary);">No system login account linked to this employee.</div>
+                      <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">Linking allows recording POS shifts, audit trails, and self-service payslip access.</div>
+                    `}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- TAB 2: SALARY & COMPENSATION -->
+            <div id="tabSalary" class="profile-tab-content" style="display: none;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <div>
+                  <div style="font-size: 16px; font-weight: 600;">Active Salary Structure</div>
+                  <div style="font-size: 12px; color: var(--text-secondary);">Configured earnings, statutory deductions and payment methods</div>
+                </div>
+                <button class="btn btn-primary btn-sm" onclick="openEmployeeSalaryModal('${emp.id}')">${salary ? 'Update Salary Plan' : '+ Configure Salary'}</button>
+              </div>
+
+              ${salary ? `
+                <div class="card" style="margin-bottom: 16px; padding: 16px;">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                    <div>
+                      <div style="font-size: 12px; color: var(--text-secondary);">BASIC SALARY</div>
+                      <div style="font-size: 24px; font-weight: 700; color: var(--accent-primary);">${formatTenantMoney(salary.basicSalary, salary.currencyCode)}</div>
+                    </div>
+                    <div>
+                      <span class="badge-pill badge-green">Effective from ${escapeHtml(salary.effectiveFrom)}</span>
+                      <div style="font-size: 12px; color: var(--text-secondary); text-align: right; margin-top: 4px;">Method: <strong>${escapeHtml(salary.paymentMethod)}</strong></div>
+                    </div>
+                  </div>
+
+                  <div style="border-top: 1px solid var(--border-subtle); padding-top: 14px;">
+                    <div style="font-weight: 600; font-size: 13px; margin-bottom: 8px;">Components Breakdown (${salary.components.length})</div>
+                    <div class="table-responsive">
+                      <table class="data-table">
+                        <thead>
+                          <tr>
+                            <th>Component Name</th>
+                            <th>Type</th>
+                            <th>Calculation Rule</th>
+                            <th>Configured Value</th>
+                            <th>Taxable</th>
+                            <th>Statutory</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          ${salary.components.map(c => `
+                            <tr>
+                              <td><strong>${escapeHtml(c.componentName)}</strong></td>
+                              <td>
+                                ${c.componentType === 'EARNING'
+                                  ? '<span class="badge-pill badge-green">Allowance</span>'
+                                  : '<span class="badge-pill badge-red">Deduction</span>'}
+                              </td>
+                              <td>${c.calculationType === 'PERCENTAGE_OF_BASIC' ? '% of Basic' : 'Fixed Amount'}</td>
+                              <td>
+                                <strong>
+                                  ${c.calculationType === 'PERCENTAGE_OF_BASIC'
+                                    ? `${parseFloat(c.componentValue).toFixed(2)}%`
+                                    : formatTenantMoney(c.componentValue, salary.currencyCode)}
+                                </strong>
+                              </td>
+                              <td>${c.isTaxable ? 'Yes' : 'Exempt'}</td>
+                              <td>${c.isStatutory ? '<span class="badge-pill badge-yellow">Statutory</span>' : 'No'}</td>
+                            </tr>
+                          `).join('')}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              ` : `
+                <div class="empty-state-card" style="padding: 30px; text-align: center;">
+                  <div style="font-size: 14px; font-weight: 600; margin-bottom: 6px;">No Salary Structure Configured</div>
+                  <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 12px;">This employee does not have an active compensation structure. Configure basic pay and allowances to include them in automated payroll runs.</p>
+                  <button class="btn btn-primary btn-sm" onclick="openEmployeeSalaryModal('${emp.id}')">+ Configure Salary Now</button>
+                </div>
+              `}
+            </div>
+
+            <!-- TAB 3: DOCUMENTS -->
+            <div id="tabDocs" class="profile-tab-content" style="display: none;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <div>
+                  <div style="font-size: 16px; font-weight: 600;">Employee Documents</div>
+                  <div style="font-size: 12px; color: var(--text-secondary);">NIC/Passport, employment contracts, certificates (PDF, PNG, JPEG, WebP)</div>
+                </div>
+                <button class="btn btn-primary btn-sm" onclick="openEmployeeDocumentsModal('${emp.id}')">+ Upload Document</button>
+              </div>
+
+              ${docs.length === 0 ? `
+                <div class="empty-state-card" style="padding: 30px; text-align: center;">
+                  <div style="font-size: 14px; font-weight: 600; margin-bottom: 6px;">No Documents Uploaded</div>
+                  <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 12px;">Upload official contracts, identification proofs, and certification files for secure multi-tenant storage.</p>
+                  <button class="btn btn-primary btn-sm" onclick="openEmployeeDocumentsModal('${emp.id}')">+ Upload First Document</button>
+                </div>
+              ` : `
+                <div class="table-responsive">
+                  <table class="data-table">
+                    <thead>
+                      <tr>
+                        <th>Title</th>
+                        <th>Category</th>
+                        <th>File Name</th>
+                        <th>Size</th>
+                        <th>Uploaded On</th>
+                        <th style="text-align: right;">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${docs.map(d => `
+                        <tr>
+                          <td><strong>${escapeHtml(d.documentTitle)}</strong></td>
+                          <td><span class="badge-pill badge-blue">${escapeHtml(d.documentCategory)}</span></td>
+                          <td style="font-family: monospace; font-size: 12px;">${escapeHtml(d.fileName)}</td>
+                          <td style="font-size: 12px;">${(d.fileSize / 1024).toFixed(1)} KB</td>
+                          <td style="font-size: 12px; color: var(--text-secondary);">${d.createdAt ? d.createdAt.substring(0, 10) : ''}</td>
+                          <td style="text-align: right;">
+                            <button class="btn btn-secondary btn-sm" onclick="previewEmployeeDocument('${emp.id}', '${d.id}')">View</button>
+                            <button class="btn btn-secondary btn-sm" onclick="deleteEmployeeDocumentConfirm('${emp.id}', '${d.id}')" style="color: var(--status-danger);">Delete</button>
+                          </td>
+                        </tr>
+                      `).join('')}
+                    </tbody>
+                  </table>
+                </div>
+              `}
+            </div>
+
+            <!-- TAB 4: AUDIT ACTIVITY -->
+            <div id="tabActivity" class="profile-tab-content" style="display: none;">
+              <div style="font-size: 16px; font-weight: 600; margin-bottom: 12px;">Auditable Activity History</div>
+              ${activity.length === 0 ? `
+                <div style="padding: 24px; text-align: center; color: var(--text-secondary); font-size: 13px;">No recorded activity events for this employee.</div>
+              ` : `
+                <div style="display: flex; flex-direction: column; gap: 10px; max-height: 350px; overflow-y: auto;">
+                  ${activity.map(act => `
+                    <div style="padding: 10px 14px; background: var(--bg-primary); border-radius: var(--radius); border-left: 3px solid var(--accent-primary);">
+                      <div style="display: flex; justify-content: space-between; font-size: 11px; color: var(--text-secondary); margin-bottom: 2px;">
+                        <span style="font-family: monospace; font-weight: 600; color: var(--accent-primary);">${escapeHtml(act.activityType)}</span>
+                        <span>${act.timestamp ? act.timestamp.replace('T', ' ').substring(0, 19) : ''}</span>
+                      </div>
+                      <div style="font-size: 13px; font-weight: 500; color: var(--text-primary);">${escapeHtml(act.description)}</div>
+                    </div>
+                  `).join('')}
+                </div>
+              `}
+            </div>
+          `,
+          footerHtml: `
+            <button class="btn btn-secondary" onclick="closeModal()">Close</button>
+          `
+        });
+      } catch (err) {
+        showToast(`Failed to load employee profile: ${err.message}`, 'error');
+      }
+    }
+
+    function switchProfileTab(tabId) {
+      document.querySelectorAll('.profile-tab-content').forEach(el => el.style.display = 'none');
+      const target = document.getElementById(tabId);
+      if (target) target.style.display = 'block';
+
+      document.querySelectorAll('.profile-tab-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.getAttribute('onclick')?.includes(tabId));
+      });
+    }
+
+    // --- 6. LINK SYSTEM USER MODAL ---
+    function openLinkEmployeeUserModal(employeeId) {
+      openModal({
+        title: 'Link System User Account',
+        maxWidth: '480px',
+        bodyHtml: `
+          <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 14px;">
+            Link an existing NexStock user login UUID to this employee profile.
+          </div>
+          <div class="form-group">
+            <label class="form-label">System User UUID *</label>
+            <input type="text" class="form-input" id="linkUserUuid" placeholder="0192b4c0-7777-7000-8000-..." required>
+          </div>
+        `,
+        footerHtml: `
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-primary" id="btnSubmitLinkUser" onclick="submitLinkEmployeeUser('${employeeId}')">Link User</button>
+        `
+      });
+    }
+
+    async function submitLinkEmployeeUser(employeeId) {
+      const btn = document.getElementById('btnSubmitLinkUser');
+      const userId = document.getElementById('linkUserUuid').value.trim();
+      if (!userId) return showToast('User UUID is required', 'error');
+
+      try {
+        if (btn) {
+          btn.disabled = true;
+          btn.innerText = 'Linking...';
+        }
+
+        await apiFetch(`/v1/employees/${employeeId}/link-user`, {
+          method: 'POST',
+          body: JSON.stringify({ userId })
+        });
+
+        showToast('System user account linked successfully', 'success');
+        closeModal();
+        openEmployeeProfileModal(employeeId);
+      } catch (err) {
+        showToast(err.message || 'Failed to link user', 'error');
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerText = 'Link User';
+        }
+      }
+    }
+
+    async function unlinkEmployeeUser(employeeId) {
+      if (!confirm('Are you sure you want to unlink the system user from this employee?')) return;
+
+      try {
+        await apiFetch(`/v1/employees/${employeeId}/link-user`, {
+          method: 'POST',
+          body: JSON.stringify({ userId: null })
+        });
+        showToast('System user unlinked', 'info');
+        openEmployeeProfileModal(employeeId);
+      } catch (err) {
+        showToast(err.message || 'Failed to unlink user', 'error');
+      }
+    }
+
+    // --- 7. SALARY STRUCTURE CONFIGURATION MODAL ---
+    async function openEmployeeSalaryModal(employeeId) {
+      try {
+        const [emp, salaryRes] = await Promise.all([
+          apiFetch(`/v1/employees/${employeeId}`),
+          apiFetch(`/v1/employees/${employeeId}/salary-structure`).catch(() => null)
+        ]);
+
+        const currency = salaryRes?.currencyCode || getTenantCurrency();
+        const basicSalary = salaryRes?.basicSalary ? parseFloat(salaryRes.basicSalary).toFixed(2) : '0.00';
+        const effectiveFrom = salaryRes?.effectiveFrom || new Date().toISOString().substring(0, 10);
+        const paymentMethod = salaryRes?.paymentMethod || 'BANK_TRANSFER';
+        const existingComponents = salaryRes?.components || [];
+
+        openModal({
+          title: `Salary Structure: ${emp.displayName}`,
+          maxWidth: '720px',
+          bodyHtml: `
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; margin-bottom: 16px;">
+              <div class="form-group">
+                <label class="form-label">Basic Salary * (${currency})</label>
+                <input type="number" step="0.01" min="0" class="form-input" id="salaryBasicInput" value="${basicSalary}" required oninput="previewSalaryTotals()">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Effective From *</label>
+                <input type="date" class="form-input" id="salaryEffectiveDate" value="${effectiveFrom}" required>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Payment Method *</label>
+                <select class="form-select" id="salaryMethodSelect">
+                  <option value="BANK_TRANSFER" ${paymentMethod === 'BANK_TRANSFER' ? 'selected' : ''}>Bank Transfer</option>
+                  <option value="CASH" ${paymentMethod === 'CASH' ? 'selected' : ''}>Cash</option>
+                  <option value="CHEQUE" ${paymentMethod === 'CHEQUE' ? 'selected' : ''}>Cheque</option>
+                </select>
+              </div>
+            </div>
+
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+              <div style="font-weight: 600; font-size: 13px;">Allowances &amp; Deductions</div>
+              <div style="display: flex; gap: 8px;">
+                <button type="button" class="btn btn-secondary btn-sm" onclick="addSalaryComponentRow('EARNING')">+ Add Allowance</button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="addSalaryComponentRow('DEDUCTION')">+ Add Deduction</button>
+              </div>
+            </div>
+
+            <div id="salaryComponentsContainer" style="display: flex; flex-direction: column; gap: 10px; max-height: 280px; overflow-y: auto; margin-bottom: 16px; padding: 4px;">
+              <!-- Dynamic Rows inserted here -->
+            </div>
+
+            <!-- Live Calculation Preview Card -->
+            <div style="padding: 12px 16px; background: var(--bg-primary); border-radius: var(--radius); border: 1px solid var(--border-subtle); display: flex; justify-content: space-between; align-items: center;">
+              <div>
+                <span style="font-size: 12px; color: var(--text-secondary);">ESTIMATED GROSS:</span>
+                <strong id="previewGrossAmount" style="margin-left: 4px; color: var(--status-success);">$0.00</strong>
+              </div>
+              <div>
+                <span style="font-size: 12px; color: var(--text-secondary);">TOTAL DEDUCTIONS:</span>
+                <strong id="previewDeductionsAmount" style="margin-left: 4px; color: var(--status-danger);">$0.00</strong>
+              </div>
+              <div>
+                <span style="font-size: 12px; color: var(--text-secondary);">ESTIMATED NET PAY:</span>
+                <strong id="previewNetAmount" style="margin-left: 4px; color: var(--accent-primary); font-size: 15px;">$0.00</strong>
+              </div>
+            </div>
+          `,
+          footerHtml: `
+            <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+            <button class="btn btn-primary" id="btnSubmitSalary" onclick="submitEmployeeSalary('${employeeId}', '${currency}')">Save Salary Plan</button>
+          `
+        });
+
+        // Initialize component rows
+        const container = document.getElementById('salaryComponentsContainer');
+        container.innerHTML = '';
+        if (existingComponents.length > 0) {
+          for (const c of existingComponents) {
+            addSalaryComponentRow(c.componentType, c.componentName, c.calculationType, c.componentValue, c.isTaxable, c.isStatutory);
+          }
+        } else {
+          // Add default starter allowances/deductions
+          addSalaryComponentRow('EARNING', 'Housing Allowance', 'FIXED_AMOUNT', '0.00', true, false);
+          addSalaryComponentRow('DEDUCTION', 'EPF Employee', 'PERCENTAGE_OF_BASIC', '8.00', false, true);
+        }
+
+        previewSalaryTotals();
+      } catch (err) {
+        showToast(`Failed to load salary plan: ${err.message}`, 'error');
+      }
+    }
+
+    function addSalaryComponentRow(type = 'EARNING', name = '', calcType = 'FIXED_AMOUNT', value = '0.00', isTaxable = true, isStatutory = false) {
+      const container = document.getElementById('salaryComponentsContainer');
+      if (!container) return;
+
+      const rowId = `comp_row_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+      const row = document.createElement('div');
+      row.className = 'salary-comp-row';
+      row.id = rowId;
+      row.style.cssText = 'display: grid; grid-template-columns: 2fr 1.2fr 1.5fr 1.2fr auto; gap: 8px; align-items: center; padding: 8px; background: var(--surface-card); border: 1px solid var(--border-subtle); border-radius: var(--radius);';
+
+      row.innerHTML = `
+        <input type="text" class="form-input comp-name" placeholder="${type === 'EARNING' ? 'e.g. Housing / Transport' : 'e.g. EPF / Tax / Loan'}" value="${escapeHtml(name)}" required>
+        <select class="form-select comp-type" onchange="previewSalaryTotals()">
+          <option value="EARNING" ${type === 'EARNING' ? 'selected' : ''}>Allowance (+)</option>
+          <option value="DEDUCTION" ${type === 'DEDUCTION' ? 'selected' : ''}>Deduction (-)</option>
+        </select>
+        <select class="form-select comp-calc" onchange="previewSalaryTotals()">
+          <option value="FIXED_AMOUNT" ${calcType === 'FIXED_AMOUNT' ? 'selected' : ''}>Fixed Amount</option>
+          <option value="PERCENTAGE_OF_BASIC" ${calcType === 'PERCENTAGE_OF_BASIC' ? 'selected' : ''}>% of Basic</option>
+        </select>
+        <input type="number" step="0.01" min="0" class="form-input comp-val" value="${parseFloat(value || 0).toFixed(2)}" oninput="previewSalaryTotals()" required>
+        <button type="button" class="btn btn-icon btn-sm" onclick="document.getElementById('${rowId}').remove(); previewSalaryTotals();" style="color: var(--status-danger);" title="Remove Row">&times;</button>
+      `;
+
+      container.appendChild(row);
+      previewSalaryTotals();
+    }
+
+    function previewSalaryTotals() {
+      const basicInput = document.getElementById('salaryBasicInput');
+      const basic = parseFloat(basicInput?.value || 0) || 0;
+
+      let allowances = 0;
+      let deductions = 0;
+
+      document.querySelectorAll('.salary-comp-row').forEach(row => {
+        const type = row.querySelector('.comp-type')?.value;
+        const calc = row.querySelector('.comp-calc')?.value;
+        const val = parseFloat(row.querySelector('.comp-val')?.value || 0) || 0;
+
+        let amount = 0;
+        if (calc === 'PERCENTAGE_OF_BASIC') {
+          amount = (basic * val) / 100;
+        } else {
+          amount = val;
+        }
+
+        if (type === 'EARNING') {
+          allowances += amount;
+        } else {
+          deductions += amount;
+        }
+      });
+
+      const gross = basic + allowances;
+      const net = Math.max(0, gross - deductions);
+
+      const grossEl = document.getElementById('previewGrossAmount');
+      const dedEl = document.getElementById('previewDeductionsAmount');
+      const netEl = document.getElementById('previewNetAmount');
+
+      if (grossEl) grossEl.innerText = formatTenantMoney(gross);
+      if (dedEl) dedEl.innerText = formatTenantMoney(deductions);
+      if (netEl) netEl.innerText = formatTenantMoney(net);
+    }
+
+    async function submitEmployeeSalary(employeeId, currencyCode) {
+      const btn = document.getElementById('btnSubmitSalary');
+      const basicSalary = document.getElementById('salaryBasicInput').value;
+      const effectiveFrom = document.getElementById('salaryEffectiveDate').value;
+      const paymentMethod = document.getElementById('salaryMethodSelect').value;
+
+      if (!basicSalary || parseFloat(basicSalary) < 0 || !effectiveFrom) {
+        return showToast('Please enter a valid basic salary and effective date', 'error');
+      }
+
+      const components = [];
+      let hasInvalidComp = false;
+
+      document.querySelectorAll('.salary-comp-row').forEach(row => {
+        const name = row.querySelector('.comp-name')?.value.trim();
+        const type = row.querySelector('.comp-type')?.value;
+        const calc = row.querySelector('.comp-calc')?.value;
+        const val = row.querySelector('.comp-val')?.value;
+
+        if (!name || parseFloat(val) < 0) {
+          hasInvalidComp = true;
+          return;
+        }
+
+        components.push({
+          componentType: type,
+          componentName: name,
+          calculationType: calc,
+          componentValue: parseFloat(val).toFixed(4),
+          isTaxable: true,
+          isStatutory: type === 'DEDUCTION' && name.toLowerCase().includes('epf'),
+          isEnabled: true
+        });
+      });
+
+      if (hasInvalidComp) {
+        return showToast('Please enter names and valid positive values for all components', 'error');
+      }
+
+      try {
+        if (btn) {
+          btn.disabled = true;
+          btn.innerText = 'Saving Plan...';
+        }
+
+        await apiFetch(`/v1/employees/${employeeId}/salary-structure`, {
+          method: 'POST',
+          body: JSON.stringify({
+            basicSalary: parseFloat(basicSalary).toFixed(4),
+            effectiveFrom,
+            paymentMethod,
+            currencyCode,
+            components
+          })
+        });
+
+        showToast('Salary structure updated successfully', 'success');
+        closeModal();
+        renderEmployeesView();
+      } catch (err) {
+        showToast(err.message || 'Failed to save salary plan', 'error');
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerText = 'Save Salary Plan';
+        }
+      }
+    }
+
+    // --- 8. EMPLOYEE DOCUMENTS MODAL ---
+    async function openEmployeeDocumentsModal(employeeId) {
+      try {
+        const [emp, docs] = await Promise.all([
+          apiFetch(`/v1/employees/${employeeId}`),
+          apiFetch(`/v1/employees/${employeeId}/documents`).catch(() => [])
+        ]);
+
+        openModal({
+          title: `Documents: ${emp.displayName}`,
+          maxWidth: '680px',
+          bodyHtml: `
+            <!-- Document Upload Form -->
+            <div class="card" style="padding: 14px 16px; margin-bottom: 20px; background: var(--bg-primary);">
+              <div style="font-weight: 600; font-size: 13px; margin-bottom: 10px;">Upload Official Document</div>
+              <div style="display: grid; grid-template-columns: 1.5fr 1fr; gap: 12px; margin-bottom: 12px;">
+                <div class="form-group" style="margin-bottom: 0;">
+                  <label class="form-label">Document Title *</label>
+                  <input type="text" class="form-input" id="uploadDocTitle" placeholder="e.g. National ID Copy / Signed Contract" required>
+                </div>
+                <div class="form-group" style="margin-bottom: 0;">
+                  <label class="form-label">Category *</label>
+                  <select class="form-select" id="uploadDocCategory">
+                    <option value="NIC_PASSPORT">NIC / Passport</option>
+                    <option value="CONTRACT" selected>Employment Contract</option>
+                    <option value="CERTIFICATE">Academic / Certificate</option>
+                    <option value="RESUME">Resume / CV</option>
+                    <option value="OTHER">Other Record</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="form-group" style="margin-bottom: 12px;">
+                <label class="form-label">Select File (PDF, PNG, JPEG, WebP - max 10MB) *</label>
+                <input type="file" class="form-input" id="uploadDocFileInput" accept=".pdf,image/jpeg,image/png,image/webp" required>
+              </div>
+
+              <div style="display: flex; justify-content: flex-end;">
+                <button class="btn btn-primary btn-sm" id="btnUploadDoc" onclick="submitUploadDocument('${employeeId}')">Upload Document</button>
+              </div>
+            </div>
+
+            <!-- Documents List -->
+            <div style="font-weight: 600; font-size: 13px; margin-bottom: 10px;">Enrolled Documents (${docs.length})</div>
+            ${docs.length === 0 ? `
+              <div style="padding: 24px; text-align: center; color: var(--text-secondary); font-size: 13px;">No documents uploaded yet.</div>
+            ` : `
+              <div class="table-responsive">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>Document Title</th>
+                      <th>Category</th>
+                      <th>File Name</th>
+                      <th>Size</th>
+                      <th style="text-align: right;">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${docs.map(d => `
+                      <tr>
+                        <td><strong>${escapeHtml(d.documentTitle)}</strong></td>
+                        <td><span class="badge-pill badge-blue">${escapeHtml(d.documentCategory)}</span></td>
+                        <td style="font-size: 12px; font-family: monospace;">${escapeHtml(d.fileName)}</td>
+                        <td style="font-size: 12px;">${(d.fileSize / 1024).toFixed(1)} KB</td>
+                        <td style="text-align: right;">
+                          <button class="btn btn-secondary btn-sm" onclick="previewEmployeeDocument('${employeeId}', '${d.id}')">View</button>
+                          <button class="btn btn-secondary btn-sm" onclick="deleteEmployeeDocumentConfirm('${employeeId}', '${d.id}')" style="color: var(--status-danger);">Delete</button>
+                        </td>
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+              </div>
+            `}
+          `,
+          footerHtml: `
+            <button class="btn btn-secondary" onclick="closeModal()">Close</button>
+          `
+        });
+      } catch (err) {
+        showToast(`Failed to load documents: ${err.message}`, 'error');
+      }
+    }
+
+    async function submitUploadDocument(employeeId) {
+      const btn = document.getElementById('btnUploadDoc');
+      const title = document.getElementById('uploadDocTitle')?.value.trim();
+      const category = document.getElementById('uploadDocCategory')?.value;
+      const fileInput = document.getElementById('uploadDocFileInput');
+      const file = fileInput?.files?.[0];
+
+      if (!title || !category || !file) {
+        return showToast('Please enter a document title and select a file', 'error');
+      }
+
+      if (file.size > 10 * 1024 * 1024) {
+        return showToast(`File size (${(file.size / (1024 * 1024)).toFixed(1)} MB) exceeds 10 MB limit`, 'error');
+      }
+
+      try {
+        if (btn) {
+          btn.disabled = true;
+          btn.innerText = 'Uploading...';
+        }
+
+        const reader = new FileReader();
+        const base64Data = await new Promise((resolve, reject) => {
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+
+        await apiFetch(`/v1/employees/${employeeId}/documents`, {
+          method: 'POST',
+          body: JSON.stringify({
+            documentCategory: category,
+            documentTitle: title,
+            fileName: file.name,
+            mimeType: file.type || 'application/pdf',
+            dataBase64: String(base64Data)
+          })
+        });
+
+        showToast(`Document "${title}" uploaded successfully!`, 'success');
+        openEmployeeDocumentsModal(employeeId);
+      } catch (err) {
+        showToast(err.message || 'Failed to upload document', 'error');
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerText = 'Upload Document';
+        }
+      }
+    }
+
+    async function previewEmployeeDocument(employeeId, documentId) {
+      try {
+        const content = await apiFetch(`/v1/employees/${employeeId}/documents/${documentId}/content`);
+        const dataUrl = `data:${content.mimeType};base64,${content.dataBase64}`;
+
+        if (content.mimeType === 'application/pdf') {
+          // Open PDF in new tab
+          const newTab = window.open();
+          if (newTab) {
+            newTab.document.write(`<iframe src="${dataUrl}" frameborder="0" style="border:0; top:0; left:0; bottom:0; right:0; width:100%; height:100%;" allowfullscreen></iframe>`);
+          } else {
+            window.location.href = dataUrl;
+          }
+        } else {
+          // Render image in modal
+          openModal({
+            title: `Preview: ${content.fileName}`,
+            maxWidth: '650px',
+            bodyHtml: `
+              <div style="text-align: center; max-height: 500px; overflow: auto;">
+                <img src="${dataUrl}" alt="${escapeHtml(content.fileName)}" style="max-width: 100%; border-radius: var(--radius); box-shadow: var(--shadow-sm);">
+              </div>
+            `,
+            footerHtml: `
+              <button class="btn btn-secondary" onclick="closeModal()">Close</button>
+            `
+          });
+        }
+      } catch (err) {
+        showToast(`Failed to preview document: ${err.message}`, 'error');
+      }
+    }
+
+    async function deleteEmployeeDocumentConfirm(employeeId, documentId) {
+      if (!confirm('Are you sure you want to delete this document? This action cannot be undone.')) return;
+
+      try {
+        await apiFetch(`/v1/employees/${employeeId}/documents/${documentId}`, {
+          method: 'DELETE'
+        });
+        showToast('Document deleted', 'success');
+        openEmployeeDocumentsModal(employeeId);
+      } catch (err) {
+        showToast(err.message || 'Failed to delete document', 'error');
+      }
+    }
+
+    // --- 9. PAYROLL RUNS VIEW ---
+    async function renderPayrollView() {
+      const container = document.getElementById('mainContainer');
+      container.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-secondary);"><div class="spinner-sm" style="display:inline-block; margin-bottom: 8px;"></div><div>Loading payroll runs...</div></div>';
+
+      try {
+        let queryUrl = '/v1/payroll/runs?limit=50';
+        if (state.payrollFilters.frequency) {
+          queryUrl += `&frequency=${encodeURIComponent(state.payrollFilters.frequency)}`;
+        }
+        if (state.payrollFilters.status) {
+          queryUrl += `&status=${encodeURIComponent(state.payrollFilters.status)}`;
+        }
+
+        const runs = await apiFetch(queryUrl).catch(() => []);
+        state.cachedPayrollRuns = Array.isArray(runs) ? runs : [];
+
+        // Aggregate stats
+        let totalNet = 0;
+        let totalPaid = 0;
+        let pendingApprovalCount = 0;
+        let approvedUnpaid = 0;
+
+        for (const r of state.cachedPayrollRuns) {
+          if (r.status !== 'CANCELLED') {
+            const net = parseFloat(r.totalNetPay || 0);
+            const paid = parseFloat(r.totalPaidAmount || 0);
+            totalNet += net;
+            totalPaid += paid;
+            if (r.status === 'PENDING_APPROVAL') pendingApprovalCount++;
+            if (['APPROVED', 'PARTIALLY_PAID'].includes(r.status)) {
+              approvedUnpaid += Math.max(0, net - paid);
+            }
+          }
+        }
+
+        container.innerHTML = `
+          <div class="view-header">
+            <div>
+              <h1 class="view-title">Payroll Management</h1>
+              <div class="view-subtitle">Calculate, approve, and disburse Monthly, Weekly, and Daily employee payroll</div>
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <button class="btn btn-secondary" onclick="renderView('payroll-reports')">Payroll Reports</button>
+              <button class="btn btn-primary" id="btnOpenCreatePayroll" onclick="openCreatePayrollRunModal()">+ New Payroll Run</button>
+            </div>
+          </div>
+
+          <!-- KPI Metric Cards -->
+          <div class="kpi-grid" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); margin-bottom: 16px;">
+            <div class="kpi-card">
+              <div class="kpi-label">Total Net Payroll</div>
+              <div class="kpi-value">${formatTenantMoney(totalNet)}</div>
+              <div class="kpi-trend" style="color: var(--text-secondary);">${state.cachedPayrollRuns.length} total runs</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Total Disbursed</div>
+              <div class="kpi-value" style="color: var(--status-success);">${formatTenantMoney(totalPaid)}</div>
+              <div class="kpi-trend" style="color: var(--status-success);">Paid to staff</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Approved &bull; Unpaid</div>
+              <div class="kpi-value" style="color: var(--status-warning);">${formatTenantMoney(approvedUnpaid)}</div>
+              <div class="kpi-trend" style="color: var(--status-warning);">Ready for disbursement</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Pending Approval</div>
+              <div class="kpi-value" style="color: var(--accent-primary);">${pendingApprovalCount}</div>
+              <div class="kpi-trend" style="color: var(--accent-primary);">Awaiting sign-off</div>
+            </div>
+          </div>
+
+          <!-- Frequency Tabs & Filter Bar -->
+          <div class="card" style="margin-bottom: 16px; padding: 12px 18px;">
+            <div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between;">
+              <div style="display: flex; gap: 6px;">
+                <button class="btn btn-sm ${!state.payrollFilters.frequency ? 'btn-primary' : 'btn-secondary'}" onclick="setPayrollFrequencyFilter('')">All Frequencies</button>
+                <button class="btn btn-sm ${state.payrollFilters.frequency === 'MONTHLY' ? 'btn-primary' : 'btn-secondary'}" onclick="setPayrollFrequencyFilter('MONTHLY')">Monthly</button>
+                <button class="btn btn-sm ${state.payrollFilters.frequency === 'WEEKLY' ? 'btn-primary' : 'btn-secondary'}" onclick="setPayrollFrequencyFilter('WEEKLY')">Weekly</button>
+                <button class="btn btn-sm ${state.payrollFilters.frequency === 'DAILY' ? 'btn-primary' : 'btn-secondary'}" onclick="setPayrollFrequencyFilter('DAILY')">Daily</button>
+              </div>
+
+              <div style="display: flex; gap: 10px; align-items: center;">
+                <select class="form-select form-select-sm" id="payrollStatusFilter" onchange="setPayrollStatusFilter(this.value)">
+                  <option value="">All Statuses</option>
+                  <option value="DRAFT" ${state.payrollFilters.status === 'DRAFT' ? 'selected' : ''}>Draft</option>
+                  <option value="PENDING_APPROVAL" ${state.payrollFilters.status === 'PENDING_APPROVAL' ? 'selected' : ''}>Pending Approval</option>
+                  <option value="APPROVED" ${state.payrollFilters.status === 'APPROVED' ? 'selected' : ''}>Approved</option>
+                  <option value="PARTIALLY_PAID" ${state.payrollFilters.status === 'PARTIALLY_PAID' ? 'selected' : ''}>Partially Paid</option>
+                  <option value="PAID" ${state.payrollFilters.status === 'PAID' ? 'selected' : ''}>Paid</option>
+                  <option value="CANCELLED" ${state.payrollFilters.status === 'CANCELLED' ? 'selected' : ''}>Cancelled</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <!-- Runs Table / Cards -->
+          <div class="card">
+            ${state.cachedPayrollRuns.length === 0 ? `
+              <div class="empty-state-card" style="padding: 40px; text-align: center;">
+                <div style="font-size: 40px; margin-bottom: 12px;">💳</div>
+                <div class="empty-state-title" style="font-size: 18px; font-weight: 600; margin-bottom: 6px;">No Payroll Runs Found</div>
+                <p class="empty-state-desc" style="color: var(--text-secondary); margin-bottom: 16px;">Create a new Monthly, Weekly, or Daily payroll run to automatically aggregate basic salaries and allowances.</p>
+                <button class="btn btn-primary" onclick="openCreatePayrollRunModal()">+ New Payroll Run</button>
+              </div>
+            ` : `
+              <div class="desktop-table-container">
+                <div class="table-responsive">
+                  <table class="data-table">
+                    <thead>
+                      <tr>
+                        <th>Run Number</th>
+                        <th>Frequency</th>
+                        <th>Period</th>
+                        <th>Payment Date</th>
+                        <th>Employees</th>
+                        <th>Gross Pay</th>
+                        <th>Deductions</th>
+                        <th>Net Pay</th>
+                        <th>Paid Amount</th>
+                        <th>Status</th>
+                        <th style="text-align: right;">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${state.cachedPayrollRuns.map(r => {
+                        const freqBadge = getFrequencyBadgeHtml(r.frequency);
+                        const statusBadge = getPayrollStatusBadgeHtml(r.status);
+                        const netPay = parseFloat(r.totalNetPay || 0);
+                        const paid = parseFloat(r.totalPaidAmount || 0);
+                        const balanceDue = Math.max(0, netPay - paid);
+
+                        return `
+                          <tr>
+                            <td>
+                              <strong style="color: var(--accent-primary); cursor: pointer;" onclick="openPayrollRunDetailModal('${r.id}')">${escapeHtml(r.runNumber)}</strong>
+                            </td>
+                            <td>${freqBadge}</td>
+                            <td style="font-size: 12px;">${escapeHtml(r.periodStart)} &rarr; ${escapeHtml(r.periodEnd)}</td>
+                            <td style="font-size: 12px; color: var(--text-secondary);">${escapeHtml(r.paymentDate)}</td>
+                            <td style="font-weight: 600;">${r.employeeCount} staff</td>
+                            <td>${formatTenantMoney(r.totalGrossPay, r.currencyCode)}</td>
+                            <td style="color: var(--status-danger);">${formatTenantMoney(r.totalDeductions, r.currencyCode)}</td>
+                            <td><strong>${formatTenantMoney(r.totalNetPay, r.currencyCode)}</strong></td>
+                            <td>
+                              <div>${formatTenantMoney(r.totalPaidAmount, r.currencyCode)}</div>
+                              ${balanceDue > 0 && ['APPROVED', 'PARTIALLY_PAID'].includes(r.status)
+                                ? `<div style="font-size: 11px; color: var(--status-warning);">Due: ${formatTenantMoney(balanceDue, r.currencyCode)}</div>`
+                                : ''}
+                            </td>
+                            <td>${statusBadge}</td>
+                            <td style="text-align: right;">
+                              <div style="display: inline-flex; gap: 6px;">
+                                <button class="btn btn-secondary btn-sm" onclick="openPayrollRunDetailModal('${r.id}')">View Items</button>
+                                ${r.status === 'DRAFT' ? `
+                                  <button class="btn btn-secondary btn-sm" onclick="submitPayrollRunAction('${r.id}')" title="Submit for supervisor signoff">Submit</button>
+                                  <button class="btn btn-primary btn-sm" onclick="approvePayrollRunAction('${r.id}')" title="Approve Run">Approve</button>
+                                  <button class="btn btn-secondary btn-sm" onclick="cancelPayrollRunAction('${r.id}')" style="color: var(--status-danger);">Cancel</button>
+                                ` : ''}
+                                ${r.status === 'PENDING_APPROVAL' ? `
+                                  <button class="btn btn-primary btn-sm" onclick="approvePayrollRunAction('${r.id}')">Approve</button>
+                                  <button class="btn btn-secondary btn-sm" onclick="cancelPayrollRunAction('${r.id}')" style="color: var(--status-danger);">Cancel</button>
+                                ` : ''}
+                                ${['APPROVED', 'PARTIALLY_PAID'].includes(r.status) && balanceDue > 0 ? `
+                                  <button class="btn btn-primary btn-sm" onclick="openRecordPayrollPaymentModal('${r.id}')">Pay</button>
+                                ` : ''}
+                              </div>
+                            </td>
+                          </tr>
+                        `;
+                      }).join('')}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            `}
+          </div>
+        `;
+      } catch (err) {
+        container.innerHTML = `
+          <div style="padding: 40px; text-align: center; color: var(--status-danger);">
+            <div style="font-size: 16px; font-weight: 600; margin-bottom: 8px;">Failed to load payroll runs</div>
+            <div style="font-size: 13px; margin-bottom: 16px;">${escapeHtml(err.message)}</div>
+            <button class="btn btn-primary btn-sm" onclick="renderPayrollView()">Try Again</button>
+          </div>
+        `;
+      }
+    }
+
+    function setPayrollFrequencyFilter(freq) {
+      state.payrollFilters.frequency = freq;
+      renderPayrollView();
+    }
+
+    function setPayrollStatusFilter(status) {
+      state.payrollFilters.status = status;
+      renderPayrollView();
+    }
+
+    function getPayrollStatusBadgeHtml(status) {
+      switch (status) {
+        case 'DRAFT':
+          return '<span class="badge-pill" style="background: #E2E8F0; color: #475569;">Draft</span>';
+        case 'PENDING_APPROVAL':
+          return '<span class="badge-pill badge-yellow">Pending Approval</span>';
+        case 'APPROVED':
+          return '<span class="badge-pill badge-blue">Approved</span>';
+        case 'PARTIALLY_PAID':
+          return '<span class="badge-pill" style="background: #FEF3C7; color: #D97706;">Partially Paid</span>';
+        case 'PAID':
+          return '<span class="badge-pill badge-green">Paid</span>';
+        case 'CANCELLED':
+          return '<span class="badge-pill badge-red">Cancelled</span>';
+        default:
+          return `<span class="badge-pill">${escapeHtml(status || 'Draft')}</span>`;
+      }
+    }
+
+    // --- 10. CREATE PAYROLL RUN MODAL ---
+    function openCreatePayrollRunModal() {
+      const now = new Date();
+      const y = now.getFullYear();
+      const m = String(now.getMonth() + 1).padStart(2, '0');
+      const startOfMonth = `${y}-${m}-01`;
+      const lastDay = new Date(y, now.getMonth() + 1, 0).getDate();
+      const endOfMonth = `${y}-${m}-${String(lastDay).padStart(2, '0')}`;
+      const payDate = `${y}-${m}-${String(Math.min(28, lastDay)).padStart(2, '0')}`;
+
+      openModal({
+        title: 'New Payroll Run',
+        maxWidth: '560px',
+        bodyHtml: `
+          <div class="form-group">
+            <label class="form-label">Payroll Frequency *</label>
+            <select class="form-select" id="newRunFrequency" onchange="updateDefaultPayrollDates(this.value)">
+              <option value="MONTHLY" selected>Monthly Payroll</option>
+              <option value="WEEKLY">Weekly Payroll</option>
+              <option value="DAILY">Daily Payroll</option>
+            </select>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+            <div class="form-group">
+              <label class="form-label">Period Start Date *</label>
+              <input type="date" class="form-input" id="newRunPeriodStart" value="${startOfMonth}" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Period End Date *</label>
+              <input type="date" class="form-input" id="newRunPeriodEnd" value="${endOfMonth}" required>
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+            <div class="form-group">
+              <label class="form-label">Payment Date *</label>
+              <input type="date" class="form-input" id="newRunPaymentDate" value="${payDate}" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Currency *</label>
+              <input type="text" class="form-input" id="newRunCurrency" value="${getTenantCurrency()}" readonly>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Internal Notes / Memo</label>
+            <textarea class="form-textarea" id="newRunNotes" placeholder="e.g. Regular monthly payroll run with quarterly performance adjustments" rows="2"></textarea>
+          </div>
+        `,
+        footerHtml: `
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-primary" id="btnSubmitCreateRun" onclick="submitCreatePayrollRun()">Calculate &amp; Generate Run</button>
+        `
+      });
+    }
+
+    function updateDefaultPayrollDates(freq) {
+      const now = new Date();
+      const y = now.getFullYear();
+      const m = String(now.getMonth() + 1).padStart(2, '0');
+      const d = String(now.getDate()).padStart(2, '0');
+      const today = `${y}-${m}-${d}`;
+
+      const startEl = document.getElementById('newRunPeriodStart');
+      const endEl = document.getElementById('newRunPeriodEnd');
+      const payEl = document.getElementById('newRunPaymentDate');
+
+      if (freq === 'DAILY') {
+        if (startEl) startEl.value = today;
+        if (endEl) endEl.value = today;
+        if (payEl) payEl.value = today;
+      } else if (freq === 'WEEKLY') {
+        // Last 7 days
+        const prevWeek = new Date(now.getTime() - 6 * 24 * 60 * 60 * 1000);
+        const pwY = prevWeek.getFullYear();
+        const pwM = String(prevWeek.getMonth() + 1).padStart(2, '0');
+        const pwD = String(prevWeek.getDate()).padStart(2, '0');
+        if (startEl) startEl.value = `${pwY}-${pwM}-${pwD}`;
+        if (endEl) endEl.value = today;
+        if (payEl) payEl.value = today;
+      } else {
+        const startOfMonth = `${y}-${m}-01`;
+        const lastDay = new Date(y, now.getMonth() + 1, 0).getDate();
+        if (startEl) startEl.value = startOfMonth;
+        if (endEl) endEl.value = `${y}-${m}-${String(lastDay).padStart(2, '0')}`;
+        if (payEl) payEl.value = `${y}-${m}-${String(Math.min(28, lastDay)).padStart(2, '0')}`;
+      }
+    }
+
+    async function submitCreatePayrollRun() {
+      const btn = document.getElementById('btnSubmitCreateRun');
+      const frequency = document.getElementById('newRunFrequency').value;
+      const periodStart = document.getElementById('newRunPeriodStart').value;
+      const periodEnd = document.getElementById('newRunPeriodEnd').value;
+      const paymentDate = document.getElementById('newRunPaymentDate').value;
+      const currencyCode = document.getElementById('newRunCurrency').value;
+      const notes = document.getElementById('newRunNotes').value.trim() || undefined;
+
+      if (!frequency || !periodStart || !periodEnd || !paymentDate) {
+        return showToast('Please complete all required date fields', 'error');
+      }
+
+      try {
+        if (btn) {
+          btn.disabled = true;
+          btn.innerText = 'Calculating Payroll...';
+        }
+
+        const run = await apiFetch('/v1/payroll/runs', {
+          method: 'POST',
+          body: JSON.stringify({
+            frequency,
+            periodStart,
+            periodEnd,
+            paymentDate,
+            currencyCode,
+            notes
+          })
+        });
+
+        showToast(`Payroll run #${run.runNumber} created successfully for ${run.employeeCount} employees!`, 'success');
+        closeModal();
+        renderPayrollView();
+      } catch (err) {
+        showToast(err.message || 'Failed to create payroll run', 'error');
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerText = 'Calculate & Generate Run';
+        }
+      }
+    }
+
+    // --- 11. PAYROLL RUN DETAIL MODAL ---
+    async function openPayrollRunDetailModal(runId) {
+      try {
+        const run = await apiFetch(`/v1/payroll/runs/${runId}`);
+        const items = run.items || [];
+        const isDraft = run.status === 'DRAFT';
+        const isApprovedOrPartial = ['APPROVED', 'PARTIALLY_PAID'].includes(run.status);
+
+        openModal({
+          title: `Payroll Run: ${run.runNumber}`,
+          maxWidth: '880px',
+          bodyHtml: `
+            <!-- Run Header Stats -->
+            <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; padding: 14px 18px; background: var(--bg-primary); border-radius: var(--radius); margin-bottom: 20px;">
+              <div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <span style="font-size: 16px; font-weight: 700;">${escapeHtml(run.runNumber)}</span>
+                  ${getFrequencyBadgeHtml(run.frequency)}
+                  ${getPayrollStatusBadgeHtml(run.status)}
+                </div>
+                <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">
+                  Period: <strong>${escapeHtml(run.periodStart)}</strong> to <strong>${escapeHtml(run.periodEnd)}</strong> &bull; Payment Date: <strong>${escapeHtml(run.paymentDate)}</strong>
+                </div>
+              </div>
+
+              <div style="display: flex; gap: 16px; text-align: right;">
+                <div>
+                  <div style="font-size: 11px; color: var(--text-secondary);">TOTAL GROSS</div>
+                  <div style="font-size: 15px; font-weight: 700;">${formatTenantMoney(run.totalGrossPay, run.currencyCode)}</div>
+                </div>
+                <div>
+                  <div style="font-size: 11px; color: var(--text-secondary);">DEDUCTIONS</div>
+                  <div style="font-size: 15px; font-weight: 700; color: var(--status-danger);">${formatTenantMoney(run.totalDeductions, run.currencyCode)}</div>
+                </div>
+                <div>
+                  <div style="font-size: 11px; color: var(--text-secondary);">TOTAL NET</div>
+                  <div style="font-size: 16px; font-weight: 700; color: var(--accent-primary);">${formatTenantMoney(run.totalNetPay, run.currencyCode)}</div>
+                </div>
+                <div>
+                  <div style="font-size: 11px; color: var(--text-secondary);">DISBURSED</div>
+                  <div style="font-size: 15px; font-weight: 700; color: var(--status-success);">${formatTenantMoney(run.totalPaidAmount, run.currencyCode)}</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Employee Line Items Table -->
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+              <div style="font-weight: 600; font-size: 14px;">Employee Line Items (${items.length})</div>
+              ${isDraft ? '<div style="font-size: 12px; color: var(--text-secondary);">Click "Adjust" to update Overtime, Bonus or Commissions</div>' : ''}
+            </div>
+
+            ${items.length === 0 ? `
+              <div style="padding: 24px; text-align: center; color: var(--text-secondary); font-size: 13px;">No eligible active employees enrolled for ${run.frequency} frequency.</div>
+            ` : `
+              <div class="table-responsive" style="max-height: 420px; overflow-y: auto;">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>Employee</th>
+                      <th>Basic</th>
+                      <th>Allowances</th>
+                      <th>OT Pay</th>
+                      <th>Bonus/Comm</th>
+                      <th>Gross Pay</th>
+                      <th>Deductions</th>
+                      <th>Net Pay</th>
+                      <th>Paid</th>
+                      <th>Status</th>
+                      <th style="text-align: right;">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${items.map(it => {
+                      const net = parseFloat(it.netPay || 0);
+                      const paid = parseFloat(it.paidAmount || 0);
+                      const due = Math.max(0, net - paid);
+                      const isItemFullyPaid = it.paymentStatus === 'PAID';
+
+                      return `
+                        <tr>
+                          <td>
+                            <strong style="color: var(--text-primary);">${escapeHtml(it.employeeName)}</strong>
+                            <div style="font-size: 11px; color: var(--text-secondary); font-family: monospace;">${escapeHtml(it.employeeCode)} &bull; ${escapeHtml(it.department)}</div>
+                          </td>
+                          <td>${formatTenantMoney(it.basicSalary, run.currencyCode)}</td>
+                          <td>${formatTenantMoney(it.allowancesTotal, run.currencyCode)}</td>
+                          <td>
+                            ${parseFloat(it.overtimePay) > 0
+                              ? `<div>${formatTenantMoney(it.overtimePay, run.currencyCode)}</div><div style="font-size: 10px; color: var(--text-secondary);">${it.overtimeHours} hrs</div>`
+                              : '—'}
+                          </td>
+                          <td>
+                            ${parseFloat(it.bonusPay) > 0 || parseFloat(it.commissionsPay) > 0
+                              ? formatTenantMoney(parseFloat(it.bonusPay) + parseFloat(it.commissionsPay), run.currencyCode)
+                              : '—'}
+                          </td>
+                          <td>${formatTenantMoney(it.grossPay, run.currencyCode)}</td>
+                          <td style="color: var(--status-danger);">${formatTenantMoney(it.deductionsTotal, run.currencyCode)}</td>
+                          <td><strong>${formatTenantMoney(it.netPay, run.currencyCode)}</strong></td>
+                          <td>
+                            <div>${formatTenantMoney(it.paidAmount, run.currencyCode)}</div>
+                            ${due > 0 && isApprovedOrPartial ? `<div style="font-size: 10px; color: var(--status-warning);">Due: ${formatTenantMoney(due, run.currencyCode)}</div>` : ''}
+                          </td>
+                          <td>
+                            ${it.paymentStatus === 'PAID'
+                              ? '<span class="badge-pill badge-green">Paid</span>'
+                              : it.paymentStatus === 'PARTIALLY_PAID'
+                                ? '<span class="badge-pill badge-yellow">Partial</span>'
+                                : '<span class="badge-pill" style="background:#E2E8F0; color:#475569;">Unpaid</span>'}
+                          </td>
+                          <td style="text-align: right;">
+                            <div style="display: inline-flex; gap: 4px;">
+                              ${isDraft ? `<button class="btn btn-secondary btn-sm" onclick="openAdjustPayrollItemModal('${run.id}', '${it.id}')" title="Adjust OT, Bonus & Commissions">Adjust</button>` : ''}
+                              ${isApprovedOrPartial && !isItemFullyPaid ? `<button class="btn btn-primary btn-sm" onclick="openRecordPayrollItemPaymentModal('${run.id}', '${it.id}')" title="Record Payment">Pay</button>` : ''}
+                              <button class="btn btn-secondary btn-sm" onclick="openPayslipModal('${run.id}', '${it.employeeId}')" title="Generate Payslip">Payslip</button>
+                            </div>
+                          </td>
+                        </tr>
+                      `;
+                    }).join('')}
+                  </tbody>
+                </table>
+              </div>
+            `}
+          `,
+          footerHtml: `
+            <div style="display: flex; justify-content: space-between; width: 100%;">
+              <div>
+                ${isDraft ? `
+                  <button class="btn btn-secondary" onclick="submitPayrollRunAction('${run.id}')">Submit for Approval</button>
+                  <button class="btn btn-primary" onclick="approvePayrollRunAction('${run.id}')">Approve Run</button>
+                ` : ''}
+                ${run.status === 'PENDING_APPROVAL' ? `
+                  <button class="btn btn-primary" onclick="approvePayrollRunAction('${run.id}')">Approve Run</button>
+                ` : ''}
+              </div>
+              <button class="btn btn-secondary" onclick="closeModal()">Close</button>
+            </div>
+          `
+        });
+      } catch (err) {
+        showToast(`Failed to load payroll run details: ${err.message}`, 'error');
+      }
+    }
+
+    // --- 12. ADJUST PAYROLL ITEM MODAL ---
+    async function openAdjustPayrollItemModal(runId, itemId) {
+      try {
+        const run = await apiFetch(`/v1/payroll/runs/${runId}`);
+        const it = (run.items || []).find(x => x.id === itemId);
+        if (!it) return showToast('Item not found', 'error');
+
+        openModal({
+          title: `Adjust Earnings: ${it.employeeName} (${it.employeeCode})`,
+          maxWidth: '520px',
+          bodyHtml: `
+            <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 14px;">
+              Basic Salary: <strong>${formatTenantMoney(it.basicSalary, run.currencyCode)}</strong> &bull; Fixed Allowances: <strong>${formatTenantMoney(it.allowancesTotal, run.currencyCode)}</strong>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+              <div class="form-group">
+                <label class="form-label">Overtime Hours</label>
+                <input type="number" step="0.25" min="0" class="form-input" id="adjOtHours" value="${parseFloat(it.overtimeHours || 0).toFixed(2)}">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Overtime Pay (${run.currencyCode})</label>
+                <input type="number" step="0.01" min="0" class="form-input" id="adjOtPay" value="${parseFloat(it.overtimePay || 0).toFixed(2)}">
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+              <div class="form-group">
+                <label class="form-label">Bonus Pay (${run.currencyCode})</label>
+                <input type="number" step="0.01" min="0" class="form-input" id="adjBonus" value="${parseFloat(it.bonusPay || 0).toFixed(2)}">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Commissions (${run.currencyCode})</label>
+                <input type="number" step="0.01" min="0" class="form-input" id="adjCommissions" value="${parseFloat(it.commissionsPay || 0).toFixed(2)}">
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Adjustment Notes / Memo</label>
+              <textarea class="form-textarea" id="adjNotes" placeholder="Reason for overtime or bonus..." rows="2">${escapeHtml(it.notes || '')}</textarea>
+            </div>
+          `,
+          footerHtml: `
+            <button class="btn btn-secondary" onclick="openPayrollRunDetailModal('${runId}')">Back</button>
+            <button class="btn btn-primary" id="btnSubmitAdjustItem" onclick="submitAdjustPayrollItem('${runId}', '${itemId}')">Save Adjustments</button>
+          `
+        });
+      } catch (err) {
+        showToast(err.message || 'Failed to open adjustment', 'error');
+      }
+    }
+
+    async function submitAdjustPayrollItem(runId, itemId) {
+      const btn = document.getElementById('btnSubmitAdjustItem');
+      const otHours = document.getElementById('adjOtHours').value;
+      const otPay = document.getElementById('adjOtPay').value;
+      const bonusPay = document.getElementById('adjBonus').value;
+      const commissionsPay = document.getElementById('adjCommissions').value;
+      const notes = document.getElementById('adjNotes').value.trim() || undefined;
+
+      try {
+        if (btn) {
+          btn.disabled = true;
+          btn.innerText = 'Saving...';
+        }
+
+        await apiFetch(`/v1/payroll/runs/${runId}/items/${itemId}`, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            overtimeHours: parseFloat(otHours || 0).toFixed(4),
+            overtimePay: parseFloat(otPay || 0).toFixed(4),
+            bonusPay: parseFloat(bonusPay || 0).toFixed(4),
+            commissionsPay: parseFloat(commissionsPay || 0).toFixed(4),
+            notes
+          })
+        });
+
+        showToast('Payroll line item updated', 'success');
+        openPayrollRunDetailModal(runId);
+        renderPayrollView();
+      } catch (err) {
+        showToast(err.message || 'Failed to update item', 'error');
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerText = 'Save Adjustments';
+        }
+      }
+    }
+
+    // --- 13. WORKFLOW ACTIONS (SUBMIT, APPROVE, CANCEL) ---
+    async function submitPayrollRunAction(runId) {
+      try {
+        await apiFetch(`/v1/payroll/runs/${runId}/submit`, { method: 'POST' });
+        showToast('Payroll run submitted for approval', 'success');
+        openPayrollRunDetailModal(runId);
+        renderPayrollView();
+      } catch (err) {
+        showToast(err.message || 'Submit failed', 'error');
+      }
+    }
+
+    async function approvePayrollRunAction(runId) {
+      if (!confirm('Are you sure you want to approve this payroll run? Once approved, line items are locked and immutable.')) return;
+
+      try {
+        await apiFetch(`/v1/payroll/runs/${runId}/approve`, { method: 'POST' });
+        showToast('Payroll run approved! Ready for disbursements.', 'success');
+        openPayrollRunDetailModal(runId);
+        renderPayrollView();
+      } catch (err) {
+        showToast(err.message || 'Approval failed', 'error');
+      }
+    }
+
+    async function cancelPayrollRunAction(runId) {
+      const reason = prompt('Please enter a cancellation reason:');
+      if (reason === null) return;
+
+      try {
+        await apiFetch(`/v1/payroll/runs/${runId}/cancel`, {
+          method: 'POST',
+          body: JSON.stringify({ reason: reason || 'Cancelled by manager' })
+        });
+        showToast('Payroll run cancelled', 'info');
+        closeModal();
+        renderPayrollView();
+      } catch (err) {
+        showToast(err.message || 'Cancellation failed', 'error');
+      }
+    }
+
+    // --- 14. RECORD PAYROLL PAYMENT MODAL ---
+    async function openRecordPayrollPaymentModal(runId, defaultItemId) {
+      try {
+        const run = await apiFetch(`/v1/payroll/runs/${runId}`);
+        const items = (run.items || []).filter(i => i.paymentStatus !== 'PAID');
+        if (items.length === 0) {
+          return showToast('All employee line items in this run are already fully paid.', 'info');
+        }
+
+        const selectedItem = items.find(i => i.id === defaultItemId) || items[0];
+        const defaultDue = Math.max(0, parseFloat(selectedItem.netPay) - parseFloat(selectedItem.paidAmount)).toFixed(2);
+
+        openModal({
+          title: `Record Payment &bull; Run #${run.runNumber}`,
+          maxWidth: '540px',
+          bodyHtml: `
+            <div class="form-group">
+              <label class="form-label">Select Employee Line Item *</label>
+              <select class="form-select" id="payItemIdSelect" onchange="updatePaymentDueAmount(this.value)">
+                ${items.map(it => {
+                  const due = Math.max(0, parseFloat(it.netPay) - parseFloat(it.paidAmount)).toFixed(2);
+                  return `<option value="${it.id}" data-due="${due}" ${it.id === selectedItem.id ? 'selected' : ''}>${escapeHtml(it.employeeName)} (${escapeHtml(it.employeeCode)}) - Due: ${formatTenantMoney(due, run.currencyCode)}</option>`;
+                }).join('')}
+              </select>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+              <div class="form-group">
+                <label class="form-label">Payment Amount * (${run.currencyCode})</label>
+                <input type="number" step="0.01" min="0.01" class="form-input" id="payAmountInput" value="${defaultDue}" required>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Payment Method *</label>
+                <select class="form-select" id="payMethodSelect">
+                  <option value="BANK_TRANSFER" selected>Bank Transfer</option>
+                  <option value="CASH">Cash</option>
+                  <option value="CHEQUE">Cheque</option>
+                </select>
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+              <div class="form-group">
+                <label class="form-label">Payment Date *</label>
+                <input type="date" class="form-input" id="payDateInput" value="${new Date().toISOString().substring(0, 10)}" required>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Transaction / Cheque Reference #</label>
+                <input type="text" class="form-input" id="payRefNumber" placeholder="TXN-202302-001">
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Payment Memo</label>
+              <input type="text" class="form-input" id="payNotes" placeholder="e.g. Disbursed via commercial payroll transfer">
+            </div>
+          `,
+          footerHtml: `
+            <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+            <button class="btn btn-primary" id="btnSubmitPayment" onclick="submitRecordPayrollPayment('${runId}', '${run.currencyCode}')">Record Payment</button>
+          `
+        });
+      } catch (err) {
+        showToast(err.message || 'Failed to open payment modal', 'error');
+      }
+    }
+
+    function updatePaymentDueAmount(itemId) {
+      const select = document.getElementById('payItemIdSelect');
+      const selectedOption = select?.querySelector(`option[value="${itemId}"]`);
+      const due = selectedOption?.getAttribute('data-due');
+      const amountInput = document.getElementById('payAmountInput');
+      if (amountInput && due) {
+        amountInput.value = due;
+      }
+    }
+
+    function openRecordPayrollItemPaymentModal(runId, itemId) {
+      openRecordPayrollPaymentModal(runId, itemId);
+    }
+
+    async function submitRecordPayrollPayment(runId, currencyCode) {
+      const btn = document.getElementById('btnSubmitPayment');
+      const itemId = document.getElementById('payItemIdSelect')?.value;
+      const amount = document.getElementById('payAmountInput')?.value;
+      const method = document.getElementById('payMethodSelect')?.value;
+      const date = document.getElementById('payDateInput')?.value;
+      const ref = document.getElementById('payRefNumber')?.value.trim() || undefined;
+      const notes = document.getElementById('payNotes')?.value.trim() || undefined;
+
+      if (!itemId || !amount || parseFloat(amount) <= 0 || !date) {
+        return showToast('Please enter a valid positive payment amount and date', 'error');
+      }
+
+      try {
+        if (btn) {
+          btn.disabled = true;
+          btn.innerText = 'Recording Payment...';
+        }
+
+        await apiFetch(`/v1/payroll/runs/${runId}/payments`, {
+          method: 'POST',
+          body: JSON.stringify({
+            itemId,
+            paymentMethod: method,
+            paymentAmount: parseFloat(amount).toFixed(4),
+            currencyCode,
+            paymentDate: date,
+            referenceNumber: ref,
+            notes
+          })
+        });
+
+        showToast(`Disbursement of ${formatTenantMoney(amount, currencyCode)} recorded successfully!`, 'success');
+        openPayrollRunDetailModal(runId);
+        renderPayrollView();
+      } catch (err) {
+        showToast(err.message || 'Payment recording failed', 'error');
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerText = 'Record Payment';
+        }
+      }
+    }
+
+    // --- 15. PAYSLIP MODAL & PRINTING ---
+    async function openPayslipModal(runId, employeeId) {
+      try {
+        const slip = await apiFetch(`/v1/payroll/runs/${runId}/payslips/${employeeId}`);
+        const it = slip.item;
+        const emp = slip.employee;
+        const earnings = slip.earningsBreakdown || [];
+        const deductions = slip.deductionsBreakdown || [];
+
+        const payslipHtml = `
+          <div id="payslipPrintArea" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #1e293b; max-width: 680px; margin: 0 auto; padding: 20px; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px;">
+            <!-- Top Header -->
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #2563eb; padding-bottom: 12px; margin-bottom: 16px;">
+              <div>
+                <div style="font-size: 20px; font-weight: 800; color: #0f172a; letter-spacing: -0.02em;">${escapeHtml(slip.tenantName)}</div>
+                <div style="font-size: 12px; color: #64748b; margin-top: 2px;">Official Salary &amp; Compensation Statement</div>
+              </div>
+              <div style="text-align: right;">
+                <div style="font-size: 14px; font-weight: 700; color: #2563eb;">PAYSLIP / INVOICE</div>
+                <div style="font-size: 11px; color: #64748b; font-family: monospace;">RUN #${escapeHtml(slip.runNumber)}</div>
+              </div>
+            </div>
+
+            <!-- Employee & Pay Period Details -->
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; background: #f8fafc; padding: 12px 16px; border-radius: 6px; margin-bottom: 16px; font-size: 12px; line-height: 1.7;">
+              <div>
+                <div><strong>Employee Name:</strong> ${escapeHtml(emp.fullName)}</div>
+                <div><strong>Employee Code:</strong> <span style="font-family: monospace;">${escapeHtml(emp.employeeCode)}</span></div>
+                <div><strong>Designation:</strong> ${escapeHtml(emp.designation)}</div>
+                <div><strong>Department:</strong> ${escapeHtml(emp.department)}</div>
+              </div>
+              <div>
+                <div><strong>Pay Period:</strong> ${escapeHtml(slip.periodStart)} &rarr; ${escapeHtml(slip.periodEnd)}</div>
+                <div><strong>Payment Date:</strong> ${escapeHtml(slip.paymentDate)}</div>
+                <div><strong>Bank:</strong> ${escapeHtml(emp.bankName || 'Direct Disbursal')} ${emp.bankAccountNumber ? `(${escapeHtml(emp.bankAccountNumber)})` : ''}</div>
+                <div><strong>EPF / Tax #:</strong> ${escapeHtml(emp.epfNumber || '—')}</div>
+              </div>
+            </div>
+
+            <!-- Earnings & Deductions Breakdown -->
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+              <!-- Earnings Column -->
+              <div style="border: 1px solid #e2e8f0; border-radius: 6px; overflow: hidden;">
+                <div style="background: #f1f5f9; padding: 8px 12px; font-size: 12px; font-weight: 700; color: #0f172a; border-bottom: 1px solid #e2e8f0;">
+                  EARNINGS &amp; ALLOWANCES
+                </div>
+                <div style="padding: 8px 12px; font-size: 12px; min-height: 120px;">
+                  ${earnings.map(e => `
+                    <div style="display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px dashed #f1f5f9;">
+                      <span>${escapeHtml(e.name)}</span>
+                      <strong>${formatTenantMoney(e.amount, slip.currencyCode)}</strong>
+                    </div>
+                  `).join('')}
+                </div>
+                <div style="background: #eff6ff; padding: 8px 12px; font-size: 12px; font-weight: 700; color: #1e3a8a; border-top: 1px solid #e2e8f0; display: flex; justify-content: space-between;">
+                  <span>GROSS EARNINGS:</span>
+                  <span>${formatTenantMoney(it.grossPay, slip.currencyCode)}</span>
+                </div>
+              </div>
+
+              <!-- Deductions Column -->
+              <div style="border: 1px solid #e2e8f0; border-radius: 6px; overflow: hidden;">
+                <div style="background: #f1f5f9; padding: 8px 12px; font-size: 12px; font-weight: 700; color: #0f172a; border-bottom: 1px solid #e2e8f0;">
+                  DEDUCTIONS &amp; STATUTORY
+                </div>
+                <div style="padding: 8px 12px; font-size: 12px; min-height: 120px;">
+                  ${deductions.length === 0 ? `
+                    <div style="color: #94a3b8; font-style: italic; padding: 8px 0;">No deductions recorded</div>
+                  ` : deductions.map(d => `
+                    <div style="display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px dashed #f1f5f9;">
+                      <span>${escapeHtml(d.name)}</span>
+                      <strong style="color: #dc2626;">-${formatTenantMoney(d.amount, slip.currencyCode)}</strong>
+                    </div>
+                  `).join('')}
+                </div>
+                <div style="background: #fef2f2; padding: 8px 12px; font-size: 12px; font-weight: 700; color: #991b1b; border-top: 1px solid #e2e8f0; display: flex; justify-content: space-between;">
+                  <span>TOTAL DEDUCTIONS:</span>
+                  <span>-${formatTenantMoney(it.deductionsTotal, slip.currencyCode)}</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Net Payable Summary -->
+            <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px; padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+              <div>
+                <div style="font-size: 11px; font-weight: 700; color: #166534; text-transform: uppercase;">NET PAYABLE SALARY</div>
+                <div style="font-size: 22px; font-weight: 800; color: #15803d;">${formatTenantMoney(it.netPay, slip.currencyCode)}</div>
+              </div>
+              <div style="text-align: right; font-size: 12px;">
+                <div>Disbursed: <strong>${formatTenantMoney(it.paidAmount, slip.currencyCode)}</strong></div>
+                <div>Status: <span class="badge-pill ${it.paymentStatus === 'PAID' ? 'badge-green' : 'badge-yellow'}">${it.paymentStatus}</span></div>
+              </div>
+            </div>
+
+            <!-- Footer Sign-off -->
+            <div style="display: flex; justify-content: space-between; font-size: 11px; color: #94a3b8; padding-top: 12px; border-top: 1px solid #e2e8f0;">
+              <div>Generated electronically by NexStock Universal SaaS</div>
+              <div>Authorized Signatory: ________________________</div>
+            </div>
+          </div>
+        `;
+
+        openModal({
+          title: `Payslip: ${emp.fullName}`,
+          maxWidth: '720px',
+          bodyHtml: payslipHtml,
+          footerHtml: `
+            <div style="display: flex; justify-content: space-between; width: 100%;">
+              <button class="btn btn-primary" onclick="printHtmlDocument(document.getElementById('payslipPrintArea').outerHTML, '@page { size: auto; margin: 15mm; }')">🖨️ Print Payslip</button>
+              <button class="btn btn-secondary" onclick="closeModal()">Close</button>
+            </div>
+          `
+        });
+      } catch (err) {
+        showToast(`Failed to load payslip: ${err.message}`, 'error');
+      }
+    }
+
+    // --- 16. PAYROLL REPORTS VIEW ---
+    async function renderPayrollReportsView() {
+      const container = document.getElementById('mainContainer');
+      container.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-secondary);"><div class="spinner-sm" style="display:inline-block; margin-bottom: 8px;"></div><div>Loading payroll summary reports...</div></div>';
+
+      try {
+        const report = await apiFetch('/v1/payroll/reports/summary');
+        const currency = getTenantCurrency();
+        const depts = report.byDepartment || [];
+        const freqs = report.byFrequency || [];
+
+        container.innerHTML = `
+          <div class="view-header">
+            <div>
+              <h1 class="view-title">Payroll Reports &amp; Analytics</h1>
+              <div class="view-subtitle">Executive summary of gross expenses, statutory withholdings, and departmental wage allocation</div>
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <button class="btn btn-secondary" onclick="renderView('payroll')">&larr; Back to Runs</button>
+              <button class="btn btn-primary" onclick="printHtmlDocument(document.getElementById('payrollReportPrintArea').outerHTML, '@page { size: auto; margin: 15mm; }')">🖨️ Print Report</button>
+            </div>
+          </div>
+
+          <div id="payrollReportPrintArea">
+            <!-- Summary KPI Grid -->
+            <div class="kpi-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); margin-bottom: 20px;">
+              <div class="kpi-card">
+                <div class="kpi-label">Total Gross Payroll</div>
+                <div class="kpi-value">${formatTenantMoney(report.totalGross, currency)}</div>
+                <div class="kpi-trend" style="color: var(--text-secondary);">${report.runsCount} active runs</div>
+              </div>
+              <div class="kpi-card">
+                <div class="kpi-label">Total Withholdings</div>
+                <div class="kpi-value" style="color: var(--status-danger);">${formatTenantMoney(report.totalDeductions, currency)}</div>
+                <div class="kpi-trend" style="color: var(--status-danger);">Tax &amp; statutory EPF</div>
+              </div>
+              <div class="kpi-card">
+                <div class="kpi-label">Total Net Salary</div>
+                <div class="kpi-value" style="color: var(--accent-primary);">${formatTenantMoney(report.totalNet, currency)}</div>
+                <div class="kpi-trend" style="color: var(--accent-primary);">${report.employeesPaidCount} employees disbursed</div>
+              </div>
+              <div class="kpi-card">
+                <div class="kpi-label">Disbursed (Paid)</div>
+                <div class="kpi-value" style="color: var(--status-success);">${formatTenantMoney(report.totalPaid, currency)}</div>
+                <div class="kpi-trend" style="color: var(--status-success);">Paid to date</div>
+              </div>
+              <div class="kpi-card">
+                <div class="kpi-label">Outstanding Unpaid</div>
+                <div class="kpi-value" style="color: var(--status-warning);">${formatTenantMoney(report.totalUnpaid, currency)}</div>
+                <div class="kpi-trend" style="color: var(--status-warning);">Balance pending</div>
+              </div>
+            </div>
+
+            <!-- Two Breakdown Tables: Department and Frequency -->
+            <div style="display: grid; grid-template-columns: 1.5fr 1fr; gap: 20px;">
+              <!-- Department Breakdown -->
+              <div class="card">
+                <div class="card-title">Department Allocation</div>
+                ${depts.length === 0 ? `
+                  <div style="padding: 24px; text-align: center; color: var(--text-secondary); font-size: 13px;">No departmental payroll data recorded.</div>
+                ` : `
+                  <div class="table-responsive">
+                    <table class="data-table">
+                      <thead>
+                        <tr>
+                          <th>Department</th>
+                          <th>Employees</th>
+                          <th>Gross Total</th>
+                          <th>Net Total</th>
+                          <th>Disbursed</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        ${depts.map(d => `
+                          <tr>
+                            <td><strong>${escapeHtml(d.department)}</strong></td>
+                            <td>${d.employeeCount}</td>
+                            <td>${formatTenantMoney(d.gross, currency)}</td>
+                            <td><strong>${formatTenantMoney(d.net, currency)}</strong></td>
+                            <td style="color: var(--status-success);">${formatTenantMoney(d.paid, currency)}</td>
+                          </tr>
+                        `).join('')}
+                      </tbody>
+                    </table>
+                  </div>
+                `}
+              </div>
+
+              <!-- Frequency Breakdown -->
+              <div class="card">
+                <div class="card-title">Schedule Frequency Breakdown</div>
+                ${freqs.length === 0 ? `
+                  <div style="padding: 24px; text-align: center; color: var(--text-secondary); font-size: 13px;">No frequency data recorded.</div>
+                ` : `
+                  <div class="table-responsive">
+                    <table class="data-table">
+                      <thead>
+                        <tr>
+                          <th>Frequency</th>
+                          <th>Runs</th>
+                          <th>Total Gross</th>
+                          <th>Total Net</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        ${freqs.map(f => `
+                          <tr>
+                            <td>${getFrequencyBadgeHtml(f.frequency)}</td>
+                            <td><strong>${f.runsCount}</strong></td>
+                            <td>${formatTenantMoney(f.gross, currency)}</td>
+                            <td><strong>${formatTenantMoney(f.net, currency)}</strong></td>
+                          </tr>
+                        `).join('')}
+                      </tbody>
+                    </table>
+                  </div>
+                `}
+              </div>
+            </div>
+          </div>
+        `;
+      } catch (err) {
+        container.innerHTML = `
+          <div style="padding: 40px; text-align: center; color: var(--status-danger);">
+            <div style="font-size: 16px; font-weight: 600; margin-bottom: 8px;">Failed to load payroll report</div>
+            <div style="font-size: 13px; margin-bottom: 16px;">${escapeHtml(err.message)}</div>
+            <button class="btn btn-primary btn-sm" onclick="renderPayrollReportsView()">Try Again</button>
+          </div>
+        `;
       }
     }
 

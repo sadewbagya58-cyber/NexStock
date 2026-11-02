@@ -522,6 +522,13 @@ export function loadPhase6BarcodeIntegrityMigrationSql(): string {
   return sqlText;
 }
 
+export function loadPhase7EmployeesAndPayrollMigrationSql(): string {
+  const filename = '0014_phase7_employees_and_payroll.sql';
+  const sqlText = readFileSync(resolve(migrationsDir, filename), 'utf-8');
+  assertPostgresMigrationSqlCompatible(sqlText, filename);
+  return sqlText;
+}
+
 export function getOrderedPostgresMigrations(): readonly PostgresMigrationSpec[] {
   return [
     {
@@ -614,6 +621,13 @@ export function getOrderedPostgresMigrations(): readonly PostgresMigrationSpec[]
       name: '0013_phase6_barcode_integrity',
       filename: '0013_phase6_barcode_integrity.sql',
       sql: loadPhase6BarcodeIntegrityMigrationSql(),
+    },
+    {
+      dialect: 'postgres',
+      version: 14,
+      name: '0014_phase7_employees_and_payroll',
+      filename: '0014_phase7_employees_and_payroll.sql',
+      sql: loadPhase7EmployeesAndPayrollMigrationSql(),
     },
   ];
 }

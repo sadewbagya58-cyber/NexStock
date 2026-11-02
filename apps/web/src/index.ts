@@ -189,10 +189,41 @@ export const ALL_SPA_VIEW_IDS = [
   'pos-registers',
   'pos-shifts',
   'pos-sales',
+  'employees',
+  'payroll',
+  'payroll-reports',
   'org-settings',
 ] as const;
 
 export type SpaViewId = (typeof ALL_SPA_VIEW_IDS)[number];
+
+export interface HrmNavItem {
+  readonly id: 'employees' | 'payroll' | 'payroll-reports';
+  readonly label: string;
+  readonly href: string;
+  readonly requiredPermission: string;
+}
+
+export const PHASE7_HRM_NAV_ITEMS: readonly HrmNavItem[] = [
+  {
+    id: 'employees',
+    label: 'Employee Directory',
+    href: '/hrm/employees',
+    requiredPermission: 'hrm:employee:read',
+  },
+  {
+    id: 'payroll',
+    label: 'Payroll Management',
+    href: '/hrm/payroll',
+    requiredPermission: 'hrm:payroll:read',
+  },
+  {
+    id: 'payroll-reports',
+    label: 'Payroll Reports',
+    href: '/hrm/payroll-reports',
+    requiredPermission: 'hrm:payroll:read',
+  },
+] as const;
 
 export function isSessionAuthenticated(token: string | null | undefined): boolean {
   return typeof token === 'string' && token.trim().length > 0;

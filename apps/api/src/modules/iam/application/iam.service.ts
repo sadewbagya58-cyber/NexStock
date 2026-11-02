@@ -58,7 +58,17 @@ export type PermissionKey =
   | 'inv:count:create'
   | 'inv:count:submit'
   | 'inv:count:approve'
-  | 'inv:count:post';
+  | 'inv:count:post'
+  | 'hrm:employee:read'
+  | 'hrm:employee:manage'
+  | 'hrm:document:read'
+  | 'hrm:document:manage'
+  | 'hrm:salary:read'
+  | 'hrm:salary:manage'
+  | 'hrm:payroll:read'
+  | 'hrm:payroll:process'
+  | 'hrm:payroll:approve'
+  | 'hrm:payroll:pay';
 
 const ALL_MILESTONE1_PERMISSIONS: readonly PermissionKey[] = [
   'org:tenant:manage',
@@ -105,6 +115,16 @@ const ALL_MILESTONE1_PERMISSIONS: readonly PermissionKey[] = [
   'inv:count:submit',
   'inv:count:approve',
   'inv:count:post',
+  'hrm:employee:read',
+  'hrm:employee:manage',
+  'hrm:document:read',
+  'hrm:document:manage',
+  'hrm:salary:read',
+  'hrm:salary:manage',
+  'hrm:payroll:read',
+  'hrm:payroll:process',
+  'hrm:payroll:approve',
+  'hrm:payroll:pay',
 ];
 
 export const SYSTEM_ROLE_DEFINITIONS: Readonly<
@@ -161,6 +181,7 @@ export const SYSTEM_ROLE_DEFINITIONS: Readonly<
       'inv:count:submit',
       'inv:count:approve',
       'inv:count:post',
+      'hrm:employee:read',
     ],
   },
   CASHIER: {
@@ -243,6 +264,13 @@ export const SYSTEM_ROLE_DEFINITIONS: Readonly<
       'inv:costing:read',
       'inv:count:read',
       'inv:count:approve',
+      'hrm:employee:read',
+      'hrm:salary:read',
+      'hrm:salary:manage',
+      'hrm:payroll:read',
+      'hrm:payroll:process',
+      'hrm:payroll:approve',
+      'hrm:payroll:pay',
     ],
   },
 };
