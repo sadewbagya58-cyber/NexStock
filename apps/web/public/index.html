@@ -818,15 +818,81 @@
       word-break: break-all;
     }
 
-    /* Print Styles */
+    /* Print Styles (BUG-043: Enhanced Report & Receipt Printing) */
     @media print {
-      body {
+      body, html {
         margin: 0 !important;
         padding: 0 !important;
+        background: #ffffff !important;
+        color: #111827 !important;
       }
-      #printableReceipt, #printableBarcodeLabel {
+      aside.sidebar,
+      header.topbar,
+      #sidebarOverlay,
+      #mobileMenuToggle,
+      #topbarMobileSubbar,
+      .btn,
+      button,
+      .view-header button,
+      .toast-container,
+      .modal-backdrop,
+      .no-print {
+        display: none !important;
+      }
+      main.content {
+        margin: 0 !important;
+        padding: 0 !important;
+        width: 100% !important;
+        max-width: 100% !important;
+      }
+      .card {
+        border: 1px solid #d1d5db !important;
+        box-shadow: none !important;
+        background: #ffffff !important;
+        page-break-inside: avoid;
+      }
+      .data-table th, .data-table td {
+        border: 1px solid #e5e7eb !important;
+        color: #111827 !important;
+      }
+      #printableReceipt, #printableBarcodeLabel, #payrollReportPrintArea {
         page-break-inside: avoid !important;
         page-break-after: avoid !important;
+      }
+    }
+
+    /* Salary Component Responsive Row (BUG-040) */
+    .salary-comp-row {
+      display: grid;
+      grid-template-columns: 2fr 1.2fr 1.5fr 1.2fr auto;
+      gap: 8px;
+      align-items: center;
+      padding: 8px;
+      background: var(--surface-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius);
+      margin-bottom: 8px;
+    }
+    @media (max-width: 680px) {
+      .salary-comp-row {
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+        padding: 10px;
+      }
+      .salary-comp-row .comp-name {
+        grid-column: 1 / -1;
+      }
+      .salary-comp-row .comp-tax-wrap {
+        grid-column: 1 / -1;
+        display: flex;
+        gap: 12px;
+        font-size: 12px;
+      }
+      .salary-comp-row .btn-remove-row {
+        grid-column: 1 / -1;
+        width: 100%;
+        text-align: center;
+        justify-content: center;
       }
     }
 
@@ -2147,6 +2213,7 @@
       'employees',
       'payroll',
       'payroll-reports',
+      'roles-permissions',
       'org-settings'
     ];
 
@@ -10006,28 +10073,43 @@
     }
 
     async function openCreateEmployeeModal() {
-      // Fetch branches and warehouses for assignment dropdowns
-      let branches = [];
-      let warehouses = [];
-      try {
-        const [bRes, wRes] = await Promise.all([
-          apiFetch('/v1/org/branches').catch(() => ({ items: [] })),
-          apiFetch('/v1/org/warehouses').catch(() => ({ items: [] }))
-        ]);
-        branches = bRes?.items || (Array.isArray(bRes) ? bRes : bRes?.data || []);
-        warehouses = wRes?.items || (Array.isArray(wRes) ? wRes : wRes?.data || []);
-      } catch (err) {
-        console.warn('Failed to load branches/warehouses:', err);
+      const triggerBtn = arguments[0] || document.getElementById('btnOpenCreateEmployee');
+      let origHtml = '';
+      if (triggerBtn) {
+        origHtml = triggerBtn.innerHTML;
+        triggerBtn.disabled = true;
+        triggerBtn.innerHTML = '<span class="spinner-sm" style="display:inline-block; vertical-align:middle; margin-right:6px;"></span> Loading...';
       }
 
-      window._employeeBranchesCache = branches;
-      window._employeeWarehousesCache = warehouses;
+      // Check if branches and warehouses are cached for 0ms instant display
+      let branches = window._employeeBranchesCache || [];
+      let warehouses = window._employeeWarehousesCache || [];
+
+      try {
+        if (!branches.length || !warehouses.length) {
+          const [bRes, wRes] = await Promise.all([
+            apiFetch('/v1/org/branches').catch(() => ({ items: [] })),
+            apiFetch('/v1/org/warehouses').catch(() => ({ items: [] }))
+          ]);
+          branches = bRes?.items || (Array.isArray(bRes) ? bRes : bRes?.data || []);
+          warehouses = wRes?.items || (Array.isArray(wRes) ? wRes : wRes?.data || []);
+          window._employeeBranchesCache = branches;
+          window._employeeWarehousesCache = warehouses;
+        }
+      } catch (err) {
+        console.warn('Failed to load branches/warehouses:', err);
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = origHtml || '+ Add Employee';
+        }
+      }
 
       openModal({
         title: 'Add New Employee',
         maxWidth: '680px',
         bodyHtml: `
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px;">
             <div class="form-group">
               <label class="form-label">Employee Code *</label>
               <input type="text" class="form-input" id="newEmpCode" placeholder="EMP-001" required>
@@ -10038,7 +10120,7 @@
             </div>
           </div>
 
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px;">
             <div class="form-group">
               <label class="form-label">First Name *</label>
               <input type="text" class="form-input" id="newEmpFirstName" placeholder="Jane" required>
@@ -10049,7 +10131,7 @@
             </div>
           </div>
 
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px;">
             <div class="form-group">
               <label class="form-label">Job Designation *</label>
               <input type="text" class="form-input" id="newEmpDesignation" placeholder="Store Manager / Cashier" required>
@@ -10060,7 +10142,7 @@
             </div>
           </div>
 
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px;">
             <div class="form-group">
               <label class="form-label">Payroll Frequency *</label>
               <select class="form-select" id="newEmpFrequency">
@@ -10079,7 +10161,7 @@
             </div>
           </div>
 
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px;">
             <div class="form-group">
               <label class="form-label">Email Address</label>
               <input type="email" class="form-input" id="newEmpEmail" placeholder="jane.doe@company.com">
@@ -10090,7 +10172,7 @@
             </div>
           </div>
 
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px;">
             <div class="form-group">
               <label class="form-label">National ID / Passport</label>
               <input type="text" class="form-input" id="newEmpNationalId" placeholder="NIC / Passport #">
@@ -10101,7 +10183,7 @@
             </div>
           </div>
 
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px;">
             <div class="form-group">
               <label class="form-label">Primary Branch</label>
               <select class="form-select" id="newEmpBranch" onchange="updateWarehouseOptions('newEmpBranch', 'newEmpWarehouse')">
@@ -10118,7 +10200,7 @@
             </div>
           </div>
 
-          <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px;">
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px;">
             <div class="form-group">
               <label class="form-label">Bank Name</label>
               <input type="text" class="form-input" id="newEmpBankName" placeholder="Bank Name">
@@ -10521,37 +10603,39 @@
           title: `Employee Profile: ${emp.displayName}`,
           maxWidth: '780px',
           bodyHtml: `
-            <!-- Top Summary Header -->
-            <div style="display: flex; gap: 16px; align-items: center; padding: 14px 18px; background: var(--bg-primary); border-radius: var(--radius); margin-bottom: 20px;">
-              <div style="width: 52px; height: 52px; border-radius: 50%; background: var(--accent-light); color: var(--accent-primary); font-weight: 700; font-size: 18px; display: flex; align-items: center; justify-content: center;">
-                ${getInitials(emp.displayName)}
-              </div>
-              <div style="flex: 1;">
-                <div style="display: flex; align-items: center; gap: 10px;">
-                  <span style="font-size: 18px; font-weight: 700; color: var(--text-primary);">${escapeHtml(emp.displayName)}</span>
-                  ${getStatusBadgeHtml(emp.employmentStatus)}
-                  ${getFrequencyBadgeHtml(emp.payrollFrequency)}
+            <!-- Top Summary Header (BUG-040: Responsive Flex Wrap) -->
+            <div style="display: flex; flex-wrap: wrap; gap: 14px; align-items: center; justify-content: space-between; padding: 14px 18px; background: var(--bg-primary); border-radius: var(--radius); margin-bottom: 20px;">
+              <div style="display: flex; gap: 14px; align-items: center; min-width: 0; flex: 1;">
+                <div style="width: 48px; height: 48px; border-radius: 50%; background: var(--accent-light); color: var(--accent-primary); font-weight: 700; font-size: 16px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                  ${getInitials(emp.displayName)}
                 </div>
-                <div style="font-size: 13px; color: var(--text-secondary); margin-top: 2px;">
-                  ${escapeHtml(emp.designation)} &bull; <strong>${escapeHtml(emp.department)}</strong> &bull; Code: <span style="font-family: monospace;">${escapeHtml(emp.employeeCode)}</span>
+                <div style="min-width: 0;">
+                  <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px;">
+                    <span style="font-size: 17px; font-weight: 700; color: var(--text-primary); word-break: break-word;">${escapeHtml(emp.displayName)}</span>
+                    ${getStatusBadgeHtml(emp.employmentStatus)}
+                    ${getFrequencyBadgeHtml(emp.payrollFrequency)}
+                  </div>
+                  <div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">
+                    ${escapeHtml(emp.designation)} &bull; <strong>${escapeHtml(emp.department)}</strong> &bull; Code: <span style="font-family: monospace;">${escapeHtml(emp.employeeCode)}</span>
+                  </div>
                 </div>
               </div>
-              <div style="display: flex; gap: 8px;">
+              <div style="display: flex; gap: 8px; flex-shrink: 0;">
                 <button class="btn btn-secondary btn-sm" onclick="openEditEmployeeModal('${emp.id}')">Edit</button>
               </div>
             </div>
 
-            <!-- Profile Tabs -->
-            <div style="display: flex; gap: 8px; border-bottom: 1px solid var(--border-subtle); margin-bottom: 16px;" id="profileTabNav">
-              <button class="btn btn-sm btn-secondary profile-tab-btn active" onclick="switchProfileTab('tabOverview')">Overview</button>
-              <button class="btn btn-sm btn-secondary profile-tab-btn" onclick="switchProfileTab('tabSalary')">Compensation &amp; Salary</button>
-              <button class="btn btn-sm btn-secondary profile-tab-btn" onclick="switchProfileTab('tabDocs')">Documents (${docs.length})</button>
-              <button class="btn btn-sm btn-secondary profile-tab-btn" onclick="switchProfileTab('tabActivity')">Activity Log (${activity.length})</button>
+            <!-- Profile Tabs (BUG-040: Horizontal Scrollable Tab Bar) -->
+            <div style="display: flex; gap: 8px; border-bottom: 1px solid var(--border-subtle); margin-bottom: 16px; overflow-x: auto; -webkit-overflow-scrolling: touch; flex-wrap: nowrap; padding-bottom: 4px;" id="profileTabNav">
+              <button class="btn btn-sm btn-secondary profile-tab-btn active" style="flex-shrink: 0; white-space: nowrap;" onclick="switchProfileTab('tabOverview')">Overview</button>
+              <button class="btn btn-sm btn-secondary profile-tab-btn" style="flex-shrink: 0; white-space: nowrap;" onclick="switchProfileTab('tabSalary')">Compensation &amp; Salary</button>
+              <button class="btn btn-sm btn-secondary profile-tab-btn" style="flex-shrink: 0; white-space: nowrap;" onclick="switchProfileTab('tabDocs')">Documents (${docs.length})</button>
+              <button class="btn btn-sm btn-secondary profile-tab-btn" style="flex-shrink: 0; white-space: nowrap;" onclick="switchProfileTab('tabActivity')">Activity Log (${activity.length})</button>
             </div>
 
             <!-- TAB 1: OVERVIEW -->
             <div id="tabOverview" class="profile-tab-content">
-              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; margin-bottom: 14px;">
                 <div class="card" style="padding: 14px 16px;">
                   <div style="font-weight: 600; font-size: 13px; margin-bottom: 10px; color: var(--text-secondary);">PERSONAL &amp; CONTACT DETAILS</div>
                   <div style="font-size: 13px; line-height: 1.8;">
@@ -10576,7 +10660,7 @@
               </div>
 
               <!-- Location & Account Linking -->
-              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px;">
                 <div class="card" style="padding: 14px 16px;">
                   <div style="font-weight: 600; font-size: 13px; margin-bottom: 10px; color: var(--text-secondary);">LOCATION ASSIGNMENTS</div>
                   <div style="font-size: 13px; line-height: 1.8;">
@@ -10597,7 +10681,7 @@
                     ${emp.linkedUserId ? `
                       <div style="color: var(--status-success); font-weight: 500;">&bull; Linked to System User</div>
                       <div><strong>Email:</strong> ${escapeHtml(emp.linkedUserEmail || '—')}</div>
-                      <div style="font-size: 11px; font-family: monospace; color: var(--text-secondary);">UID: ${escapeHtml(emp.linkedUserId)}</div>
+                      <div style="font-size: 11px; font-family: monospace; color: var(--text-secondary); word-break: break-all;">UID: ${escapeHtml(emp.linkedUserId)}</div>
                     ` : `
                       <div style="color: var(--text-secondary);">No system login account linked to this employee.</div>
                       <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">Linking allows recording POS shifts, audit trails, and self-service payslip access.</div>
@@ -10857,7 +10941,7 @@
           title: `Salary Structure: ${emp.displayName}`,
           maxWidth: '720px',
           bodyHtml: `
-            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; margin-bottom: 16px;">
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 16px;">
               <div class="form-group">
                 <label class="form-label">Basic Salary * (${currency})</label>
                 <input type="number" step="0.01" min="0" class="form-input" id="salaryBasicInput" value="${basicSalary}" required oninput="previewSalaryTotals()">
@@ -10876,9 +10960,9 @@
               </div>
             </div>
 
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px;">
               <div style="font-weight: 600; font-size: 13px;">Allowances &amp; Deductions</div>
-              <div style="display: flex; gap: 8px;">
+              <div style="display: flex; flex-wrap: wrap; gap: 8px;">
                 <button type="button" class="btn btn-secondary btn-sm" onclick="addSalaryComponentRow('EARNING')">+ Add Allowance</button>
                 <button type="button" class="btn btn-secondary btn-sm" onclick="addSalaryComponentRow('DEDUCTION')">+ Add Deduction</button>
               </div>
@@ -10888,8 +10972,8 @@
               <!-- Dynamic Rows inserted here -->
             </div>
 
-            <!-- Live Calculation Preview Card -->
-            <div style="padding: 12px 16px; background: var(--bg-primary); border-radius: var(--radius); border: 1px solid var(--border-subtle); display: flex; justify-content: space-between; align-items: center;">
+            <!-- Live Calculation Preview Card (BUG-040: Responsive Auto-Fit Grid) -->
+            <div style="padding: 12px 16px; background: var(--bg-primary); border-radius: var(--radius); border: 1px solid var(--border-subtle); display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; align-items: center;">
               <div>
                 <span style="font-size: 12px; color: var(--text-secondary);">ESTIMATED GROSS:</span>
                 <strong id="previewGrossAmount" style="margin-left: 4px; color: var(--status-success);">$0.00</strong>
@@ -10937,7 +11021,6 @@
       const row = document.createElement('div');
       row.className = 'salary-comp-row';
       row.id = rowId;
-      row.style.cssText = 'display: grid; grid-template-columns: 2fr 1.2fr 1.5fr 1.2fr auto; gap: 8px; align-items: center; padding: 8px; background: var(--surface-card); border: 1px solid var(--border-subtle); border-radius: var(--radius);';
 
       row.innerHTML = `
         <input type="text" class="form-input comp-name" placeholder="${type === 'EARNING' ? 'e.g. Housing / Transport' : 'e.g. EPF / Tax / Loan'}" value="${escapeHtml(name)}" required>
@@ -10950,7 +11033,7 @@
           <option value="PERCENTAGE_OF_BASIC" ${calcType === 'PERCENTAGE_OF_BASIC' ? 'selected' : ''}>% of Basic</option>
         </select>
         <input type="number" step="0.01" min="0" class="form-input comp-val" value="${parseFloat(value || 0).toFixed(2)}" oninput="previewSalaryTotals()" required>
-        <button type="button" class="btn btn-icon btn-sm" onclick="document.getElementById('${rowId}').remove(); previewSalaryTotals();" style="color: var(--status-danger);" title="Remove Row">&times;</button>
+        <button type="button" class="btn btn-secondary btn-sm btn-remove-row" onclick="document.getElementById('${rowId}').remove(); previewSalaryTotals();" style="color: var(--status-danger);" title="Remove Row">&times; Remove</button>
       `;
 
       container.appendChild(row);
@@ -11083,17 +11166,17 @@
           title: `Documents: ${emp.displayName}`,
           maxWidth: '680px',
           bodyHtml: `
-            <!-- Document Upload Form -->
+            <!-- Document Upload Form (BUG-040: Responsive Form Fields) -->
             <div class="card" style="padding: 14px 16px; margin-bottom: 20px; background: var(--bg-primary);">
               <div style="font-weight: 600; font-size: 13px; margin-bottom: 10px;">Upload Official Document</div>
-              <div style="display: grid; grid-template-columns: 1.5fr 1fr; gap: 12px; margin-bottom: 12px;">
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-bottom: 12px;">
                 <div class="form-group" style="margin-bottom: 0;">
                   <label class="form-label">Document Title *</label>
-                  <input type="text" class="form-input" id="uploadDocTitle" placeholder="e.g. National ID Copy / Signed Contract" required>
+                  <input type="text" class="form-input" id="uploadDocTitle" style="width: 100%; box-sizing: border-box;" placeholder="e.g. National ID Copy / Signed Contract" required>
                 </div>
                 <div class="form-group" style="margin-bottom: 0;">
                   <label class="form-label">Category *</label>
-                  <select class="form-select" id="uploadDocCategory">
+                  <select class="form-select" id="uploadDocCategory" style="width: 100%; box-sizing: border-box;">
                     <option value="NIC_PASSPORT">NIC / Passport</option>
                     <option value="CONTRACT" selected>Employment Contract</option>
                     <option value="CERTIFICATE">Academic / Certificate</option>
@@ -11105,7 +11188,7 @@
 
               <div class="form-group" style="margin-bottom: 12px;">
                 <label class="form-label">Select File (PDF, PNG, JPEG, WebP - max 10MB) *</label>
-                <input type="file" class="form-input" id="uploadDocFileInput" accept=".pdf,image/jpeg,image/png,image/webp" required>
+                <input type="file" class="form-input" id="uploadDocFileInput" style="width: 100%; box-sizing: border-box;" accept=".pdf,image/jpeg,image/png,image/webp" required>
               </div>
 
               <div style="display: flex; justify-content: flex-end;">
@@ -11113,37 +11196,59 @@
               </div>
             </div>
 
-            <!-- Documents List -->
+            <!-- Documents List (BUG-040: Desktop Table + Mobile Cards) -->
             <div style="font-weight: 600; font-size: 13px; margin-bottom: 10px;">Enrolled Documents (${docs.length})</div>
             ${docs.length === 0 ? `
               <div style="padding: 24px; text-align: center; color: var(--text-secondary); font-size: 13px;">No documents uploaded yet.</div>
             ` : `
-              <div class="table-responsive">
-                <table class="data-table">
-                  <thead>
-                    <tr>
-                      <th>Document Title</th>
-                      <th>Category</th>
-                      <th>File Name</th>
-                      <th>Size</th>
-                      <th style="text-align: right;">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    ${docs.map(d => `
+              <div class="desktop-table-container">
+                <div class="table-responsive">
+                  <table class="data-table">
+                    <thead>
                       <tr>
-                        <td><strong>${escapeHtml(d.documentTitle)}</strong></td>
-                        <td><span class="badge-pill badge-blue">${escapeHtml(d.documentCategory)}</span></td>
-                        <td style="font-size: 12px; font-family: monospace;">${escapeHtml(d.fileName)}</td>
-                        <td style="font-size: 12px;">${(d.fileSize / 1024).toFixed(1)} KB</td>
-                        <td style="text-align: right;">
-                          <button class="btn btn-secondary btn-sm" onclick="previewEmployeeDocument('${employeeId}', '${d.id}')">View</button>
-                          <button class="btn btn-secondary btn-sm" onclick="deleteEmployeeDocumentConfirm('${employeeId}', '${d.id}')" style="color: var(--status-danger);">Delete</button>
-                        </td>
+                        <th>Document Title</th>
+                        <th>Category</th>
+                        <th>File Name</th>
+                        <th>Size</th>
+                        <th style="text-align: right;">Actions</th>
                       </tr>
-                    `).join('')}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      ${docs.map(d => `
+                        <tr>
+                          <td><strong>${escapeHtml(d.documentTitle)}</strong></td>
+                          <td><span class="badge-pill badge-blue">${escapeHtml(d.documentCategory)}</span></td>
+                          <td style="font-size: 12px; font-family: monospace;">${escapeHtml(d.fileName)}</td>
+                          <td style="font-size: 12px;">${(d.fileSize / 1024).toFixed(1)} KB</td>
+                          <td style="text-align: right;">
+                            <div style="display: inline-flex; gap: 6px;">
+                              <button class="btn btn-secondary btn-sm" onclick="previewEmployeeDocument('${employeeId}', '${d.id}')">View</button>
+                              <button class="btn btn-secondary btn-sm" onclick="deleteEmployeeDocumentConfirm('${employeeId}', '${d.id}')" style="color: var(--status-danger);">Delete</button>
+                            </div>
+                          </td>
+                        </tr>
+                      `).join('')}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div class="mobile-cards-container">
+                ${docs.map(d => `
+                  <div class="entity-card" style="padding: 12px 14px; border: 1px solid var(--border-subtle); border-radius: var(--radius); margin-bottom: 10px; background: var(--surface-card);">
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-bottom: 6px;">
+                      <div style="font-weight: 600; font-size: 14px; color: var(--text-primary); word-break: break-word;">${escapeHtml(d.documentTitle)}</div>
+                      <span class="badge-pill badge-blue" style="font-size: 10px; flex-shrink: 0;">${escapeHtml(d.documentCategory)}</span>
+                    </div>
+                    <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 10px; font-family: monospace; word-break: break-all;">
+                      ${escapeHtml(d.fileName)} &bull; ${(d.fileSize / 1024).toFixed(1)} KB
+                    </div>
+                    <div style="display: flex; gap: 8px;">
+                      <button class="btn btn-secondary btn-sm" style="flex: 1;" onclick="previewEmployeeDocument('${employeeId}', '${d.id}')">View Document</button>
+                      <button class="btn btn-secondary btn-sm" style="color: var(--status-danger);" onclick="deleteEmployeeDocumentConfirm('${employeeId}', '${d.id}')">Delete</button>
+                    </div>
+                  </div>
+                `).join('')}
               </div>
             `}
           `,
@@ -11365,17 +11470,17 @@
                   <table class="data-table">
                     <thead>
                       <tr>
-                        <th>Run Number</th>
-                        <th>Frequency</th>
-                        <th>Period</th>
-                        <th>Payment Date</th>
-                        <th>Employees</th>
-                        <th>Gross Pay</th>
-                        <th>Deductions</th>
-                        <th>Net Pay</th>
-                        <th>Paid Amount</th>
-                        <th>Status</th>
-                        <th style="text-align: right;">Actions</th>
+                        <th style="min-width: 130px;">Run Number</th>
+                        <th style="min-width: 100px;">Frequency</th>
+                        <th style="min-width: 170px;">Period</th>
+                        <th style="min-width: 110px;">Payment Date</th>
+                        <th style="min-width: 85px;">Employees</th>
+                        <th style="min-width: 120px; text-align: right;">Gross Pay</th>
+                        <th style="min-width: 115px; text-align: right;">Deductions</th>
+                        <th style="min-width: 120px; text-align: right;">Net Pay</th>
+                        <th style="min-width: 120px; text-align: right;">Paid Amount</th>
+                        <th style="min-width: 110px;">Status</th>
+                        <th style="min-width: 220px; text-align: right;">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -11392,30 +11497,30 @@
                               <strong style="color: var(--accent-primary); cursor: pointer;" onclick="openPayrollRunDetailModal('${r.id}')">${escapeHtml(r.runNumber)}</strong>
                             </td>
                             <td>${freqBadge}</td>
-                            <td style="font-size: 12px;">${escapeHtml(r.periodStart)} &rarr; ${escapeHtml(r.periodEnd)}</td>
-                            <td style="font-size: 12px; color: var(--text-secondary);">${escapeHtml(r.paymentDate)}</td>
-                            <td style="font-weight: 600;">${r.employeeCount} staff</td>
-                            <td>${formatTenantMoney(r.totalGrossPay, r.currencyCode)}</td>
-                            <td style="color: var(--status-danger);">${formatTenantMoney(r.totalDeductions, r.currencyCode)}</td>
-                            <td><strong>${formatTenantMoney(r.totalNetPay, r.currencyCode)}</strong></td>
-                            <td>
+                            <td style="font-size: 12px; white-space: nowrap;">${escapeHtml(r.periodStart)} &rarr; ${escapeHtml(r.periodEnd)}</td>
+                            <td style="font-size: 12px; color: var(--text-secondary); white-space: nowrap;">${escapeHtml(r.paymentDate)}</td>
+                            <td style="font-weight: 600; white-space: nowrap;">${r.employeeCount} staff</td>
+                            <td style="text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums;">${formatTenantMoney(r.totalGrossPay, r.currencyCode)}</td>
+                            <td style="color: var(--status-danger); text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums;">${formatTenantMoney(r.totalDeductions, r.currencyCode)}</td>
+                            <td style="text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums;"><strong>${formatTenantMoney(r.totalNetPay, r.currencyCode)}</strong></td>
+                            <td style="text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums;">
                               <div>${formatTenantMoney(r.totalPaidAmount, r.currencyCode)}</div>
                               ${balanceDue > 0 && ['APPROVED', 'PARTIALLY_PAID'].includes(r.status)
                                 ? `<div style="font-size: 11px; color: var(--status-warning);">Due: ${formatTenantMoney(balanceDue, r.currencyCode)}</div>`
                                 : ''}
                             </td>
                             <td>${statusBadge}</td>
-                            <td style="text-align: right;">
+                            <td style="text-align: right; white-space: nowrap;">
                               <div style="display: inline-flex; gap: 6px;">
                                 <button class="btn btn-secondary btn-sm" onclick="openPayrollRunDetailModal('${r.id}')">View Items</button>
                                 ${r.status === 'DRAFT' ? `
-                                  <button class="btn btn-secondary btn-sm" onclick="submitPayrollRunAction('${r.id}')" title="Submit for supervisor signoff">Submit</button>
-                                  <button class="btn btn-primary btn-sm" onclick="approvePayrollRunAction('${r.id}')" title="Approve Run">Approve</button>
-                                  <button class="btn btn-secondary btn-sm" onclick="cancelPayrollRunAction('${r.id}')" style="color: var(--status-danger);">Cancel</button>
+                                  <button class="btn btn-secondary btn-sm" onclick="submitPayrollRunAction('${r.id}', this)" title="Submit for supervisor signoff">Submit</button>
+                                  <button class="btn btn-primary btn-sm" onclick="approvePayrollRunAction('${r.id}', this)" title="Approve Run">Approve</button>
+                                  <button class="btn btn-secondary btn-sm" onclick="cancelPayrollRunAction('${r.id}', this)" style="color: var(--status-danger);">Cancel</button>
                                 ` : ''}
                                 ${r.status === 'PENDING_APPROVAL' ? `
-                                  <button class="btn btn-primary btn-sm" onclick="approvePayrollRunAction('${r.id}')">Approve</button>
-                                  <button class="btn btn-secondary btn-sm" onclick="cancelPayrollRunAction('${r.id}')" style="color: var(--status-danger);">Cancel</button>
+                                  <button class="btn btn-primary btn-sm" onclick="approvePayrollRunAction('${r.id}', this)">Approve</button>
+                                  <button class="btn btn-secondary btn-sm" onclick="cancelPayrollRunAction('${r.id}', this)" style="color: var(--status-danger);">Cancel</button>
                                 ` : ''}
                                 ${['APPROVED', 'PARTIALLY_PAID'].includes(r.status) && balanceDue > 0 ? `
                                   <button class="btn btn-primary btn-sm" onclick="openRecordPayrollPaymentModal('${r.id}')">Pay</button>
@@ -11428,6 +11533,72 @@
                     </tbody>
                   </table>
                 </div>
+              </div>
+
+              <!-- Mobile Card Layout (BUG-042: Touch-Friendly Responsive View for Payroll Runs) -->
+              <div class="mobile-cards-container">
+                ${state.cachedPayrollRuns.map(r => {
+                  const freqBadge = getFrequencyBadgeHtml(r.frequency);
+                  const statusBadge = getPayrollStatusBadgeHtml(r.status);
+                  const netPay = parseFloat(r.totalNetPay || 0);
+                  const paid = parseFloat(r.totalPaidAmount || 0);
+                  const balanceDue = Math.max(0, netPay - paid);
+
+                  return `
+                    <div class="entity-card" style="padding: 16px; border-radius: 8px; border: 1px solid var(--border-subtle); background: var(--surface-card); margin-bottom: 12px;">
+                      <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px;">
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                          <strong style="font-size: 15px; color: var(--accent-primary); cursor: pointer;" onclick="openPayrollRunDetailModal('${r.id}')">${escapeHtml(r.runNumber)}</strong>
+                          ${freqBadge}
+                        </div>
+                        <div>${statusBadge}</div>
+                      </div>
+
+                      <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 12px; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px;">
+                        <div>📅 ${escapeHtml(r.periodStart)} &rarr; ${escapeHtml(r.periodEnd)}</div>
+                        <div>👥 <strong>${r.employeeCount} staff</strong></div>
+                      </div>
+
+                      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 10px; background: var(--bg-primary); border-radius: 6px; font-size: 12px; margin-bottom: 12px;">
+                        <div>
+                          <div style="color: var(--text-secondary); font-size: 11px;">GROSS PAY</div>
+                          <div style="font-weight: 600; color: var(--text-primary);">${formatTenantMoney(r.totalGrossPay, r.currencyCode)}</div>
+                        </div>
+                        <div>
+                          <div style="color: var(--text-secondary); font-size: 11px;">DEDUCTIONS</div>
+                          <div style="font-weight: 600; color: var(--status-danger);">${formatTenantMoney(r.totalDeductions, r.currencyCode)}</div>
+                        </div>
+                        <div>
+                          <div style="color: var(--text-secondary); font-size: 11px;">NET PAY</div>
+                          <div style="font-weight: 700; color: var(--accent-primary); font-size: 13px;">${formatTenantMoney(r.totalNetPay, r.currencyCode)}</div>
+                        </div>
+                        <div>
+                          <div style="color: var(--text-secondary); font-size: 11px;">PAID AMOUNT</div>
+                          <div style="font-weight: 600; color: var(--status-success);">${formatTenantMoney(r.totalPaidAmount, r.currencyCode)}</div>
+                          ${balanceDue > 0 && ['APPROVED', 'PARTIALLY_PAID'].includes(r.status)
+                            ? `<div style="font-size: 10px; color: var(--status-warning);">Due: ${formatTenantMoney(balanceDue, r.currencyCode)}</div>`
+                            : ''}
+                        </div>
+                      </div>
+
+                      <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+                        <button class="btn btn-secondary btn-sm" style="flex: 1;" onclick="openPayrollRunDetailModal('${r.id}')">View Items</button>
+                        ${r.status === 'DRAFT' ? `
+                          <button class="btn btn-secondary btn-sm" onclick="submitPayrollRunAction('${r.id}', this)" title="Submit for supervisor signoff">Submit</button>
+                          <button class="btn btn-primary btn-sm" onclick="approvePayrollRunAction('${r.id}', this)" title="Approve Run">Approve</button>
+                          <button class="btn btn-secondary btn-sm" onclick="cancelPayrollRunAction('${r.id}', this)" style="color: var(--status-danger);">Cancel</button>
+                        ` : ''}
+                        ${r.status === 'PENDING_APPROVAL' ? `
+                          <button class="btn btn-primary btn-sm" onclick="approvePayrollRunAction('${r.id}', this)">Approve</button>
+                          <button class="btn btn-secondary btn-sm" onclick="cancelPayrollRunAction('${r.id}', this)" style="color: var(--status-danger);">Cancel</button>
+                        ` : ''}
+                        ${['APPROVED', 'PARTIALLY_PAID'].includes(r.status) && balanceDue > 0 ? `
+                          <button class="btn btn-primary btn-sm" onclick="openRecordPayrollPaymentModal('${r.id}')">Pay</button>
+                        ` : ''}
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
               </div>
             `}
           </div>
@@ -11606,8 +11777,21 @@
       }
     }
 
-    // --- 11. PAYROLL RUN DETAIL MODAL ---
+    // --- 11. PAYROLL RUN DETAIL MODAL (BUG-039: Instant 0ms Modal Feedback) ---
     async function openPayrollRunDetailModal(runId) {
+      const cached = (state.cachedPayrollRuns || []).find(r => r.id === runId);
+      openModal({
+        title: cached ? `Payroll Run: ${escapeHtml(cached.runNumber)}` : 'Payroll Run Details',
+        maxWidth: '880px',
+        bodyHtml: `
+          <div style="padding: 48px 24px; text-align: center;">
+            <div class="spinner-sm" style="display:inline-block; width: 32px; height: 32px; border-width: 3px; margin-bottom: 12px;"></div>
+            <div style="font-weight: 600; font-size: 15px; color: var(--text-primary);">Loading payroll run details...</div>
+            <div style="color: var(--text-secondary); font-size: 12px; margin-top: 4px;">Retrieving line items, allowances, and statutory calculations</div>
+          </div>
+        `
+      });
+
       try {
         const run = await apiFetch(`/v1/payroll/runs/${runId}`);
         const items = run.items || [];
@@ -11735,11 +11919,11 @@
             <div style="display: flex; justify-content: space-between; width: 100%;">
               <div>
                 ${isDraft ? `
-                  <button class="btn btn-secondary" onclick="submitPayrollRunAction('${run.id}')">Submit for Approval</button>
-                  <button class="btn btn-primary" onclick="approvePayrollRunAction('${run.id}')">Approve Run</button>
+                  <button class="btn btn-secondary" onclick="submitPayrollRunAction('${run.id}', this)">Submit for Approval</button>
+                  <button class="btn btn-primary" onclick="approvePayrollRunAction('${run.id}', this)">Approve Run</button>
                 ` : ''}
                 ${run.status === 'PENDING_APPROVAL' ? `
-                  <button class="btn btn-primary" onclick="approvePayrollRunAction('${run.id}')">Approve Run</button>
+                  <button class="btn btn-primary" onclick="approvePayrollRunAction('${run.id}', this)">Approve Run</button>
                 ` : ''}
               </div>
               <button class="btn btn-secondary" onclick="closeModal()">Close</button>
@@ -11747,7 +11931,18 @@
           `
         });
       } catch (err) {
-        showToast(`Failed to load payroll run details: ${err.message}`, 'error');
+        openModal({
+          title: 'Error Loading Payroll Run',
+          maxWidth: '500px',
+          bodyHtml: `
+            <div style="padding: 24px; text-align: center; color: var(--status-danger);">
+              <div style="font-size: 15px; font-weight: 600; margin-bottom: 8px;">Failed to load payroll details</div>
+              <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px;">${escapeHtml(err.message || 'Network error')}</p>
+              <button class="btn btn-primary btn-sm" onclick="openPayrollRunDetailModal('${runId}')">Retry</button>
+            </div>
+          `,
+          footerHtml: '<button class="btn btn-secondary" onclick="closeModal()">Close</button>'
+        });
       }
     }
 
@@ -11841,8 +12036,25 @@
       }
     }
 
-    // --- 13. WORKFLOW ACTIONS (SUBMIT, APPROVE, CANCEL) ---
-    async function submitPayrollRunAction(runId) {
+    // --- 13. WORKFLOW ACTIONS (BUG-039: Instant Feedback & In-Flight Lock) ---
+    const _payrollActionInFlight = new Set();
+
+    async function submitPayrollRunAction(runId, btnElement = null) {
+      const actionKey = `submit_${runId}`;
+      if (_payrollActionInFlight.has(actionKey)) return;
+      _payrollActionInFlight.add(actionKey);
+
+      let targetBtn = btnElement;
+      if (!targetBtn && typeof event !== 'undefined' && event?.currentTarget) {
+        targetBtn = event.currentTarget;
+      }
+      let origHtml = '';
+      if (targetBtn) {
+        origHtml = targetBtn.innerHTML;
+        targetBtn.disabled = true;
+        targetBtn.innerHTML = '<span class="spinner-sm" style="display:inline-block; vertical-align:middle; margin-right:4px;"></span> Submitting...';
+      }
+
       try {
         await apiFetch(`/v1/payroll/runs/${runId}/submit`, { method: 'POST' });
         showToast('Payroll run submitted for approval', 'success');
@@ -11850,11 +12062,32 @@
         renderPayrollView();
       } catch (err) {
         showToast(err.message || 'Submit failed', 'error');
+      } finally {
+        _payrollActionInFlight.delete(actionKey);
+        if (targetBtn) {
+          targetBtn.disabled = false;
+          targetBtn.innerHTML = origHtml;
+        }
       }
     }
 
-    async function approvePayrollRunAction(runId) {
+    async function approvePayrollRunAction(runId, btnElement = null) {
       if (!confirm('Are you sure you want to approve this payroll run? Once approved, line items are locked and immutable.')) return;
+
+      const actionKey = `approve_${runId}`;
+      if (_payrollActionInFlight.has(actionKey)) return;
+      _payrollActionInFlight.add(actionKey);
+
+      let targetBtn = btnElement;
+      if (!targetBtn && typeof event !== 'undefined' && event?.currentTarget) {
+        targetBtn = event.currentTarget;
+      }
+      let origHtml = '';
+      if (targetBtn) {
+        origHtml = targetBtn.innerHTML;
+        targetBtn.disabled = true;
+        targetBtn.innerHTML = '<span class="spinner-sm" style="display:inline-block; vertical-align:middle; margin-right:4px;"></span> Approving...';
+      }
 
       try {
         await apiFetch(`/v1/payroll/runs/${runId}/approve`, { method: 'POST' });
@@ -11863,12 +12096,33 @@
         renderPayrollView();
       } catch (err) {
         showToast(err.message || 'Approval failed', 'error');
+      } finally {
+        _payrollActionInFlight.delete(actionKey);
+        if (targetBtn) {
+          targetBtn.disabled = false;
+          targetBtn.innerHTML = origHtml;
+        }
       }
     }
 
-    async function cancelPayrollRunAction(runId) {
+    async function cancelPayrollRunAction(runId, btnElement = null) {
       const reason = prompt('Please enter a cancellation reason:');
       if (reason === null) return;
+
+      const actionKey = `cancel_${runId}`;
+      if (_payrollActionInFlight.has(actionKey)) return;
+      _payrollActionInFlight.add(actionKey);
+
+      let targetBtn = btnElement;
+      if (!targetBtn && typeof event !== 'undefined' && event?.currentTarget) {
+        targetBtn = event.currentTarget;
+      }
+      let origHtml = '';
+      if (targetBtn) {
+        origHtml = targetBtn.innerHTML;
+        targetBtn.disabled = true;
+        targetBtn.innerHTML = '<span class="spinner-sm" style="display:inline-block; vertical-align:middle; margin-right:4px;"></span> Cancelling...';
+      }
 
       try {
         await apiFetch(`/v1/payroll/runs/${runId}/cancel`, {
@@ -11880,6 +12134,12 @@
         renderPayrollView();
       } catch (err) {
         showToast(err.message || 'Cancellation failed', 'error');
+      } finally {
+        _payrollActionInFlight.delete(actionKey);
+        if (targetBtn) {
+          targetBtn.disabled = false;
+          targetBtn.innerHTML = origHtml;
+        }
       }
     }
 
@@ -12127,13 +12387,14 @@
       }
     }
 
-    // --- 16. PAYROLL REPORTS VIEW ---
+    // --- 16. PAYROLL REPORTS VIEW (BUG-041, BUG-042, BUG-043: Responsive Tables, Mobile Layout & High-Quality Print) ---
     async function renderPayrollReportsView() {
       const container = document.getElementById('mainContainer');
       container.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-secondary);"><div class="spinner-sm" style="display:inline-block; margin-bottom: 8px;"></div><div>Loading payroll summary reports...</div></div>';
 
       try {
         const report = await apiFetch('/v1/payroll/reports/summary');
+        window._cachedPayrollSummaryReport = report;
         const currency = getTenantCurrency();
         const depts = report.byDepartment || [];
         const freqs = report.byFrequency || [];
@@ -12146,7 +12407,7 @@
             </div>
             <div style="display: flex; gap: 8px;">
               <button class="btn btn-secondary" onclick="renderView('payroll')">&larr; Back to Runs</button>
-              <button class="btn btn-primary" onclick="printHtmlDocument(document.getElementById('payrollReportPrintArea').outerHTML, '@page { size: auto; margin: 15mm; }')">🖨️ Print Report</button>
+              <button class="btn btn-primary" id="btnPrintPayrollReport" onclick="printPayrollReport()">🖨️ Print Report</button>
             </div>
           </div>
 
@@ -12180,8 +12441,8 @@
               </div>
             </div>
 
-            <!-- Two Breakdown Tables: Department and Frequency -->
-            <div style="display: grid; grid-template-columns: 1.5fr 1fr; gap: 20px;">
+            <!-- Two Breakdown Tables: Department and Frequency (BUG-042: Responsive Auto-Fit Grid) -->
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px;">
               <!-- Department Breakdown -->
               <div class="card">
                 <div class="card-title">Department Allocation</div>
@@ -12193,20 +12454,20 @@
                       <thead>
                         <tr>
                           <th>Department</th>
-                          <th>Employees</th>
-                          <th>Gross Total</th>
-                          <th>Net Total</th>
-                          <th>Disbursed</th>
+                          <th style="text-align: right; min-width: 80px;">Employees</th>
+                          <th style="text-align: right; min-width: 110px;">Gross Total</th>
+                          <th style="text-align: right; min-width: 110px;">Net Total</th>
+                          <th style="text-align: right; min-width: 110px;">Disbursed</th>
                         </tr>
                       </thead>
                       <tbody>
                         ${depts.map(d => `
                           <tr>
                             <td><strong>${escapeHtml(d.department)}</strong></td>
-                            <td>${d.employeeCount}</td>
-                            <td>${formatTenantMoney(d.gross, currency)}</td>
-                            <td><strong>${formatTenantMoney(d.net, currency)}</strong></td>
-                            <td style="color: var(--status-success);">${formatTenantMoney(d.paid, currency)}</td>
+                            <td style="text-align: right;">${d.employeeCount}</td>
+                            <td style="text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap;">${formatTenantMoney(d.gross, currency)}</td>
+                            <td style="text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap;"><strong>${formatTenantMoney(d.net, currency)}</strong></td>
+                            <td style="text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--status-success);">${formatTenantMoney(d.paid, currency)}</td>
                           </tr>
                         `).join('')}
                       </tbody>
@@ -12226,18 +12487,18 @@
                       <thead>
                         <tr>
                           <th>Frequency</th>
-                          <th>Runs</th>
-                          <th>Total Gross</th>
-                          <th>Total Net</th>
+                          <th style="text-align: right; min-width: 70px;">Runs</th>
+                          <th style="text-align: right; min-width: 110px;">Total Gross</th>
+                          <th style="text-align: right; min-width: 110px;">Total Net</th>
                         </tr>
                       </thead>
                       <tbody>
                         ${freqs.map(f => `
                           <tr>
                             <td>${getFrequencyBadgeHtml(f.frequency)}</td>
-                            <td><strong>${f.runsCount}</strong></td>
-                            <td>${formatTenantMoney(f.gross, currency)}</td>
-                            <td><strong>${formatTenantMoney(f.net, currency)}</strong></td>
+                            <td style="text-align: right; font-weight: 600;">${f.runsCount}</td>
+                            <td style="text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap;">${formatTenantMoney(f.gross, currency)}</td>
+                            <td style="text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap;"><strong>${formatTenantMoney(f.net, currency)}</strong></td>
                           </tr>
                         `).join('')}
                       </tbody>
@@ -12259,6 +12520,294 @@
       }
     }
 
+    // --- 17. PRINT PAYROLL REPORT (BUG-043: Executive A4 Landscape Corporate Print Layout) ---
+    function printPayrollReport() {
+      const report = window._cachedPayrollSummaryReport;
+      if (!report) {
+        window.print();
+        return;
+      }
+
+      const currency = getTenantCurrency();
+      const orgName = state.tenantName || 'Organization';
+      const now = new Date();
+      const formattedDate = now.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+      const formattedTime = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+      const user = state.fullName || 'Authorized Administrator';
+
+      const depts = report.byDepartment || [];
+      const freqs = report.byFrequency || [];
+
+      const printCss = `
+        @page {
+          size: A4 landscape;
+          margin: 12mm 15mm;
+        }
+        * {
+          box-sizing: border-box;
+          margin: 0;
+          padding: 0;
+        }
+        body {
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+          color: #111827;
+          background: #ffffff;
+          padding: 0;
+          font-size: 12px;
+          line-height: 1.4;
+        }
+        .report-header {
+          border-bottom: 2px solid #111827;
+          padding-bottom: 12px;
+          margin-bottom: 16px;
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-end;
+        }
+        .report-title {
+          font-size: 20px;
+          font-weight: 700;
+          color: #111827;
+          letter-spacing: -0.3px;
+        }
+        .report-org {
+          font-size: 13px;
+          font-weight: 600;
+          color: #4b5563;
+          margin-top: 2px;
+        }
+        .report-meta {
+          text-align: right;
+          font-size: 11px;
+          color: #6b7280;
+        }
+        .kpi-row {
+          display: grid;
+          grid-template-columns: repeat(5, 1fr);
+          gap: 12px;
+          margin-bottom: 20px;
+          page-break-inside: avoid;
+        }
+        .kpi-box {
+          border: 1px solid #d1d5db;
+          border-radius: 6px;
+          padding: 10px 12px;
+          background: #f9fafb;
+        }
+        .kpi-box-label {
+          font-size: 10px;
+          font-weight: 600;
+          text-transform: uppercase;
+          color: #6b7280;
+          margin-bottom: 4px;
+        }
+        .kpi-box-val {
+          font-size: 16px;
+          font-weight: 700;
+          color: #111827;
+          font-variant-numeric: tabular-nums;
+        }
+        .kpi-box-sub {
+          font-size: 10px;
+          color: #6b7280;
+          margin-top: 2px;
+        }
+        .section-title {
+          font-size: 14px;
+          font-weight: 700;
+          color: #111827;
+          margin-bottom: 8px;
+          padding-bottom: 4px;
+          border-bottom: 1px solid #e5e7eb;
+        }
+        .tables-container {
+          display: grid;
+          grid-template-columns: 1.6fr 1fr;
+          gap: 16px;
+          margin-bottom: 16px;
+        }
+        table.print-table {
+          width: 100%;
+          border-collapse: collapse;
+          font-size: 11px;
+        }
+        table.print-table th {
+          background: #f3f4f6;
+          color: #374151;
+          font-weight: 600;
+          text-align: left;
+          padding: 6px 8px;
+          border: 1px solid #d1d5db;
+          font-size: 10px;
+          text-transform: uppercase;
+        }
+        table.print-table td {
+          padding: 6px 8px;
+          border: 1px solid #e5e7eb;
+          color: #1f2937;
+          font-variant-numeric: tabular-nums;
+        }
+        table.print-table tr:nth-child(even) {
+          background: #f9fafb;
+        }
+        table.print-table tfoot td {
+          font-weight: 700;
+          background: #f3f4f6;
+          border-top: 2px solid #d1d5db;
+        }
+        .text-right {
+          text-align: right;
+        }
+        .report-footer {
+          margin-top: 24px;
+          padding-top: 8px;
+          border-top: 1px solid #e5e7eb;
+          display: flex;
+          justify-content: space-between;
+          font-size: 10px;
+          color: #9ca3af;
+          page-break-inside: avoid;
+        }
+      `;
+
+      let deptTotalGross = 0, deptTotalNet = 0, deptTotalPaid = 0, deptTotalStaff = 0;
+      for (const d of depts) {
+        deptTotalGross += parseFloat(d.gross || 0);
+        deptTotalNet += parseFloat(d.net || 0);
+        deptTotalPaid += parseFloat(d.paid || 0);
+        deptTotalStaff += parseInt(d.employeeCount || 0, 10);
+      }
+
+      let freqTotalRuns = 0, freqTotalGross = 0, freqTotalNet = 0;
+      for (const f of freqs) {
+        freqTotalRuns += parseInt(f.runsCount || 0, 10);
+        freqTotalGross += parseFloat(f.gross || 0);
+        freqTotalNet += parseFloat(f.net || 0);
+      }
+
+      const printableHtml = `
+        <div class="report-header">
+          <div>
+            <div class="report-title">Executive Payroll &amp; Cost Allocation Summary</div>
+            <div class="report-org">${escapeHtml(orgName)} &bull; Internal Financial Document</div>
+          </div>
+          <div class="report-meta">
+            <div><strong>Generated:</strong> ${formattedDate} at ${formattedTime}</div>
+            <div><strong>Prepared By:</strong> ${escapeHtml(user)}</div>
+            <div><strong>System:</strong> NexStock ERP</div>
+          </div>
+        </div>
+
+        <div class="kpi-row">
+          <div class="kpi-box">
+            <div class="kpi-box-label">Total Gross Payroll</div>
+            <div class="kpi-box-val">${formatTenantMoney(report.totalGross, currency)}</div>
+            <div class="kpi-box-sub">${report.runsCount} active runs</div>
+          </div>
+          <div class="kpi-box">
+            <div class="kpi-box-label">Total Withholdings</div>
+            <div class="kpi-box-val" style="color: #b91c1c;">${formatTenantMoney(report.totalDeductions, currency)}</div>
+            <div class="kpi-box-sub">Tax &amp; Statutory EPF</div>
+          </div>
+          <div class="kpi-box">
+            <div class="kpi-box-label">Total Net Pay</div>
+            <div class="kpi-box-val" style="color: #1d4ed8;">${formatTenantMoney(report.totalNet, currency)}</div>
+            <div class="kpi-box-sub">${report.employeesPaidCount} staff disbursed</div>
+          </div>
+          <div class="kpi-box">
+            <div class="kpi-box-label">Total Disbursed</div>
+            <div class="kpi-box-val" style="color: #15803d;">${formatTenantMoney(report.totalPaid, currency)}</div>
+            <div class="kpi-box-sub">Paid to date</div>
+          </div>
+          <div class="kpi-box">
+            <div class="kpi-box-label">Outstanding Balance</div>
+            <div class="kpi-box-val" style="color: #b45309;">${formatTenantMoney(report.totalUnpaid, currency)}</div>
+            <div class="kpi-box-sub">Pending disbursement</div>
+          </div>
+        </div>
+
+        <div class="tables-container">
+          <div>
+            <div class="section-title">Department Cost Allocation</div>
+            <table class="print-table">
+              <thead>
+                <tr>
+                  <th>Department</th>
+                  <th class="text-right">Staff</th>
+                  <th class="text-right">Gross Total</th>
+                  <th class="text-right">Net Total</th>
+                  <th class="text-right">Disbursed</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${depts.length === 0 ? '<tr><td colspan="5" style="text-align:center; padding:12px;">No departmental records found</td></tr>' : depts.map(d => `
+                  <tr>
+                    <td><strong>${escapeHtml(d.department)}</strong></td>
+                    <td class="text-right">${d.employeeCount}</td>
+                    <td class="text-right">${formatTenantMoney(d.gross, currency)}</td>
+                    <td class="text-right"><strong>${formatTenantMoney(d.net, currency)}</strong></td>
+                    <td class="text-right" style="color:#15803d;">${formatTenantMoney(d.paid, currency)}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+              ${depts.length > 0 ? `
+                <tfoot>
+                  <tr>
+                    <td>Total (${depts.length} departments)</td>
+                    <td class="text-right">${deptTotalStaff}</td>
+                    <td class="text-right">${formatTenantMoney(deptTotalGross, currency)}</td>
+                    <td class="text-right">${formatTenantMoney(deptTotalNet, currency)}</td>
+                    <td class="text-right">${formatTenantMoney(deptTotalPaid, currency)}</td>
+                  </tr>
+                </tfoot>
+              ` : ''}
+            </table>
+          </div>
+
+          <div>
+            <div class="section-title">Schedule Frequency Breakdown</div>
+            <table class="print-table">
+              <thead>
+                <tr>
+                  <th>Frequency</th>
+                  <th class="text-right">Runs</th>
+                  <th class="text-right">Gross Pay</th>
+                  <th class="text-right">Net Pay</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${freqs.length === 0 ? '<tr><td colspan="4" style="text-align:center; padding:12px;">No frequency records found</td></tr>' : freqs.map(f => `
+                  <tr>
+                    <td><strong>${escapeHtml(f.frequency)}</strong></td>
+                    <td class="text-right">${f.runsCount}</td>
+                    <td class="text-right">${formatTenantMoney(f.gross, currency)}</td>
+                    <td class="text-right"><strong>${formatTenantMoney(f.net, currency)}</strong></td>
+                  </tr>
+                `).join('')}
+              </tbody>
+              ${freqs.length > 0 ? `
+                <tfoot>
+                  <tr>
+                    <td>Total Runs</td>
+                    <td class="text-right">${freqTotalRuns}</td>
+                    <td class="text-right">${formatTenantMoney(freqTotalGross, currency)}</td>
+                    <td class="text-right">${formatTenantMoney(freqTotalNet, currency)}</td>
+                  </tr>
+                </tfoot>
+              ` : ''}
+            </table>
+          </div>
+        </div>
+
+        <div class="report-footer">
+          <div>NexStock Enterprise SaaS &bull; Confidential Internal Financial Document</div>
+          <div>Page 1 of 1</div>
+        </div>
+      `;
+
+      printHtmlDocument(printableHtml, printCss);
+    }
+
     // ============================================================================
     // --- PHASE 7.2: ROLES & GRANULAR PERMISSIONS MANAGEMENT ---
     // ============================================================================
@@ -12277,14 +12826,44 @@
       const container = document.getElementById('mainContainer');
       container.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-secondary);"><div class="spinner-sm" style="display:inline-block; margin-bottom: 8px;"></div><div>Loading roles and permission policies...</div></div>';
 
+      let roles = [];
+      let catalogRes = { modules: [], allKeys: [] };
+      let members = [];
+      let branchesRes = { items: [] };
+      let warehousesRes = { items: [] };
+      let accessDenied = false;
+
       try {
-        const [roles, catalogRes, members, branchesRes, warehousesRes] = await Promise.all([
-          apiFetch('/v1/iam/roles').catch(() => []),
+        const [r, c, m, b, w] = await Promise.all([
+          apiFetch('/v1/iam/roles').catch(err => {
+            const msg = String(err?.message || '').toLowerCase();
+            if (err?.status === 403 || err?.statusCode === 403 || msg.includes('permission') || msg.includes('forbidden') || msg.includes('unauthorized')) {
+              accessDenied = true;
+            }
+            return [];
+          }),
           apiFetch('/v1/iam/permissions').catch(() => ({ modules: [], allKeys: [] })),
           apiFetch('/v1/iam/members').catch(() => []),
           apiFetch('/v1/org/branches').catch(() => ({ items: [] })),
           apiFetch('/v1/org/warehouses').catch(() => ({ items: [] }))
         ]);
+        roles = r;
+        catalogRes = c;
+        members = m;
+        branchesRes = b;
+        warehousesRes = w;
+
+        if (accessDenied && roles.length === 0) {
+          container.innerHTML = `
+            <div class="card" style="padding: 48px 24px; text-align: center; max-width: 580px; margin: 40px auto;">
+              <div style="font-size: 48px; margin-bottom: 16px;">🔒</div>
+              <h2 style="font-size: 20px; font-weight: 700; margin-bottom: 8px;">Access Restricted</h2>
+              <p style="color: var(--text-secondary); margin-bottom: 24px; line-height: 1.5;">You do not possess the required IAM administrative permissions to configure organization roles and security policies.</p>
+              <button class="btn btn-primary" onclick="renderView('dashboard')">Return to Dashboard</button>
+            </div>
+          `;
+          return;
+        }
 
         window._rolesCache = roles;
         window._permissionsCatalogCache = catalogRes;

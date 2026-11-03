@@ -2079,4 +2079,107 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       expect(html).toContain('Organization-Wide Access (All Locations)');
     });
   });
+
+  describe('25. Phase 7.2 Production QA Remediation: BUG-039 through BUG-044', () => {
+    it('BUG-044: verifies roles-permissions is registered in VALID_VIEWS and ALL_SPA_VIEW_IDS preventing redirect to dashboard', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // Verified in contract type definitions
+      expect(ALL_SPA_VIEW_IDS).toContain('roles-permissions');
+
+      // Verified in SPA client VALID_VIEWS routing list
+      expect(html).toMatch(/'roles-permissions'/);
+
+      // Verified graceful 403 access restricted handling without full page redirect
+      expect(html).toContain('Access Restricted');
+      expect(html).toContain('You do not possess the required IAM administrative permissions');
+    });
+
+    it('BUG-039: verifies immediate visual feedback, 0ms modal loaders, and in-flight duplicate prevention on action buttons', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // Instant 0ms modal feedback on openPayrollRunDetailModal before API await
+      expect(html).toContain("title: cached ? `Payroll Run: ${escapeHtml(cached.runNumber)}` : 'Payroll Run Details'");
+      expect(html).toContain('Loading payroll run details...');
+
+      // In-flight locking set for duplicate click prevention
+      expect(html).toContain('const _payrollActionInFlight = new Set();');
+      expect(html).toContain('if (_payrollActionInFlight.has(actionKey)) return;');
+
+      // Button processing states with spinners for Submit, Approve, and Cancel
+      expect(html).toContain("Submitting...");
+      expect(html).toContain("Approving...");
+      expect(html).toContain("Cancelling...");
+
+      // Immediate loading state on Add Employee button
+      expect(html).toContain("triggerBtn.innerHTML = '<span class=\"spinner-sm\" style=\"display:inline-block; vertical-align:middle; margin-right:6px;\"></span> Loading...'");
+    });
+
+    it('BUG-040: verifies mobile responsive layouts for Employee Profile, Documents, and Salary Structure modals', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // Employee Profile modal responsive auto-fit grid and horizontally scrolling tabs
+      expect(html).toContain('grid-template-columns: repeat(auto-fit, minmax(280px, 1fr))');
+      expect(html).toContain('overflow-x: auto; -webkit-overflow-scrolling: touch; flex-wrap: nowrap;');
+
+      // Employee Documents modal with desktop table and dedicated mobile cards
+      expect(html).toContain('Enrolled Documents (${docs.length})');
+      expect(html).toContain('<div class="desktop-table-container">');
+      expect(html).toContain('<div class="mobile-cards-container">');
+
+      // Salary Structure modal responsive layout and salary-comp-row CSS
+      expect(html).toContain('.salary-comp-row');
+      expect(html).toContain('@media (max-width: 680px)');
+      expect(html).toContain('grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));');
+      expect(html).toContain('grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));');
+    });
+
+    it('BUG-041: verifies Desktop Payroll Runs table alignment, explicit column min-widths, and tabular-nums formatting', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // Desktop table explicit column min-widths
+      expect(html).toContain('<th style="min-width: 130px;">Run Number</th>');
+      expect(html).toContain('<th style="min-width: 100px;">Frequency</th>');
+      expect(html).toContain('<th style="min-width: 170px;">Period</th>');
+      expect(html).toContain('<th style="min-width: 120px; text-align: right;">Gross Pay</th>');
+      expect(html).toContain('<th style="min-width: 115px; text-align: right;">Deductions</th>');
+      expect(html).toContain('<th style="min-width: 120px; text-align: right;">Net Pay</th>');
+      expect(html).toContain('<th style="min-width: 220px; text-align: right;">Actions</th>');
+      expect(html).toContain('font-variant-numeric: tabular-nums;');
+    });
+
+    it('BUG-042: verifies dedicated mobile cards container for Payroll Management and responsive breakdown tables', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // Dedicated mobile cards container in renderPayrollView
+      expect(html).toContain('<!-- Mobile Card Layout (BUG-042: Touch-Friendly Responsive View for Payroll Runs) -->');
+      expect(html).toContain('<div class="mobile-cards-container">');
+
+      // Responsive breakdown tables in renderPayrollReportsView
+      expect(html).toContain('grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px;');
+    });
+
+    it('BUG-043: verifies dedicated A4 landscape executive print generator and enhanced print stylesheet', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // Enhanced @media print hiding navigation, sidebar, topbar, and action buttons
+      expect(html).toContain('/* Print Styles (BUG-043: Enhanced Report & Receipt Printing) */');
+      expect(html).toContain('aside.sidebar,');
+      expect(html).toContain('header.topbar,');
+      expect(html).toContain('.view-header button,');
+
+      // Dedicated executive print generator
+      expect(html).toContain('function printPayrollReport()');
+      expect(html).toContain('Executive Payroll &amp; Cost Allocation Summary');
+      expect(html).toContain('size: A4 landscape;');
+      expect(html).toContain('Department Cost Allocation');
+      expect(html).toContain('Schedule Frequency Breakdown');
+    });
+  });
 });

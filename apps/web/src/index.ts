@@ -192,6 +192,7 @@ export const ALL_SPA_VIEW_IDS = [
   'employees',
   'payroll',
   'payroll-reports',
+  'roles-permissions',
   'org-settings',
 ] as const;
 
