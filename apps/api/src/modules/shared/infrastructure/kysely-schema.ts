@@ -283,8 +283,10 @@ export interface RolesTable {
   tenant_id: string;
   code: string;
   name: string;
+  description: string | null;
   is_system_role: Generated<boolean>;
   created_at: Generated<Date>;
+  updated_at: Generated<Date>;
 }
 
 export interface RolePermissionsTable {

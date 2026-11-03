@@ -1960,5 +1960,123 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       expect(html).toContain("btn.innerText = 'Creating Employee...'");
       expect(html).toContain("btn.innerText = 'Saving...'");
     });
+
+    it('BUG-037: verifies responsive desktop table and mobile card layout in Employee Directory', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // Desktop table container exists with proper table structure
+      expect(html).toContain('class="desktop-table-container"');
+      expect(html).toContain('Employee</th>');
+      expect(html).toContain('Role &amp; Department</th>');
+      expect(html).toContain('Pay Frequency</th>');
+      expect(html).toContain('Contact</th>');
+      expect(html).toContain('Branch &amp; Warehouse</th>');
+      expect(html).toContain('Joined Date</th>');
+      expect(html).toContain('Status</th>');
+      expect(html).toContain('Actions</th>');
+
+      // Mobile cards container exists for viewport <= 768px
+      expect(html).toContain('class="mobile-cards-container"');
+
+      // Mobile cards include touch-friendly controls (height 36px), initials avatar, and action buttons
+      expect(html).toContain('height: 36px');
+      expect(html).toContain('openEmployeeProfileModal(');
+      expect(html).toContain('openEditEmployeeModal(');
+      expect(html).toContain('openEmployeeSalaryModal(');
+      expect(html).toContain('openEmployeeDocumentsModal(');
+      expect(html).toContain('openUpdateEmployeeStatusModal(');
+    });
+
+    it('BUG-038: verifies employee edit form handles empty/cleared optional fields without validation errors', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // submitEditEmployee extracts and passes null for empty optional fields
+      expect(html).toContain('function submitEditEmployee(');
+      expect(html).toContain("document.getElementById('editEmpNationalId').value.trim() || null");
+      expect(html).toContain("document.getElementById('editEmpBranch')?.value || null");
+      expect(html).toContain("document.getElementById('editEmpWarehouse')?.value || null");
+      expect(html).toContain("document.getElementById('editEmpBankName').value.trim() || null");
+      expect(html).toContain("document.getElementById('editEmpBankAccount').value.trim() || null");
+      expect(html).toContain("document.getElementById('editEmpEpf').value.trim() || null");
+      expect(html).toContain("document.getElementById('editEmpAddress').value.trim() || null");
+      expect(html).toContain("document.getElementById('editEmpNotes').value.trim() || null");
+
+      // Payload maps optional fields correctly
+      expect(html).toContain('primaryBranchId: branchId');
+      expect(html).toContain('primaryWarehouseId: warehouseId');
+      expect(html).toContain('bankAccountNumber: bankAccount');
+      expect(html).toContain('addressLine1: address');
+
+      // Required fields are strictly validated before submission
+      expect(html).toContain("showToast('Please fill in all required fields marked with *', 'error')");
+    });
+
+    it('BUG-039: verifies instant modal responsiveness, loading spinners, and double-click prevention', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // Immediate modal opening with 0ms click latency and loading states
+      expect(html).toContain("title: 'Add New Employee'");
+      expect(html).toContain('Edit Employee');
+      expect(html).toContain('Employee Profile');
+      expect(html).toContain('Salary &amp; Compensation');
+      expect(html).toContain('Employee Documents');
+
+      // Double-click prevention on employee action submissions
+      expect(html).toContain('btn.disabled = true;');
+      expect(html).toContain("btn.innerText = 'Creating Employee...'");
+      expect(html).toContain("btn.innerText = 'Saving...'");
+      expect(html).toContain("btn.innerText = 'Saving Plan...'");
+      expect(html).toContain("btn.innerText = 'Uploading...'");
+    });
+  });
+
+  describe('24. Phase 7.2: Advanced Permissions & Granular Role Management UI', () => {
+    it('verifies sidebar navigation link and SPA view routing for Roles & Permissions', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // Sidebar navigation link
+      expect(html).toContain('data-view="roles-permissions"');
+      expect(html).toContain('Roles &amp; Permissions');
+
+      // View routing handler in switchView
+      expect(html).toContain("case 'roles-permissions':");
+      expect(html).toContain('renderRolesPermissionsView();');
+    });
+
+    it('verifies renderRolesPermissionsView renders 3-tab layout with metrics and catalog', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      expect(html).toContain('function renderRolesPermissionsView()');
+      expect(html).toContain('function switchRolesTab(');
+
+      // Tab headers
+      expect(html).toContain('Roles Directory');
+      expect(html).toContain('Permission Policy Editor');
+      expect(html).toContain('Team Members &amp; Scopes');
+
+      // Tab 1: Roles Directory table and mobile cards
+      expect(html).toContain('openCreateRoleModal()');
+      expect(html).toContain('+ Create Custom Role');
+      expect(html).toContain('function deleteRolePrompt(');
+      expect(html).toContain('function submitDeleteRole(');
+
+      // Tab 2: Permission Matrix Policy Editor with Select/Clear All and Unsaved Banner
+      expect(html).toContain('selectModulePerms(');
+      expect(html).toContain('function saveRolePermissions(');
+      expect(html).toContain('unsavedChangesBadge');
+      expect(html).toContain('Built-in System Role (Protected)');
+
+      // Tab 3: Team Members and Scoping Modals
+      expect(html).toContain('function openAssignMemberRolesModal(');
+      expect(html).toContain('function submitAssignMemberRoles(');
+      expect(html).toContain('function openEditMemberLocationScopeModal(');
+      expect(html).toContain('function submitMemberLocationScopes(');
+      expect(html).toContain('Organization-Wide Access (All Locations)');
+    });
   });
 });

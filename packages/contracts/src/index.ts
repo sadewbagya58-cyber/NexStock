@@ -53,6 +53,15 @@ export const ErrorCodeSchema = Type.Union([
   Type.Literal('IAM_TENANT_MEMBERSHIP_REQUIRED'),
   Type.Literal('IAM_PERMISSION_DENIED'),
   Type.Literal('IAM_LOCATION_SCOPE_DENIED'),
+  Type.Literal('IAM_ROLE_NOT_FOUND'),
+  Type.Literal('IAM_RESERVED_ROLE_CODE'),
+  Type.Literal('IAM_DUPLICATE_ROLE_CODE'),
+  Type.Literal('IAM_PRIVILEGE_ESCALATION_DENIED'),
+  Type.Literal('IAM_SYSTEM_ROLE_PROTECTED'),
+  Type.Literal('IAM_ROLE_IN_USE'),
+  Type.Literal('IAM_MEMBERSHIP_NOT_FOUND'),
+  Type.Literal('IAM_INVALID_ROLE_ID'),
+  Type.Literal('IAM_CANNOT_REMOVE_LAST_OWNER'),
   Type.Literal('SUB_SUBSCRIPTION_INACTIVE'),
   Type.Literal('SUB_TRIAL_EXPIRED'),
   Type.Literal('SUB_QUOTA_EXCEEDED'),
@@ -2105,33 +2114,33 @@ export const CreateEmployeeRequestSchema = Type.Object(
     employeeCode: Type.String({ minLength: 1, maxLength: 50 }),
     firstName: Type.String({ minLength: 1, maxLength: 100 }),
     lastName: Type.String({ minLength: 1, maxLength: 100 }),
-    displayName: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
-    email: Type.Optional(Type.String({ maxLength: 255 })),
-    phone: Type.Optional(Type.String({ maxLength: 50 })),
-    nationalId: Type.Optional(Type.String({ maxLength: 50 })),
-    gender: Type.Optional(Type.String({ maxLength: 20 })),
-    dateOfBirth: Type.Optional(Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' })),
+    displayName: Type.Optional(Type.Union([Type.String({ minLength: 1, maxLength: 200 }), Type.Null()])),
+    email: Type.Optional(Type.Union([Type.String({ maxLength: 255 }), Type.Null()])),
+    phone: Type.Optional(Type.Union([Type.String({ maxLength: 50 }), Type.Null()])),
+    nationalId: Type.Optional(Type.Union([Type.String({ maxLength: 50 }), Type.Null()])),
+    gender: Type.Optional(Type.Union([Type.String({ maxLength: 20 }), Type.Null()])),
+    dateOfBirth: Type.Optional(Type.Union([Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' }), Type.Literal(''), Type.Null()])),
     joinedDate: Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' }),
     designation: Type.String({ minLength: 1, maxLength: 100 }),
     department: Type.String({ minLength: 1, maxLength: 100 }),
     employmentStatus: Type.Optional(EmploymentStatusSchema),
     payrollFrequency: Type.Optional(PayrollFrequencySchema),
-    primaryBranchId: Type.Optional(UuidSchema),
-    primaryWarehouseId: Type.Optional(UuidSchema),
-    branchIds: Type.Optional(Type.Array(UuidSchema)),
-    warehouseIds: Type.Optional(Type.Array(UuidSchema)),
-    linkedUserId: Type.Optional(UuidSchema),
-    avatarUrl: Type.Optional(Type.String()),
-    bankName: Type.Optional(Type.String({ maxLength: 100 })),
-    bankAccountNumber: Type.Optional(Type.String({ maxLength: 100 })),
-    bankBranch: Type.Optional(Type.String({ maxLength: 100 })),
-    epfNumber: Type.Optional(Type.String({ maxLength: 100 })),
-    addressLine1: Type.Optional(Type.String()),
-    addressLine2: Type.Optional(Type.String()),
-    city: Type.Optional(Type.String()),
-    emergencyContactName: Type.Optional(Type.String()),
-    emergencyContactPhone: Type.Optional(Type.String()),
-    notes: Type.Optional(Type.String()),
+    primaryBranchId: Type.Optional(Type.Union([UuidSchema, Type.Literal(''), Type.Null()])),
+    primaryWarehouseId: Type.Optional(Type.Union([UuidSchema, Type.Literal(''), Type.Null()])),
+    branchIds: Type.Optional(Type.Union([Type.Array(UuidSchema), Type.Null()])),
+    warehouseIds: Type.Optional(Type.Union([Type.Array(UuidSchema), Type.Null()])),
+    linkedUserId: Type.Optional(Type.Union([UuidSchema, Type.Literal(''), Type.Null()])),
+    avatarUrl: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+    bankName: Type.Optional(Type.Union([Type.String({ maxLength: 100 }), Type.Null()])),
+    bankAccountNumber: Type.Optional(Type.Union([Type.String({ maxLength: 100 }), Type.Null()])),
+    bankBranch: Type.Optional(Type.Union([Type.String({ maxLength: 100 }), Type.Null()])),
+    epfNumber: Type.Optional(Type.Union([Type.String({ maxLength: 100 }), Type.Null()])),
+    addressLine1: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+    addressLine2: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+    city: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+    emergencyContactName: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+    emergencyContactPhone: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+    notes: Type.Optional(Type.Union([Type.String(), Type.Null()])),
   },
   { additionalProperties: false },
 );
@@ -2501,6 +2510,138 @@ export const PayrollReportSummaryResponseSchema = Type.Object({
 export type PayrollReportSummaryResponse = Static<
   typeof PayrollReportSummaryResponseSchema
 >;
+
+// --- Phase 7.2: Advanced Permissions & Role Management Schemas ---
+
+export const PermissionActionSchema = Type.Union([
+  Type.Literal('View'),
+  Type.Literal('Create'),
+  Type.Literal('Edit'),
+  Type.Literal('Delete'),
+  Type.Literal('Approve'),
+  Type.Literal('Export'),
+  Type.Literal('Manage'),
+]);
+export type PermissionAction = Static<typeof PermissionActionSchema>;
+
+export const PermissionItemSchema = Type.Object({
+  key: Type.String(),
+  name: Type.String(),
+  module: Type.String(),
+  action: PermissionActionSchema,
+  description: Type.String(),
+});
+export type PermissionItem = Static<typeof PermissionItemSchema>;
+
+export const ModulePermissionsSchema = Type.Object({
+  module: Type.String(),
+  permissions: Type.Array(PermissionItemSchema),
+});
+export type ModulePermissions = Static<typeof ModulePermissionsSchema>;
+
+export const PermissionsCatalogResponseSchema = Type.Object({
+  modules: Type.Array(ModulePermissionsSchema),
+  allKeys: Type.Array(Type.String()),
+});
+export type PermissionsCatalogResponse = Static<typeof PermissionsCatalogResponseSchema>;
+
+export const RoleSummaryResponseSchema = Type.Object({
+  id: UuidSchema,
+  tenantId: UuidSchema,
+  code: Type.String(),
+  name: Type.String(),
+  description: Type.Union([Type.String(), Type.Null()]),
+  isSystemRole: Type.Boolean(),
+  memberCount: Type.Integer({ minimum: 0 }),
+  permissionsCount: Type.Integer({ minimum: 0 }),
+  createdAt: Type.String(),
+  updatedAt: Type.Optional(Type.String()),
+});
+export type RoleSummaryResponse = Static<typeof RoleSummaryResponseSchema>;
+
+export const RoleDetailResponseSchema = Type.Object({
+  id: UuidSchema,
+  tenantId: UuidSchema,
+  code: Type.String(),
+  name: Type.String(),
+  description: Type.Union([Type.String(), Type.Null()]),
+  isSystemRole: Type.Boolean(),
+  memberCount: Type.Integer({ minimum: 0 }),
+  permissions: Type.Array(Type.String()),
+  createdAt: Type.String(),
+  updatedAt: Type.Optional(Type.String()),
+});
+export type RoleDetailResponse = Static<typeof RoleDetailResponseSchema>;
+
+export const CreateRoleRequestSchema = Type.Object(
+  {
+    code: Type.String({ minLength: 2, maxLength: 50, pattern: '^[A-Z0-9_]+$' }),
+    name: Type.String({ minLength: 2, maxLength: 100 }),
+    description: Type.Optional(Type.Union([Type.String({ maxLength: 255 }), Type.Null()])),
+    permissions: Type.Array(Type.String()),
+  },
+  { additionalProperties: false },
+);
+export type CreateRoleRequest = Static<typeof CreateRoleRequestSchema>;
+
+export const UpdateRoleRequestSchema = Type.Object(
+  {
+    name: Type.Optional(Type.String({ minLength: 2, maxLength: 100 })),
+    description: Type.Optional(Type.Union([Type.String({ maxLength: 255 }), Type.Null()])),
+    permissions: Type.Optional(Type.Array(Type.String())),
+  },
+  { additionalProperties: false },
+);
+export type UpdateRoleRequest = Static<typeof UpdateRoleRequestSchema>;
+
+export const MemberRoleAssignmentSummarySchema = Type.Object({
+  id: UuidSchema,
+  code: Type.String(),
+  name: Type.String(),
+  isSystemRole: Type.Boolean(),
+});
+export type MemberRoleAssignmentSummary = Static<typeof MemberRoleAssignmentSummarySchema>;
+
+export const MemberLocationScopeDetailSchema = Type.Object({
+  branchIds: Type.Array(UuidSchema),
+  warehouseIds: Type.Array(UuidSchema),
+});
+export type MemberLocationScopeDetail = Static<typeof MemberLocationScopeDetailSchema>;
+
+export const MemberSummaryResponseSchema = Type.Object({
+  id: UuidSchema,
+  tenantId: UuidSchema,
+  userId: UuidSchema,
+  email: Type.String(),
+  fullName: Type.String(),
+  status: Type.Union([Type.Literal('INVITED'), Type.Literal('ACTIVE'), Type.Literal('DISABLED')]),
+  allLocationsAccess: Type.Boolean(),
+  roles: Type.Array(MemberRoleAssignmentSummarySchema),
+  locationScopes: MemberLocationScopeDetailSchema,
+  createdAt: Type.String(),
+});
+export type MemberSummaryResponse = Static<typeof MemberSummaryResponseSchema>;
+
+export const AssignMemberRolesRequestSchema = Type.Object(
+  {
+    roleIds: Type.Array(UuidSchema),
+  },
+  { additionalProperties: false },
+);
+export type AssignMemberRolesRequest = Static<typeof AssignMemberRolesRequestSchema>;
+
+export const UpdateMemberLocationScopesRequestSchema = Type.Object(
+  {
+    allLocationsAccess: Type.Boolean(),
+    branchIds: Type.Optional(Type.Array(UuidSchema)),
+    warehouseIds: Type.Optional(Type.Array(UuidSchema)),
+  },
+  { additionalProperties: false },
+);
+export type UpdateMemberLocationScopesRequest = Static<
+  typeof UpdateMemberLocationScopesRequestSchema
+>;
+
 
 
 

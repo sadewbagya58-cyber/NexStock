@@ -1953,6 +1953,10 @@
       </a>
 
       <div class="nav-section-title">Organization</div>
+      <a class="nav-link" data-view="roles-permissions">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+        Roles &amp; Permissions
+      </a>
       <a class="nav-link" data-view="org-settings">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
         Settings &amp; Quotas
@@ -2836,6 +2840,7 @@
         case 'employees': renderEmployeesView(); break;
         case 'payroll': renderPayrollView(); break;
         case 'payroll-reports': renderPayrollReportsView(); break;
+        case 'roles-permissions': renderRolesPermissionsView(); break;
         case 'org-settings': renderOrgSettingsView(); break;
         default: renderDashboardView();
       }
@@ -9792,14 +9797,14 @@
                   <table class="data-table">
                     <thead>
                       <tr>
-                        <th>Employee</th>
-                        <th>Role &amp; Department</th>
-                        <th>Pay Frequency</th>
-                        <th>Contact</th>
-                        <th>Branch &amp; Warehouse</th>
-                        <th>Joined Date</th>
-                        <th>Status</th>
-                        <th style="text-align: right;">Actions</th>
+                        <th style="min-width: 200px;">Employee</th>
+                        <th style="min-width: 150px;">Role &amp; Department</th>
+                        <th style="min-width: 110px;">Pay Frequency</th>
+                        <th style="min-width: 160px;">Contact</th>
+                        <th style="min-width: 160px;">Branch &amp; Warehouse</th>
+                        <th style="min-width: 105px;">Joined Date</th>
+                        <th style="min-width: 100px;">Status</th>
+                        <th style="text-align: right; min-width: 280px;">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -9827,16 +9832,16 @@
                             </td>
                             <td>${freqBadge}</td>
                             <td>
-                              <div style="font-size: 12px;">${emp.email ? `<a href="mailto:${escapeHtml(emp.email)}" style="color: var(--accent-primary); text-decoration: none;">${escapeHtml(emp.email)}</a>` : '—'}</div>
+                              <div style="font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 160px;">${emp.email ? `<a href="mailto:${escapeHtml(emp.email)}" style="color: var(--accent-primary); text-decoration: none;">${escapeHtml(emp.email)}</a>` : '—'}</div>
                               <div style="font-size: 11px; color: var(--text-secondary);">${escapeHtml(emp.phone || '')}</div>
                             </td>
                             <td>
                               <div style="font-size: 12px; font-weight: 500;">${escapeHtml(emp.primaryBranchName || 'HQ Branch')}</div>
                               <div style="font-size: 11px; color: var(--text-secondary);">${escapeHtml(emp.primaryWarehouseName || 'Main Depot')}</div>
                             </td>
-                            <td style="font-size: 12px; color: var(--text-secondary);">${escapeHtml(emp.joinedDate)}</td>
+                            <td style="font-size: 12px; color: var(--text-secondary); white-space: nowrap;">${escapeHtml(emp.joinedDate)}</td>
                             <td>${statusBadge}</td>
-                            <td style="text-align: right;">
+                            <td style="text-align: right; white-space: nowrap;">
                               <div style="display: inline-flex; gap: 6px;">
                                 <button class="btn btn-secondary btn-sm" onclick="openEmployeeProfileModal('${emp.id}')" title="View Full Profile">Profile</button>
                                 <button class="btn btn-secondary btn-sm" onclick="openEditEmployeeModal('${emp.id}')" title="Edit Employee Details">Edit</button>
@@ -9851,6 +9856,62 @@
                     </tbody>
                   </table>
                 </div>
+              </div>
+
+              <!-- Mobile Card Layout (BUG-037: Touch-Friendly Responsive View) -->
+              <div class="mobile-cards-container">
+                ${employees.map(emp => {
+                  const statusBadge = getStatusBadgeHtml(emp.employmentStatus);
+                  const freqBadge = getFrequencyBadgeHtml(emp.payrollFrequency);
+                  const initials = getInitials(emp.displayName || `${emp.firstName} ${emp.lastName}`);
+
+                  return `
+                    <div class="entity-card" style="padding: 16px; border-radius: 8px; border: 1px solid var(--border-subtle); background: var(--surface-card); margin-bottom: 12px;">
+                      <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px;">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                          <div style="width: 40px; height: 40px; border-radius: 50%; background: var(--accent-light); color: var(--accent-primary); font-weight: 700; display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0;">
+                            ${initials}
+                          </div>
+                          <div>
+                            <div style="font-weight: 600; font-size: 15px; color: var(--text-primary); cursor: pointer;" onclick="openEmployeeProfileModal('${emp.id}')">${escapeHtml(emp.displayName)}</div>
+                            <div style="font-size: 11px; color: var(--text-secondary); font-family: monospace;">${escapeHtml(emp.employeeCode)}</div>
+                          </div>
+                        </div>
+                        <div>${statusBadge}</div>
+                      </div>
+
+                      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 12px; margin-bottom: 12px; padding: 10px; background: var(--surface-bg); border-radius: 6px;">
+                        <div>
+                          <div style="color: var(--text-secondary); font-size: 10px; text-transform: uppercase;">Designation</div>
+                          <div style="font-weight: 600; color: var(--text-primary);">${escapeHtml(emp.designation)}</div>
+                          <div style="color: var(--text-secondary); font-size: 11px;">${escapeHtml(emp.department)}</div>
+                        </div>
+                        <div>
+                          <div style="color: var(--text-secondary); font-size: 10px; text-transform: uppercase;">Pay Frequency</div>
+                          <div style="margin-top: 2px;">${freqBadge}</div>
+                        </div>
+                        <div>
+                          <div style="color: var(--text-secondary); font-size: 10px; text-transform: uppercase;">Location</div>
+                          <div style="font-weight: 500;">${escapeHtml(emp.primaryBranchName || 'HQ Branch')}</div>
+                          <div style="color: var(--text-secondary); font-size: 11px;">${escapeHtml(emp.primaryWarehouseName || 'Main Depot')}</div>
+                        </div>
+                        <div>
+                          <div style="color: var(--text-secondary); font-size: 10px; text-transform: uppercase;">Contact &amp; Joined</div>
+                          <div style="color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(emp.phone || emp.joinedDate)}</div>
+                          <div style="color: var(--text-secondary); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(emp.email || emp.joinedDate)}</div>
+                        </div>
+                      </div>
+
+                      <div style="display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; border-top: 1px solid var(--border-subtle); padding-top: 10px;">
+                        <button class="btn btn-secondary btn-sm" onclick="openEmployeeProfileModal('${emp.id}')" style="flex: 1; min-width: 65px; height: 36px;">Profile</button>
+                        <button class="btn btn-secondary btn-sm" onclick="openEditEmployeeModal('${emp.id}')" style="flex: 1; min-width: 60px; height: 36px;">Edit</button>
+                        <button class="btn btn-secondary btn-sm" onclick="openEmployeeSalaryModal('${emp.id}')" style="flex: 1; min-width: 65px; height: 36px;">Salary</button>
+                        <button class="btn btn-secondary btn-sm" onclick="openEmployeeDocumentsModal('${emp.id}')" style="flex: 1; min-width: 60px; height: 36px;">Docs</button>
+                        <button class="btn btn-secondary btn-sm" onclick="openUpdateEmployeeStatusModal('${emp.id}')" style="flex: 1; min-width: 65px; height: 36px;">Status</button>
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
               </div>
             `}
           </div>
@@ -10150,6 +10211,13 @@
 
     // --- 3. EDIT EMPLOYEE DETAILS MODAL ---
     async function openEditEmployeeModal(employeeId) {
+      const cached = (state.cachedEmployees || []).find(e => e.id === employeeId);
+      openModal({
+        title: cached ? `Edit Employee: ${escapeHtml(cached.displayName)} (${escapeHtml(cached.employeeCode)})` : 'Edit Employee',
+        maxWidth: '680px',
+        bodyHtml: '<div style="padding: 40px; text-align: center;"><div class="spinner-sm" style="display:inline-block; margin-bottom: 8px;"></div><div>Loading employee profile...</div></div>'
+      });
+
       try {
         const [emp, bRes, wRes] = await Promise.all([
           apiFetch(`/v1/employees/${employeeId}`),
@@ -10435,6 +10503,13 @@
 
     // --- 5. FULL EMPLOYEE PROFILE MODAL ---
     async function openEmployeeProfileModal(employeeId) {
+      const cached = (state.cachedEmployees || []).find(e => e.id === employeeId);
+      openModal({
+        title: cached ? `Employee Profile: ${escapeHtml(cached.displayName)}` : 'Employee Profile',
+        maxWidth: '780px',
+        bodyHtml: '<div style="padding: 40px; text-align: center;"><div class="spinner-sm" style="display:inline-block; margin-bottom: 8px;"></div><div>Loading profile data...</div></div>'
+      });
+
       try {
         const profile = await apiFetch(`/v1/employees/${employeeId}/profile`);
         const emp = profile.employee;
@@ -10759,6 +10834,13 @@
 
     // --- 7. SALARY STRUCTURE CONFIGURATION MODAL ---
     async function openEmployeeSalaryModal(employeeId) {
+      const cached = (state.cachedEmployees || []).find(e => e.id === employeeId);
+      openModal({
+        title: cached ? `Salary Structure: ${escapeHtml(cached.displayName)}` : 'Salary Structure',
+        maxWidth: '720px',
+        bodyHtml: '<div style="padding: 40px; text-align: center;"><div class="spinner-sm" style="display:inline-block; margin-bottom: 8px;"></div><div>Loading salary structure...</div></div>'
+      });
+
       try {
         const [emp, salaryRes] = await Promise.all([
           apiFetch(`/v1/employees/${employeeId}`),
@@ -10984,6 +11066,13 @@
 
     // --- 8. EMPLOYEE DOCUMENTS MODAL ---
     async function openEmployeeDocumentsModal(employeeId) {
+      const cached = (state.cachedEmployees || []).find(e => e.id === employeeId);
+      openModal({
+        title: cached ? `Documents: ${escapeHtml(cached.displayName)}` : 'Employee Documents',
+        maxWidth: '680px',
+        bodyHtml: '<div style="padding: 40px; text-align: center;"><div class="spinner-sm" style="display:inline-block; margin-bottom: 8px;"></div><div>Loading documents...</div></div>'
+      });
+
       try {
         const [emp, docs] = await Promise.all([
           apiFetch(`/v1/employees/${employeeId}`),
@@ -12167,6 +12256,821 @@
             <button class="btn btn-primary btn-sm" onclick="renderPayrollReportsView()">Try Again</button>
           </div>
         `;
+      }
+    }
+
+    // ============================================================================
+    // --- PHASE 7.2: ROLES & GRANULAR PERMISSIONS MANAGEMENT ---
+    // ============================================================================
+
+    state.rolesTab = 'roles';
+    state.activeEditorRoleId = null;
+    state.permissionsDirty = false;
+
+    function switchRolesTab(tabName, roleId = null) {
+      state.rolesTab = tabName;
+      if (roleId) state.activeEditorRoleId = roleId;
+      renderRolesPermissionsView();
+    }
+
+    async function renderRolesPermissionsView() {
+      const container = document.getElementById('mainContainer');
+      container.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-secondary);"><div class="spinner-sm" style="display:inline-block; margin-bottom: 8px;"></div><div>Loading roles and permission policies...</div></div>';
+
+      try {
+        const [roles, catalogRes, members, branchesRes, warehousesRes] = await Promise.all([
+          apiFetch('/v1/iam/roles').catch(() => []),
+          apiFetch('/v1/iam/permissions').catch(() => ({ modules: [], allKeys: [] })),
+          apiFetch('/v1/iam/members').catch(() => []),
+          apiFetch('/v1/org/branches').catch(() => ({ items: [] })),
+          apiFetch('/v1/org/warehouses').catch(() => ({ items: [] }))
+        ]);
+
+        window._rolesCache = roles;
+        window._permissionsCatalogCache = catalogRes;
+        window._membersCache = members;
+        window._employeeBranchesCache = branchesRes?.items || branchesRes || [];
+        window._employeeWarehousesCache = warehousesRes?.items || warehousesRes || [];
+
+        const systemRolesCount = roles.filter(r => r.isSystemRole).length;
+        const customRolesCount = roles.filter(r => !r.isSystemRole).length;
+        const activeTab = state.rolesTab || 'roles';
+
+        if (!state.activeEditorRoleId && roles.length > 0) {
+          state.activeEditorRoleId = roles[0].id;
+        }
+
+        container.innerHTML = `
+          <div class="view-header">
+            <div>
+              <h1 class="view-title">Roles &amp; Access Permissions</h1>
+              <div class="view-subtitle">RBAC role definitions, granular module permissions, and location access scopes</div>
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <button class="btn btn-primary" id="btnOpenCreateRole" onclick="openCreateRoleModal()">+ Create Custom Role</button>
+            </div>
+          </div>
+
+          <!-- KPI Metric Cards -->
+          <div class="kpi-grid" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); margin-bottom: 16px;">
+            <div class="kpi-card">
+              <div class="kpi-label">Total System Roles</div>
+              <div class="kpi-value">${roles.length}</div>
+              <div class="kpi-trend" style="color: var(--text-secondary);">${systemRolesCount} built-in &bull; ${customRolesCount} custom</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Active Members</div>
+              <div class="kpi-value" style="color: var(--accent-primary);">${members.length}</div>
+              <div class="kpi-trend" style="color: var(--text-secondary);">Assigned personnel</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Granular Permissions</div>
+              <div class="kpi-value" style="color: var(--status-success);">${catalogRes.allKeys ? catalogRes.allKeys.length : 52}</div>
+              <div class="kpi-trend" style="color: var(--status-success);">Across 20 modules</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Security Model</div>
+              <div class="kpi-value" style="color: var(--status-info); font-size: 16px; margin-top: 4px;">Least Privilege</div>
+              <div class="kpi-trend" style="color: var(--text-secondary);">3D Scoped + RLS</div>
+            </div>
+          </div>
+
+          <!-- Section Tabs -->
+          <div style="display: flex; gap: 8px; border-bottom: 1px solid var(--border-subtle); margin-bottom: 20px; flex-wrap: wrap;">
+            <button class="btn btn-sm ${activeTab === 'roles' ? 'btn-primary' : 'btn-secondary'}" onclick="switchRolesTab('roles')">Roles Directory (${roles.length})</button>
+            <button class="btn btn-sm ${activeTab === 'editor' ? 'btn-primary' : 'btn-secondary'}" onclick="switchRolesTab('editor')">Permission Policy Editor</button>
+            <button class="btn btn-sm ${activeTab === 'members' ? 'btn-primary' : 'btn-secondary'}" onclick="switchRolesTab('members')">Team Members &amp; Scopes (${members.length})</button>
+          </div>
+
+          <!-- Tab 1: Roles Directory -->
+          ${activeTab === 'roles' ? renderRolesDirectoryTabHtml(roles) : ''}
+
+          <!-- Tab 2: Permission Policy Editor -->
+          ${activeTab === 'editor' ? renderPermissionEditorTabHtml(roles, catalogRes) : ''}
+
+          <!-- Tab 3: Team Members & Scopes -->
+          ${activeTab === 'members' ? renderMembersTabHtml(members, roles) : ''}
+        `;
+      } catch (err) {
+        container.innerHTML = `
+          <div style="padding: 40px; text-align: center; color: var(--status-danger);">
+            <div style="font-size: 16px; font-weight: 600; margin-bottom: 8px;">Failed to load roles &amp; permissions</div>
+            <div style="font-size: 13px; margin-bottom: 16px;">${escapeHtml(err.message)}</div>
+            <button class="btn btn-primary btn-sm" onclick="renderRolesPermissionsView()">Try Again</button>
+          </div>
+        `;
+      }
+    }
+
+    // --- Tab 1: Roles Directory Render ---
+    function renderRolesDirectoryTabHtml(roles) {
+      if (roles.length === 0) {
+        return `
+          <div class="card" style="padding: 40px; text-align: center;">
+            <div style="font-size: 36px; margin-bottom: 12px;">🛡️</div>
+            <div style="font-size: 18px; font-weight: 600; margin-bottom: 6px;">No Roles Configured</div>
+            <button class="btn btn-primary" onclick="openCreateRoleModal()">+ Create Custom Role</button>
+          </div>
+        `;
+      }
+
+      return `
+        <div class="card">
+          <!-- Desktop Table Layout -->
+          <div class="desktop-table-container">
+            <div class="table-responsive">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th style="min-width: 180px;">Role Name</th>
+                    <th style="min-width: 130px;">Code</th>
+                    <th style="min-width: 110px;">Type</th>
+                    <th style="min-width: 300px;">Description</th>
+                    <th style="min-width: 100px; text-align: center;">Members</th>
+                    <th style="min-width: 110px; text-align: center;">Permissions</th>
+                    <th style="text-align: right; min-width: 200px;">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${roles.map(r => `
+                    <tr>
+                      <td>
+                        <div style="font-weight: 600; color: var(--text-primary); cursor: pointer;" onclick="switchRolesTab('editor', '${r.id}')">${escapeHtml(r.name)}</div>
+                      </td>
+                      <td>
+                        <span style="font-family: monospace; font-size: 11px; padding: 2px 6px; background: var(--surface-bg); border-radius: 4px; border: 1px solid var(--border-subtle);">${escapeHtml(r.code)}</span>
+                      </td>
+                      <td>
+                        ${r.isSystemRole
+                          ? '<span class="badge-pill badge-blue" style="font-size: 11px;">Built-in System</span>'
+                          : '<span class="badge-pill badge-green" style="font-size: 11px;">Custom Role</span>'}
+                      </td>
+                      <td style="font-size: 12px; color: var(--text-secondary); max-width: 320px; line-height: 1.4;">
+                        ${escapeHtml(r.description || 'Custom organizational permission profile.')}
+                      </td>
+                      <td style="text-align: center; font-size: 13px; font-weight: 600;">
+                        ${r.memberCount}
+                      </td>
+                      <td style="text-align: center; font-size: 12px;">
+                        <span style="font-weight: 600; color: var(--accent-primary);">${r.permissionsCount}</span> active
+                      </td>
+                      <td style="text-align: right; white-space: nowrap;">
+                        <div style="display: inline-flex; gap: 6px;">
+                          <button class="btn btn-secondary btn-sm" onclick="switchRolesTab('editor', '${r.id}')" title="Configure granular permissions">Permissions</button>
+                          ${r.isSystemRole ? `
+                            <button class="btn btn-secondary btn-sm" disabled title="Built-in system roles are protected from deletion" style="opacity: 0.5;">Protected</button>
+                          ` : `
+                            <button class="btn btn-secondary btn-sm" style="color: var(--status-danger);" onclick="deleteRolePrompt('${r.id}', '${escapeHtml(r.name)}')" title="Delete custom role">Delete</button>
+                          `}
+                        </div>
+                      </td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Mobile Cards Layout -->
+          <div class="mobile-cards-container">
+            ${roles.map(r => `
+              <div class="entity-card" style="padding: 14px 16px; border-radius: 8px; border: 1px solid var(--border-subtle); background: var(--surface-card); margin-bottom: 12px;">
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+                  <div>
+                    <div style="font-weight: 700; font-size: 15px; color: var(--text-primary); cursor: pointer;" onclick="switchRolesTab('editor', '${r.id}')">${escapeHtml(r.name)}</div>
+                    <div style="font-family: monospace; font-size: 11px; color: var(--text-secondary); margin-top: 2px;">${escapeHtml(r.code)}</div>
+                  </div>
+                  <div>
+                    ${r.isSystemRole
+                      ? '<span class="badge-pill badge-blue" style="font-size: 11px;">Built-in</span>'
+                      : '<span class="badge-pill badge-green" style="font-size: 11px;">Custom</span>'}
+                  </div>
+                </div>
+
+                <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 12px; line-height: 1.4;">
+                  ${escapeHtml(r.description || 'Custom organizational permission profile.')}
+                </div>
+
+                <div style="display: flex; justify-content: space-between; font-size: 12px; padding: 8px 12px; background: var(--surface-bg); border-radius: 6px; margin-bottom: 12px;">
+                  <div><strong>${r.memberCount}</strong> assigned member(s)</div>
+                  <div><strong>${r.permissionsCount}</strong> permissions</div>
+                </div>
+
+                <div style="display: flex; gap: 8px; justify-content: flex-end; border-top: 1px solid var(--border-subtle); padding-top: 10px;">
+                  <button class="btn btn-secondary btn-sm" style="flex: 1;" onclick="switchRolesTab('editor', '${r.id}')">Permissions</button>
+                  ${!r.isSystemRole ? `
+                    <button class="btn btn-secondary btn-sm" style="color: var(--status-danger); flex: 1;" onclick="deleteRolePrompt('${r.id}', '${escapeHtml(r.name)}')">Delete</button>
+                  ` : ''}
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `;
+    }
+
+    // --- Tab 2: Permission Policy Editor Render ---
+    function renderPermissionEditorTabHtml(roles, catalogRes) {
+      const activeRoleId = state.activeEditorRoleId || (roles[0] ? roles[0].id : null);
+      const activeRole = roles.find(r => r.id === activeRoleId) || roles[0];
+
+      if (!activeRole) {
+        return '<div class="card" style="padding: 30px; text-align: center;">No role selected.</div>';
+      }
+
+      // Check which permissions are granted to this role
+      let assignedPerms = new Set();
+      if (activeRole.isSystemRole) {
+        // System roles have static definitions
+        if (activeRole.code === 'TENANT_OWNER') {
+          assignedPerms = new Set(catalogRes.allKeys || []);
+        } else if (activeRole.code === 'ORG_ADMIN') {
+          assignedPerms = new Set((catalogRes.allKeys || []).filter(k => k !== 'sub:payment:record'));
+        } else {
+          // Use loaded details or cached items
+          assignedPerms = new Set(activeRole.permissions || []);
+        }
+      }
+
+      // Pre-fetch fresh permissions for custom roles if not already loaded in memory
+      if (!window._roleDetailCache || window._roleDetailCache.id !== activeRole.id) {
+        setTimeout(async () => {
+          try {
+            const detail = await apiFetch(`/v1/iam/roles/${activeRole.id}`);
+            window._roleDetailCache = detail;
+            const checks = document.querySelectorAll('.perm-checkbox');
+            const detailSet = new Set(detail.permissions || []);
+            checks.forEach(c => {
+              c.checked = detailSet.has(c.value);
+            });
+            updatePermissionStatsBadge();
+          } catch (e) {
+            console.warn('Failed to fetch role permissions:', e);
+          }
+        }, 10);
+      } else {
+        assignedPerms = new Set(window._roleDetailCache.permissions || []);
+      }
+
+      return `
+        <div class="card" style="padding: 18px 22px; margin-bottom: 20px;">
+          <!-- Top Role Selector & Meta Bar -->
+          <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 14px; margin-bottom: 16px;">
+            <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+              <div>
+                <label class="form-label" style="margin-bottom: 4px;">Active Role</label>
+                <select class="form-select" id="roleSelectorSelect" onchange="switchRolesTab('editor', this.value)" style="min-width: 220px; font-weight: 600;">
+                  ${roles.map(r => `
+                    <option value="${r.id}" ${r.id === activeRole.id ? 'selected' : ''}>
+                      ${escapeHtml(r.name)} (${r.isSystemRole ? 'Built-in' : 'Custom'})
+                    </option>
+                  `).join('')}
+                </select>
+              </div>
+              <div style="margin-top: 18px;">
+                ${activeRole.isSystemRole
+                  ? '<span class="badge-pill badge-blue" style="font-size: 12px; padding: 6px 12px;">Built-in System Role (Protected)</span>'
+                  : '<span class="badge-pill badge-green" style="font-size: 12px; padding: 6px 12px;">Custom Editable Role</span>'}
+              </div>
+            </div>
+
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <span id="unsavedChangesBadge" style="display: none;" class="badge-pill badge-yellow">● Unsaved Changes</span>
+              <span id="permStatsBadge" style="font-size: 13px; font-weight: 600; color: var(--text-secondary); margin-right: 8px;">
+                ${activeRole.permissionsCount} / ${(catalogRes.allKeys || []).length} permissions active
+              </span>
+              ${!activeRole.isSystemRole ? `
+                <button class="btn btn-secondary btn-sm" onclick="resetRolePermissionsForm()">Reset</button>
+                <button class="btn btn-primary btn-sm" id="btnSaveRolePermissions" onclick="saveRolePermissions('${activeRole.id}')">Save Changes</button>
+              ` : ''}
+            </div>
+          </div>
+
+          <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 18px; padding: 10px 14px; background: var(--surface-bg); border-radius: 6px; border: 1px solid var(--border-subtle);">
+            ${escapeHtml(activeRole.description || 'Granular permissions define exact authorizations across operations, POS, inventory, payroll, and settings.')}
+          </div>
+
+          ${activeRole.isSystemRole ? `
+            <div style="background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.25); border-radius: 6px; padding: 12px 16px; margin-bottom: 20px; font-size: 13px; color: var(--text-primary); display: flex; gap: 10px; align-items: center;">
+              <span style="font-size: 18px;">🔒</span>
+              <div>
+                <strong>Immutable System Policy:</strong> Permissions for <em>${escapeHtml(activeRole.name)}</em> are strictly enforced by the NexStock security foundation and cannot be modified. To construct a tailored authorization policy, use <strong>+ Create Custom Role</strong>.
+              </div>
+            </div>
+          ` : ''}
+
+          <!-- Module Permissions Matrix (All 20 Modules) -->
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px;">
+            ${(catalogRes.modules || []).map((m, mIdx) => {
+              const allKeysInModule = m.permissions.map(p => p.key);
+              const disabledAttr = activeRole.isSystemRole ? 'disabled' : '';
+
+              return `
+                <div class="card" style="padding: 14px 16px; border: 1px solid var(--border-subtle); background: var(--surface-card); box-shadow: none;">
+                  <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px; margin-bottom: 12px;">
+                    <div style="font-weight: 700; font-size: 14px; color: var(--text-primary); display: flex; align-items: center; gap: 6px;">
+                      <span>${escapeHtml(m.module)}</span>
+                      <span class="badge-pill badge-gray" style="font-size: 10px;" id="badge_module_${mIdx}">${m.permissions.length}</span>
+                    </div>
+                    ${!activeRole.isSystemRole ? `
+                      <div style="display: flex; gap: 4px;">
+                        <button class="btn btn-secondary btn-sm" style="font-size: 10px; padding: 2px 6px; height: 22px;" onclick="selectModulePerms(${mIdx}, true)">Select All</button>
+                        <button class="btn btn-secondary btn-sm" style="font-size: 10px; padding: 2px 6px; height: 22px;" onclick="selectModulePerms(${mIdx}, false)">Clear</button>
+                      </div>
+                    ` : ''}
+                  </div>
+
+                  <div class="module-perms-list" id="module_list_${mIdx}" style="display: flex; flex-direction: column; gap: 10px;">
+                    ${m.permissions.map(p => {
+                      const isChecked = assignedPerms.has(p.key);
+                      const actionColor = getActionBadgeColor(p.action);
+
+                      return `
+                        <label style="display: flex; align-items: flex-start; gap: 10px; cursor: ${activeRole.isSystemRole ? 'default' : 'pointer'}; font-size: 13px;">
+                          <input type="checkbox"
+                            class="perm-checkbox module-perm-${mIdx}"
+                            value="${p.key}"
+                            ${isChecked ? 'checked' : ''}
+                            ${disabledAttr}
+                            onchange="onPermissionCheckboxChanged()"
+                            style="margin-top: 3px; cursor: ${activeRole.isSystemRole ? 'default' : 'pointer'};">
+                          <div style="flex: 1;">
+                            <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                              <span style="font-weight: 600; color: var(--text-primary);">${escapeHtml(p.name)}</span>
+                              <span class="badge-pill" style="font-size: 9px; padding: 1px 5px; ${actionColor}">${escapeHtml(p.action)}</span>
+                            </div>
+                            <div style="font-size: 11px; color: var(--text-secondary); margin-top: 2px; line-height: 1.3;">
+                              ${escapeHtml(p.description)}
+                            </div>
+                          </div>
+                        </label>
+                      `;
+                    }).join('')}
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+
+          <!-- Bottom Sticky Action Bar for Custom Roles -->
+          ${!activeRole.isSystemRole ? `
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border-subtle);">
+              <div style="font-size: 13px; color: var(--text-secondary);">
+                Changes take effect immediately for active team members assigned to this role.
+              </div>
+              <div style="display: flex; gap: 8px;">
+                <button class="btn btn-secondary" onclick="resetRolePermissionsForm()">Discard</button>
+                <button class="btn btn-primary" id="btnSaveRolePermissionsBottom" onclick="saveRolePermissions('${activeRole.id}')">Save Permissions</button>
+              </div>
+            </div>
+          ` : ''}
+        </div>
+      `;
+    }
+
+    function getActionBadgeColor(action) {
+      switch (action) {
+        case 'View': return 'background: rgba(59, 130, 246, 0.1); color: #3b82f6;';
+        case 'Create': return 'background: rgba(16, 185, 129, 0.1); color: #10b981;';
+        case 'Edit': return 'background: rgba(245, 158, 11, 0.1); color: #f59e0b;';
+        case 'Delete': return 'background: rgba(239, 68, 68, 0.1); color: #ef4444;';
+        case 'Approve': return 'background: rgba(139, 92, 246, 0.1); color: #8b5cf6;';
+        case 'Export': return 'background: rgba(14, 165, 233, 0.1); color: #0ea5e9;';
+        default: return 'background: rgba(99, 102, 241, 0.1); color: #6366f1;';
+      }
+    }
+
+    function selectModulePerms(moduleIdx, check) {
+      const checkboxes = document.querySelectorAll(`.module-perm-${moduleIdx}`);
+      checkboxes.forEach(c => {
+        if (!c.disabled) c.checked = check;
+      });
+      onPermissionCheckboxChanged();
+    }
+
+    function onPermissionCheckboxChanged() {
+      state.permissionsDirty = true;
+      const badge = document.getElementById('unsavedChangesBadge');
+      if (badge) badge.style.display = 'inline-block';
+      updatePermissionStatsBadge();
+    }
+
+    function updatePermissionStatsBadge() {
+      const checkboxes = document.querySelectorAll('.perm-checkbox');
+      const checkedCount = Array.from(checkboxes).filter(c => c.checked).length;
+      const statsBadge = document.getElementById('permStatsBadge');
+      if (statsBadge && checkboxes.length > 0) {
+        statsBadge.innerText = `${checkedCount} / ${checkboxes.length} permissions active`;
+      }
+    }
+
+    function resetRolePermissionsForm() {
+      state.permissionsDirty = false;
+      const badge = document.getElementById('unsavedChangesBadge');
+      if (badge) badge.style.display = 'none';
+      if (window._roleDetailCache) {
+        const detailSet = new Set(window._roleDetailCache.permissions || []);
+        document.querySelectorAll('.perm-checkbox').forEach(c => {
+          c.checked = detailSet.has(c.value);
+        });
+        updatePermissionStatsBadge();
+      }
+    }
+
+    async function saveRolePermissions(roleId) {
+      const topBtn = document.getElementById('btnSaveRolePermissions');
+      const btmBtn = document.getElementById('btnSaveRolePermissionsBottom');
+      const checkboxes = document.querySelectorAll('.perm-checkbox');
+      const selectedKeys = Array.from(checkboxes).filter(c => c.checked).map(c => c.value);
+
+      try {
+        if (topBtn) { topBtn.disabled = true; topBtn.innerText = 'Saving...'; }
+        if (btmBtn) { btmBtn.disabled = true; btmBtn.innerText = 'Saving...'; }
+
+        const updated = await apiFetch(`/v1/iam/roles/${roleId}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ permissions: selectedKeys })
+        });
+
+        window._roleDetailCache = updated;
+        state.permissionsDirty = false;
+        const badge = document.getElementById('unsavedChangesBadge');
+        if (badge) badge.style.display = 'none';
+
+        showToast(`Permissions policy for ${updated.name} saved successfully!`, 'success');
+        updatePermissionStatsBadge();
+      } catch (err) {
+        showToast(err.message || 'Failed to update role permissions', 'error');
+      } finally {
+        if (topBtn) { topBtn.disabled = false; topBtn.innerText = 'Save Changes'; }
+        if (btmBtn) { btmBtn.disabled = false; btmBtn.innerText = 'Save Permissions'; }
+      }
+    }
+
+    // --- Tab 3: Team Members & Scopes Render ---
+    function renderMembersTabHtml(members, roles) {
+      if (members.length === 0) {
+        return '<div class="card" style="padding: 30px; text-align: center;">No active organization members found.</div>';
+      }
+
+      return `
+        <div class="card">
+          <!-- Desktop Members Table -->
+          <div class="desktop-table-container">
+            <div class="table-responsive">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th style="min-width: 200px;">Member Name</th>
+                    <th style="min-width: 180px;">Email</th>
+                    <th style="min-width: 90px;">Status</th>
+                    <th style="min-width: 220px;">Assigned Roles</th>
+                    <th style="min-width: 200px;">Location Access Scope</th>
+                    <th style="text-align: right; min-width: 160px;">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${members.map(m => {
+                    const assignedRoleBadges = m.roles.length > 0
+                      ? m.roles.map(r => `<span class="badge-pill ${r.isSystemRole ? 'badge-blue' : 'badge-green'}" style="font-size: 11px;">${escapeHtml(r.name)}</span>`).join(' ')
+                      : '<span style="color: var(--text-secondary); font-size: 12px;">No Roles Assigned</span>';
+
+                    const scopeBadge = m.allLocationsAccess
+                      ? '<span class="badge-pill badge-green" style="font-size: 11px;">All Locations (Org-Wide)</span>'
+                      : `<span class="badge-pill badge-yellow" style="font-size: 11px;">Restricted: ${m.locationScopes.branchIds.length} branch(es), ${m.locationScopes.warehouseIds.length} depot(s)</span>`;
+
+                    return `
+                      <tr>
+                        <td>
+                          <div style="font-weight: 600; color: var(--text-primary);">${escapeHtml(m.fullName)}</div>
+                        </td>
+                        <td style="font-size: 12px; color: var(--text-secondary);">${escapeHtml(m.email)}</td>
+                        <td>
+                          <span class="badge-pill badge-green" style="font-size: 11px;">${escapeHtml(m.status)}</span>
+                        </td>
+                        <td>
+                          <div style="display: flex; flex-wrap: wrap; gap: 4px;">
+                            ${assignedRoleBadges}
+                          </div>
+                        </td>
+                        <td>
+                          ${scopeBadge}
+                        </td>
+                        <td style="text-align: right; white-space: nowrap;">
+                          <div style="display: inline-flex; gap: 6px;">
+                            <button class="btn btn-secondary btn-sm" onclick="openAssignMemberRolesModal('${m.id}')" title="Configure member roles">Roles</button>
+                            <button class="btn btn-secondary btn-sm" onclick="openEditMemberLocationScopeModal('${m.id}')" title="Configure branch and warehouse access">Scope</button>
+                          </div>
+                        </td>
+                      </tr>
+                    `;
+                  }).join('')}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Mobile Members Cards -->
+          <div class="mobile-cards-container">
+            ${members.map(m => {
+              const assignedRoleBadges = m.roles.length > 0
+                ? m.roles.map(r => `<span class="badge-pill ${r.isSystemRole ? 'badge-blue' : 'badge-green'}" style="font-size: 11px;">${escapeHtml(r.name)}</span>`).join(' ')
+                : '<span style="color: var(--text-secondary); font-size: 12px;">No Roles Assigned</span>';
+
+              const scopeBadge = m.allLocationsAccess
+                ? '<span class="badge-pill badge-green" style="font-size: 11px;">All Locations (Org-Wide)</span>'
+                : `<span class="badge-pill badge-yellow" style="font-size: 11px;">Restricted Scope</span>`;
+
+              return `
+                <div class="entity-card" style="padding: 14px 16px; border-radius: 8px; border: 1px solid var(--border-subtle); background: var(--surface-card); margin-bottom: 12px;">
+                  <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+                    <div>
+                      <div style="font-weight: 600; font-size: 14px; color: var(--text-primary);">${escapeHtml(m.fullName)}</div>
+                      <div style="font-size: 12px; color: var(--text-secondary);">${escapeHtml(m.email)}</div>
+                    </div>
+                    <span class="badge-pill badge-green" style="font-size: 11px;">${escapeHtml(m.status)}</span>
+                  </div>
+
+                  <div style="margin-bottom: 8px;">
+                    <div style="font-size: 10px; text-transform: uppercase; color: var(--text-secondary); margin-bottom: 4px;">Assigned Roles</div>
+                    <div style="display: flex; flex-wrap: wrap; gap: 4px;">${assignedRoleBadges}</div>
+                  </div>
+
+                  <div style="margin-bottom: 12px;">
+                    <div style="font-size: 10px; text-transform: uppercase; color: var(--text-secondary); margin-bottom: 4px;">Location Access</div>
+                    <div>${scopeBadge}</div>
+                  </div>
+
+                  <div style="display: flex; gap: 8px; justify-content: flex-end; border-top: 1px solid var(--border-subtle); padding-top: 10px;">
+                    <button class="btn btn-secondary btn-sm" style="flex: 1;" onclick="openAssignMemberRolesModal('${m.id}')">Assign Roles</button>
+                    <button class="btn btn-secondary btn-sm" style="flex: 1;" onclick="openEditMemberLocationScopeModal('${m.id}')">Edit Scope</button>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </div>
+      `;
+    }
+
+    // --- Modal 1: Create Custom Role ---
+    function openCreateRoleModal() {
+      openModal({
+        title: 'Create Custom Access Role',
+        maxWidth: '520px',
+        bodyHtml: `
+          <div class="form-group">
+            <label class="form-label">Role Name *</label>
+            <input type="text" class="form-input" id="newRoleName" placeholder="e.g. Regional Inventory Auditor" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Role Code * (Alphanumeric &amp; Underscores)</label>
+            <input type="text" class="form-input" id="newRoleCode" placeholder="REGIONAL_AUDITOR" style="text-transform: uppercase; font-family: monospace;" required>
+            <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">System codes are permanently immutable once created.</div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Description</label>
+            <textarea class="form-input" id="newRoleDesc" rows="3" placeholder="Briefly summarize this role's purpose and authority boundaries..."></textarea>
+          </div>
+          <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px;">
+            <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+            <button class="btn btn-primary" id="btnSubmitCreateRole" onclick="submitCreateRole()">Create Role</button>
+          </div>
+        `
+      });
+    }
+
+    async function submitCreateRole() {
+      const btn = document.getElementById('btnSubmitCreateRole');
+      const name = document.getElementById('newRoleName').value.trim();
+      const code = document.getElementById('newRoleCode').value.trim().toUpperCase();
+      const desc = document.getElementById('newRoleDesc').value.trim() || null;
+
+      if (!name || !code) {
+        return showToast('Role name and code are required.', 'error');
+      }
+
+      if (!/^[A-Z0-9_]{2,50}$/.test(code)) {
+        return showToast('Role code must be 2-50 uppercase alphanumeric characters or underscores.', 'error');
+      }
+
+      try {
+        if (btn) { btn.disabled = true; btn.innerText = 'Creating Role...'; }
+
+        const created = await apiFetch('/v1/iam/roles', {
+          method: 'POST',
+          body: JSON.stringify({
+            name,
+            code,
+            description: desc,
+            permissions: []
+          })
+        });
+
+        showToast(`Custom role "${created.name}" created! Configure permissions below.`, 'success');
+        closeModal();
+        switchRolesTab('editor', created.id);
+      } catch (err) {
+        showToast(err.message || 'Failed to create custom role', 'error');
+      } finally {
+        if (btn) { btn.disabled = false; btn.innerText = 'Create Role'; }
+      }
+    }
+
+    // --- Modal 2: Delete Custom Role ---
+    function deleteRolePrompt(roleId, roleName) {
+      openModal({
+        title: `Delete Role: ${roleName}`,
+        maxWidth: '460px',
+        bodyHtml: `
+          <div style="font-size: 13px; color: var(--text-primary); line-height: 1.5; margin-bottom: 20px;">
+            Are you sure you want to permanently delete the custom role <strong>"${escapeHtml(roleName)}"</strong>?<br><br>
+            Roles assigned to active organization members cannot be deleted until reassigned.
+          </div>
+          <div style="display: flex; justify-content: flex-end; gap: 8px;">
+            <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+            <button class="btn btn-primary" id="btnConfirmDeleteRole" style="background: var(--status-danger);" onclick="submitDeleteRole('${roleId}')">Confirm Delete</button>
+          </div>
+        `
+      });
+    }
+
+    async function submitDeleteRole(roleId) {
+      const btn = document.getElementById('btnConfirmDeleteRole');
+      try {
+        if (btn) { btn.disabled = true; btn.innerText = 'Deleting...'; }
+        await apiFetch(`/v1/iam/roles/${roleId}`, { method: 'DELETE' });
+        showToast('Role deleted successfully', 'success');
+        closeModal();
+        renderRolesPermissionsView();
+      } catch (err) {
+        showToast(err.message || 'Failed to delete role', 'error');
+      } finally {
+        if (btn) { btn.disabled = false; btn.innerText = 'Confirm Delete'; }
+      }
+    }
+
+    // --- Modal 3: Assign Member Roles ---
+    function openAssignMemberRolesModal(membershipId) {
+      const member = (window._membersCache || []).find(m => m.id === membershipId);
+      const roles = window._rolesCache || [];
+      if (!member) return showToast('Member not found', 'error');
+
+      const assignedRoleIds = new Set(member.roles.map(r => r.id));
+
+      openModal({
+        title: `Assign Roles: ${member.fullName}`,
+        maxWidth: '540px',
+        bodyHtml: `
+          <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px;">
+            Select roles to assign to <strong>${escapeHtml(member.fullName)}</strong> (${escapeHtml(member.email)}):
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: 10px; max-height: 320px; overflow-y: auto; padding-right: 6px; margin-bottom: 20px;">
+            ${roles.map(r => `
+              <label style="display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; background: var(--surface-bg); border-radius: 6px; border: 1px solid var(--border-subtle); cursor: pointer;">
+                <input type="checkbox" class="assign-role-check" value="${r.id}" ${assignedRoleIds.has(r.id) ? 'checked' : ''} style="margin-top: 3px;">
+                <div style="flex: 1;">
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-weight: 600; color: var(--text-primary); font-size: 13px;">${escapeHtml(r.name)}</span>
+                    ${r.isSystemRole
+                      ? '<span class="badge-pill badge-blue" style="font-size: 10px;">Built-in</span>'
+                      : '<span class="badge-pill badge-green" style="font-size: 10px;">Custom</span>'}
+                  </div>
+                  <div style="font-size: 11px; color: var(--text-secondary); margin-top: 2px;">${escapeHtml(r.description || 'Organizational permission profile')}</div>
+                </div>
+              </label>
+            `).join('')}
+          </div>
+
+          <div style="display: flex; justify-content: flex-end; gap: 8px;">
+            <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+            <button class="btn btn-primary" id="btnSubmitAssignRoles" onclick="submitAssignMemberRoles('${membershipId}')">Save Role Assignments</button>
+          </div>
+        `
+      });
+    }
+
+    async function submitAssignMemberRoles(membershipId) {
+      const btn = document.getElementById('btnSubmitAssignRoles');
+      const checks = document.querySelectorAll('.assign-role-check');
+      const roleIds = Array.from(checks).filter(c => c.checked).map(c => c.value);
+
+      try {
+        if (btn) { btn.disabled = true; btn.innerText = 'Saving...'; }
+
+        await apiFetch(`/v1/iam/members/${membershipId}/roles`, {
+          method: 'PUT',
+          body: JSON.stringify({ roleIds })
+        });
+
+        showToast('Member roles updated successfully!', 'success');
+        closeModal();
+        renderRolesPermissionsView();
+      } catch (err) {
+        showToast(err.message || 'Failed to update member roles', 'error');
+      } finally {
+        if (btn) { btn.disabled = false; btn.innerText = 'Save Role Assignments'; }
+      }
+    }
+
+    // --- Modal 4: Edit Member Location Scope ---
+    function openEditMemberLocationScopeModal(membershipId) {
+      const member = (window._membersCache || []).find(m => m.id === membershipId);
+      const branches = window._employeeBranchesCache || [];
+      const warehouses = window._employeeWarehousesCache || [];
+      if (!member) return showToast('Member not found', 'error');
+
+      const isAll = member.allLocationsAccess;
+      const assignedBranchIds = new Set(member.locationScopes.branchIds || []);
+      const assignedWarehouseIds = new Set(member.locationScopes.warehouseIds || []);
+
+      openModal({
+        title: `Location Access: ${member.fullName}`,
+        maxWidth: '580px',
+        bodyHtml: `
+          <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px;">
+            Configure geographical and warehouse operational boundaries for <strong>${escapeHtml(member.fullName)}</strong>:
+          </div>
+
+          <div style="margin-bottom: 16px; padding: 12px; background: var(--surface-bg); border-radius: 6px; border: 1px solid var(--border-subtle);">
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+              <input type="checkbox" id="chkAllLocationsAccess" ${isAll ? 'checked' : ''} onchange="toggleScopeLocationList(this.checked)">
+              <div>
+                <div style="font-weight: 600; font-size: 13px; color: var(--text-primary);">Organization-Wide Access (All Locations)</div>
+                <div style="font-size: 11px; color: var(--text-secondary);">Grants full clearance across every branch, register, and warehouse in the company.</div>
+              </div>
+            </label>
+          </div>
+
+          <div id="restrictedLocationLists" style="${isAll ? 'display: none;' : 'display: block;'}">
+            <div style="font-size: 12px; font-weight: 700; text-transform: uppercase; color: var(--text-secondary); margin-bottom: 8px;">Authorized Branches (${branches.length})</div>
+            <div style="display: flex; flex-direction: column; gap: 6px; max-height: 160px; overflow-y: auto; margin-bottom: 14px; padding-right: 4px;">
+              ${branches.map(b => `
+                <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+                  <input type="checkbox" class="scope-branch-check" value="${b.id}" ${assignedBranchIds.has(b.id) ? 'checked' : ''}>
+                  <span>${escapeHtml(b.name || b.code)}</span>
+                </label>
+              `).join('')}
+            </div>
+
+            <div style="font-size: 12px; font-weight: 700; text-transform: uppercase; color: var(--text-secondary); margin-bottom: 8px;">Authorized Warehouses / Depots (${warehouses.length})</div>
+            <div style="display: flex; flex-direction: column; gap: 6px; max-height: 160px; overflow-y: auto; padding-right: 4px;">
+              ${warehouses.map(w => `
+                <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+                  <input type="checkbox" class="scope-warehouse-check" value="${w.id}" ${assignedWarehouseIds.has(w.id) ? 'checked' : ''}>
+                  <span>${escapeHtml(w.name || w.code)}</span>
+                </label>
+              `).join('')}
+            </div>
+          </div>
+
+          <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px;">
+            <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+            <button class="btn btn-primary" id="btnSubmitLocationScopes" onclick="submitMemberLocationScopes('${membershipId}')">Save Location Scopes</button>
+          </div>
+        `
+      });
+    }
+
+    function toggleScopeLocationList(isAll) {
+      const el = document.getElementById('restrictedLocationLists');
+      if (el) el.style.display = isAll ? 'none' : 'block';
+    }
+
+    async function submitMemberLocationScopes(membershipId) {
+      const btn = document.getElementById('btnSubmitLocationScopes');
+      const allLocationsAccess = document.getElementById('chkAllLocationsAccess').checked;
+
+      const branchChecks = document.querySelectorAll('.scope-branch-check');
+      const warehouseChecks = document.querySelectorAll('.scope-warehouse-check');
+
+      const branchIds = allLocationsAccess
+        ? []
+        : Array.from(branchChecks).filter(c => c.checked).map(c => c.value);
+      const warehouseIds = allLocationsAccess
+        ? []
+        : Array.from(warehouseChecks).filter(c => c.checked).map(c => c.value);
+
+      try {
+        if (btn) { btn.disabled = true; btn.innerText = 'Saving...'; }
+
+        await apiFetch(`/v1/iam/members/${membershipId}/location-scopes`, {
+          method: 'PUT',
+          body: JSON.stringify({
+            allLocationsAccess,
+            branchIds,
+            warehouseIds
+          })
+        });
+
+        showToast('Member location scope updated successfully!', 'success');
+        closeModal();
+        renderRolesPermissionsView();
+      } catch (err) {
+        showToast(err.message || 'Failed to update location scopes', 'error');
+      } finally {
+        if (btn) { btn.disabled = false; btn.innerText = 'Save Location Scopes'; }
       }
     }
 

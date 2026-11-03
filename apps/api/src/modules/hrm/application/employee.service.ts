@@ -329,30 +329,30 @@ export async function updateEmployee(
       first_name: input.firstName ? input.firstName.trim() : existing.first_name,
       last_name: input.lastName ? input.lastName.trim() : existing.last_name,
       display_name: updatedDisplayName,
-      email: input.email !== undefined ? (input.email ? input.email.trim().toLowerCase() : null) : existing.email,
-      phone: input.phone !== undefined ? (input.phone ? input.phone.trim() : null) : existing.phone,
-      national_id: input.nationalId !== undefined ? (input.nationalId ? input.nationalId.trim() : null) : existing.national_id,
-      gender: input.gender !== undefined ? (input.gender ? input.gender.trim() : null) : existing.gender,
-      date_of_birth: input.dateOfBirth !== undefined ? input.dateOfBirth : existing.date_of_birth,
+      email: input.email !== undefined ? (input.email && input.email.trim() ? input.email.trim().toLowerCase() : null) : existing.email,
+      phone: input.phone !== undefined ? (input.phone && input.phone.trim() ? input.phone.trim() : null) : existing.phone,
+      national_id: input.nationalId !== undefined ? (input.nationalId && input.nationalId.trim() ? input.nationalId.trim() : null) : existing.national_id,
+      gender: input.gender !== undefined ? (input.gender && input.gender.trim() ? input.gender.trim() : null) : existing.gender,
+      date_of_birth: input.dateOfBirth !== undefined ? (input.dateOfBirth && input.dateOfBirth.trim() ? input.dateOfBirth.trim() : null) : existing.date_of_birth,
       joined_date: input.joinedDate !== undefined ? input.joinedDate : existing.joined_date,
       designation: input.designation ? input.designation.trim() : existing.designation,
       department: input.department ? input.department.trim() : existing.department,
       employment_status: input.employmentStatus ?? existing.employment_status,
       payroll_frequency: input.payrollFrequency ?? existing.payroll_frequency,
-      primary_branch_id: input.primaryBranchId !== undefined ? input.primaryBranchId : existing.primary_branch_id,
-      primary_warehouse_id: input.primaryWarehouseId !== undefined ? input.primaryWarehouseId : existing.primary_warehouse_id,
-      linked_user_id: input.linkedUserId !== undefined ? input.linkedUserId : existing.linked_user_id,
-      avatar_url: input.avatarUrl !== undefined ? input.avatarUrl : existing.avatar_url,
-      bank_name: input.bankName !== undefined ? (input.bankName ? input.bankName.trim() : null) : existing.bank_name,
-      bank_account_number: input.bankAccountNumber !== undefined ? (input.bankAccountNumber ? input.bankAccountNumber.trim() : null) : existing.bank_account_number,
-      bank_branch: input.bankBranch !== undefined ? (input.bankBranch ? input.bankBranch.trim() : null) : existing.bank_branch,
-      epf_number: input.epfNumber !== undefined ? (input.epfNumber ? input.epfNumber.trim() : null) : existing.epf_number,
-      address_line1: input.addressLine1 !== undefined ? (input.addressLine1 ? input.addressLine1.trim() : null) : existing.address_line1,
-      address_line2: input.addressLine2 !== undefined ? (input.addressLine2 ? input.addressLine2.trim() : null) : existing.address_line2,
-      city: input.city !== undefined ? (input.city ? input.city.trim() : null) : existing.city,
-      emergency_contact_name: input.emergencyContactName !== undefined ? (input.emergencyContactName ? input.emergencyContactName.trim() : null) : existing.emergency_contact_name,
-      emergency_contact_phone: input.emergencyContactPhone !== undefined ? (input.emergencyContactPhone ? input.emergencyContactPhone.trim() : null) : existing.emergency_contact_phone,
-      notes: input.notes !== undefined ? (input.notes ? input.notes.trim() : null) : existing.notes,
+      primary_branch_id: input.primaryBranchId !== undefined ? (input.primaryBranchId ? input.primaryBranchId : null) : existing.primary_branch_id,
+      primary_warehouse_id: input.primaryWarehouseId !== undefined ? (input.primaryWarehouseId ? input.primaryWarehouseId : null) : existing.primary_warehouse_id,
+      linked_user_id: input.linkedUserId !== undefined ? (input.linkedUserId ? input.linkedUserId : null) : existing.linked_user_id,
+      avatar_url: input.avatarUrl !== undefined ? (input.avatarUrl && input.avatarUrl.trim() ? input.avatarUrl.trim() : null) : existing.avatar_url,
+      bank_name: input.bankName !== undefined ? (input.bankName && input.bankName.trim() ? input.bankName.trim() : null) : existing.bank_name,
+      bank_account_number: input.bankAccountNumber !== undefined ? (input.bankAccountNumber && input.bankAccountNumber.trim() ? input.bankAccountNumber.trim() : null) : existing.bank_account_number,
+      bank_branch: input.bankBranch !== undefined ? (input.bankBranch && input.bankBranch.trim() ? input.bankBranch.trim() : null) : existing.bank_branch,
+      epf_number: input.epfNumber !== undefined ? (input.epfNumber && input.epfNumber.trim() ? input.epfNumber.trim() : null) : existing.epf_number,
+      address_line1: input.addressLine1 !== undefined ? (input.addressLine1 && input.addressLine1.trim() ? input.addressLine1.trim() : null) : existing.address_line1,
+      address_line2: input.addressLine2 !== undefined ? (input.addressLine2 && input.addressLine2.trim() ? input.addressLine2.trim() : null) : existing.address_line2,
+      city: input.city !== undefined ? (input.city && input.city.trim() ? input.city.trim() : null) : existing.city,
+      emergency_contact_name: input.emergencyContactName !== undefined ? (input.emergencyContactName && input.emergencyContactName.trim() ? input.emergencyContactName.trim() : null) : existing.emergency_contact_name,
+      emergency_contact_phone: input.emergencyContactPhone !== undefined ? (input.emergencyContactPhone && input.emergencyContactPhone.trim() ? input.emergencyContactPhone.trim() : null) : existing.emergency_contact_phone,
+      notes: input.notes !== undefined ? (input.notes && input.notes.trim() ? input.notes.trim() : null) : existing.notes,
       updated_at: new Date(),
     })
     .where('tenant_id', '=', trx.tenantId)
@@ -368,7 +368,7 @@ export async function updateEmployee(
       .execute();
 
     const branchIds = new Set<string>(input.branchIds ?? []);
-    const primaryBranch = input.primaryBranchId ?? existing.primary_branch_id;
+    const primaryBranch = input.primaryBranchId !== undefined ? (input.primaryBranchId || null) : existing.primary_branch_id;
     if (primaryBranch) {
       branchIds.add(primaryBranch);
     }
@@ -395,7 +395,7 @@ export async function updateEmployee(
       .execute();
 
     const warehouseIds = new Set<string>(input.warehouseIds ?? []);
-    const primaryWarehouse = input.primaryWarehouseId ?? existing.primary_warehouse_id;
+    const primaryWarehouse = input.primaryWarehouseId !== undefined ? (input.primaryWarehouseId || null) : existing.primary_warehouse_id;
     if (primaryWarehouse) {
       warehouseIds.add(primaryWarehouse);
     }

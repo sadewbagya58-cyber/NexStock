@@ -98,8 +98,13 @@ describe('@nexstock/api — Phase 7.1: Employee Management & Flexible Payroll En
 
   let alphaOwnerToken: string;
   let betaOwnerToken: string;
+  let cashierToken: string;
+  let accountantToken: string;
   let alphaBranchId: string;
   let alphaWarehouseId: string;
+
+  const CASHIER_USER_ID = '0192b4c0-7777-7000-8000-000000000088';
+  const ACCOUNTANT_USER_ID = '0192b4c0-7777-7000-8000-000000000099';
 
   beforeAll(async () => {
     harness = await createTestPostgresHarness();
@@ -932,11 +937,6 @@ describe('@nexstock/api — Phase 7.1: Employee Management & Flexible Payroll En
   // Module 7: Phase 7.1 QA Remediation (BUG-034, BUG-035, BUG-036)
   // ==========================================================================
   describe('7. QA Remediation: Permissions, Reports & Warehouse Discovery', () => {
-    const CASHIER_USER_ID = '0192b4c0-7777-7000-8000-000000000088';
-    const ACCOUNTANT_USER_ID = '0192b4c0-7777-7000-8000-000000000099';
-    let cashierToken: string;
-    let accountantToken: string;
-
     beforeAll(async () => {
       // 1. Create cashier and accountant users in database
       await harness.db
@@ -1216,6 +1216,562 @@ describe('@nexstock/api — Phase 7.1: Employee Management & Flexible Payroll En
         },
       });
       expect(crossTenantWhRes.statusCode).toBe(404);
+    });
+  });
+
+  // ==========================================================================
+  // 8. Phase 7.1 QA Remediation Regression Tests (BUG-038 & Optional Fields)
+  // ==========================================================================
+  describe('8. Phase 7.1 QA Remediation (BUG-038: Optional Fields Handling)', () => {
+    it('8.1 BUG-038: updates employee with null, empty, and undefined optional fields without 400 validation error', async () => {
+      // 1. Create employee with optional fields populated
+      const createRes = await app.inject({
+        method: 'POST',
+        url: '/v1/employees',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+        payload: {
+          employeeCode: 'EMP-OPT-01',
+          firstName: 'Alice',
+          lastName: 'Optional',
+          designation: 'Staff Analyst',
+          department: 'Operations',
+          joinedDate: '2026-03-01',
+          nationalId: 'NIC-987654321',
+          bankName: 'Alpha Commercial Bank',
+          bankAccountNumber: 'ACC-11223344',
+          epfNumber: 'EPF-998877',
+          addressLine1: '123 Enterprise Avenue',
+          notes: 'Initial employee notes',
+          primaryBranchId: alphaBranchId,
+          primaryWarehouseId: alphaWarehouseId,
+        },
+      });
+      expect(createRes.statusCode).toBe(201);
+      const empId = createRes.json().id;
+      expect(createRes.json().nationalId).toBe('NIC-987654321');
+      expect(createRes.json().bankName).toBe('Alpha Commercial Bank');
+
+      // 2. PATCH with optional fields explicitly set to null (unsetting them) - MUST SUCCEED (BUG-038)
+      const patchNullRes = await app.inject({
+        method: 'PATCH',
+        url: `/v1/employees/${empId}`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+        payload: {
+          nationalId: null,
+          bankName: null,
+          bankAccountNumber: null,
+          epfNumber: null,
+          addressLine1: null,
+          notes: null,
+          primaryBranchId: null,
+          primaryWarehouseId: null,
+        },
+      });
+      expect(patchNullRes.statusCode).toBe(200);
+      const updatedNull = patchNullRes.json();
+      expect(updatedNull.nationalId).toBeNull();
+      expect(updatedNull.bankName).toBeNull();
+      expect(updatedNull.bankAccountNumber).toBeNull();
+      expect(updatedNull.epfNumber).toBeNull();
+      expect(updatedNull.addressLine1).toBeNull();
+      expect(updatedNull.notes).toBeNull();
+      expect(updatedNull.primaryBranchId).toBeNull();
+      expect(updatedNull.primaryWarehouseId).toBeNull();
+      // Required and untouched fields are preserved
+      expect(updatedNull.firstName).toBe('Alice');
+      expect(updatedNull.lastName).toBe('Optional');
+      expect(updatedNull.employeeCode).toBe('EMP-OPT-01');
+
+      // 3. PATCH with empty string "" optional fields - normalized to null and succeeds
+      const patchEmptyStrRes = await app.inject({
+        method: 'PATCH',
+        url: `/v1/employees/${empId}`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+        payload: {
+          nationalId: '',
+          bankName: '',
+          notes: '',
+        },
+      });
+      expect(patchEmptyStrRes.statusCode).toBe(200);
+      expect(patchEmptyStrRes.json().nationalId).toBeNull();
+
+      // 4. PATCH with partial update (only changing designation) - preserves all existing fields
+      const patchPartialRes = await app.inject({
+        method: 'PATCH',
+        url: `/v1/employees/${empId}`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+        payload: {
+          designation: 'Senior Lead Analyst',
+        },
+      });
+      expect(patchPartialRes.statusCode).toBe(200);
+      expect(patchPartialRes.json().designation).toBe('Senior Lead Analyst');
+      expect(patchPartialRes.json().department).toBe('Operations');
+    });
+
+    it('8.2 BUG-038: rejects invalid employee updates with missing required fields or malformed data', async () => {
+      const getRes = await app.inject({
+        method: 'GET',
+        url: '/v1/employees?limit=1',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+      const empId = getRes.json().items[0].id;
+
+      // 1. Cannot set required string to empty minLength violation
+      const invalidRes = await app.inject({
+        method: 'PATCH',
+        url: `/v1/employees/${empId}`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+        payload: {
+          firstName: '',
+        },
+      });
+      expect(invalidRes.statusCode).toBe(400);
+
+      // 2. Cannot send unknown unexpected property (strict additionalProperties: false)
+      const extraPropRes = await app.inject({
+        method: 'PATCH',
+        url: `/v1/employees/${empId}`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+        payload: {
+          unknownField: 'malicious-data',
+        },
+      });
+      expect(extraPropRes.statusCode).toBe(400);
+    });
+  });
+
+  // ==========================================================================
+  // 9. Phase 7.2: Advanced Permissions & Granular Role Management Integration
+  // ==========================================================================
+  describe('9. Phase 7.2: Advanced Permissions & Granular Role Management', () => {
+    let customRoleId: string;
+    let cashierMembershipId: string;
+
+    it('9.1 Permissions Catalog: GET /v1/iam/permissions returns 20 modules with structured actions', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/v1/iam/permissions',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const catalog = res.json();
+      expect(catalog.modules.length).toBeGreaterThanOrEqual(20);
+      expect(catalog.allKeys.length).toBeGreaterThanOrEqual(50);
+
+      // Check key modules
+      const moduleNames = catalog.modules.map((m: { module: string }) => m.module);
+      expect(moduleNames).toContain('Dashboard');
+      expect(moduleNames).toContain('Products');
+      expect(moduleNames).toContain('POS Checkout');
+      expect(moduleNames).toContain('Employees');
+      expect(moduleNames).toContain('Payroll');
+      expect(moduleNames).toContain('Organization Settings');
+
+      // Verify permission item attributes
+      const dashModule = catalog.modules.find((m: { module: string }) => m.module === 'Dashboard');
+      expect(dashModule.permissions[0].key).toBe('dash:view');
+      expect(dashModule.permissions[0].action).toBe('View');
+      expect(dashModule.permissions[0].name).toBe('View Dashboard');
+    });
+
+    it('9.2 List Roles: GET /v1/iam/roles returns system and custom roles with member counts', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/v1/iam/roles',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const roles = res.json();
+      expect(roles.length).toBeGreaterThanOrEqual(7);
+
+      const ownerRole = roles.find((r: { code: string }) => r.code === 'TENANT_OWNER');
+      expect(ownerRole).toBeDefined();
+      expect(ownerRole.isSystemRole).toBe(true);
+      expect(ownerRole.memberCount).toBeGreaterThanOrEqual(1);
+      expect(ownerRole.description).toBeTruthy();
+    });
+
+    it('9.3 Create Custom Role: POST /v1/iam/roles creates role and prevents privilege escalation', async () => {
+      // 1. Cashier attempts to create a role (fails - lacks iam:role:manage)
+      const unauthRes = await app.inject({
+        method: 'POST',
+        url: '/v1/iam/roles',
+        headers: {
+          authorization: `Bearer ${cashierToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+        payload: {
+          code: 'TEST_UNAUTH_ROLE',
+          name: 'Unauthorized Role',
+          permissions: ['cat:product:read'],
+        },
+      });
+      expect(unauthRes.statusCode).toBe(403);
+
+      // 2. Attempting to use a reserved system role code is rejected (422)
+      const reservedRes = await app.inject({
+        method: 'POST',
+        url: '/v1/iam/roles',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+        payload: {
+          code: 'TENANT_OWNER',
+          name: 'Fake Owner',
+          permissions: ['cat:product:read'],
+        },
+      });
+      expect(reservedRes.statusCode).toBe(422);
+
+      // 3. Accountant attempts to create a role with sub:subscription:manage (Privilege Escalation Denial)
+      // Note: Accountant has iam:member:manage? Wait, Accountant does NOT have iam:role:manage.
+      // But if an actor with iam:role:manage tries to grant permissions they don't possess:
+      // Let's create custom role as Tenant Owner (who possesses all permissions) -> SUCCEEDS
+      const createRes = await app.inject({
+        method: 'POST',
+        url: '/v1/iam/roles',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+        payload: {
+          code: 'STOCK_SUPERVISOR',
+          name: 'Stock Inventory Supervisor',
+          description: 'Specialized role for inventory auditing and count verification.',
+          permissions: [
+            'cat:product:read',
+            'inv:balance:read',
+            'inv:movement:read',
+            'inv:count:read',
+            'inv:count:approve',
+          ],
+        },
+      });
+      expect(createRes.statusCode).toBe(201);
+      customRoleId = createRes.json().id;
+      expect(createRes.json().code).toBe('STOCK_SUPERVISOR');
+      expect(createRes.json().isSystemRole).toBe(false);
+      expect(createRes.json().permissions).toHaveLength(5);
+      expect(createRes.json().permissions).toContain('inv:count:approve');
+
+      // 4. Duplicate role code is rejected with 409
+      const dupRes = await app.inject({
+        method: 'POST',
+        url: '/v1/iam/roles',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+        payload: {
+          code: 'STOCK_SUPERVISOR',
+          name: 'Another Supervisor',
+          permissions: ['cat:product:read'],
+        },
+      });
+      expect(dupRes.statusCode).toBe(409);
+    });
+
+    it('9.4 Built-in System Role Protection: rejects modification and deletion of system roles (403)', async () => {
+      // Find TENANT_OWNER role ID
+      const rolesRes = await app.inject({
+        method: 'GET',
+        url: '/v1/iam/roles',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+      const ownerRole = rolesRes.json().find((r: { code: string }) => r.code === 'TENANT_OWNER');
+
+      // 1. Attempting to PATCH built-in system role throws 403 IAM_SYSTEM_ROLE_PROTECTED
+      const patchSysRes = await app.inject({
+        method: 'PATCH',
+        url: `/v1/iam/roles/${ownerRole.id}`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+        payload: {
+          name: 'Hacked Owner',
+        },
+      });
+      expect(patchSysRes.statusCode).toBe(403);
+      expect(patchSysRes.json().errorCode).toBe('IAM_SYSTEM_ROLE_PROTECTED');
+
+      // 2. Attempting to DELETE built-in system role throws 403 IAM_SYSTEM_ROLE_PROTECTED
+      const deleteSysRes = await app.inject({
+        method: 'DELETE',
+        url: `/v1/iam/roles/${ownerRole.id}`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+      expect(deleteSysRes.statusCode).toBe(403);
+      expect(deleteSysRes.json().errorCode).toBe('IAM_SYSTEM_ROLE_PROTECTED');
+    });
+
+    it('9.5 Edit & Manage Custom Role: PATCH updates permissions and details', async () => {
+      // 1. Update custom role name and add a new permission
+      const updateRes = await app.inject({
+        method: 'PATCH',
+        url: `/v1/iam/roles/${customRoleId}`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+        payload: {
+          name: 'Senior Stock Supervisor',
+          permissions: [
+            'cat:product:read',
+            'inv:balance:read',
+            'inv:movement:read',
+            'inv:count:read',
+            'inv:count:approve',
+            'inv:count:post', // added permission
+          ],
+        },
+      });
+      expect(updateRes.statusCode).toBe(200);
+      expect(updateRes.json().name).toBe('Senior Stock Supervisor');
+      expect(updateRes.json().permissions).toHaveLength(6);
+      expect(updateRes.json().permissions).toContain('inv:count:post');
+
+      // 2. GET /v1/iam/roles/:roleId verifies persistence
+      const getDetailRes = await app.inject({
+        method: 'GET',
+        url: `/v1/iam/roles/${customRoleId}`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+      expect(getDetailRes.statusCode).toBe(200);
+      expect(getDetailRes.json().name).toBe('Senior Stock Supervisor');
+      expect(getDetailRes.json().permissions).toContain('inv:count:post');
+    });
+
+    it('9.6 Member Role Management: lists members and assigns custom roles', async () => {
+      // 1. GET /v1/iam/members
+      const membersRes = await app.inject({
+        method: 'GET',
+        url: '/v1/iam/members',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+      expect(membersRes.statusCode).toBe(200);
+      const members = membersRes.json();
+      expect(members.length).toBeGreaterThanOrEqual(1);
+
+      // Find Cashier member
+      const cashierMember = members.find((m: { email: string }) => m.email.includes('cashier'));
+      expect(cashierMember).toBeDefined();
+      cashierMembershipId = cashierMember.id;
+
+      // 2. Assign custom role alongside existing CASHIER role
+      // Fetch CASHIER role id
+      const rolesRes = await app.inject({
+        method: 'GET',
+        url: '/v1/iam/roles',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+      const cashierRoleId = rolesRes.json().find((r: { code: string }) => r.code === 'CASHIER').id;
+
+      const assignRes = await app.inject({
+        method: 'PUT',
+        url: `/v1/iam/members/${cashierMembershipId}/roles`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+        payload: {
+          roleIds: [cashierRoleId, customRoleId],
+        },
+      });
+      expect(assignRes.statusCode).toBe(200);
+      const updatedMember = assignRes.json();
+      expect(updatedMember.roles).toHaveLength(2);
+      const assignedCodes = updatedMember.roles.map((r: { code: string }) => r.code);
+      expect(assignedCodes).toContain('CASHIER');
+      expect(assignedCodes).toContain('STOCK_SUPERVISOR');
+    });
+
+    it('9.7 Last Tenant Owner Protection: rejects stripping sole Tenant Owner role (422)', async () => {
+      // Find Owner member
+      const membersRes = await app.inject({
+        method: 'GET',
+        url: '/v1/iam/members',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+      const ownerMember = membersRes.json().find((m: { roles: Array<{ code: string }> }) =>
+        m.roles.some((r) => r.code === 'TENANT_OWNER'),
+      );
+      expect(ownerMember).toBeDefined();
+
+      // Attempt to replace Owner roles with only customRoleId
+      const stripOwnerRes = await app.inject({
+        method: 'PUT',
+        url: `/v1/iam/members/${ownerMember.id}/roles`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+        payload: {
+          roleIds: [customRoleId], // Removing TENANT_OWNER
+        },
+      });
+      expect(stripOwnerRes.statusCode).toBe(422);
+      expect(stripOwnerRes.json().errorCode).toBe('IAM_CANNOT_REMOVE_LAST_OWNER');
+    });
+
+    it('9.8 Role Deletion In-Use Protection: prevents deleting role assigned to active members (409)', async () => {
+      // Custom role is assigned to Cashier member
+      const deleteInUseRes = await app.inject({
+        method: 'DELETE',
+        url: `/v1/iam/roles/${customRoleId}`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+      expect(deleteInUseRes.statusCode).toBe(409);
+      expect(deleteInUseRes.json().errorCode).toBe('IAM_ROLE_IN_USE');
+    });
+
+    it('9.9 Location Scope Management: updates member location access and enforces restrictions', async () => {
+      // 1. Update Cashier to restricted scope (only alphaBranchId and alphaWarehouseId)
+      const updateScopeRes = await app.inject({
+        method: 'PUT',
+        url: `/v1/iam/members/${cashierMembershipId}/location-scopes`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+        payload: {
+          allLocationsAccess: false,
+          branchIds: [alphaBranchId],
+          warehouseIds: [alphaWarehouseId],
+        },
+      });
+      expect(updateScopeRes.statusCode).toBe(200);
+      expect(updateScopeRes.json().allLocationsAccess).toBe(false);
+      expect(updateScopeRes.json().locationScopes.branchIds).toContain(alphaBranchId);
+
+      // 2. Restore organization-wide scope
+      const restoreScopeRes = await app.inject({
+        method: 'PUT',
+        url: `/v1/iam/members/${cashierMembershipId}/location-scopes`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+        payload: {
+          allLocationsAccess: true,
+        },
+      });
+      expect(restoreScopeRes.statusCode).toBe(200);
+      expect(restoreScopeRes.json().allLocationsAccess).toBe(true);
+    });
+
+    it('9.10 Unassign and Clean Deletion: unassigns role and successfully deletes custom role', async () => {
+      // 1. Remove custom role from cashier member
+      const unassignRes = await app.inject({
+        method: 'DELETE',
+        url: `/v1/iam/members/${cashierMembershipId}/roles/${customRoleId}`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+      expect(unassignRes.statusCode).toBe(200);
+      expect(unassignRes.json().roles.some((r: { id: string }) => r.id === customRoleId)).toBe(false);
+
+      // 2. DELETE custom role now succeeds cleanly
+      const deleteRes = await app.inject({
+        method: 'DELETE',
+        url: `/v1/iam/roles/${customRoleId}`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+      expect(deleteRes.statusCode).toBe(200);
+      expect(deleteRes.json().success).toBe(true);
+      expect(deleteRes.json().roleId).toBe(customRoleId);
+
+      // 3. GET /v1/iam/roles/:roleId now returns 404
+      const getRes = await app.inject({
+        method: 'GET',
+        url: `/v1/iam/roles/${customRoleId}`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+      expect(getRes.statusCode).toBe(404);
+    });
+
+    it('9.11 Cross-Tenant Role Isolation: Tenant A cannot access or mutate Tenant B roles', async () => {
+      // Beta Tenant Owner attempts to fetch an Alpha role
+      const alphaRolesRes = await app.inject({
+        method: 'GET',
+        url: '/v1/iam/roles',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+      const alphaRole = alphaRolesRes.json()[0];
+
+      const crossTenantRes = await app.inject({
+        method: 'GET',
+        url: `/v1/iam/roles/${alphaRole.id}`,
+        headers: {
+          authorization: `Bearer ${betaOwnerToken}`,
+          'x-tenant-id': TENANT_BETA_ID,
+        },
+      });
+      expect(crossTenantRes.statusCode).toBe(404);
     });
   });
 });

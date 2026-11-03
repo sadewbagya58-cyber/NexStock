@@ -310,6 +310,11 @@ describe('@nexstock/api — Milestone 0 Foundation, RLS, Idempotency & Sync Inva
           name: '0015_phase7_role_permissions_sync',
           filename: '0015_phase7_role_permissions_sync.sql',
         },
+        {
+          version: 16,
+          name: '0016_phase7_advanced_permissions',
+          filename: '0016_phase7_advanced_permissions.sql',
+        },
       ]);
     });
 
@@ -383,6 +388,7 @@ describe('@nexstock/api — Milestone 0 Foundation, RLS, Idempotency & Sync Inva
         '0013_phase6_barcode_integrity.sql',
         '0014_phase7_employees_and_payroll.sql',
         '0015_phase7_role_permissions_sync.sql',
+        '0016_phase7_advanced_permissions.sql',
       ]);
 
       await expect(

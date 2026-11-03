@@ -536,6 +536,13 @@ export function loadPhase7RolePermissionsSyncMigrationSql(): string {
   return sqlText;
 }
 
+export function loadPhase7AdvancedPermissionsMigrationSql(): string {
+  const filename = '0016_phase7_advanced_permissions.sql';
+  const sqlText = readFileSync(resolve(migrationsDir, filename), 'utf-8');
+  assertPostgresMigrationSqlCompatible(sqlText, filename);
+  return sqlText;
+}
+
 export function getOrderedPostgresMigrations(): readonly PostgresMigrationSpec[] {
   return [
     {
@@ -642,6 +649,13 @@ export function getOrderedPostgresMigrations(): readonly PostgresMigrationSpec[]
       name: '0015_phase7_role_permissions_sync',
       filename: '0015_phase7_role_permissions_sync.sql',
       sql: loadPhase7RolePermissionsSyncMigrationSql(),
+    },
+    {
+      dialect: 'postgres',
+      version: 16,
+      name: '0016_phase7_advanced_permissions',
+      filename: '0016_phase7_advanced_permissions.sql',
+      sql: loadPhase7AdvancedPermissionsMigrationSql(),
     },
   ];
 }

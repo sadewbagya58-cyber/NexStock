@@ -4,6 +4,7 @@ import {
   TypeBoxValidatorCompiler,
 } from '@fastify/type-provider-typebox';
 import {
+  AssignMemberRolesRequestSchema,
   AuthenticatedIdempotentHeadersSchema,
   AuthenticatedTenantHeadersSchema,
   BatchResponseSchema,
@@ -20,6 +21,7 @@ import {
   CreatePosShiftAdjustmentRequestSchema,
   CreateProductBarcodeRequestSchema,
   CreateProductRequestSchema,
+  CreateRoleRequestSchema,
   CreateSalaryStructureRequestSchema,
   CreateStocktakeSessionRequestSchema,
   CreateSupplierRequestSchema,
@@ -57,6 +59,7 @@ import {
   ListSuppliersQuerySchema,
   LoginRequestSchema,
   LoginResponseSchema,
+  MemberSummaryResponseSchema,
   OnboardBusinessRequestSchema,
   OnboardBusinessResponseSchema,
   OpenPosShiftRequestSchema,
@@ -68,6 +71,7 @@ import {
   PayrollRunResponseSchema,
   PayrollRunStatusSchema,
   PayslipResponseSchema,
+  PermissionsCatalogResponseSchema,
   PosProductItemResponseSchema,
   PosProductSearchQuerySchema,
   PosRegisterSummaryResponseSchema,
@@ -85,6 +89,8 @@ import {
   RegisterSerialStockRequestSchema,
   ReverseStockMovementRequestSchema,
   ReviewStocktakeRequestSchema,
+  RoleDetailResponseSchema,
+  RoleSummaryResponseSchema,
   SalaryStructureResponseSchema,
   SalesInvoiceResponseSchema,
   SalesSummaryQuerySchema,
@@ -106,10 +112,12 @@ import {
   UpdateCategoryRequestSchema,
   UpdateEmployeeRequestSchema,
   UpdateEmployeeStatusRequestSchema,
+  UpdateMemberLocationScopesRequestSchema,
   UpdatePayrollItemRequestSchema,
   UpdatePosRegisterRequestSchema,
   UpdateProductBarcodeRequestSchema,
   UpdateProductRequestSchema,
+  UpdateRoleRequestSchema,
   UpdateSupplierRequestSchema,
   UpdateTenantBarcodeSettingsRequestSchema,
   UpdateWarehouseRequestSchema,
@@ -160,13 +168,23 @@ import {
   RemoteJwksProvider,
   type SystemRoleCode,
   assertAuthorized,
+  assignMemberRoles,
+  createRole,
+  deleteRole,
+  getPermissionsCatalog,
+  getRoleById,
   getUserProfileAndMemberships,
   handleLogin,
   handleLogout,
   handlePasswordResetRequest,
   handleRefreshToken,
   handleSignUp,
+  listMembers,
+  listRoles,
   provisionTenantMember,
+  removeMemberRole,
+  updateMemberLocationScopes,
+  updateRole,
   verifySupabaseJwt,
 } from './modules/iam/index.js';
 import {
@@ -1467,6 +1485,348 @@ export async function buildApp(
       );
 
       return reply.status(201).send(member);
+    },
+  );
+
+  // 13b. Permissions Catalog (Phase 7.2)
+  app.get(
+    '/v1/iam/permissions',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        response: {
+          200: PermissionsCatalogResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      return getPermissionsCatalog();
+    },
+  );
+
+  // 13c. List Roles (Phase 7.2)
+  app.get(
+    '/v1/iam/roles',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        response: {
+          200: Type.Array(RoleSummaryResponseSchema),
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => listRoles(trx),
+      );
+    },
+  );
+
+  // 13d. Create Custom Role (Phase 7.2)
+  app.post(
+    '/v1/iam/roles',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        body: CreateRoleRequestSchema,
+        response: {
+          201: RoleDetailResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+          422: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      const created = await withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => createRole(trx, request.body),
+      );
+
+      return reply.status(201).send(created);
+    },
+  );
+
+  // 13e. Get Role Details (Phase 7.2)
+  app.get(
+    '/v1/iam/roles/:roleId',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ roleId: UuidSchema }),
+        response: {
+          200: RoleDetailResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => getRoleById(trx, request.params.roleId),
+      );
+    },
+  );
+
+  // 13f. Update Custom Role (Phase 7.2)
+  app.patch(
+    '/v1/iam/roles/:roleId',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ roleId: UuidSchema }),
+        body: UpdateRoleRequestSchema,
+        response: {
+          200: RoleDetailResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => updateRole(trx, request.params.roleId, request.body),
+      );
+    },
+  );
+
+  // 13g. Delete Custom Role (Phase 7.2)
+  app.delete(
+    '/v1/iam/roles/:roleId',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ roleId: UuidSchema }),
+        response: {
+          200: Type.Object({
+            success: Type.Boolean(),
+            roleId: UuidSchema,
+          }),
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => deleteRole(trx, request.params.roleId),
+      );
+    },
+  );
+
+  // 13h. List Members with Roles & Scopes (Phase 7.2)
+  app.get(
+    '/v1/iam/members',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        response: {
+          200: Type.Array(MemberSummaryResponseSchema),
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => listMembers(trx),
+      );
+    },
+  );
+
+  // 13i. Assign Member Roles (Phase 7.2)
+  app.put(
+    '/v1/iam/members/:membershipId/roles',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ membershipId: UuidSchema }),
+        body: AssignMemberRolesRequestSchema,
+        response: {
+          200: MemberSummaryResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          422: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          assignMemberRoles(
+            trx,
+            request.params.membershipId,
+            request.body.roleIds,
+          ),
+      );
+    },
+  );
+
+  // 13j. Remove Member Role (Phase 7.2)
+  app.delete(
+    '/v1/iam/members/:membershipId/roles/:roleId',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({
+          membershipId: UuidSchema,
+          roleId: UuidSchema,
+        }),
+        response: {
+          200: MemberSummaryResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          422: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          removeMemberRole(
+            trx,
+            request.params.membershipId,
+            request.params.roleId,
+          ),
+      );
+    },
+  );
+
+  // 13k. Update Member Location Scopes (Phase 7.2)
+  app.put(
+    '/v1/iam/members/:membershipId/location-scopes',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ membershipId: UuidSchema }),
+        body: UpdateMemberLocationScopesRequestSchema,
+        response: {
+          200: MemberSummaryResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          updateMemberLocationScopes(
+            trx,
+            request.params.membershipId,
+            request.body,
+          ),
+      );
     },
   );
 
