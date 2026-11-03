@@ -323,6 +323,55 @@ CREATE POLICY tenant_isolation_policy ON payroll_payments
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE payroll_payments TO nexstock_app_user;
 
+-- 10. Synchronize System Role Permissions for Phase 7.1 HRM & Payroll
+DO $$
+DECLARE
+  r_role RECORD;
+  v_perm text;
+  v_perms text[];
+BEGIN
+  FOR r_role IN
+    SELECT id, tenant_id, code
+    FROM roles
+    WHERE code IN ('TENANT_OWNER', 'ORG_ADMIN', 'ACCOUNTANT', 'BRANCH_MANAGER')
+  LOOP
+    IF r_role.code IN ('TENANT_OWNER', 'ORG_ADMIN') THEN
+      v_perms := ARRAY[
+        'hrm:employee:read', 'hrm:employee:manage',
+        'hrm:document:read', 'hrm:document:manage',
+        'hrm:salary:read', 'hrm:salary:manage',
+        'hrm:payroll:read', 'hrm:payroll:process',
+        'hrm:payroll:approve', 'hrm:payroll:pay'
+      ];
+    ELSIF r_role.code = 'ACCOUNTANT' THEN
+      v_perms := ARRAY[
+        'hrm:employee:read',
+        'hrm:salary:read', 'hrm:salary:manage',
+        'hrm:payroll:read', 'hrm:payroll:process',
+        'hrm:payroll:approve', 'hrm:payroll:pay'
+      ];
+    ELSIF r_role.code = 'BRANCH_MANAGER' THEN
+      v_perms := ARRAY[
+        'hrm:employee:read'
+      ];
+    ELSE
+      v_perms := ARRAY[]::text[];
+    END IF;
+
+    FOREACH v_perm IN ARRAY v_perms
+    LOOP
+      INSERT INTO role_permissions (id, tenant_id, role_id, permission_key)
+      VALUES (
+        gen_random_uuid(),
+        r_role.tenant_id,
+        r_role.id,
+        v_perm
+      )
+      ON CONFLICT (tenant_id, role_id, permission_key) DO NOTHING;
+    END LOOP;
+  END LOOP;
+END $$;
+
 -- Record completion of Migration 0014
 INSERT INTO schema_migrations (version, name, filename)
 VALUES (14, '0014_phase7_employees_and_payroll', '0014_phase7_employees_and_payroll.sql')

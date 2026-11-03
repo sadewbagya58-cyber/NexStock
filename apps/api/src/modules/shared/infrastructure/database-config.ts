@@ -529,6 +529,13 @@ export function loadPhase7EmployeesAndPayrollMigrationSql(): string {
   return sqlText;
 }
 
+export function loadPhase7RolePermissionsSyncMigrationSql(): string {
+  const filename = '0015_phase7_role_permissions_sync.sql';
+  const sqlText = readFileSync(resolve(migrationsDir, filename), 'utf-8');
+  assertPostgresMigrationSqlCompatible(sqlText, filename);
+  return sqlText;
+}
+
 export function getOrderedPostgresMigrations(): readonly PostgresMigrationSpec[] {
   return [
     {
@@ -628,6 +635,13 @@ export function getOrderedPostgresMigrations(): readonly PostgresMigrationSpec[]
       name: '0014_phase7_employees_and_payroll',
       filename: '0014_phase7_employees_and_payroll.sql',
       sql: loadPhase7EmployeesAndPayrollMigrationSql(),
+    },
+    {
+      dialect: 'postgres',
+      version: 15,
+      name: '0015_phase7_role_permissions_sync',
+      filename: '0015_phase7_role_permissions_sync.sql',
+      sql: loadPhase7RolePermissionsSyncMigrationSql(),
     },
   ];
 }

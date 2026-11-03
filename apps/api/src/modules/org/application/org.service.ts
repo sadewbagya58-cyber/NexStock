@@ -416,6 +416,116 @@ export async function listBranches(
   }));
 }
 
+export async function listWarehouses(
+  trx: TenantTransactionContext,
+  options?: { readonly branchId?: string | undefined },
+): Promise<readonly WarehouseDto[]> {
+  const authCtx = await assertAuthorized(trx, {
+    permission: 'org:warehouse:read',
+  });
+
+  await assertSubscriptionEntitlement(trx, {
+    requireWriteAccess: false,
+  });
+
+  let query = trx.db
+    .selectFrom('warehouses')
+    .select([
+      'id',
+      'tenant_id',
+      'branch_id',
+      'code',
+      'name',
+      'allow_negative_stock',
+      'is_active',
+    ])
+    .orderBy('code', 'asc');
+
+  if (options?.branchId) {
+    const branchId = options.branchId;
+    const linked = await trx.db
+      .selectFrom('branch_warehouse_links')
+      .select(['warehouse_id'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('branch_id', '=', branchId)
+      .execute();
+    const linkedIds = linked.map((l) => l.warehouse_id);
+
+    query = query.where((eb) =>
+      eb.or([
+        eb('branch_id', '=', branchId),
+        ...(linkedIds.length > 0 ? [eb('id', 'in', linkedIds)] : []),
+      ]),
+    );
+  }
+
+  if (!authCtx.allLocationsAccess) {
+    const allowedIds = [...authCtx.allowedWarehouseIds];
+    if (allowedIds.length === 0) {
+      return [];
+    }
+    query = query.where('id', 'in', allowedIds);
+  }
+
+  const rows = await query.execute();
+  return rows.map((row) => ({
+    id: row.id,
+    tenantId: row.tenant_id,
+    branchId: row.branch_id,
+    code: row.code,
+    name: row.name,
+    allowNegativeStock: row.allow_negative_stock,
+    isActive: row.is_active,
+  }));
+}
+
+export async function getWarehouseById(
+  trx: TenantTransactionContext,
+  warehouseId: string,
+): Promise<WarehouseDto> {
+  await assertAuthorized(trx, {
+    permission: 'org:warehouse:read',
+    warehouseId,
+  });
+
+  await assertSubscriptionEntitlement(trx, {
+    requireWriteAccess: false,
+  });
+
+  const row = await trx.db
+    .selectFrom('warehouses')
+    .select([
+      'id',
+      'tenant_id',
+      'branch_id',
+      'code',
+      'name',
+      'allow_negative_stock',
+      'is_active',
+    ])
+    .where('id', '=', warehouseId)
+    .executeTakeFirst();
+
+  if (!row) {
+    throw new AppError({
+      statusCode: 404,
+      errorCode: 'ERR_NOT_FOUND',
+      title: 'Warehouse Not Found',
+      detail: `Warehouse "${warehouseId}" was not found in tenant "${trx.tenantId}".`,
+    });
+  }
+
+  return {
+    id: row.id,
+    tenantId: row.tenant_id,
+    branchId: row.branch_id,
+    code: row.code,
+    name: row.name,
+    allowNegativeStock: row.allow_negative_stock,
+    isActive: row.is_active,
+  };
+}
+
 export async function createWarehouse(
   trx: TenantTransactionContext,
   input: {

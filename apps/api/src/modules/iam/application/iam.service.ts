@@ -561,7 +561,11 @@ export async function resolveMemberAuthorizationContext(
         .onRef('roles.tenant_id', '=', 'member_role_assignments.tenant_id')
         .onRef('roles.id', '=', 'member_role_assignments.role_id'),
     )
-    .select(['roles.id as role_id', 'roles.code as role_code'])
+    .select([
+      'roles.id as role_id',
+      'roles.code as role_code',
+      'roles.is_system_role as is_system_role',
+    ])
     .where('member_role_assignments.tenant_id', '=', trx.tenantId)
     .where('member_role_assignments.membership_id', '=', membership.id)
     .execute();
@@ -573,13 +577,52 @@ export async function resolveMemberAuthorizationContext(
   if (roleIds.length > 0) {
     const permRows = await trx.db
       .selectFrom('role_permissions')
-      .select(['permission_key'])
+      .select(['permission_key', 'role_id'])
       .where('tenant_id', '=', trx.tenantId)
       .where('role_id', 'in', roleIds)
       .execute();
 
     for (const p of permRows) {
       permissions.add(p.permission_key);
+    }
+
+    // Auto-heal / synchronize missing permissions for built-in system roles
+    const missingRolePerms: Array<{
+      id: string;
+      tenant_id: string;
+      role_id: string;
+      permission_key: string;
+    }> = [];
+
+    for (const role of assignedRoles) {
+      if (role.is_system_role && role.role_code in SYSTEM_ROLE_DEFINITIONS) {
+        const sysDef = SYSTEM_ROLE_DEFINITIONS[role.role_code as SystemRoleCode];
+        for (const permKey of sysDef.permissions) {
+          permissions.add(permKey);
+          const alreadyInDb = permRows.some(
+            (r) => r.role_id === role.role_id && r.permission_key === permKey,
+          );
+          if (!alreadyInDb) {
+            missingRolePerms.push({
+              id: generateUuidV7(),
+              tenant_id: trx.tenantId,
+              role_id: role.role_id,
+              permission_key: permKey,
+            });
+          }
+        }
+      }
+    }
+
+    if (missingRolePerms.length > 0) {
+      await trx.db
+        .insertInto('role_permissions')
+        .values(missingRolePerms)
+        .onConflict((oc) =>
+          oc.columns(['tenant_id', 'role_id', 'permission_key']).doNothing(),
+        )
+        .execute()
+        .catch(() => {});
     }
   }
 

@@ -9920,19 +9920,47 @@
       }
     }
 
-    // --- 2. CREATE EMPLOYEE MODAL ---
+    // --- 2. CREATE EMPLOYEE MODAL & WAREHOUSE FILTERING ---
+    function updateWarehouseOptions(branchSelectId, warehouseSelectId, selectedWarehouseId = '') {
+      const branchEl = document.getElementById(branchSelectId);
+      const warehouseEl = document.getElementById(warehouseSelectId);
+      if (!warehouseEl) return;
+
+      const selectedBranchId = branchEl ? branchEl.value : '';
+      const allWarehouses = window._employeeWarehousesCache || [];
+
+      // Filter warehouses for the selected branch (or general warehouses if no branch selected)
+      const filtered = selectedBranchId
+        ? allWarehouses.filter(w => w.branchId === selectedBranchId || !w.branchId)
+        : allWarehouses;
+
+      if (filtered.length === 0) {
+        warehouseEl.innerHTML = '<option value="">No warehouses found for this branch</option>';
+      } else {
+        warehouseEl.innerHTML = `
+          <option value="">Default Warehouse (All)</option>
+          ${filtered.map(w => `<option value="${w.id}" ${w.id === selectedWarehouseId ? 'selected' : ''}>${escapeHtml(w.name || w.code)}</option>`).join('')}
+        `;
+      }
+    }
+
     async function openCreateEmployeeModal() {
       // Fetch branches and warehouses for assignment dropdowns
       let branches = [];
       let warehouses = [];
       try {
         const [bRes, wRes] = await Promise.all([
-          apiFetch('/v1/org/branches').catch(() => []),
-          apiFetch('/v1/org/warehouses').catch(() => [])
+          apiFetch('/v1/org/branches').catch(() => ({ items: [] })),
+          apiFetch('/v1/org/warehouses').catch(() => ({ items: [] }))
         ]);
-        branches = Array.isArray(bRes) ? bRes : (bRes.data || []);
-        warehouses = Array.isArray(wRes) ? wRes : (wRes.data || []);
-      } catch {}
+        branches = bRes?.items || (Array.isArray(bRes) ? bRes : bRes?.data || []);
+        warehouses = wRes?.items || (Array.isArray(wRes) ? wRes : wRes?.data || []);
+      } catch (err) {
+        console.warn('Failed to load branches/warehouses:', err);
+      }
+
+      window._employeeBranchesCache = branches;
+      window._employeeWarehousesCache = warehouses;
 
       openModal({
         title: 'Add New Employee',
@@ -10015,7 +10043,7 @@
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
             <div class="form-group">
               <label class="form-label">Primary Branch</label>
-              <select class="form-select" id="newEmpBranch">
+              <select class="form-select" id="newEmpBranch" onchange="updateWarehouseOptions('newEmpBranch', 'newEmpWarehouse')">
                 <option value="">Default Branch</option>
                 ${branches.map(b => `<option value="${b.id}">${escapeHtml(b.name || b.code)}</option>`).join('')}
               </select>
@@ -10023,7 +10051,7 @@
             <div class="form-group">
               <label class="form-label">Primary Warehouse</label>
               <select class="form-select" id="newEmpWarehouse">
-                <option value="">Default Warehouse</option>
+                <option value="">Default Warehouse (All)</option>
                 ${warehouses.map(w => `<option value="${w.id}">${escapeHtml(w.name || w.code)}</option>`).join('')}
               </select>
             </div>
@@ -10123,7 +10151,20 @@
     // --- 3. EDIT EMPLOYEE DETAILS MODAL ---
     async function openEditEmployeeModal(employeeId) {
       try {
-        const emp = await apiFetch(`/v1/employees/${employeeId}`);
+        const [emp, bRes, wRes] = await Promise.all([
+          apiFetch(`/v1/employees/${employeeId}`),
+          apiFetch('/v1/org/branches').catch(() => ({ items: [] })),
+          apiFetch('/v1/org/warehouses').catch(() => ({ items: [] }))
+        ]);
+
+        const branches = bRes?.items || (Array.isArray(bRes) ? bRes : bRes?.data || []);
+        const warehouses = wRes?.items || (Array.isArray(wRes) ? wRes : wRes?.data || []);
+        window._employeeBranchesCache = branches;
+        window._employeeWarehousesCache = warehouses;
+
+        const filteredWarehouses = emp.primaryBranchId
+          ? warehouses.filter(w => w.branchId === emp.primaryBranchId || !w.branchId)
+          : warehouses;
 
         openModal({
           title: `Edit Employee: ${emp.displayName} (${emp.employeeCode})`,
@@ -10205,6 +10246,23 @@
               </div>
             </div>
 
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+              <div class="form-group">
+                <label class="form-label">Primary Branch</label>
+                <select class="form-select" id="editEmpBranch" onchange="updateWarehouseOptions('editEmpBranch', 'editEmpWarehouse')">
+                  <option value="">Default Branch</option>
+                  ${branches.map(b => `<option value="${b.id}" ${b.id === emp.primaryBranchId ? 'selected' : ''}>${escapeHtml(b.name || b.code)}</option>`).join('')}
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Primary Warehouse</label>
+                <select class="form-select" id="editEmpWarehouse">
+                  <option value="">Default Warehouse (All)</option>
+                  ${filteredWarehouses.map(w => `<option value="${w.id}" ${w.id === emp.primaryWarehouseId ? 'selected' : ''}>${escapeHtml(w.name || w.code)}</option>`).join('')}
+                </select>
+              </div>
+            </div>
+
             <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px;">
               <div class="form-group">
                 <label class="form-label">Bank Name</label>
@@ -10254,6 +10312,8 @@
       const phone = document.getElementById('editEmpPhone').value.trim() || null;
       const nationalId = document.getElementById('editEmpNationalId').value.trim() || null;
       const dob = document.getElementById('editEmpDob').value || null;
+      const branchId = document.getElementById('editEmpBranch')?.value || null;
+      const warehouseId = document.getElementById('editEmpWarehouse')?.value || null;
       const bankName = document.getElementById('editEmpBankName').value.trim() || null;
       const bankAccount = document.getElementById('editEmpBankAccount').value.trim() || null;
       const epfNumber = document.getElementById('editEmpEpf').value.trim() || null;
@@ -10286,6 +10346,8 @@
             phone,
             nationalId,
             dateOfBirth: dob,
+            primaryBranchId: branchId,
+            primaryWarehouseId: warehouseId,
             bankName,
             bankAccountNumber: bankAccount,
             epfNumber,

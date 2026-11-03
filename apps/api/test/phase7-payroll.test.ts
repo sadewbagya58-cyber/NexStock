@@ -6,6 +6,9 @@ import {
   StaticJwksProvider,
   type SupabaseJwk,
   buildApp,
+  generateUuidV7,
+  provisionTenantMember,
+  withTenantTransaction,
 } from '../src/index.js';
 import {
   type TestPostgresHarness,
@@ -923,5 +926,296 @@ describe('@nexstock/api — Phase 7.1: Employee Management & Flexible Payroll En
       },
     });
     expect(runRes.statusCode).toBe(404);
+  });
+
+  // ==========================================================================
+  // Module 7: Phase 7.1 QA Remediation (BUG-034, BUG-035, BUG-036)
+  // ==========================================================================
+  describe('7. QA Remediation: Permissions, Reports & Warehouse Discovery', () => {
+    const CASHIER_USER_ID = '0192b4c0-7777-7000-8000-000000000088';
+    const ACCOUNTANT_USER_ID = '0192b4c0-7777-7000-8000-000000000099';
+    let cashierToken: string;
+    let accountantToken: string;
+
+    beforeAll(async () => {
+      // 1. Create cashier and accountant users in database
+      await harness.db
+        .insertInto('users')
+        .values([
+          {
+            id: CASHIER_USER_ID,
+            email: 'cashier@alpha-hrm.example.com',
+            full_name: 'Alpha POS Cashier',
+          },
+          {
+            id: ACCOUNTANT_USER_ID,
+            email: 'accountant@alpha-hrm.example.com',
+            full_name: 'Alpha Staff Accountant',
+          },
+        ])
+        .execute();
+
+      // 2. Provision tenant memberships with respective system roles
+      await withTenantTransaction(
+        harness.db,
+        {
+          tenantId: TENANT_ALPHA_ID,
+          userId: TENANT_ALPHA_OWNER,
+          traceId: generateUuidV7(),
+        },
+        async (trx) => {
+          await provisionTenantMember(trx, {
+            userId: CASHIER_USER_ID,
+            email: 'cashier@alpha-hrm.example.com',
+            fullName: 'Alpha POS Cashier',
+            roleCodes: ['CASHIER'],
+            allLocationsAccess: false,
+            branchIds: [alphaBranchId],
+          });
+
+          await provisionTenantMember(trx, {
+            userId: ACCOUNTANT_USER_ID,
+            email: 'accountant@alpha-hrm.example.com',
+            fullName: 'Alpha Staff Accountant',
+            roleCodes: ['ACCOUNTANT'],
+            allLocationsAccess: true,
+          });
+        },
+      );
+
+      // 3. Issue valid asymmetric ES256 Bearer JWTs
+      cashierToken = issueToken(CASHIER_USER_ID, 'cashier@alpha-hrm.example.com');
+      accountantToken = issueToken(ACCOUNTANT_USER_ID, 'accountant@alpha-hrm.example.com');
+    });
+
+    it('BUG-034: enforces employee permissions (Owner/Accountant allowed, Cashier rejected) and auto-heals legacy tenant permissions', async () => {
+      // 1. Cashier lacks hrm:employee:read -> 403 Forbidden
+      const cashierReadRes = await app.inject({
+        method: 'GET',
+        url: '/v1/employees',
+        headers: {
+          authorization: `Bearer ${cashierToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+      expect(cashierReadRes.statusCode).toBe(403);
+      expect(cashierReadRes.json().errorCode).toBe('IAM_PERMISSION_DENIED');
+      expect(cashierReadRes.json().detail).toContain('hrm:employee:read');
+
+      // 2. Cashier lacks hrm:employee:manage -> 403 Forbidden
+      const cashierCreateRes = await app.inject({
+        method: 'POST',
+        url: '/v1/employees',
+        headers: {
+          authorization: `Bearer ${cashierToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+        payload: {
+          employeeCode: 'EMP-UNAUTH',
+          firstName: 'Unauthorized',
+          lastName: 'Cashier',
+          designation: 'Clerk',
+          department: 'Sales',
+          joinedDate: '2026-01-01',
+        },
+      });
+      expect(cashierCreateRes.statusCode).toBe(403);
+      expect(cashierCreateRes.json().errorCode).toBe('IAM_PERMISSION_DENIED');
+
+      // 3. Accountant has hrm:employee:read -> 200 OK
+      const accountantReadRes = await app.inject({
+        method: 'GET',
+        url: '/v1/employees',
+        headers: {
+          authorization: `Bearer ${accountantToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+      expect(accountantReadRes.statusCode).toBe(200);
+
+      // 4. Simulate legacy tenant with missing role_permissions in database
+      // Delete all hrm:* permissions for TENANT_OWNER role in Tenant Alpha
+      const ownerRole = await harness.db
+        .selectFrom('roles')
+        .select(['id'])
+        .where('tenant_id', '=', TENANT_ALPHA_ID)
+        .where('code', '=', 'TENANT_OWNER')
+        .executeTakeFirst();
+      expect(ownerRole).toBeDefined();
+
+      await harness.db
+        .deleteFrom('role_permissions')
+        .where('tenant_id', '=', TENANT_ALPHA_ID)
+        .where('role_id', '=', ownerRole!.id)
+        .where('permission_key', 'like', 'hrm:%')
+        .execute();
+
+      // Verify permissions are gone from database
+      const deletedPerms = await harness.db
+        .selectFrom('role_permissions')
+        .select(['permission_key'])
+        .where('tenant_id', '=', TENANT_ALPHA_ID)
+        .where('role_id', '=', ownerRole!.id)
+        .where('permission_key', 'like', 'hrm:%')
+        .execute();
+      expect(deletedPerms.length).toBe(0);
+
+      // Call GET /v1/employees as Owner -> must succeed and self-heal missing permissions in DB!
+      const ownerHealedRes = await app.inject({
+        method: 'GET',
+        url: '/v1/employees',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+      expect(ownerHealedRes.statusCode).toBe(200);
+
+      // Verify permissions were automatically restored into the database
+      const restoredPerms = await harness.db
+        .selectFrom('role_permissions')
+        .select(['permission_key'])
+        .where('tenant_id', '=', TENANT_ALPHA_ID)
+        .where('role_id', '=', ownerRole!.id)
+        .where('permission_key', 'like', 'hrm:%')
+        .execute();
+      expect(restoredPerms.length).toBeGreaterThan(0);
+    });
+
+    it('BUG-035: authorizes Owner and Accountant to read payroll reports, while rejecting Cashier', async () => {
+      // 1. Owner can access payroll summary reports
+      const ownerReportRes = await app.inject({
+        method: 'GET',
+        url: '/v1/payroll/reports/summary',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+      expect(ownerReportRes.statusCode).toBe(200);
+      expect(ownerReportRes.json().totalGross).toBeDefined();
+
+      // 2. Accountant can access payroll summary reports
+      const accountantReportRes = await app.inject({
+        method: 'GET',
+        url: '/v1/payroll/reports/summary',
+        headers: {
+          authorization: `Bearer ${accountantToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+      expect(accountantReportRes.statusCode).toBe(200);
+      expect(accountantReportRes.json().totalGross).toBeDefined();
+
+      // 3. Cashier lacks hrm:payroll:read -> 403 Forbidden
+      const cashierReportRes = await app.inject({
+        method: 'GET',
+        url: '/v1/payroll/reports/summary',
+        headers: {
+          authorization: `Bearer ${cashierToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+      expect(cashierReportRes.statusCode).toBe(403);
+      expect(cashierReportRes.json().errorCode).toBe('IAM_PERMISSION_DENIED');
+      expect(cashierReportRes.json().detail).toContain('hrm:payroll:read');
+
+      // 4. Cashier cannot access payroll runs
+      const cashierRunsRes = await app.inject({
+        method: 'GET',
+        url: '/v1/payroll/runs',
+        headers: {
+          authorization: `Bearer ${cashierToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+      expect(cashierRunsRes.statusCode).toBe(403);
+      expect(cashierRunsRes.json().errorCode).toBe('IAM_PERMISSION_DENIED');
+
+      // 5. Accountant cannot perform employee administrative updates (least-privilege check)
+      const accountantUpdateEmpRes = await app.inject({
+        method: 'PATCH',
+        url: `/v1/employees/${employeeAId}`,
+        headers: {
+          authorization: `Bearer ${accountantToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+        payload: {
+          designation: 'Unauthorized Modification',
+        },
+      });
+      expect(accountantUpdateEmpRes.statusCode).toBe(403);
+      expect(accountantUpdateEmpRes.json().errorCode).toBe('IAM_PERMISSION_DENIED');
+      expect(accountantUpdateEmpRes.json().detail).toContain('hrm:employee:manage');
+    });
+
+    it('BUG-036: GET /v1/org/warehouses returns tenant warehouses, supports branch filtering, and isolates cross-tenant access', async () => {
+      // 1. GET /v1/org/warehouses returns all warehouses for tenant
+      const whListRes = await app.inject({
+        method: 'GET',
+        url: '/v1/org/warehouses',
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+      expect(whListRes.statusCode).toBe(200);
+      const whList = whListRes.json();
+      expect(Array.isArray(whList.items)).toBe(true);
+      expect(whList.items.length).toBeGreaterThan(0);
+      expect(whList.items.some((w: { id: string }) => w.id === alphaWarehouseId)).toBe(true);
+
+      // 2. GET /v1/org/warehouses with valid branchId filter
+      const whFilteredRes = await app.inject({
+        method: 'GET',
+        url: `/v1/org/warehouses?branchId=${alphaBranchId}`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+      expect(whFilteredRes.statusCode).toBe(200);
+      const filteredList = whFilteredRes.json();
+      expect(filteredList.items.length).toBeGreaterThan(0);
+      expect(filteredList.items[0].id).toBe(alphaWarehouseId);
+
+      // 3. GET /v1/org/warehouses with non-matching branchId returns empty items list
+      const nonMatchingBranchId = '0192b4c0-9999-7000-8000-000000000099';
+      const emptyBranchRes = await app.inject({
+        method: 'GET',
+        url: `/v1/org/warehouses?branchId=${nonMatchingBranchId}`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+      expect(emptyBranchRes.statusCode).toBe(200);
+      expect(emptyBranchRes.json().items).toEqual([]);
+
+      // 4. GET /v1/org/warehouses/:warehouseId retrieves specific warehouse
+      const singleWhRes = await app.inject({
+        method: 'GET',
+        url: `/v1/org/warehouses/${alphaWarehouseId}`,
+        headers: {
+          authorization: `Bearer ${alphaOwnerToken}`,
+          'x-tenant-id': TENANT_ALPHA_ID,
+        },
+      });
+      expect(singleWhRes.statusCode).toBe(200);
+      expect(singleWhRes.json().id).toBe(alphaWarehouseId);
+      expect(singleWhRes.json().code).toBe('AWH-01');
+      expect(singleWhRes.json().name).toBe('Alpha Central Depot');
+
+      // 5. Cross-tenant warehouse access is rejected (strict tenant isolation)
+      const crossTenantWhRes = await app.inject({
+        method: 'GET',
+        url: `/v1/org/warehouses/${alphaWarehouseId}`,
+        headers: {
+          authorization: `Bearer ${betaOwnerToken}`,
+          'x-tenant-id': TENANT_BETA_ID,
+        },
+      });
+      expect(crossTenantWhRes.statusCode).toBe(404);
+    });
   });
 });

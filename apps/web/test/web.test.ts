@@ -1921,5 +1921,44 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       // Payroll reports view
       expect(html).toContain('function renderPayrollReportsView()');
     });
+
+    it('BUG-034 & BUG-035: verifies error state rendering and "Try Again" retry action in Directory and Reports', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // Employee directory failure and retry button
+      expect(html).toContain('Failed to load employee directory');
+      expect(html).toContain('onclick="renderEmployeesView()">Try Again</button>');
+
+      // Payroll runs failure and retry button
+      expect(html).toContain('Failed to load payroll runs');
+      expect(html).toContain('onclick="renderPayrollView()">Try Again</button>');
+
+      // Payroll reports failure and retry button
+      expect(html).toContain('Failed to load payroll report');
+      expect(html).toContain('onclick="renderPayrollReportsView()">Try Again</button>');
+    });
+
+    it('BUG-036: verifies warehouse discovery, dynamic branch-to-warehouse filtering, and dropdown states in employee forms', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // Dynamic branch-to-warehouse filtering function
+      expect(html).toContain('function updateWarehouseOptions(');
+      expect(html).toContain('window._employeeWarehousesCache');
+      expect(html).toContain('No warehouses found for this branch');
+
+      // Create modal: queries /v1/org/warehouses and binds onchange
+      expect(html).toContain("apiFetch('/v1/org/warehouses')");
+      expect(html).toContain("onchange=\"updateWarehouseOptions('newEmpBranch', 'newEmpWarehouse')\"");
+      expect(html).toContain('Default Warehouse (All)');
+
+      // Edit modal: queries /v1/org/warehouses and binds onchange
+      expect(html).toContain("onchange=\"updateWarehouseOptions('editEmpBranch', 'editEmpWarehouse')\"");
+
+      // Double-click prevention and loading states
+      expect(html).toContain("btn.innerText = 'Creating Employee...'");
+      expect(html).toContain("btn.innerText = 'Saving...'");
+    });
   });
 });

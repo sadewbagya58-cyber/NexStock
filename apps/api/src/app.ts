@@ -200,7 +200,9 @@ import {
   createBranch,
   createWarehouse,
   getBranchById,
+  getWarehouseById,
   listBranches,
+  listWarehouses,
   onboardBusinessAtomic,
   onboardTenantOrganization,
   updateBranchName,
@@ -1246,6 +1248,83 @@ export async function buildApp(
             branchId: request.params.branchId,
             name: request.body.name,
           });
+        },
+      );
+    },
+  );
+
+  // 11b. List Warehouses (Enforces JWT + 3D Location Scope Filter + RLS)
+  app.get(
+    '/v1/org/warehouses',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        querystring: Type.Optional(
+          Type.Object({
+            branchId: Type.Optional(UuidSchema),
+          }),
+        ),
+        response: {
+          200: Type.Object({
+            items: Type.Array(WarehouseResponseSchema),
+          }),
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      const items = await withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        async (trx) => {
+          return listWarehouses(trx, {
+            branchId: (request.query as { branchId?: string } | undefined)?.branchId,
+          });
+        },
+      );
+
+      return { items: [...items] };
+    },
+  );
+
+  // 11c. Get Warehouse by ID (Enforces JWT + Warehouse Scope + RLS)
+  app.get(
+    '/v1/org/warehouses/:warehouseId',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ warehouseId: UuidSchema }),
+        response: {
+          200: WarehouseResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        async (trx) => {
+          return getWarehouseById(trx, request.params.warehouseId);
         },
       );
     },
