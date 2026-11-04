@@ -16,6 +16,7 @@ export type TenantTransaction = Transaction<NexStockDatabase> & {
   readonly db: Transaction<NexStockDatabase>;
   readonly tenantId: string;
   readonly userId: string;
+  readonly _trxCache?: Map<string, unknown>;
 };
 
 export type TenantTransactionContext = TenantTransaction;
@@ -80,6 +81,7 @@ export async function withTenantTransaction<T>(
       db: trx,
       tenantId: ctx.tenantId,
       userId: ctx.userId,
+      _trxCache: new Map<string, unknown>(),
     }) as TenantTransaction;
 
     return fn(brandedTrx);

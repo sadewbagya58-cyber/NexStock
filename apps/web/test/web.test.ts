@@ -2301,4 +2301,88 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       expect(payslipBody).toContain('style="white-space: nowrap; font-variant-numeric: tabular-nums;"');
     });
   });
+
+  // ===========================================================================
+  // 26. BUG-048: Global Application Loading Performance & Responsiveness
+  // ===========================================================================
+  describe('26. BUG-048: Global Application Loading Performance & Responsiveness', () => {
+    it('BUG-048: verifies apiFetch request timeout, in-flight GET deduplication, and write-mutation cache invalidation', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // In-flight GET request deduplication map and cache invalidation helper
+      expect(html).toContain('const inFlightGetRequests = new Map();');
+      expect(html).toContain('function clearTenantViewCache()');
+      expect(html).toContain('inFlightGetRequests.clear();');
+
+      // Request timeout via AbortController (15000ms default)
+      const apiFetchBody = html.substring(
+        html.indexOf('async function apiFetch(endpoint, options = {})'),
+        html.indexOf('function openModal(optionsOrHtml)'),
+      );
+      expect(apiFetchBody).toContain('const timeoutMs = options.timeoutMs || 15000;');
+      expect(apiFetchBody).toContain('const controller = !options.signal ? new AbortController() : null;');
+      expect(apiFetchBody).toContain('setTimeout(() => controller.abort(), timeoutMs)');
+      expect(apiFetchBody).toContain("new Error('Request timed out. The server is taking longer than expected to respond.');");
+
+      // Automatic view cache invalidation on write mutations (POST, PUT, PATCH, DELETE)
+      expect(apiFetchBody).toContain("if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {");
+      expect(apiFetchBody).toContain('clearTenantViewCache();');
+    });
+
+    it('BUG-048: verifies tenant-isolated Stale-While-Revalidate (SWR) view cache and navigation race-condition guard', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // Tenant-scoped view cache key includes tenantId, branchId, warehouseId, and userRole
+      expect(html).toContain('const tenantViewCache = new Map();');
+      expect(html).toContain('function getTenantCacheScopeKey()');
+      expect(html).toContain("`${state.tenantId || 'none'}:${state.branchId || 'none'}:${state.warehouseId || 'none'}:${state.userRole || 'none'}`");
+      expect(html).toContain('function getViewCache(viewKey, maxAgeMs = 60000)');
+      expect(html).toContain('function setViewCache(viewKey, data)');
+
+      // Navigation race-condition guard
+      expect(html).toContain('viewRenderSeq: 0,');
+      expect(html).toContain('function isCurrentViewRender(viewName, renderSeq)');
+      expect(html).toContain('state.viewRenderSeq = (state.viewRenderSeq || 0) + 1;');
+
+      // SWR and race-condition guards applied to primary views
+      expect(html).toContain("const cached = getViewCache('dashboard');");
+      expect(html).toContain("!isCurrentViewRender('dashboard', renderSeq)");
+      expect(html).toContain("const cached = getViewCache('products');");
+      expect(html).toContain("!isCurrentViewRender('products', renderSeq)");
+      expect(html).toContain("const cachedCats = getViewCache('categories');");
+      expect(html).toContain("const cachedSups = getViewCache('suppliers');");
+      expect(html).toContain("const cachedBalances = getViewCache('balances');");
+    });
+
+    it('BUG-048: verifies non-blocking tenant selection, structured skeleton placeholders, and connection recovery UI', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // Non-blocking background hydration for tenant branches and registers
+      expect(html).toContain('async function hydrateTenantLocationContext(targetTenantId)');
+      expect(html).toContain('hydrateTenantLocationContext(membership.tenantId);');
+
+      // Structured skeleton loader for immediate module navigation feedback
+      expect(html).toContain('.skeleton-pulse {');
+      expect(html).toContain('function renderViewSkeleton(viewName)');
+      expect(html).toContain('container.innerHTML = renderViewSkeleton(viewName);');
+
+      // Connection recovery UI when server cold-starts without cached tenant context
+      expect(html).toContain('function renderConnectionRecoveryState(reasonMessage)');
+      expect(html).toContain('async function retryAppInitialization(btnEl)');
+      expect(html).toContain('Connection Taking Longer Than Expected');
+      expect(html).toContain('Retry Connection');
+
+      // Parallelized POS checkout view API calls
+      const posViewBody = html.substring(
+        html.indexOf('async function renderPosCheckoutView()'),
+        html.indexOf('async function executeBarcodeScan(barcodeOrSku)'),
+      );
+      expect(posViewBody).toContain('await Promise.all([');
+      expect(posViewBody).toContain('/v1/pos/shifts/active?registerId=');
+      expect(posViewBody).toContain('/v1/pos/products/search?warehouseId=');
+    });
+  });
 });

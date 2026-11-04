@@ -681,12 +681,30 @@ export async function getUserProfileAndMemberships(
   traceId: string,
 ): Promise<UserMeResponse> {
   return withUserTransaction(db, { userId, traceId }, async (trx) => {
-    // 1. Fetch user record
-    const userRow = await trx
-      .selectFrom('users')
-      .select(['id', 'email', 'full_name'])
-      .where('id', '=', userId)
-      .executeTakeFirst();
+    // 1. Fetch user record and active memberships in parallel
+    const [userRow, membershipRows] = await Promise.all([
+      trx
+        .selectFrom('users')
+        .select(['id', 'email', 'full_name'])
+        .where('id', '=', userId)
+        .executeTakeFirst(),
+      trx
+        .selectFrom('tenant_memberships')
+        .innerJoin('tenants', 'tenants.id', 'tenant_memberships.tenant_id')
+        .select([
+          'tenant_memberships.id as membership_id',
+          'tenant_memberships.tenant_id',
+          'tenant_memberships.status as membership_status',
+          'tenants.legal_name as business_name',
+          'tenants.slug',
+          'tenants.base_currency',
+          'tenants.default_timezone',
+          'tenants.status as tenant_status',
+        ])
+        .where('tenant_memberships.user_id', '=', userId)
+        .where('tenant_memberships.status', '=', 'ACTIVE')
+        .execute(),
+    ]);
 
     const user: AuthUserSummary = {
       id: userRow?.id ?? userId,
@@ -694,55 +712,63 @@ export async function getUserProfileAndMemberships(
       fullName: userRow?.full_name ?? '',
     };
 
-    // 2. Fetch memberships for this user (filtered by user_tenant_memberships_select_policy)
-    const membershipRows = await trx
-      .selectFrom('tenant_memberships')
-      .innerJoin('tenants', 'tenants.id', 'tenant_memberships.tenant_id')
-      .select([
-        'tenant_memberships.id as membership_id',
-        'tenant_memberships.tenant_id',
-        'tenant_memberships.status as membership_status',
-        'tenants.legal_name as business_name',
-        'tenants.slug',
-        'tenants.base_currency',
-        'tenants.default_timezone',
-        'tenants.status as tenant_status',
-      ])
-      .where('tenant_memberships.user_id', '=', userId)
-      .where('tenant_memberships.status', '=', 'ACTIVE')
-      .execute();
+    if (membershipRows.length === 0) {
+      return {
+        user,
+        memberships: [],
+      };
+    }
 
-    const memberships: TenantMembershipSummary[] = [];
+    const membershipIds = membershipRows.map((m) => m.membership_id);
+    const tenantIds = Array.from(new Set(membershipRows.map((m) => m.tenant_id)));
 
-    for (const m of membershipRows) {
-      // Find role for this membership
-      const roleRow = await trx
+    // 2. Batch-fetch all role assignments and branches across memberships in parallel
+    const [roleRows, allBranchRows] = await Promise.all([
+      trx
         .selectFrom('member_role_assignments')
         .innerJoin('roles', (join) =>
           join
             .onRef('roles.tenant_id', '=', 'member_role_assignments.tenant_id')
             .onRef('roles.id', '=', 'member_role_assignments.role_id'),
         )
-        .select(['roles.code as role_code'])
-        .where('member_role_assignments.membership_id', '=', m.membership_id)
-        .executeTakeFirst();
-
-      // Find branches for this tenant
-      const branchRows = await trx
+        .select([
+          'member_role_assignments.membership_id as membership_id',
+          'roles.code as role_code',
+        ])
+        .where('member_role_assignments.membership_id', 'in', membershipIds)
+        .execute(),
+      trx
         .selectFrom('branches')
-        .select(['id', 'code', 'name', 'default_warehouse_id', 'timezone'])
-        .where('tenant_id', '=', m.tenant_id)
+        .select(['id', 'tenant_id', 'code', 'name', 'default_warehouse_id', 'timezone'])
+        .where('tenant_id', 'in', tenantIds)
         .where('is_active', '=', true)
         .orderBy('name', 'asc')
-        .execute();
+        .execute(),
+    ]);
 
-      memberships.push({
+    const roleByMembershipId = new Map<string, string>();
+    for (const r of roleRows) {
+      if (!roleByMembershipId.has(r.membership_id)) {
+        roleByMembershipId.set(r.membership_id, r.role_code);
+      }
+    }
+
+    const branchesByTenantId = new Map<string, typeof allBranchRows>();
+    for (const b of allBranchRows) {
+      const list = branchesByTenantId.get(b.tenant_id) ?? [];
+      list.push(b);
+      branchesByTenantId.set(b.tenant_id, list);
+    }
+
+    const memberships: TenantMembershipSummary[] = membershipRows.map((m) => {
+      const branchRows = branchesByTenantId.get(m.tenant_id) ?? [];
+      return {
         tenantId: m.tenant_id,
         businessName: m.business_name,
         slug: m.slug,
         baseCurrency: m.base_currency,
         status: m.tenant_status,
-        role: roleRow?.role_code ?? 'MEMBER',
+        role: roleByMembershipId.get(m.membership_id) ?? 'MEMBER',
         timezone: m.default_timezone ?? 'UTC',
         branches: branchRows.map((b) => ({
           id: b.id,
@@ -751,8 +777,8 @@ export async function getUserProfileAndMemberships(
           defaultWarehouseId: b.default_warehouse_id,
           timezone: b.timezone ?? m.default_timezone ?? 'UTC',
         })),
-      });
-    }
+      };
+    });
 
     return {
       user,

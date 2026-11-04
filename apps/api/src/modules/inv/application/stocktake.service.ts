@@ -25,13 +25,21 @@ import { postStockMovement } from './inv.service.js';
 async function getTenantBaseCurrency(
   trx: TenantTransactionContext,
 ): Promise<string> {
+  const cacheKey = `baseCurrency:${trx.tenantId}`;
+  const cached = trx._trxCache?.get(cacheKey) as string | undefined;
+  if (cached) {
+    return cached;
+  }
+
   const tenant = await trx.db
     .selectFrom('tenants')
     .select(['base_currency'])
     .where('id', '=', trx.tenantId)
     .executeTakeFirst();
 
-  return tenant?.base_currency?.trim() ?? 'USD';
+  const resolved = tenant?.base_currency?.trim() ?? 'USD';
+  trx._trxCache?.set(cacheKey, resolved);
+  return resolved;
 }
 
 function generateStocktakeCountNumber(): string {
@@ -376,10 +384,74 @@ export async function listStocktakeSessions(
   const nextCursor =
     hasNextPage && items.length > 0 ? items[items.length - 1]!.id : null;
 
-  const data: StocktakeSessionResponse[] = [];
-  for (const r of items) {
-    data.push(await mapStocktakeSession(trx, r, false));
+  if (items.length === 0) {
+    return {
+      data: [],
+      pageInfo: {
+        hasNextPage,
+        nextCursor,
+      },
+    };
   }
+
+  const sessionIds = items.map((s) => s.id);
+  const [baseCurrency, allLineRows] = await Promise.all([
+    getTenantBaseCurrency(trx),
+    trx.db
+      .selectFrom('stocktake_lines')
+      .select(['session_id', 'variance_qty', 'variance_value'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('session_id', 'in', sessionIds)
+      .execute(),
+  ]);
+
+  const linesBySessionId = new Map<string, typeof allLineRows>();
+  for (const l of allLineRows) {
+    const list = linesBySessionId.get(l.session_id) ?? [];
+    list.push(l);
+    linesBySessionId.set(l.session_id, list);
+  }
+
+  const data: StocktakeSessionResponse[] = items.map((session) => {
+    const lineRows = linesBySessionId.get(session.id) ?? [];
+    let discrepantLinesCount = 0;
+    let totalVariance = Money.zero(baseCurrency);
+
+    for (const l of lineRows) {
+      const varValue = Money.fromDecimalString(
+        String(l.variance_value ?? '0.0000'),
+        baseCurrency,
+      );
+      totalVariance = totalVariance.add(varValue);
+
+      if (l.variance_qty && !Quantity.fromDecimalString(String(l.variance_qty)).isZero()) {
+        discrepantLinesCount++;
+      }
+    }
+
+    return {
+      id: session.id,
+      countNumber: session.count_number,
+      branchId: session.branch_id,
+      warehouseId: session.warehouse_id,
+      scope: session.scope as StocktakeScope,
+      categoryId: session.category_id,
+      status: session.status as StocktakeStatus,
+      startedAt: session.started_at ? new Date(session.started_at).toISOString() : null,
+      completedAt: session.completed_at
+        ? new Date(session.completed_at).toISOString()
+        : null,
+      countedByUserId: session.counted_by_user_id,
+      reviewedByUserId: session.reviewed_by_user_id,
+      rejectionReason: session.rejection_reason,
+      notes: session.notes,
+      totalLinesCount: lineRows.length,
+      discrepantLinesCount,
+      totalVarianceValue: totalVariance.toDecimalString(),
+      createdAt: new Date(session.created_at).toISOString(),
+      updatedAt: new Date(session.updated_at).toISOString(),
+    };
+  });
 
   return {
     data,

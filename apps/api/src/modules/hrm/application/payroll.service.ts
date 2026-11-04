@@ -134,15 +134,46 @@ export async function createPayrollRun(
     notes: string | null;
   }> = [];
 
+  const eligibleEmpIds = eligibleEmployees.map((e) => e.id);
+  const activeStructures =
+    eligibleEmpIds.length > 0
+      ? await trx.db
+          .selectFrom('employee_salary_structures')
+          .selectAll()
+          .where('tenant_id', '=', trx.tenantId)
+          .where('employee_id', 'in', eligibleEmpIds)
+          .where('is_active', '=', true)
+          .execute()
+      : [];
+
+  const structureByEmployeeId = new Map<string, (typeof activeStructures)[number]>();
+  for (const s of activeStructures) {
+    if (!structureByEmployeeId.has(s.employee_id)) {
+      structureByEmployeeId.set(s.employee_id, s);
+    }
+  }
+
+  const structureIds = activeStructures.map((s) => s.id);
+  const allComponents =
+    structureIds.length > 0
+      ? await trx.db
+          .selectFrom('employee_salary_components')
+          .selectAll()
+          .where('tenant_id', '=', trx.tenantId)
+          .where('structure_id', 'in', structureIds)
+          .where('is_enabled', '=', true)
+          .execute()
+      : [];
+
+  const componentsByStructureId = new Map<string, typeof allComponents>();
+  for (const c of allComponents) {
+    const list = componentsByStructureId.get(c.structure_id) ?? [];
+    list.push(c);
+    componentsByStructureId.set(c.structure_id, list);
+  }
+
   for (const emp of eligibleEmployees) {
-    // Find active salary structure
-    const structure = await trx.db
-      .selectFrom('employee_salary_structures')
-      .selectAll()
-      .where('tenant_id', '=', trx.tenantId)
-      .where('employee_id', '=', emp.id)
-      .where('is_active', '=', true)
-      .executeTakeFirst();
+    const structure = structureByEmployeeId.get(emp.id);
 
     let basicMoney = Money.zero(input.currencyCode);
     let allowancesMoney = Money.zero(input.currencyCode);
@@ -155,13 +186,7 @@ export async function createPayrollRun(
         input.currencyCode,
       );
 
-      const components = await trx.db
-        .selectFrom('employee_salary_components')
-        .selectAll()
-        .where('tenant_id', '=', trx.tenantId)
-        .where('structure_id', '=', structure.id)
-        .where('is_enabled', '=', true)
-        .execute();
+      const components = componentsByStructureId.get(structure.id) ?? [];
 
       for (const comp of components) {
         const compAmount = calculateComponentAmount(
@@ -242,29 +267,31 @@ export async function createPayrollRun(
     })
     .execute();
 
-  // Insert items
-  for (const item of runItemsToInsert) {
+  // Batch-insert items
+  if (runItemsToInsert.length > 0) {
     await trx.db
       .insertInto('payroll_items')
-      .values({
-        id: item.id,
-        tenant_id: item.tenant_id,
-        payroll_run_id: item.payroll_run_id,
-        employee_id: item.employee_id,
-        basic_salary: item.basic_salary,
-        allowances_total: item.allowances_total,
-        overtime_hours: item.overtime_hours,
-        overtime_pay: item.overtime_pay,
-        bonus_pay: item.bonus_pay,
-        commissions_pay: item.commissions_pay,
-        gross_pay: item.gross_pay,
-        deductions_total: item.deductions_total,
-        net_pay: item.net_pay,
-        paid_amount: item.paid_amount,
-        payment_status: item.payment_status,
-        components_snapshot: item.components_snapshot as unknown as Record<string, unknown>,
-        notes: item.notes,
-      })
+      .values(
+        runItemsToInsert.map((item) => ({
+          id: item.id,
+          tenant_id: item.tenant_id,
+          payroll_run_id: item.payroll_run_id,
+          employee_id: item.employee_id,
+          basic_salary: item.basic_salary,
+          allowances_total: item.allowances_total,
+          overtime_hours: item.overtime_hours,
+          overtime_pay: item.overtime_pay,
+          bonus_pay: item.bonus_pay,
+          commissions_pay: item.commissions_pay,
+          gross_pay: item.gross_pay,
+          deductions_total: item.deductions_total,
+          net_pay: item.net_pay,
+          paid_amount: item.paid_amount,
+          payment_status: item.payment_status,
+          components_snapshot: item.components_snapshot as unknown as Record<string, unknown>,
+          notes: item.notes,
+        })),
+      )
       .execute();
   }
 

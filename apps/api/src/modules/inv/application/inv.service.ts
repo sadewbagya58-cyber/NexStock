@@ -56,13 +56,21 @@ const OUTBOUND_MOVEMENT_TYPES = new Set<StockMovementType>([
 async function getTenantBaseCurrency(
   trx: TenantTransactionContext,
 ): Promise<string> {
+  const cacheKey = `baseCurrency:${trx.tenantId}`;
+  const cached = trx._trxCache?.get(cacheKey) as string | undefined;
+  if (cached) {
+    return cached;
+  }
+
   const tenant = await trx.db
     .selectFrom('tenants')
     .select(['base_currency'])
     .where('id', '=', trx.tenantId)
     .executeTakeFirst();
 
-  return tenant?.base_currency?.trim() ?? 'USD';
+  const resolved = tenant?.base_currency?.trim() ?? 'USD';
+  trx._trxCache?.set(cacheKey, resolved);
+  return resolved;
 }
 
 function mapStockMovementRow(

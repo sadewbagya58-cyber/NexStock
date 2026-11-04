@@ -172,7 +172,7 @@ export async function provisionTenantSubscription(
     },
   });
 
-  return {
+  const entitlement: SubscriptionEntitlementDto = {
     subscriptionId,
     tenantId: trx.tenantId,
     planId: plan.id,
@@ -193,11 +193,19 @@ export async function provisionTenantSubscription(
       maxUsers: plan.max_users,
     },
   };
+  trx._trxCache?.set(`subEntitlement:${trx.tenantId}`, entitlement);
+  return entitlement;
 }
 
 export async function getTenantSubscriptionEntitlement(
   trx: TenantTransactionContext,
 ): Promise<SubscriptionEntitlementDto> {
+  const cacheKey = `subEntitlement:${trx.tenantId}`;
+  const cached = trx._trxCache?.get(cacheKey) as SubscriptionEntitlementDto | undefined;
+  if (cached) {
+    return cached;
+  }
+
   let row = await trx.db
     .selectFrom('tenant_subscriptions')
     .innerJoin(
@@ -344,7 +352,7 @@ export async function getTenantSubscriptionEntitlement(
     });
   }
 
-  return {
+  const entitlement: SubscriptionEntitlementDto = {
     subscriptionId: row.subscription_id,
     tenantId: row.tenant_id,
     planId: row.plan_id,
@@ -367,6 +375,8 @@ export async function getTenantSubscriptionEntitlement(
       maxUsers: row.max_users,
     },
   };
+  trx._trxCache?.set(cacheKey, entitlement);
+  return entitlement;
 }
 
 export async function updateSubscriptionLifecycleAndOverride(
@@ -459,6 +469,7 @@ export async function updateSubscriptionLifecycleAndOverride(
     },
   });
 
+  trx._trxCache?.delete(`subEntitlement:${trx.tenantId}`);
   return getTenantSubscriptionEntitlement(trx);
 }
 

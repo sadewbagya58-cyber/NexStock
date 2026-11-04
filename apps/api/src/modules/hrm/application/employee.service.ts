@@ -725,78 +725,78 @@ export async function listEmployees(
 
   if (rows.length > 0) {
     const empIds = rows.map((r) => r.id);
-    const bRows = await trx.db
-      .selectFrom('employee_branch_assignments')
-      .select(['employee_id', 'branch_id'])
-      .where('tenant_id', '=', trx.tenantId)
-      .where('employee_id', 'in', empIds)
-      .execute();
-    for (const b of bRows) {
-      const list = branchMap.get(b.employee_id) ?? [];
-      list.push(b.branch_id);
-      branchMap.set(b.employee_id, list);
-    }
-
-    const wRows = await trx.db
-      .selectFrom('employee_warehouse_assignments')
-      .select(['employee_id', 'warehouse_id'])
-      .where('tenant_id', '=', trx.tenantId)
-      .where('employee_id', 'in', empIds)
-      .execute();
-    for (const w of wRows) {
-      const list = warehouseMap.get(w.employee_id) ?? [];
-      list.push(w.warehouse_id);
-      warehouseMap.set(w.employee_id, list);
-    }
-
     const branchIds = [
       ...new Set(
         rows.map((r) => r.primary_branch_id).filter(Boolean) as string[],
       ),
     ];
-    if (branchIds.length > 0) {
-      const bNames = await trx.db
-        .selectFrom('branches')
-        .select(['id', 'name'])
-        .where('tenant_id', '=', trx.tenantId)
-        .where('id', 'in', branchIds)
-        .execute();
-      for (const bn of bNames) {
-        branchNameMap.set(bn.id, bn.name);
-      }
-    }
-
     const warehouseIds = [
       ...new Set(
         rows.map((r) => r.primary_warehouse_id).filter(Boolean) as string[],
       ),
     ];
-    if (warehouseIds.length > 0) {
-      const wNames = await trx.db
-        .selectFrom('warehouses')
-        .select(['id', 'name'])
-        .where('tenant_id', '=', trx.tenantId)
-        .where('id', 'in', warehouseIds)
-        .execute();
-      for (const wn of wNames) {
-        warehouseNameMap.set(wn.id, wn.name);
-      }
-    }
-
     const userIds = [
       ...new Set(
         rows.map((r) => r.linked_user_id).filter(Boolean) as string[],
       ),
     ];
-    if (userIds.length > 0) {
-      const uEmails = await trx.db
-        .selectFrom('users')
-        .select(['id', 'email'])
-        .where('id', 'in', userIds)
-        .execute();
-      for (const ue of uEmails) {
-        userEmailMap.set(ue.id, ue.email);
-      }
+
+    const [bRows, wRows, bNames, wNames, uEmails] = await Promise.all([
+      trx.db
+        .selectFrom('employee_branch_assignments')
+        .select(['employee_id', 'branch_id'])
+        .where('tenant_id', '=', trx.tenantId)
+        .where('employee_id', 'in', empIds)
+        .execute(),
+      trx.db
+        .selectFrom('employee_warehouse_assignments')
+        .select(['employee_id', 'warehouse_id'])
+        .where('tenant_id', '=', trx.tenantId)
+        .where('employee_id', 'in', empIds)
+        .execute(),
+      branchIds.length > 0
+        ? trx.db
+            .selectFrom('branches')
+            .select(['id', 'name'])
+            .where('tenant_id', '=', trx.tenantId)
+            .where('id', 'in', branchIds)
+            .execute()
+        : Promise.resolve([]),
+      warehouseIds.length > 0
+        ? trx.db
+            .selectFrom('warehouses')
+            .select(['id', 'name'])
+            .where('tenant_id', '=', trx.tenantId)
+            .where('id', 'in', warehouseIds)
+            .execute()
+        : Promise.resolve([]),
+      userIds.length > 0
+        ? trx.db
+            .selectFrom('users')
+            .select(['id', 'email'])
+            .where('id', 'in', userIds)
+            .execute()
+        : Promise.resolve([]),
+    ]);
+
+    for (const b of bRows) {
+      const list = branchMap.get(b.employee_id) ?? [];
+      list.push(b.branch_id);
+      branchMap.set(b.employee_id, list);
+    }
+    for (const w of wRows) {
+      const list = warehouseMap.get(w.employee_id) ?? [];
+      list.push(w.warehouse_id);
+      warehouseMap.set(w.employee_id, list);
+    }
+    for (const bn of bNames) {
+      branchNameMap.set(bn.id, bn.name);
+    }
+    for (const wn of wNames) {
+      warehouseNameMap.set(wn.id, wn.name);
+    }
+    for (const ue of uEmails) {
+      userEmailMap.set(ue.id, ue.email);
     }
   }
 

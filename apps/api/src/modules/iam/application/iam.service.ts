@@ -633,6 +633,8 @@ export async function provisionTenantMember(
     },
   });
 
+  trx._trxCache?.clear();
+
   return {
     membershipId,
     userId: input.userId,
@@ -652,14 +654,40 @@ export async function provisionTenantMember(
 export async function resolveMemberAuthorizationContext(
   trx: TenantTransactionContext,
 ): Promise<AuthorizedMemberContext> {
-  const membership = await trx.db
-    .selectFrom('tenant_memberships')
-    .select(['id', 'status', 'all_locations_access'])
-    .where('tenant_id', '=', trx.tenantId)
-    .where('user_id', '=', trx.userId)
-    .executeTakeFirst();
+  const cacheKey = `authCtx:${trx.tenantId}:${trx.userId}`;
+  const cached = trx._trxCache?.get(cacheKey) as
+    | AuthorizedMemberContext
+    | undefined;
+  if (cached) {
+    return cached;
+  }
 
-  if (!membership || membership.status !== 'ACTIVE') {
+  const membershipAndRoles = await trx.db
+    .selectFrom('tenant_memberships')
+    .leftJoin('member_role_assignments', (join) =>
+      join
+        .onRef('member_role_assignments.tenant_id', '=', 'tenant_memberships.tenant_id')
+        .onRef('member_role_assignments.membership_id', '=', 'tenant_memberships.id'),
+    )
+    .leftJoin('roles', (join) =>
+      join
+        .onRef('roles.tenant_id', '=', 'member_role_assignments.tenant_id')
+        .onRef('roles.id', '=', 'member_role_assignments.role_id'),
+    )
+    .select([
+      'tenant_memberships.id as membership_id',
+      'tenant_memberships.status as status',
+      'tenant_memberships.all_locations_access as all_locations_access',
+      'roles.id as role_id',
+      'roles.code as role_code',
+      'roles.is_system_role as is_system_role',
+    ])
+    .where('tenant_memberships.tenant_id', '=', trx.tenantId)
+    .where('tenant_memberships.user_id', '=', trx.userId)
+    .execute();
+
+  const firstRow = membershipAndRoles[0];
+  if (!firstRow || firstRow.status !== 'ACTIVE') {
     throw new AppError({
       statusCode: 403,
       errorCode: 'IAM_TENANT_MEMBERSHIP_REQUIRED',
@@ -668,34 +696,53 @@ export async function resolveMemberAuthorizationContext(
     });
   }
 
-  const assignedRoles = await trx.db
-    .selectFrom('member_role_assignments')
-    .innerJoin('roles', (join) =>
-      join
-        .onRef('roles.tenant_id', '=', 'member_role_assignments.tenant_id')
-        .onRef('roles.id', '=', 'member_role_assignments.role_id'),
-    )
-    .select([
-      'roles.id as role_id',
-      'roles.code as role_code',
-      'roles.is_system_role as is_system_role',
-    ])
-    .where('member_role_assignments.tenant_id', '=', trx.tenantId)
-    .where('member_role_assignments.membership_id', '=', membership.id)
-    .execute();
+  const membership = {
+    id: firstRow.membership_id,
+    status: firstRow.status,
+    all_locations_access: firstRow.all_locations_access,
+  };
+
+  const assignedRoles: Array<{
+    role_id: string;
+    role_code: string;
+    is_system_role: boolean;
+  }> = [];
+  const seenRoleIds = new Set<string>();
+  for (const r of membershipAndRoles) {
+    if (r.role_id && r.role_code && !seenRoleIds.has(r.role_id)) {
+      seenRoleIds.add(r.role_id);
+      assignedRoles.push({
+        role_id: r.role_id,
+        role_code: r.role_code,
+        is_system_role: Boolean(r.is_system_role),
+      });
+    }
+  }
 
   const roleIds = assignedRoles.map((r) => r.role_id);
   const roleCodes = assignedRoles.map((r) => r.role_code);
 
+  const [permRows, scopeRows] = await Promise.all([
+    roleIds.length > 0
+      ? trx.db
+          .selectFrom('role_permissions')
+          .select(['permission_key', 'role_id'])
+          .where('tenant_id', '=', trx.tenantId)
+          .where('role_id', 'in', roleIds)
+          .execute()
+      : Promise.resolve([]),
+    !membership.all_locations_access
+      ? trx.db
+          .selectFrom('member_location_scopes')
+          .select(['branch_id', 'warehouse_id'])
+          .where('tenant_id', '=', trx.tenantId)
+          .where('membership_id', '=', membership.id)
+          .execute()
+      : Promise.resolve([]),
+  ]);
+
   const permissions = new Set<string>();
   if (roleIds.length > 0) {
-    const permRows = await trx.db
-      .selectFrom('role_permissions')
-      .select(['permission_key', 'role_id'])
-      .where('tenant_id', '=', trx.tenantId)
-      .where('role_id', 'in', roleIds)
-      .execute();
-
     for (const p of permRows) {
       permissions.add(p.permission_key);
     }
@@ -744,13 +791,6 @@ export async function resolveMemberAuthorizationContext(
   const allowedWarehouseIds = new Set<string>();
 
   if (!membership.all_locations_access) {
-    const scopeRows = await trx.db
-      .selectFrom('member_location_scopes')
-      .select(['branch_id', 'warehouse_id'])
-      .where('tenant_id', '=', trx.tenantId)
-      .where('membership_id', '=', membership.id)
-      .execute();
-
     for (const row of scopeRows) {
       if (row.branch_id) {
         allowedBranchIds.add(row.branch_id);
@@ -762,31 +802,31 @@ export async function resolveMemberAuthorizationContext(
 
     if (allowedBranchIds.size > 0) {
       const branchIdList = [...allowedBranchIds];
-      const branchWarehouses = await trx.db
-        .selectFrom('warehouses')
-        .select(['id'])
-        .where('tenant_id', '=', trx.tenantId)
-        .where('branch_id', 'in', branchIdList)
-        .execute();
+      const [branchWarehouses, linkedWarehouses] = await Promise.all([
+        trx.db
+          .selectFrom('warehouses')
+          .select(['id'])
+          .where('tenant_id', '=', trx.tenantId)
+          .where('branch_id', 'in', branchIdList)
+          .execute(),
+        trx.db
+          .selectFrom('branch_warehouse_links')
+          .select(['warehouse_id'])
+          .where('tenant_id', '=', trx.tenantId)
+          .where('branch_id', 'in', branchIdList)
+          .execute(),
+      ]);
 
       for (const wh of branchWarehouses) {
         allowedWarehouseIds.add(wh.id);
       }
-
-      const linkedWarehouses = await trx.db
-        .selectFrom('branch_warehouse_links')
-        .select(['warehouse_id'])
-        .where('tenant_id', '=', trx.tenantId)
-        .where('branch_id', 'in', branchIdList)
-        .execute();
-
       for (const link of linkedWarehouses) {
         allowedWarehouseIds.add(link.warehouse_id);
       }
     }
   }
 
-  return {
+  const authCtx: AuthorizedMemberContext = {
     membershipId: membership.id,
     tenantId: trx.tenantId,
     userId: trx.userId,
@@ -796,6 +836,9 @@ export async function resolveMemberAuthorizationContext(
     allowedBranchIds,
     allowedWarehouseIds,
   };
+
+  trx._trxCache?.set(cacheKey, authCtx);
+  return authCtx;
 }
 
 /**
@@ -902,30 +945,30 @@ export async function listRoles(
 ): Promise<RoleSummaryResponse[]> {
   await assertAuthorized(trx, { permission: 'iam:member:read' });
 
-  const roleRows = await trx.db
-    .selectFrom('roles')
-    .selectAll()
-    .where('tenant_id', '=', trx.tenantId)
-    .orderBy('is_system_role', 'desc')
-    .orderBy('name', 'asc')
-    .execute();
-
-  const memberAssignments = await trx.db
-    .selectFrom('member_role_assignments')
-    .select(['role_id'])
-    .where('tenant_id', '=', trx.tenantId)
-    .execute();
+  const [roleRows, memberAssignments, rolePermRows] = await Promise.all([
+    trx.db
+      .selectFrom('roles')
+      .selectAll()
+      .where('tenant_id', '=', trx.tenantId)
+      .orderBy('is_system_role', 'desc')
+      .orderBy('name', 'asc')
+      .execute(),
+    trx.db
+      .selectFrom('member_role_assignments')
+      .select(['role_id'])
+      .where('tenant_id', '=', trx.tenantId)
+      .execute(),
+    trx.db
+      .selectFrom('role_permissions')
+      .select(['role_id', 'permission_key'])
+      .where('tenant_id', '=', trx.tenantId)
+      .execute(),
+  ]);
 
   const memberCountMap = new Map<string, number>();
   for (const m of memberAssignments) {
     memberCountMap.set(m.role_id, (memberCountMap.get(m.role_id) ?? 0) + 1);
   }
-
-  const rolePermRows = await trx.db
-    .selectFrom('role_permissions')
-    .select(['role_id', 'permission_key'])
-    .where('tenant_id', '=', trx.tenantId)
-    .execute();
 
   const permCountMap = new Map<string, number>();
   for (const p of rolePermRows) {
@@ -1206,6 +1249,7 @@ export async function updateRole(
     },
   });
 
+  trx._trxCache?.clear();
   return getRoleById(trx, roleId);
 }
 
@@ -1279,6 +1323,7 @@ export async function deleteRole(
     },
   });
 
+  trx._trxCache?.clear();
   return { success: true, roleId };
 }
 
@@ -1287,39 +1332,45 @@ export async function listMembers(
 ): Promise<MemberSummaryResponse[]> {
   await assertAuthorized(trx, { permission: 'iam:member:read' });
 
-  const members = await trx.db
-    .selectFrom('tenant_memberships')
-    .innerJoin('users', 'users.id', 'tenant_memberships.user_id')
-    .select([
-      'tenant_memberships.id as membership_id',
-      'tenant_memberships.tenant_id as tenant_id',
-      'tenant_memberships.user_id as user_id',
-      'users.email as email',
-      'users.full_name as full_name',
-      'tenant_memberships.status as status',
-      'tenant_memberships.all_locations_access as all_locations_access',
-      'tenant_memberships.created_at as created_at',
-    ])
-    .where('tenant_memberships.tenant_id', '=', trx.tenantId)
-    .orderBy('tenant_memberships.created_at', 'asc')
-    .execute();
-
-  const assignments = await trx.db
-    .selectFrom('member_role_assignments')
-    .innerJoin('roles', (join) =>
-      join
-        .onRef('roles.tenant_id', '=', 'member_role_assignments.tenant_id')
-        .onRef('roles.id', '=', 'member_role_assignments.role_id'),
-    )
-    .select([
-      'member_role_assignments.membership_id as membership_id',
-      'roles.id as role_id',
-      'roles.code as role_code',
-      'roles.name as role_name',
-      'roles.is_system_role as is_system_role',
-    ])
-    .where('member_role_assignments.tenant_id', '=', trx.tenantId)
-    .execute();
+  const [members, assignments, scopes] = await Promise.all([
+    trx.db
+      .selectFrom('tenant_memberships')
+      .innerJoin('users', 'users.id', 'tenant_memberships.user_id')
+      .select([
+        'tenant_memberships.id as membership_id',
+        'tenant_memberships.tenant_id as tenant_id',
+        'tenant_memberships.user_id as user_id',
+        'users.email as email',
+        'users.full_name as full_name',
+        'tenant_memberships.status as status',
+        'tenant_memberships.all_locations_access as all_locations_access',
+        'tenant_memberships.created_at as created_at',
+      ])
+      .where('tenant_memberships.tenant_id', '=', trx.tenantId)
+      .orderBy('tenant_memberships.created_at', 'asc')
+      .execute(),
+    trx.db
+      .selectFrom('member_role_assignments')
+      .innerJoin('roles', (join) =>
+        join
+          .onRef('roles.tenant_id', '=', 'member_role_assignments.tenant_id')
+          .onRef('roles.id', '=', 'member_role_assignments.role_id'),
+      )
+      .select([
+        'member_role_assignments.membership_id as membership_id',
+        'roles.id as role_id',
+        'roles.code as role_code',
+        'roles.name as role_name',
+        'roles.is_system_role as is_system_role',
+      ])
+      .where('member_role_assignments.tenant_id', '=', trx.tenantId)
+      .execute(),
+    trx.db
+      .selectFrom('member_location_scopes')
+      .select(['membership_id', 'branch_id', 'warehouse_id'])
+      .where('tenant_id', '=', trx.tenantId)
+      .execute(),
+  ]);
 
   const roleMap = new Map<
     string,
@@ -1335,12 +1386,6 @@ export async function listMembers(
     });
     roleMap.set(a.membership_id, list);
   }
-
-  const scopes = await trx.db
-    .selectFrom('member_location_scopes')
-    .select(['membership_id', 'branch_id', 'warehouse_id'])
-    .where('tenant_id', '=', trx.tenantId)
-    .execute();
 
   const scopeMap = new Map<string, { branchIds: string[]; warehouseIds: string[] }>();
   for (const s of scopes) {
@@ -1459,6 +1504,7 @@ export async function assignMemberRoles(
   // Privilege Escalation Guard: Actor must possess all permissions included in assigned roles
   const actorContext = await resolveMemberAuthorizationContext(trx);
   const requiredPerms = new Set<string>();
+  const customRoleIdsToFetch: string[] = [];
 
   for (const role of targetRoles) {
     if (role.is_system_role && role.code in SYSTEM_ROLE_DEFINITIONS) {
@@ -1466,16 +1512,20 @@ export async function assignMemberRoles(
         requiredPerms.add(p);
       }
     } else {
-      const perms = await trx.db
-        .selectFrom('role_permissions')
-        .select(['permission_key'])
-        .where('tenant_id', '=', trx.tenantId)
-        .where('role_id', '=', role.id)
-        .execute();
+      customRoleIdsToFetch.push(role.id);
+    }
+  }
 
-      for (const p of perms) {
-        requiredPerms.add(p.permission_key);
-      }
+  if (customRoleIdsToFetch.length > 0) {
+    const perms = await trx.db
+      .selectFrom('role_permissions')
+      .select(['permission_key'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('role_id', 'in', customRoleIdsToFetch)
+      .execute();
+
+    for (const p of perms) {
+      requiredPerms.add(p.permission_key);
     }
   }
 
@@ -1521,6 +1571,7 @@ export async function assignMemberRoles(
     },
   });
 
+  trx._trxCache?.clear();
   const allMembers = await listMembers(trx);
   const updatedMember = allMembers.find((m) => m.id === membershipId);
   if (!updatedMember) {
@@ -1593,6 +1644,7 @@ export async function removeMemberRole(
     metadata: { roleId },
   });
 
+  trx._trxCache?.clear();
   const allMembers = await listMembers(trx);
   const updatedMember = allMembers.find((m) => m.id === membershipId);
   if (!updatedMember) {
@@ -1688,6 +1740,7 @@ export async function updateMemberLocationScopes(
     },
   });
 
+  trx._trxCache?.clear();
   const allMembers = await listMembers(trx);
   const updatedMember = allMembers.find((m) => m.id === membershipId);
   if (!updatedMember) {

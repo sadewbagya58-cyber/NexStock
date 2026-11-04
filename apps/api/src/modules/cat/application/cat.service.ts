@@ -511,13 +511,21 @@ export async function listCategories(
 async function getTenantBaseCurrency(
   trx: TenantTransactionContext,
 ): Promise<string> {
+  const cacheKey = `baseCurrency:${trx.tenantId}`;
+  const cached = trx._trxCache?.get(cacheKey) as string | undefined;
+  if (cached) {
+    return cached;
+  }
+
   const tenant = await trx.db
     .selectFrom('tenants')
     .select(['base_currency'])
     .where('id', '=', trx.tenantId)
     .executeTakeFirst();
 
-  return tenant?.base_currency?.trim() ?? 'USD';
+  const resolved = tenant?.base_currency?.trim() ?? 'USD';
+  trx._trxCache?.set(cacheKey, resolved);
+  return resolved;
 }
 
 function validateAndNormalizeMoney(
@@ -573,74 +581,92 @@ function validateAndNormalizeNonNegativeQuantity(
   return qty.toDecimalString();
 }
 
-async function hydrateProductDetails(
+type ProductRowForHydration = {
+  id: string;
+  tenant_id: string;
+  sku: string;
+  name: string;
+  description: string | null;
+  product_type: ProductType;
+  status: RecordLifecycleStatus;
+  category_id: string | null;
+  base_uom: string;
+  purchase_cost: string;
+  selling_price: string;
+  tax_group_id: string | null;
+  track_inventory: boolean;
+  tracking_mode?: TrackingMode | null;
+  valuation_method?: ValuationMethod | null;
+  reorder_point: string;
+  reorder_qty: string;
+  image_url: string | null;
+  image_alt: string | null;
+  primary_barcode: string | null;
+  sync_version: string | number;
+  created_at: Date | string;
+  updated_at: Date | string;
+  archived_at: Date | string | null;
+};
+
+async function hydrateProductsBatch(
   trx: TenantTransactionContext,
-  row: {
-    id: string;
-    tenant_id: string;
-    sku: string;
-    name: string;
-    description: string | null;
-    product_type: ProductType;
-    status: RecordLifecycleStatus;
-    category_id: string | null;
-    base_uom: string;
-    purchase_cost: string;
-    selling_price: string;
-    tax_group_id: string | null;
-    track_inventory: boolean;
-    tracking_mode?: TrackingMode | null;
-    valuation_method?: ValuationMethod | null;
-    reorder_point: string;
-    reorder_qty: string;
-    image_url: string | null;
-    image_alt: string | null;
-    primary_barcode: string | null;
-    sync_version: string | number;
-    created_at: Date | string;
-    updated_at: Date | string;
-    archived_at: Date | string | null;
-  },
-): Promise<ProductResponse> {
-  const barcodeRows = await trx.db
-    .selectFrom('product_barcodes')
-    .selectAll()
-    .where('tenant_id', '=', trx.tenantId)
-    .where('product_id', '=', row.id)
-    .orderBy('is_primary', 'desc')
-    .orderBy('barcode', 'asc')
-    .execute();
+  rows: readonly ProductRowForHydration[],
+): Promise<ProductResponse[]> {
+  if (rows.length === 0) {
+    return [];
+  }
 
-  const uomRows = await trx.db
-    .selectFrom('product_unit_conversions')
-    .selectAll()
-    .where('tenant_id', '=', trx.tenantId)
-    .where('product_id', '=', row.id)
-    .orderBy('uom_code', 'asc')
-    .execute();
+  const productIds = rows.map((r) => r.id);
 
-  const barcodes: ProductBarcodeResponse[] = barcodeRows.map((b) => ({
-    id: b.id,
-    barcode: b.barcode,
-    barcodeType: b.barcode_type,
-    uomCode: b.uom_code,
-    isPrimary: b.is_primary,
-    isActive: b.is_active ?? true,
-  }));
+  const [barcodeRows, uomRows, baseCurrency] = await Promise.all([
+    trx.db
+      .selectFrom('product_barcodes')
+      .selectAll()
+      .where('tenant_id', '=', trx.tenantId)
+      .where('product_id', 'in', productIds)
+      .orderBy('is_primary', 'desc')
+      .orderBy('barcode', 'asc')
+      .execute(),
+    trx.db
+      .selectFrom('product_unit_conversions')
+      .selectAll()
+      .where('tenant_id', '=', trx.tenantId)
+      .where('product_id', 'in', productIds)
+      .orderBy('uom_code', 'asc')
+      .execute(),
+    getTenantBaseCurrency(trx),
+  ]);
 
-  const unitConversions: ProductUnitConversionResponse[] = uomRows.map((u) => ({
-    id: u.id,
-    uomCode: u.uom_code,
-    uomName: u.uom_name,
-    conversionFactorToBase: Quantity.fromDecimalString(
-      String(u.conversion_factor_to_base),
-    ).toDecimalString(),
-    isActive: u.is_active,
-  }));
+  const barcodesByProductId = new Map<string, ProductBarcodeResponse[]>();
+  for (const b of barcodeRows) {
+    const list = barcodesByProductId.get(b.product_id) ?? [];
+    list.push({
+      id: b.id,
+      barcode: b.barcode,
+      barcodeType: b.barcode_type,
+      uomCode: b.uom_code,
+      isPrimary: b.is_primary,
+      isActive: b.is_active ?? true,
+    });
+    barcodesByProductId.set(b.product_id, list);
+  }
 
-  const baseCurrency = await getTenantBaseCurrency(trx);
+  const uomsByProductId = new Map<string, ProductUnitConversionResponse[]>();
+  for (const u of uomRows) {
+    const list = uomsByProductId.get(u.product_id) ?? [];
+    list.push({
+      id: u.id,
+      uomCode: u.uom_code,
+      uomName: u.uom_name,
+      conversionFactorToBase: Quantity.fromDecimalString(
+        String(u.conversion_factor_to_base),
+      ).toDecimalString(),
+      isActive: u.is_active,
+    });
+    uomsByProductId.set(u.product_id, list);
+  }
 
-  return {
+  return rows.map((row) => ({
     id: row.id,
     tenantId: row.tenant_id,
     sku: row.sku,
@@ -671,13 +697,21 @@ async function hydrateProductDetails(
     imageUrl: row.image_url,
     imageAlt: row.image_alt,
     primaryBarcode: row.primary_barcode,
-    barcodes,
-    unitConversions,
+    barcodes: barcodesByProductId.get(row.id) ?? [],
+    unitConversions: uomsByProductId.get(row.id) ?? [],
     syncVersion: Number(row.sync_version),
     createdAt: new Date(row.created_at).toISOString(),
     updatedAt: new Date(row.updated_at).toISOString(),
     archivedAt: row.archived_at ? new Date(row.archived_at).toISOString() : null,
-  };
+  }));
+}
+
+async function hydrateProductDetails(
+  trx: TenantTransactionContext,
+  row: ProductRowForHydration,
+): Promise<ProductResponse> {
+  const [hydrated] = await hydrateProductsBatch(trx, [row]);
+  return hydrated!;
 }
 
 export async function createProduct(
@@ -1731,10 +1765,14 @@ export async function listProducts(
     dbQuery = dbQuery.orderBy('id', sortDir);
   }
 
+  const searchLower = query.search?.trim().toLowerCase();
+  if (!searchLower) {
+    dbQuery = dbQuery.limit(limit + 1);
+  }
+
   const rows = await dbQuery.execute();
 
   let matchedProductIdsByBarcode: Set<string> | null = null;
-  const searchLower = query.search?.trim().toLowerCase();
   if (searchLower) {
     const bcRows = await trx.db
       .selectFrom('product_barcodes')
@@ -1766,10 +1804,7 @@ export async function listProducts(
       ? pageRows[pageRows.length - 1]!.id
       : null;
 
-  const hydrated: ProductResponse[] = [];
-  for (const r of pageRows) {
-    hydrated.push(await hydrateProductDetails(trx, r));
-  }
+  const hydrated = await hydrateProductsBatch(trx, pageRows);
 
   return {
     data: hydrated,

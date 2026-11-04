@@ -1920,6 +1920,23 @@
       border-color: var(--accent-primary);
       background: var(--accent-light);
     }
+    /* Skeleton Loading Placeholders (BUG-048: Perceived Performance & Zero Layout Shift) */
+    @keyframes nexstockSkeletonPulse {
+      0% { opacity: 0.55; }
+      50% { opacity: 0.9; }
+      100% { opacity: 0.55; }
+    }
+    .skeleton-pulse {
+      background: var(--border-subtle);
+      border-radius: 6px;
+      animation: nexstockSkeletonPulse 1.4s ease-in-out infinite;
+    }
+    .skeleton-line {
+      height: 14px;
+      border-radius: 4px;
+      background: var(--border-subtle);
+      animation: nexstockSkeletonPulse 1.4s ease-in-out infinite;
+    }
   </style>
 </head>
 <body data-theme="light">
@@ -2286,6 +2303,7 @@
     // State Store (Phase 5.0 Authentication & Tenant Scoped)
     const state = {
       sessionEpoch: 0,
+      viewRenderSeq: 0,
       apiBaseUrl: resolveApiBaseUrl(),
       token: storedSessionToken,
       tenantId: storedActiveTenantId,
@@ -2480,7 +2498,46 @@
       }, 3500);
     }
 
-    // API Client with automatic auth, token refresh, tenant header, and idempotency key
+    // Tenant- and Scope-Safe View Cache & In-Flight GET Deduplication (BUG-048)
+    const inFlightGetRequests = new Map();
+    const tenantViewCache = new Map();
+
+    function getTenantCacheScopeKey() {
+      return `${state.tenantId || 'none'}:${state.branchId || 'none'}:${state.warehouseId || 'none'}:${state.userRole || 'none'}`;
+    }
+
+    function getViewCache(viewKey, maxAgeMs = 60000) {
+      if (!state.tenantId) return null;
+      const fullKey = `${getTenantCacheScopeKey()}::${viewKey}`;
+      const entry = tenantViewCache.get(fullKey);
+      if (!entry) return null;
+      return {
+        data: entry.data,
+        isFresh: (Date.now() - entry.timestamp) < maxAgeMs
+      };
+    }
+
+    function setViewCache(viewKey, data) {
+      if (!state.tenantId) return;
+      const fullKey = `${getTenantCacheScopeKey()}::${viewKey}`;
+      tenantViewCache.set(fullKey, {
+        data,
+        timestamp: Date.now()
+      });
+    }
+
+    function clearTenantViewCache() {
+      tenantViewCache.clear();
+      inFlightGetRequests.clear();
+    }
+
+    function isCurrentViewRender(viewName, renderSeq) {
+      if (state.activeView !== viewName) return false;
+      if (renderSeq !== undefined && state.viewRenderSeq !== renderSeq) return false;
+      return true;
+    }
+
+    // API Client with automatic auth, token refresh, tenant header, timeout, and GET deduplication
     async function apiFetch(endpoint, options = {}) {
       const requestEpoch = state.sessionEpoch || 0;
       const rawBase = (state.apiBaseUrl && typeof state.apiBaseUrl === 'string' && state.apiBaseUrl.trim() !== '')
@@ -2490,85 +2547,123 @@
       const rawEndpoint = String(endpoint || '').trim();
       const normalizedEndpoint = rawEndpoint.startsWith('/') ? rawEndpoint : `/${rawEndpoint}`;
       const url = `${baseUrl}${normalizedEndpoint}`;
+      const method = String(options.method || 'GET').toUpperCase();
 
       const isAuthBypass = normalizedEndpoint.startsWith('/v1/auth/login') ||
         normalizedEndpoint.startsWith('/v1/auth/signup') ||
         normalizedEndpoint.startsWith('/v1/auth/recover') ||
         normalizedEndpoint.startsWith('/v1/auth/refresh');
 
-      // Proactive token refresh if token exists, is expiring within 30 seconds, and refresh token is available
-      if (!isAuthBypass && state.token && !options._retried) {
-        const exp = state.tokenExpiresAt || getTokenExpiry(state.token);
-        if (exp && Date.now() + 30000 >= exp) {
-          await refreshAccessToken();
-        }
+      // Deduplicate identical concurrent GET requests within the same session and tenant scope
+      const dedupeKey = (method === 'GET' && !options._retried)
+        ? `${requestEpoch}:${state.tenantId || ''}:${state.token || ''}:${url}`
+        : null;
+
+      if (dedupeKey && inFlightGetRequests.has(dedupeKey)) {
+        return inFlightGetRequests.get(dedupeKey);
       }
 
-      const headers = {
-        ...(options.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
-        ...(state.tenantId ? { 'x-tenant-id': state.tenantId } : {}),
-        ...(state.token ? { 'Authorization': `Bearer ${state.token}` } : {}),
-        ...(options.headers || {})
-      };
-
-      if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(options.method)) {
-        if (!headers['idempotency-key']) {
-          headers['idempotency-key'] = crypto.randomUUID();
-        }
-      }
-
-      try {
-        const res = await fetch(url, {
-          ...options,
-          headers
-        });
-
-        // Guard against stale in-flight responses if session changed or user signed out
-        if ((state.sessionEpoch || 0) !== requestEpoch) {
-          return null;
+      const executeRequest = (async () => {
+        // Proactive token refresh if token exists, is expiring within 30 seconds, and refresh token is available
+        if (!isAuthBypass && state.token && !options._retried) {
+          const exp = state.tokenExpiresAt || getTokenExpiry(state.token);
+          if (exp && Date.now() + 30000 >= exp) {
+            await refreshAccessToken();
+          }
         }
 
-        const contentType = res.headers.get('content-type') || '';
-        const data = contentType.includes('json') ? await res.json() : null;
+        const headers = {
+          ...(options.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+          ...(state.tenantId ? { 'x-tenant-id': state.tenantId } : {}),
+          ...(state.token ? { 'Authorization': `Bearer ${state.token}` } : {}),
+          ...(options.headers || {})
+        };
 
-        if (!res.ok) {
-          if (res.status === 401 && !isAuthBypass) {
-            // Attempt token refresh on 401 once before deciding whether to sign out
-            if (!options._retried) {
-              const refreshed = await refreshAccessToken();
-              if (refreshed === true) {
-                return apiFetch(endpoint, { ...options, _retried: true });
-              }
-              if (refreshed === false) {
-                // Server confirmed refresh token is expired or revoked
+        if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(options.method)) {
+          if (!headers['idempotency-key']) {
+            headers['idempotency-key'] = crypto.randomUUID();
+          }
+        }
+
+        const timeoutMs = options.timeoutMs || 15000;
+        const controller = !options.signal ? new AbortController() : null;
+        const timeoutId = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+
+        try {
+          const res = await fetch(url, {
+            ...options,
+            headers,
+            ...(controller ? { signal: controller.signal } : {})
+          });
+
+          // Guard against stale in-flight responses if session changed or user signed out
+          if ((state.sessionEpoch || 0) !== requestEpoch) {
+            return null;
+          }
+
+          const contentType = res.headers.get('content-type') || '';
+          const data = contentType.includes('json') ? await res.json() : null;
+
+          if (!res.ok) {
+            if (res.status === 401 && !isAuthBypass) {
+              // Attempt token refresh on 401 once before deciding whether to sign out
+              if (!options._retried) {
+                const refreshed = await refreshAccessToken();
+                if (refreshed === true) {
+                  return apiFetch(endpoint, { ...options, _retried: true });
+                }
+                if (refreshed === false) {
+                  // Server confirmed refresh token is expired or revoked
+                  showToast('Your session has expired. Please sign in again.', 'warning');
+                  handleSignOut();
+                  return null;
+                }
+                // If refreshed is null (network error / 5xx), do NOT sign out!
+              } else {
+                // Already retried after refresh and still got 401
                 showToast('Your session has expired. Please sign in again.', 'warning');
                 handleSignOut();
                 return null;
               }
-              // If refreshed is null (network error / 5xx), do NOT sign out!
-            } else {
-              // Already retried after refresh and still got 401
-              showToast('Your session has expired. Please sign in again.', 'warning');
-              handleSignOut();
-              return null;
             }
+
+            // HTTP 403 Forbidden or other client/server error: DO NOT SIGN OUT!
+            const detail = data?.detail || data?.title || data?.message || `HTTP ${res.status}`;
+            throw new Error(detail);
           }
 
-          // HTTP 403 Forbidden or other client/server error: DO NOT SIGN OUT!
-          const detail = data?.detail || data?.title || data?.message || `HTTP ${res.status}`;
-          throw new Error(detail);
-        }
+          // Invalidate view cache on any successful write mutation so views always reflect latest state
+          if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+            clearTenantViewCache();
+          }
 
-        return data;
-      } catch (err) {
-        if ((state.sessionEpoch || 0) !== requestEpoch) {
-          return null;
+          return data;
+        } catch (err) {
+          if ((state.sessionEpoch || 0) !== requestEpoch) {
+            return null;
+          }
+          if (err && err.name === 'AbortError') {
+            const timeoutErr = new Error('Request timed out. The server is taking longer than expected to respond.');
+            if (!options.silent) {
+              showToast(timeoutErr.message, 'error');
+            }
+            throw timeoutErr;
+          }
+          if (!options.silent) {
+            showToast(err.message, 'error');
+          }
+          throw err;
+        } finally {
+          if (timeoutId) clearTimeout(timeoutId);
+          if (dedupeKey) inFlightGetRequests.delete(dedupeKey);
         }
-        if (!options.silent) {
-          showToast(err.message, 'error');
-        }
-        throw err;
+      })();
+
+      if (dedupeKey) {
+        inFlightGetRequests.set(dedupeKey, executeRequest);
       }
+
+      return executeRequest;
     }
 
     // Modal Manager: supports both object config { title, bodyHtml, footerHtml } and HTML string
@@ -2629,9 +2724,47 @@
 
     const AUTH_VIEWS = ['welcome', 'login', 'signup', 'forgot-password', 'onboard-business', 'tenant-select'];
 
+    // Background non-blocking hydration for fallback warehouse & POS register (BUG-048)
+    async function hydrateTenantLocationContext(targetTenantId) {
+      if (!targetTenantId || state.tenantId !== targetTenantId) return;
+      try {
+        if (!state.warehouseId && state.tenantId) {
+          const branchRes = await apiFetch('/v1/org/branches', { silent: true }).catch(() => ({ items: [] }));
+          if (state.tenantId !== targetTenantId) return;
+          const branches = branchRes?.items || (Array.isArray(branchRes) ? branchRes : []);
+          const activeBranch = branches.find(b => b.id === state.branchId) || branches[0];
+          if (activeBranch) {
+            state.branchId = activeBranch.id;
+            state.branchName = activeBranch.name;
+            state.warehouseId = activeBranch.defaultWarehouseId || '';
+            const branchEl = document.getElementById('topbarBranchName');
+            if (branchEl) branchEl.innerText = state.branchName;
+            const mobileBranchEl = document.getElementById('topbarMobileBranchName');
+            if (mobileBranchEl) mobileBranchEl.innerText = state.branchName;
+          }
+        }
+
+        if (state.branchId && state.tenantId === targetTenantId) {
+          const regRes = await apiFetch(`/v1/pos/registers?branchId=${encodeURIComponent(state.branchId)}`, { silent: true }).catch(() => []);
+          if (state.tenantId !== targetTenantId) return;
+          const regList = Array.isArray(regRes) ? regRes : (regRes?.data || []);
+          if (regList.length > 0) {
+            state.registerId = regList[0].id;
+            state.registerCode = regList[0].code || 'REG-01';
+          }
+        }
+      } catch {
+        // Non-critical background hydration
+      }
+    }
+
     // Select Active Tenant Membership
     async function selectActiveTenant(membership) {
+      const previousTenantId = state.tenantId;
       state.tenantId = membership.tenantId;
+      if (previousTenantId && previousTenantId !== membership.tenantId) {
+        clearTenantViewCache();
+      }
       state.tenantName = membership.businessName || membership.tenantName || 'My Business';
       state.currency = membership.baseCurrency || membership.currency || 'USD';
       localStorage.setItem('nexstock_active_currency', state.currency);
@@ -2682,35 +2815,8 @@
         mobileSubbar.style.display = (!isAuthView && state.tenantId) ? 'flex' : 'none';
       }
 
-      // If defaultWarehouseId was not in membership, resolve from branches API
-      if (!state.warehouseId && state.tenantId) {
-        try {
-          const branchRes = await apiFetch('/v1/org/branches', { silent: true }).catch(() => ({ items: [] }));
-          const branches = branchRes?.items || (Array.isArray(branchRes) ? branchRes : []);
-          const activeBranch = branches.find(b => b.id === state.branchId) || branches[0];
-          if (activeBranch) {
-            state.branchId = activeBranch.id;
-            state.branchName = activeBranch.name;
-            state.warehouseId = activeBranch.defaultWarehouseId || '';
-          }
-        } catch {
-          // Non-critical fallback
-        }
-      }
-
-      // Pre-load active POS register for this branch safely
-      if (state.branchId) {
-        try {
-          const regRes = await apiFetch(`/v1/pos/registers?branchId=${encodeURIComponent(state.branchId)}`, { silent: true }).catch(() => []);
-          const regList = Array.isArray(regRes) ? regRes : (regRes?.data || []);
-          if (regList.length > 0) {
-            state.registerId = regList[0].id;
-            state.registerCode = regList[0].code || 'REG-01';
-          }
-        } catch {
-          // Non-critical fallback
-        }
-      }
+      // Resolve fallback branch/warehouse and POS register asynchronously without blocking view render (BUG-048)
+      hydrateTenantLocationContext(membership.tenantId);
     }
 
     // Sign Out Handler
@@ -2722,8 +2828,9 @@
         b.innerText = 'Signing out...';
       });
 
-      // Invalidate all in-flight API requests immediately
+      // Invalidate all in-flight API requests and tenant caches immediately
       state.sessionEpoch = (state.sessionEpoch || 0) + 1;
+      clearTenantViewCache();
 
       // Capture token and apiBaseUrl for background revocation
       const tokenToRevoke = state.token;
@@ -2854,12 +2961,44 @@
       };
     }
 
+    // Structured Skeleton Placeholder Generator (BUG-048)
+    function renderViewSkeleton(viewName) {
+      if (AUTH_VIEWS.includes(viewName)) {
+        return '<div style="padding: 40px; text-align: center; color: var(--text-secondary);">Loading...</div>';
+      }
+      return `
+        <div class="view-header">
+          <div style="flex: 1;">
+            <div class="skeleton-line" style="width: 240px; height: 22px; margin-bottom: 8px;"></div>
+            <div class="skeleton-line" style="width: 320px; height: 14px;"></div>
+          </div>
+          <div style="font-size: 12px; color: var(--text-secondary); display: flex; align-items: center; gap: 6px;">
+            <span class="spinner-sm" style="width: 14px; height: 14px; border-width: 2px;"></span>
+            <span>Loading...</span>
+          </div>
+        </div>
+        <div class="kpi-grid" style="margin-bottom: 20px;">
+          <div class="kpi-card"><div class="skeleton-line" style="width: 60%; margin-bottom: 10px;"></div><div class="skeleton-line" style="width: 45%; height: 24px;"></div></div>
+          <div class="kpi-card"><div class="skeleton-line" style="width: 60%; margin-bottom: 10px;"></div><div class="skeleton-line" style="width: 45%; height: 24px;"></div></div>
+          <div class="kpi-card"><div class="skeleton-line" style="width: 60%; margin-bottom: 10px;"></div><div class="skeleton-line" style="width: 45%; height: 24px;"></div></div>
+          <div class="kpi-card"><div class="skeleton-line" style="width: 60%; margin-bottom: 10px;"></div><div class="skeleton-line" style="width: 45%; height: 24px;"></div></div>
+        </div>
+        <div class="card">
+          <div class="skeleton-line" style="width: 35%; height: 18px; margin-bottom: 16px;"></div>
+          <div class="skeleton-line" style="width: 100%; height: 42px; margin-bottom: 10px;"></div>
+          <div class="skeleton-line" style="width: 100%; height: 42px; margin-bottom: 10px;"></div>
+          <div class="skeleton-line" style="width: 100%; height: 42px;"></div>
+        </div>
+      `;
+    }
+
     // View Navigation Router
     function renderView(viewName) {
       if (!VALID_VIEWS.includes(viewName)) {
         viewName = 'dashboard';
       }
       state.activeView = viewName;
+      state.viewRenderSeq = (state.viewRenderSeq || 0) + 1;
 
       // Stop any active camera streams on view navigation (BUG-033)
       try {
@@ -2938,7 +3077,9 @@
       });
 
       const container = document.getElementById('mainContainer');
-      container.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-secondary);">Loading...</div>';
+      if (container && !getViewCache(viewName)) {
+        container.innerHTML = renderViewSkeleton(viewName);
+      }
 
       switch (viewName) {
         case 'welcome': renderWelcomeView(); break;
@@ -3358,6 +3499,9 @@
         state.fullName = data.user.fullName || data.user.email;
         state.userEmail = data.user.email;
         state.memberships = data.memberships || [];
+        try {
+          localStorage.setItem('nexstock_user_profile', JSON.stringify(data.user));
+        } catch {}
 
         const userNameEl = document.getElementById('topbarUserName');
         if (userNameEl) userNameEl.innerText = state.fullName;
@@ -3752,18 +3896,49 @@
 
         localStorage.setItem('nexstock_active_tenant_id', data.tenant.id);
 
-        // Update memberships list
+        const onboardedMembership = {
+          tenantId: data.tenant.id,
+          businessName: state.tenantName,
+          tenantName: state.tenantName,
+          baseCurrency: state.currency,
+          currency: state.currency,
+          countryCode,
+          timezone,
+          status: 'TRIAL',
+          plan: 'TRIAL',
+          role: 'TENANT_OWNER',
+          branches: [
+            {
+              id: data.branch.id,
+              name: data.branch.name,
+              code: data.branch.code || branchCode || 'MAIN-01',
+              defaultWarehouseId: data.warehouse.id,
+              timezone,
+              isHeadquarters: true
+            }
+          ]
+        };
+        state.memberships = [onboardedMembership, ...(state.memberships || []).filter(m => m.tenantId !== data.tenant.id)];
         try {
-          const meRes = await fetch(`${state.apiBaseUrl}/v1/auth/me`, {
-            headers: { 'Authorization': `Bearer ${state.token}` }
-          });
+          localStorage.setItem('nexstock_active_membership', JSON.stringify(onboardedMembership));
+          if (state.user) {
+            localStorage.setItem('nexstock_user_profile', JSON.stringify(state.user));
+          }
+        } catch {}
+
+        // Update memberships list in background without blocking dashboard navigation (BUG-048)
+        fetch(`${state.apiBaseUrl}/v1/auth/me`, {
+          headers: { 'Authorization': `Bearer ${state.token}` }
+        }).then(async (meRes) => {
           if (meRes.ok) {
             const meData = await meRes.json();
-            state.memberships = meData.memberships || [];
+            if (meData && Array.isArray(meData.memberships)) {
+              state.memberships = meData.memberships;
+            }
           }
-        } catch {
+        }).catch(() => {
           // Non-critical background refresh
-        }
+        });
 
         // Update Topbar
         const tenantEl = document.getElementById('topbarTenantName');
@@ -3843,9 +4018,125 @@
     // =========================================================================
     // 1. DASHBOARD VIEW
     // =========================================================================
+    function paintDashboardHtml(container, prodList, balList, saleList) {
+      const totalProducts = prodList.length;
+      const totalOnHand = balList.reduce((acc, b) => acc + parseFloat(b.qtyOnHand || '0'), 0);
+      const lowStockCount = balList.filter(b => parseFloat(b.availableQty ?? b.availableQuantity ?? '0') <= parseFloat(b.reorderPoint || '0')).length;
+
+      // BUG-012 Fix: Date boundary filter using tenant's configured timezone and strict status separation
+      const tz = state.timezone || 'UTC';
+      const now = new Date();
+      const todaySales = saleList.filter(s => isSameDayInTimezone(s.createdAt || s.soldAt, now, tz));
+
+      const completedSales = todaySales.filter(s => s.status === 'COMPLETED');
+      const voidedSales = todaySales.filter(s => s.status === 'VOIDED');
+
+      const totalSalesRevenue = completedSales.reduce((acc, s) => acc + parseFloat(s.grandTotal || '0'), 0);
+      const completedCount = completedSales.length;
+      const voidedCount = voidedSales.length;
+
+      container.innerHTML = `
+        <div class="view-header">
+          <div>
+            <h1 class="view-title">Store Operations Dashboard</h1>
+            <div class="view-subtitle">Live status for ${escapeHtml(state.branchName || 'Main Branch')} &bull; ${escapeHtml(state.tenantName || 'Business Operations')}</div>
+          </div>
+        </div>
+
+        <div class="kpi-grid">
+          <div class="kpi-card">
+            <div class="kpi-label">Active Products</div>
+            <div class="kpi-value">${totalProducts}</div>
+            <div class="kpi-trend">Catalog Synced</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Units on Hand</div>
+            <div class="kpi-value">${totalOnHand.toFixed(0)} PCS</div>
+            <div class="kpi-trend">Live Ledger Balance</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Low Stock Alerts</div>
+            <div class="kpi-value" style="color: ${lowStockCount > 0 ? 'var(--status-warning)' : 'var(--text-primary)'};">${lowStockCount}</div>
+            <div class="kpi-trend">At or below reorder pt</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Today's POS Sales</div>
+            <div class="kpi-value">${formatTenantMoney(totalSalesRevenue)}</div>
+            <div class="kpi-trend">${completedCount} completed transaction${completedCount === 1 ? '' : 's'}${voidedCount > 0 ? ` (${voidedCount} voided)` : ''}</div>
+          </div>
+        </div>
+
+        <div class="dashboard-split-grid">
+          <div class="card" style="margin: 0;">
+            <div class="card-title">
+              <span>Recent Completed Sales</span>
+              <button class="btn btn-secondary btn-sm" onclick="renderView('pos-sales')">View All</button>
+            </div>
+            ${completedSales.length === 0 ? '<div class="empty-state"><div class="empty-state-title">No completed sales yet</div><p style="font-size: 13px; color: var(--text-secondary); margin-top: 4px;">Transactions completed at the POS checkout register will appear here in real time.</p></div>' : `
+              <div class="table-responsive">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>Invoice</th>
+                      <th>Total (${escapeHtml(getTenantCurrency())})</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${completedSales.slice(0, 5).map(s => `
+                      <tr>
+                        <td><strong>${s.invoiceNumber}</strong></td>
+                        <td>${formatTenantMoney(s.grandTotal)}</td>
+                        <td><span class="badge-pill badge-green">${s.status}</span></td>
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+              </div>
+            `}
+          </div>
+
+          <div class="card" style="margin: 0;">
+            <div class="card-title">
+              <span>Inventory Levels &amp; Balances</span>
+              <button class="btn btn-secondary btn-sm" onclick="renderView('balances')">Inspect Stock</button>
+            </div>
+            ${balList.length === 0 ? '<div class="empty-state"><div class="empty-state-title">No inventory recorded</div><p style="font-size: 13px; color: var(--text-secondary); margin-top: 4px;">Record an opening stock movement or purchase order to see stock balances.</p></div>' : `
+              <div class="table-responsive">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>SKU</th>
+                      <th>On Hand</th>
+                      <th>Available</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${balList.slice(0, 5).map(b => `
+                      <tr>
+                        <td><strong>${b.sku}</strong></td>
+                        <td>${formatQty(b.qtyOnHand)}</td>
+                        <td>${formatQty(b.availableQty ?? b.availableQuantity)}</td>
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+              </div>
+            `}
+          </div>
+        </div>
+      `;
+    }
+
     async function renderDashboardView() {
       const container = document.getElementById('mainContainer');
+      const renderSeq = state.viewRenderSeq;
       try {
+        const cached = getViewCache('dashboard');
+        if (cached && cached.data && container) {
+          paintDashboardHtml(container, cached.data.prodList, cached.data.balList, cached.data.saleList);
+        }
+
         const whParam = state.warehouseId ? `&warehouseId=${encodeURIComponent(state.warehouseId)}` : '';
         const regParam = state.branchId ? `?branchId=${encodeURIComponent(state.branchId)}` : '';
         const [products, balances, sales, registers] = await Promise.all([
@@ -3859,138 +4150,23 @@
         const balList = balances?.data || (Array.isArray(balances) ? balances : []);
         const saleList = Array.isArray(sales) ? sales : (sales?.data || []);
 
-        const totalProducts = prodList.length;
-        const totalOnHand = balList.reduce((acc, b) => acc + parseFloat(b.qtyOnHand || '0'), 0);
-        const lowStockCount = balList.filter(b => parseFloat(b.availableQty ?? b.availableQuantity ?? '0') <= parseFloat(b.reorderPoint || '0')).length;
+        state.cachedProducts = prodList;
+        setViewCache('dashboard', { prodList, balList, saleList });
+        setViewCache('balances', balList);
 
-        // BUG-012 Fix: Date boundary filter using tenant's configured timezone and strict status separation
-        const tz = state.timezone || 'UTC';
-        const now = new Date();
-        const todaySales = saleList.filter(s => isSameDayInTimezone(s.createdAt || s.soldAt, now, tz));
-
-        const completedSales = todaySales.filter(s => s.status === 'COMPLETED');
-        const voidedSales = todaySales.filter(s => s.status === 'VOIDED');
-
-        const totalSalesRevenue = completedSales.reduce((acc, s) => acc + parseFloat(s.grandTotal || '0'), 0);
-        const completedCount = completedSales.length;
-        const voidedCount = voidedSales.length;
-
-        container.innerHTML = `
-          <div class="view-header">
-            <div>
-              <h1 class="view-title">Store Operations Dashboard</h1>
-              <div class="view-subtitle">Live status for ${escapeHtml(state.branchName || 'Main Branch')} &bull; ${escapeHtml(state.tenantName || 'Business Operations')}</div>
-            </div>
-          </div>
-
-          <div class="kpi-grid">
-            <div class="kpi-card">
-              <div class="kpi-label">Active Products</div>
-              <div class="kpi-value">${totalProducts}</div>
-              <div class="kpi-trend">Catalog Synced</div>
-            </div>
-            <div class="kpi-card">
-              <div class="kpi-label">Units on Hand</div>
-              <div class="kpi-value">${totalOnHand.toFixed(0)} PCS</div>
-              <div class="kpi-trend">Live Ledger Balance</div>
-            </div>
-            <div class="kpi-card">
-              <div class="kpi-label">Low Stock Alerts</div>
-              <div class="kpi-value" style="color: ${lowStockCount > 0 ? 'var(--status-warning)' : 'var(--text-primary)'};">${lowStockCount}</div>
-              <div class="kpi-trend">At or below reorder pt</div>
-            </div>
-            <div class="kpi-card">
-              <div class="kpi-label">Today's POS Sales</div>
-              <div class="kpi-value">${formatTenantMoney(totalSalesRevenue)}</div>
-              <div class="kpi-trend">${completedCount} completed transaction${completedCount === 1 ? '' : 's'}${voidedCount > 0 ? ` (${voidedCount} voided)` : ''}</div>
-            </div>
-          </div>
-
-          <div class="dashboard-split-grid">
-            <div class="card" style="margin: 0;">
-              <div class="card-title">
-                <span>Recent Completed Sales</span>
-                <button class="btn btn-secondary btn-sm" onclick="renderView('pos-sales')">View All</button>
-              </div>
-              ${completedSales.length === 0 ? '<div class="empty-state"><div class="empty-state-title">No completed sales yet</div><p style="font-size: 13px; color: var(--text-secondary); margin-top: 4px;">Transactions completed at the POS checkout register will appear here in real time.</p></div>' : `
-                <div class="table-responsive">
-                  <table class="data-table">
-                    <thead>
-                      <tr>
-                        <th>Invoice</th>
-                        <th>Total (${escapeHtml(getTenantCurrency())})</th>
-                        <th>Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      ${completedSales.slice(0, 5).map(s => `
-                        <tr>
-                          <td><strong>${s.invoiceNumber}</strong></td>
-                          <td>${formatTenantMoney(s.grandTotal)}</td>
-                          <td><span class="badge-pill badge-green">${s.status}</span></td>
-                        </tr>
-                      `).join('')}
-                    </tbody>
-                  </table>
-                </div>
-              `}
-            </div>
-
-            <div class="card" style="margin: 0;">
-              <div class="card-title">
-                <span>Inventory Levels &amp; Balances</span>
-                <button class="btn btn-secondary btn-sm" onclick="renderView('balances')">Inspect Stock</button>
-              </div>
-              ${balList.length === 0 ? '<div class="empty-state"><div class="empty-state-title">No inventory recorded</div><p style="font-size: 13px; color: var(--text-secondary); margin-top: 4px;">Record an opening stock movement or purchase order to see stock balances.</p></div>' : `
-                <div class="table-responsive">
-                  <table class="data-table">
-                    <thead>
-                      <tr>
-                        <th>SKU</th>
-                        <th>On Hand</th>
-                        <th>Available</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      ${balList.slice(0, 5).map(b => `
-                        <tr>
-                          <td><strong>${b.sku}</strong></td>
-                          <td>${formatQty(b.qtyOnHand)}</td>
-                          <td>${formatQty(b.availableQty ?? b.availableQuantity)}</td>
-                        </tr>
-                      `).join('')}
-                    </tbody>
-                  </table>
-                </div>
-              `}
-            </div>
-          </div>
-        `;
+        if (!isCurrentViewRender('dashboard', renderSeq) || !container) return;
+        paintDashboardHtml(container, prodList, balList, saleList);
       } catch (err) {
-        container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load dashboard: ${err.message}</div>`;
+        if (!isCurrentViewRender('dashboard', renderSeq) || !container) return;
+        container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load dashboard: ${err.message} <button class="btn btn-secondary btn-sm" style="margin-left: 8px;" onclick="renderDashboardView()">Retry</button></div>`;
       }
     }
 
     // =========================================================================
     // 2. PRODUCTS VIEW
     // =========================================================================
-    async function renderProductsView() {
-      const container = document.getElementById('mainContainer');
-      try {
-        const [productsRes, categoriesRes] = await Promise.all([
-          apiFetch('/v1/products?limit=100').catch(err => {
-            console.warn('Unable to load products from API:', err);
-            return { data: [] };
-          }),
-          apiFetch('/v1/categories?limit=100').catch(err => {
-            console.warn('Unable to load categories from API:', err);
-            return { data: [] };
-          })
-        ]);
-        state.cachedProducts = productsRes?.data || (Array.isArray(productsRes) ? productsRes : []);
-        state.cachedCategories = categoriesRes?.data || (Array.isArray(categoriesRes) ? categoriesRes : []);
-
-        container.innerHTML = `
+    function paintProductsHtml(container) {
+      container.innerHTML = `
           <div class="view-header">
             <div>
               <h1 class="view-title">Product Catalog</h1>
@@ -4149,7 +4325,46 @@
             `}
           </div>
         `;
+    }
+
+    async function renderProductsView() {
+      const container = document.getElementById('mainContainer');
+      const renderSeq = state.viewRenderSeq;
+      try {
+        const cached = getViewCache('products');
+        if (cached && cached.data && container) {
+          state.cachedProducts = cached.data.products || state.cachedProducts;
+          state.cachedCategories = cached.data.categories || state.cachedCategories;
+          paintProductsHtml(container);
+        }
+
+        const [productsRes, categoriesRes] = await Promise.all([
+          apiFetch('/v1/products?limit=100').catch(err => {
+            console.warn('Unable to load products from API:', err);
+            return { data: [] };
+          }),
+          apiFetch('/v1/categories?limit=100').catch(err => {
+            console.warn('Unable to load categories from API:', err);
+            return { data: [] };
+          })
+        ]);
+        state.cachedProducts = productsRes?.data || (Array.isArray(productsRes) ? productsRes : []);
+        state.cachedCategories = categoriesRes?.data || (Array.isArray(categoriesRes) ? categoriesRes : []);
+        setViewCache('products', { products: state.cachedProducts, categories: state.cachedCategories });
+        setViewCache('categories', state.cachedCategories);
+
+        if (!isCurrentViewRender('products', renderSeq) || !container) return;
+        const activeSearch = document.getElementById('productSearchInput')?.value || '';
+        paintProductsHtml(container);
+        if (activeSearch) {
+          const searchInput = document.getElementById('productSearchInput');
+          if (searchInput) {
+            searchInput.value = activeSearch;
+            filterProductsTable();
+          }
+        }
       } catch (err) {
+        if (!isCurrentViewRender('products', renderSeq) || !container) return;
         container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load products: ${escapeHtml(err.message)}</div>`;
       }
     }
@@ -4511,11 +4726,9 @@
     // =========================================================================
     async function renderCategoriesView() {
       const container = document.getElementById('mainContainer');
-      try {
-        const res = await apiFetch('/v1/categories?limit=100').catch(() => ({ data: [] }));
-        state.cachedCategories = res?.data || (Array.isArray(res) ? res : []);
+      const renderSeq = state.viewRenderSeq;
 
-        container.innerHTML = `
+      const buildCategoriesHtml = (categories) => `
           <div class="view-header">
             <div>
               <h1 class="view-title">Product Categories</h1>
@@ -4525,7 +4738,7 @@
           </div>
 
           <div class="card">
-            ${state.cachedCategories.length === 0 ? `
+            ${categories.length === 0 ? `
               <div class="empty-state-card">
                 <svg class="empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path><line x1="7" y1="7" x2="7.01" y2="7"></line></svg>
                 <div class="empty-state-title">No categories found</div>
@@ -4546,7 +4759,7 @@
                       </tr>
                     </thead>
                     <tbody>
-                      ${state.cachedCategories.map(c => {
+                      ${categories.map(c => {
                         const name = escapeHtml(c.name);
                         const desc = escapeHtml(c.description || '—');
                         const isActive = c.status === 'ACTIVE' || c.isActive === true;
@@ -4570,7 +4783,7 @@
               </div>
 
               <div class="mobile-cards-container">
-                ${state.cachedCategories.map(c => {
+                ${categories.map(c => {
                   const name = escapeHtml(c.name);
                   const desc = escapeHtml(c.description || '—');
                   const isActive = c.status === 'ACTIVE' || c.isActive === true;
@@ -4601,9 +4814,25 @@
               </div>
             `}
           </div>
-        `;
+      `;
+
+      const cachedCats = getViewCache('categories');
+      if (cachedCats && Array.isArray(cachedCats.data)) {
+        state.cachedCategories = cachedCats.data;
+        container.innerHTML = buildCategoriesHtml(cachedCats.data);
+      }
+
+      try {
+        const res = await apiFetch('/v1/categories?limit=100').catch(() => ({ data: [] }));
+        if (!isCurrentViewRender('categories', renderSeq)) return;
+        state.cachedCategories = res?.data || (Array.isArray(res) ? res : []);
+        setViewCache('categories', state.cachedCategories);
+        container.innerHTML = buildCategoriesHtml(state.cachedCategories);
       } catch (err) {
-        container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load categories: ${escapeHtml(err.message)}</div>`;
+        if (!isCurrentViewRender('categories', renderSeq)) return;
+        if (!cachedCats || !cachedCats.data) {
+          container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load categories: ${escapeHtml(err.message)}</div>`;
+        }
       }
     }
 
@@ -4702,11 +4931,9 @@
     // =========================================================================
     async function renderSuppliersView() {
       const container = document.getElementById('mainContainer');
-      try {
-        const res = await apiFetch('/v1/suppliers?limit=100').catch(() => ({ data: [] }));
-        state.cachedSuppliers = res?.data || (Array.isArray(res) ? res : []);
+      const renderSeq = state.viewRenderSeq;
 
-        container.innerHTML = `
+      const buildSuppliersHtml = (suppliers) => `
           <div class="view-header">
             <div>
               <h1 class="view-title">Suppliers &amp; Vendors</h1>
@@ -4716,7 +4943,7 @@
           </div>
 
           <div class="card">
-            ${state.cachedSuppliers.length === 0 ? `
+            ${suppliers.length === 0 ? `
               <div class="empty-state-card">
                 <svg class="empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
                 <div class="empty-state-title">No suppliers found</div>
@@ -4740,7 +4967,7 @@
                       </tr>
                     </thead>
                     <tbody>
-                      ${state.cachedSuppliers.map(s => {
+                      ${suppliers.map(s => {
                         const code = escapeHtml(s.code);
                         const name = escapeHtml(s.name);
                         const contact = escapeHtml(s.contactPerson || '—');
@@ -4770,7 +4997,7 @@
               </div>
 
               <div class="mobile-cards-container">
-                ${state.cachedSuppliers.map(s => {
+                ${suppliers.map(s => {
                   const code = escapeHtml(s.code);
                   const name = escapeHtml(s.name);
                   const contact = escapeHtml(s.contactPerson || '—');
@@ -4813,9 +5040,25 @@
               </div>
             `}
           </div>
-        `;
+      `;
+
+      const cachedSups = getViewCache('suppliers');
+      if (cachedSups && Array.isArray(cachedSups.data)) {
+        state.cachedSuppliers = cachedSups.data;
+        container.innerHTML = buildSuppliersHtml(cachedSups.data);
+      }
+
+      try {
+        const res = await apiFetch('/v1/suppliers?limit=100').catch(() => ({ data: [] }));
+        if (!isCurrentViewRender('suppliers', renderSeq)) return;
+        state.cachedSuppliers = res?.data || (Array.isArray(res) ? res : []);
+        setViewCache('suppliers', state.cachedSuppliers);
+        container.innerHTML = buildSuppliersHtml(state.cachedSuppliers);
       } catch (err) {
-        container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load suppliers: ${escapeHtml(err.message)}</div>`;
+        if (!isCurrentViewRender('suppliers', renderSeq)) return;
+        if (!cachedSups || !cachedSups.data) {
+          container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load suppliers: ${escapeHtml(err.message)}</div>`;
+        }
       }
     }
 
@@ -5250,12 +5493,9 @@
 
     async function renderBalancesView() {
       const container = document.getElementById('mainContainer');
-      try {
-        const whParam = state.warehouseId ? `warehouseId=${encodeURIComponent(state.warehouseId)}&` : '';
-        const res = await apiFetch(`/v1/inventory/balances?${whParam}limit=100`).catch(() => ({ data: [] }));
-        const balances = res?.data || (Array.isArray(res) ? res : []);
+      const renderSeq = state.viewRenderSeq;
 
-        container.innerHTML = `
+      const buildBalancesHtml = (balances) => `
           <div class="view-header">
             <div>
               <h1 class="view-title">Inventory Balances</h1>
@@ -5353,9 +5593,25 @@
               </div>
             `}
           </div>
-        `;
+      `;
+
+      const cachedBalances = getViewCache('balances');
+      if (cachedBalances && Array.isArray(cachedBalances.data)) {
+        container.innerHTML = buildBalancesHtml(cachedBalances.data);
+      }
+
+      try {
+        const whParam = state.warehouseId ? `warehouseId=${encodeURIComponent(state.warehouseId)}&` : '';
+        const res = await apiFetch(`/v1/inventory/balances?${whParam}limit=100`).catch(() => ({ data: [] }));
+        if (!isCurrentViewRender('balances', renderSeq)) return;
+        const balances = res?.data || (Array.isArray(res) ? res : []);
+        setViewCache('balances', balances);
+        container.innerHTML = buildBalancesHtml(balances);
       } catch (err) {
-        container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load balances: ${escapeHtml(err.message)}</div>`;
+        if (!isCurrentViewRender('balances', renderSeq)) return;
+        if (!cachedBalances || !cachedBalances.data) {
+          container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load balances: ${escapeHtml(err.message)}</div>`;
+        }
       }
     }
 
@@ -5383,23 +5639,23 @@
 
     async function renderPosCheckoutView() {
       const container = document.getElementById('mainContainer');
+      const renderSeq = state.viewRenderSeq;
       try {
-        // 1. Check for open shift
-        let activeShift = null;
-        if (state.registerId) {
-          try {
-            activeShift = await apiFetch(`/v1/pos/shifts/active?registerId=${encodeURIComponent(state.registerId)}`, { silent: true });
-            state.activeShift = activeShift;
-          } catch (e) {
-            state.activeShift = null;
-          }
-        }
+        // Fetch active shift and POS catalog products in parallel (BUG-048)
+        const [activeShiftRes, productsRes] = await Promise.all([
+          state.registerId
+            ? apiFetch(`/v1/pos/shifts/active?registerId=${encodeURIComponent(state.registerId)}`, { silent: true }).catch(() => null)
+            : Promise.resolve(null),
+          state.warehouseId
+            ? apiFetch(`/v1/pos/products/search?warehouseId=${encodeURIComponent(state.warehouseId)}&limit=100`, { silent: true }).catch(() => [])
+            : Promise.resolve([])
+        ]);
 
-        // 2. Fetch catalog products
+        state.activeShift = activeShiftRes || null;
+
         let products = [];
         state.posProductsMap = new Map();
         if (state.warehouseId) {
-          const productsRes = await apiFetch(`/v1/pos/products/search?warehouseId=${encodeURIComponent(state.warehouseId)}&limit=100`, { silent: true }).catch(() => []);
           products = productsRes || [];
           for (const p of products) {
             if (p.id) state.posProductsMap.set(p.id, p);
@@ -5412,6 +5668,8 @@
             }
           }
         }
+
+        if (!isCurrentViewRender('pos-checkout', renderSeq) || !container) return;
 
         container.innerHTML = `
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 12px;">
@@ -13950,6 +14208,34 @@
     }
 
     // Initialize Application
+    // Render a recoverable connection state if server cold-start or network fails without cached context (BUG-048)
+    function renderConnectionRecoveryState(reasonMessage) {
+      const container = document.getElementById('mainContainer');
+      if (!container) return;
+      container.innerHTML = `
+        <div class="card" style="max-width: 520px; margin: 64px auto; text-align: center; padding: 36px 24px;">
+          <div style="font-size: 32px; margin-bottom: 12px;">⚡</div>
+          <h2 style="font-size: 18px; font-weight: 700; margin-bottom: 8px; color: var(--text-primary);">Connection Taking Longer Than Expected</h2>
+          <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 20px; line-height: 1.5;">
+            ${escapeHtml(reasonMessage || 'The NexStock cloud server is waking up or temporarily unreachable. Your session is safe.')}
+          </p>
+          <div style="display: flex; justify-content: center; gap: 10px; flex-wrap: wrap;">
+            <button id="btnRetryAppInit" class="btn btn-primary" onclick="retryAppInitialization(this)">Retry Connection</button>
+            <button class="btn btn-secondary" onclick="handleSignOut()">Sign In Again</button>
+          </div>
+        </div>
+      `;
+    }
+
+    async function retryAppInitialization(btnEl) {
+      if (btnEl) {
+        btnEl.disabled = true;
+        btnEl.textContent = 'Connecting...';
+      }
+      state.isInitializing = true;
+      await initApp();
+    }
+
     async function initApp() {
       setupMobileNavigation();
 
@@ -14140,13 +14426,15 @@
         if (!hasCachedMembership) {
           const savedTenantId = localStorage.getItem('nexstock_active_tenant_id');
           const savedCurrency = localStorage.getItem('nexstock_active_currency');
+          const targetRoute = state.pendingTargetView || getRouteFromLocation() || 'dashboard';
+          state.pendingTargetView = null;
           if (savedTenantId) {
             state.tenantId = savedTenantId;
             state.currency = savedCurrency || 'USD';
+            renderView(targetRoute);
+          } else {
+            renderConnectionRecoveryState('The NexStock cloud server took too long to respond during startup. Click Retry Connection to continue.');
           }
-          const targetRoute = state.pendingTargetView || getRouteFromLocation() || 'dashboard';
-          state.pendingTargetView = null;
-          renderView(targetRoute);
         }
       } catch (err) {
         if (coldBootTimer) clearTimeout(coldBootTimer);

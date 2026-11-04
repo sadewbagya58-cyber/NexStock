@@ -55,37 +55,46 @@ function validateSupplierContactData(input: {
   return { email, phone };
 }
 
-async function hydrateSupplierResponse(
+type SupplierRowForHydration = {
+  id: string;
+  tenant_id: string;
+  code: string;
+  business_name: string;
+  contact_person: string | null;
+  email: string | null;
+  phone: string | null;
+  address: string | null;
+  tax_registration_number: string | null;
+  notes: string | null;
+  status: RecordLifecycleStatus;
+  sync_version: string | number;
+  created_at: Date | string;
+  updated_at: Date | string;
+  archived_at: Date | string | null;
+};
+
+async function hydrateSuppliersBatch(
   trx: TenantTransactionContext,
-  row: {
-    id: string;
-    tenant_id: string;
-    code: string;
-    business_name: string;
-    contact_person: string | null;
-    email: string | null;
-    phone: string | null;
-    address: string | null;
-    tax_registration_number: string | null;
-    notes: string | null;
-    status: RecordLifecycleStatus;
-    sync_version: string | number;
-    created_at: Date | string;
-    updated_at: Date | string;
-    archived_at: Date | string | null;
-  },
-): Promise<SupplierResponse> {
+  rows: readonly SupplierRowForHydration[],
+): Promise<SupplierResponse[]> {
+  if (rows.length === 0) {
+    return [];
+  }
+
+  const supplierIds = rows.map((r) => r.id);
   const linkRows = await trx.db
     .selectFrom('supplier_products')
     .selectAll()
     .where('tenant_id', '=', trx.tenantId)
-    .where('supplier_id', '=', row.id)
+    .where('supplier_id', 'in', supplierIds)
     .orderBy('id', 'asc')
     .execute();
 
-  const products: SupplierProductResponse[] = linkRows.map((l) => {
+  const productsBySupplierId = new Map<string, SupplierProductResponse[]>();
+  for (const l of linkRows) {
     const currency = l.currency_code?.trim() || null;
-    return {
+    const list = productsBySupplierId.get(l.supplier_id) ?? [];
+    list.push({
       id: l.id,
       tenantId: l.tenant_id,
       supplierId: l.supplier_id,
@@ -110,10 +119,11 @@ async function hydrateSupplierResponse(
       isPreferred: l.is_preferred,
       createdAt: new Date(l.created_at).toISOString(),
       updatedAt: new Date(l.updated_at).toISOString(),
-    };
-  });
+    });
+    productsBySupplierId.set(l.supplier_id, list);
+  }
 
-  return {
+  return rows.map((row) => ({
     id: row.id,
     tenantId: row.tenant_id,
     code: row.code,
@@ -125,12 +135,20 @@ async function hydrateSupplierResponse(
     taxRegistrationNumber: row.tax_registration_number,
     notes: row.notes,
     status: row.status,
-    products,
+    products: productsBySupplierId.get(row.id) ?? [],
     syncVersion: Number(row.sync_version),
     createdAt: new Date(row.created_at).toISOString(),
     updatedAt: new Date(row.updated_at).toISOString(),
     archivedAt: row.archived_at ? new Date(row.archived_at).toISOString() : null,
-  };
+  }));
+}
+
+async function hydrateSupplierResponse(
+  trx: TenantTransactionContext,
+  row: SupplierRowForHydration,
+): Promise<SupplierResponse> {
+  const [hydrated] = await hydrateSuppliersBatch(trx, [row]);
+  return hydrated!;
 }
 
 export async function createSupplier(
@@ -698,8 +716,12 @@ export async function listSuppliers(
     dbQuery = dbQuery.where('id', '>', query.cursor);
   }
 
-  const rows = await dbQuery.execute();
   const searchLower = query.search?.trim().toLowerCase();
+  if (!searchLower) {
+    dbQuery = dbQuery.limit(limit + 1);
+  }
+
+  const rows = await dbQuery.execute();
 
   const filtered = searchLower
     ? rows.filter(
@@ -720,10 +742,7 @@ export async function listSuppliers(
       ? pageRows[pageRows.length - 1]!.id
       : null;
 
-  const hydrated: SupplierResponse[] = [];
-  for (const r of pageRows) {
-    hydrated.push(await hydrateSupplierResponse(trx, r));
-  }
+  const hydrated = await hydrateSuppliersBatch(trx, pageRows);
 
   return {
     data: hydrated,
