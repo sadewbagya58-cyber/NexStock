@@ -2384,5 +2384,38 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       expect(posViewBody).toContain('/v1/pos/shifts/active?registerId=');
       expect(posViewBody).toContain('/v1/pos/products/search?warehouseId=');
     });
+
+    it('BUG-048 Remediation: verifies zero JavaScript syntax errors in index.html and robust 6-state initialization state machine', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // 1. Syntax Validation: extract inline script and verify parser succeeds without SyntaxError
+      const scriptMatch = html.match(/<script>([\s\S]*?)<\/script>/);
+      expect(scriptMatch).not.toBeNull();
+      const scriptCode = scriptMatch![1];
+      expect(() => new Function(scriptCode)).not.toThrow();
+
+      // 2. Six-State Application Initialization State Machine
+      expect(html).toContain('const APP_INIT_STATES = {');
+      expect(html).toContain("INITIALIZING: 'INITIALIZING'");
+      expect(html).toContain("RESTORING_SESSION: 'RESTORING_SESSION'");
+      expect(html).toContain("LOADING_TENANT_CONTEXT: 'LOADING_TENANT_CONTEXT'");
+      expect(html).toContain("LOADING_DASHBOARD: 'LOADING_DASHBOARD'");
+      expect(html).toContain("READY: 'READY'");
+      expect(html).toContain("RECOVERABLE_ERROR: 'RECOVERABLE_ERROR'");
+      expect(html).toContain('function setAppInitPhase(phase, message)');
+
+      // 3. Centralized Topbar Context Synchronizer
+      expect(html).toContain('function updateTopbarContext()');
+      expect(html).toContain('document.getElementById(\'topbarTenantName\')');
+      expect(html).toContain('document.getElementById(\'topbarBranchName\')');
+      expect(html).toContain('document.getElementById(\'topbarUserRole\')');
+      expect(html).toContain('document.getElementById(\'topbarMobileTenantName\')');
+
+      // 4. Duplicate initApp invocation guard and retry capability
+      expect(html).toContain('if (state._isInitRunning) return;');
+      expect(html).toContain('state._isInitRunning = true;');
+      expect(html).toContain('async function retryAppInitialization(btnEl)');
+    });
   });
 });

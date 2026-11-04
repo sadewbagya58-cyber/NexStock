@@ -2107,7 +2107,7 @@
     <main class="main-content" id="mainContainer">
       <div id="initialAppLoader" style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 380px; gap: 16px; color: var(--text-secondary);">
         <div class="spinner-sm" style="width: 32px; height: 32px; border-width: 3px;"></div>
-        <div style="font-size: 14px; font-weight: 500;">Loading NexStock...</div>
+        <div id="initialAppLoaderLabel" style="font-size: 14px; font-weight: 500;">Loading NexStock...</div>
       </div>
     </main>
   </div>
@@ -2758,6 +2758,33 @@
       }
     }
 
+    // Centralized Topbar Context Synchronizer (BUG-048)
+    function updateTopbarContext() {
+      const tenantEl = document.getElementById('topbarTenantName');
+      if (tenantEl) tenantEl.innerText = state.tenantName || '—';
+      const planEl = document.getElementById('topbarPlanBadge');
+      if (planEl) planEl.innerText = state.plan || 'TRIAL';
+      const branchEl = document.getElementById('topbarBranchName');
+      if (branchEl) branchEl.innerText = state.branchName || '—';
+      const roleEl = document.getElementById('topbarUserRole');
+      if (roleEl) roleEl.innerText = state.userRole || '—';
+
+      const mobileTenantEl = document.getElementById('topbarMobileTenantName');
+      if (mobileTenantEl) mobileTenantEl.innerText = state.tenantName || '—';
+      const mobilePlanEl = document.getElementById('topbarMobilePlanBadge');
+      if (mobilePlanEl) mobilePlanEl.innerText = state.plan || 'TRIAL';
+      const mobileBranchEl = document.getElementById('topbarMobileBranchName');
+      if (mobileBranchEl) mobileBranchEl.innerText = state.branchName || '—';
+      const mobileSubbar = document.getElementById('topbarMobileSubbar');
+      if (mobileSubbar) {
+        const isAuthView = AUTH_VIEWS.includes(state.activeView);
+        mobileSubbar.style.display = (!isAuthView && state.tenantId) ? 'flex' : 'none';
+      }
+
+      const userNameEl = document.getElementById('topbarUserName');
+      if (userNameEl && state.fullName) userNameEl.innerText = state.fullName;
+    }
+
     // Select Active Tenant Membership
     async function selectActiveTenant(membership) {
       const previousTenantId = state.tenantId;
@@ -2792,28 +2819,8 @@
         state.warehouseId = '';
       }
 
-      // Update Topbar context (Desktop)
-      const tenantEl = document.getElementById('topbarTenantName');
-      if (tenantEl) tenantEl.innerText = state.tenantName;
-      const planEl = document.getElementById('topbarPlanBadge');
-      if (planEl) planEl.innerText = state.plan;
-      const branchEl = document.getElementById('topbarBranchName');
-      if (branchEl) branchEl.innerText = state.branchName;
-      const roleEl = document.getElementById('topbarUserRole');
-      if (roleEl) roleEl.innerText = state.userRole;
-
-      // Update Topbar context (Mobile Subbar)
-      const mobileTenantEl = document.getElementById('topbarMobileTenantName');
-      if (mobileTenantEl) mobileTenantEl.innerText = state.tenantName;
-      const mobilePlanEl = document.getElementById('topbarMobilePlanBadge');
-      if (mobilePlanEl) mobilePlanEl.innerText = state.plan;
-      const mobileBranchEl = document.getElementById('topbarMobileBranchName');
-      if (mobileBranchEl) mobileBranchEl.innerText = state.branchName;
-      const mobileSubbar = document.getElementById('topbarMobileSubbar');
-      if (mobileSubbar) {
-        const isAuthView = AUTH_VIEWS.includes(state.activeView);
-        mobileSubbar.style.display = (!isAuthView && state.tenantId) ? 'flex' : 'none';
-      }
+      // Synchronize Topbar context immediately
+      updateTopbarContext();
 
       // Resolve fallback branch/warehouse and POS register asynchronously without blocking view render (BUG-048)
       hydrateTenantLocationContext(membership.tenantId);
@@ -10541,7 +10548,6 @@
         }
       }
     }
-    }
 
     async function submitCreateEmployee() {
       const btn = document.getElementById('btnSubmitCreateEmp');
@@ -12398,51 +12404,6 @@
       }
     }
 
-        openModal({
-          title: `Adjust Earnings: ${it.employeeName} (${it.employeeCode})`,
-          maxWidth: '520px',
-          bodyHtml: `
-            <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 14px;">
-              Basic Salary: <strong>${formatTenantMoney(it.basicSalary, run.currencyCode)}</strong> &bull; Fixed Allowances: <strong>${formatTenantMoney(it.allowancesTotal, run.currencyCode)}</strong>
-            </div>
-
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
-              <div class="form-group">
-                <label class="form-label">Overtime Hours</label>
-                <input type="number" step="0.25" min="0" class="form-input" id="adjOtHours" value="${parseFloat(it.overtimeHours || 0).toFixed(2)}">
-              </div>
-              <div class="form-group">
-                <label class="form-label">Overtime Pay (${run.currencyCode})</label>
-                <input type="number" step="0.01" min="0" class="form-input" id="adjOtPay" value="${parseFloat(it.overtimePay || 0).toFixed(2)}">
-              </div>
-            </div>
-
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
-              <div class="form-group">
-                <label class="form-label">Bonus Pay (${run.currencyCode})</label>
-                <input type="number" step="0.01" min="0" class="form-input" id="adjBonus" value="${parseFloat(it.bonusPay || 0).toFixed(2)}">
-              </div>
-              <div class="form-group">
-                <label class="form-label">Commissions (${run.currencyCode})</label>
-                <input type="number" step="0.01" min="0" class="form-input" id="adjCommissions" value="${parseFloat(it.commissionsPay || 0).toFixed(2)}">
-              </div>
-            </div>
-
-            <div class="form-group">
-              <label class="form-label">Adjustment Notes / Memo</label>
-              <textarea class="form-textarea" id="adjNotes" placeholder="Reason for overtime or bonus..." rows="2">${escapeHtml(it.notes || '')}</textarea>
-            </div>
-          `,
-          footerHtml: `
-            <button class="btn btn-secondary" onclick="openPayrollRunDetailModal('${runId}')">Back</button>
-            <button class="btn btn-primary" id="btnSubmitAdjustItem" onclick="submitAdjustPayrollItem('${runId}', '${itemId}')">Save Adjustments</button>
-          `
-        });
-      } catch (err) {
-        showToast(err.message || 'Failed to open adjustment', 'error');
-      }
-    }
-
     async function submitAdjustPayrollItem(runId, itemId) {
       const btn = document.getElementById('btnSubmitAdjustItem');
       const otHours = document.getElementById('adjOtHours').value;
@@ -14208,6 +14169,27 @@
     }
 
     // Initialize Application
+    // Centralized Application Initialization State Machine (BUG-048)
+    const APP_INIT_STATES = {
+      INITIALIZING: 'INITIALIZING',
+      RESTORING_SESSION: 'RESTORING_SESSION',
+      LOADING_TENANT_CONTEXT: 'LOADING_TENANT_CONTEXT',
+      LOADING_DASHBOARD: 'LOADING_DASHBOARD',
+      READY: 'READY',
+      RECOVERABLE_ERROR: 'RECOVERABLE_ERROR'
+    };
+
+    function setAppInitPhase(phase, message) {
+      state.appInitPhase = phase;
+      const label = document.getElementById('initialAppLoaderLabel');
+      if (label && message) {
+        label.innerText = message;
+      }
+      if (phase === APP_INIT_STATES.RECOVERABLE_ERROR) {
+        renderConnectionRecoveryState(message);
+      }
+    }
+
     // Render a recoverable connection state if server cold-start or network fails without cached context (BUG-048)
     function renderConnectionRecoveryState(reasonMessage) {
       const container = document.getElementById('mainContainer');
@@ -14233,10 +14215,24 @@
         btnEl.textContent = 'Connecting...';
       }
       state.isInitializing = true;
+      state._isInitRunning = false;
+      const container = document.getElementById('mainContainer');
+      if (container) {
+        container.innerHTML = `
+          <div id="initialAppLoader" style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 380px; gap: 16px; color: var(--text-secondary);">
+            <div class="spinner-sm" style="width: 32px; height: 32px; border-width: 3px;"></div>
+            <div id="initialAppLoaderLabel" style="font-size: 14px; font-weight: 500;">Loading NexStock...</div>
+          </div>
+        `;
+      }
       await initApp();
     }
 
     async function initApp() {
+      if (state._isInitRunning) return;
+      state._isInitRunning = true;
+      setAppInitPhase(APP_INIT_STATES.INITIALIZING, 'Initializing NexStock...');
+
       setupMobileNavigation();
 
       const savedTheme = localStorage.getItem('nexstock_theme');
@@ -14244,6 +14240,9 @@
         state.theme = savedTheme;
         document.body.setAttribute('data-theme', savedTheme);
       }
+
+      // Synchronize topbar from any existing cached credentials immediately
+      updateTopbarContext();
 
       // Multi-tab storage listener to sync session token and signout events
       window.addEventListener('storage', (event) => {
@@ -14261,18 +14260,25 @@
       const storedRefreshToken = localStorage.getItem('nexstock_refresh_token');
       if (!storedToken && !storedRefreshToken) {
         state.isInitializing = false;
+        state._isInitRunning = false;
         state.pendingTargetView = null;
+        setAppInitPhase(APP_INIT_STATES.READY);
         renderView('welcome');
         return;
       }
+
+      setAppInitPhase(APP_INIT_STATES.RESTORING_SESSION, 'Restoring session...');
 
       // Fast-path synchronous render if membership cache exists (BUG-030)
       const hasCachedMembership = Boolean(state.tenantId && state.userRole);
       if (hasCachedMembership) {
         state.isInitializing = false;
+        updateTopbarContext();
+        setAppInitPhase(APP_INIT_STATES.LOADING_DASHBOARD, 'Loading dashboard...');
         const initialRoute = state.pendingTargetView || getRouteFromLocation() || 'dashboard';
         state.pendingTargetView = null;
         renderView(initialRoute);
+        setAppInitPhase(APP_INIT_STATES.READY);
       }
 
       // Display helpful connection status if cold boot exceeds 8s on first-time load
@@ -14344,6 +14350,7 @@
             } else if (refreshed === false) {
               if (coldBootTimer) clearTimeout(coldBootTimer);
               state.isInitializing = false;
+              state._isInitRunning = false;
               state.pendingTargetView = null;
               localStorage.removeItem('nexstock_session_token');
               localStorage.removeItem('nexstock_refresh_token');
@@ -14351,6 +14358,7 @@
               localStorage.removeItem('nexstock_user_profile');
               state.token = '';
               showToast('Your session has expired. Please sign in again.', 'warning');
+              setAppInitPhase(APP_INIT_STATES.READY);
               renderView('welcome');
               return;
             }
@@ -14361,6 +14369,7 @@
 
         if (res && res.ok) {
           const data = await res.json();
+          setAppInitPhase(APP_INIT_STATES.LOADING_TENANT_CONTEXT, 'Loading tenant context...');
           state.token = activeToken;
           state.user = data.user;
           state.fullName = data.user.fullName || data.user.email;
@@ -14381,8 +14390,10 @@
           }
 
           state.isInitializing = false;
+          state._isInitRunning = false;
 
           if (state.memberships.length === 0) {
+            setAppInitPhase(APP_INIT_STATES.READY);
             renderView('onboard-business');
             return;
           }
@@ -14390,18 +14401,22 @@
           const savedTenantId = localStorage.getItem('nexstock_active_tenant_id');
           const activeMembership = state.memberships.find(m => m.tenantId === savedTenantId) || state.memberships[0];
           await selectActiveTenant(activeMembership);
+          updateTopbarContext();
 
           // Only re-navigate if we have not already rendered the view via cached fast-path
           if (!hasCachedMembership || state.activeView === 'welcome') {
+            setAppInitPhase(APP_INIT_STATES.LOADING_DASHBOARD, 'Loading dashboard...');
             const targetRoute = state.pendingTargetView || getRouteFromLocation() || 'dashboard';
             state.pendingTargetView = null;
             renderView(targetRoute);
           }
+          setAppInitPhase(APP_INIT_STATES.READY);
           return;
         }
 
         if (res && (res.status === 401 || res.status === 403)) {
           state.isInitializing = false;
+          state._isInitRunning = false;
           state.pendingTargetView = null;
           localStorage.removeItem('nexstock_session_token');
           localStorage.removeItem('nexstock_refresh_token');
@@ -14409,12 +14424,14 @@
           localStorage.removeItem('nexstock_user_profile');
           state.token = '';
           showToast('Your session has expired. Please sign in again.', 'warning');
+          setAppInitPhase(APP_INIT_STATES.READY);
           renderView('welcome');
           return;
         }
 
         // Server error (500, 502, 503, 504) or gateway timeout: PRESERVE SESSION!
         state.isInitializing = false;
+        state._isInitRunning = false;
         state.token = activeToken || storedToken;
         const statusEl = document.getElementById('topbarSyncStatus');
         if (statusEl) {
@@ -14431,15 +14448,19 @@
           if (savedTenantId) {
             state.tenantId = savedTenantId;
             state.currency = savedCurrency || 'USD';
+            updateTopbarContext();
+            setAppInitPhase(APP_INIT_STATES.LOADING_DASHBOARD, 'Loading dashboard...');
             renderView(targetRoute);
+            setAppInitPhase(APP_INIT_STATES.READY);
           } else {
-            renderConnectionRecoveryState('The NexStock cloud server took too long to respond during startup. Click Retry Connection to continue.');
+            setAppInitPhase(APP_INIT_STATES.RECOVERABLE_ERROR, 'The NexStock cloud server took too long to respond during startup. Click Retry Connection to continue.');
           }
         }
       } catch (err) {
         if (coldBootTimer) clearTimeout(coldBootTimer);
         // Network offline / connection failed: PRESERVE SESSION!
         state.isInitializing = false;
+        state._isInitRunning = false;
         state.token = storedToken;
         const statusEl = document.getElementById('topbarSyncStatus');
         if (statusEl) {
@@ -14456,9 +14477,12 @@
           if (savedTenantId) {
             state.tenantId = savedTenantId;
             state.currency = savedCurrency || 'USD';
+            updateTopbarContext();
+            setAppInitPhase(APP_INIT_STATES.LOADING_DASHBOARD, 'Loading dashboard...');
             renderView(targetRoute);
+            setAppInitPhase(APP_INIT_STATES.READY);
           } else {
-            renderView('welcome');
+            setAppInitPhase(APP_INIT_STATES.RECOVERABLE_ERROR, 'Network disconnected or cloud server unavailable. Click Retry Connection to continue.');
           }
         }
       }
