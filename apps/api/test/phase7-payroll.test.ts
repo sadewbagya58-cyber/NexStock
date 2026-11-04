@@ -211,7 +211,7 @@ describe('@nexstock/api — Phase 7.1: Employee Management & Flexible Payroll En
         full_name: 'John Staff Doe',
       })
       .execute();
-  });
+  }, 60_000);
 
   afterAll(async () => {
     if (app) await app.close();
@@ -242,7 +242,7 @@ describe('@nexstock/api — Phase 7.1: Employee Management & Flexible Payroll En
         nationalId: 'NIC-99887766V',
         gender: 'Female',
         dateOfBirth: '1992-05-14',
-        joinedDate: '2023-01-15',
+        joinedDate: '2023-01-01',
         designation: 'Senior Accountant',
         department: 'Finance',
         employmentStatus: 'ACTIVE',

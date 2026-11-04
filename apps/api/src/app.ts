@@ -130,6 +130,26 @@ import {
   VoidSaleRequestSchema,
   WarehouseResponseSchema,
   createCursorPageResponseSchema,
+  AttendanceListResponseSchema,
+  AttendanceRecordResponseSchema,
+  AttendanceStatusSchema,
+  CheckInRequestSchema,
+  CheckOutRequestSchema,
+  RecordManualAttendanceRequestSchema,
+  CreateLeaveRequestSchema,
+  ReviewLeaveRequestSchema,
+  LeaveRequestResponseSchema,
+  LeaveRequestListResponseSchema,
+  LeaveBalanceListResponseSchema,
+  LeaveRequestStatusSchema,
+  CreateWorkScheduleRequestSchema,
+  WorkScheduleResponseSchema,
+  CreateOrgHolidayRequestSchema,
+  OrgHolidayResponseSchema,
+  OrgHolidayListResponseSchema,
+  OrgPayrollSettingsResponseSchema,
+  UpdateOrgPayrollSettingsRequestSchema,
+  PreCalculationValidationResponseSchema,
 } from '@nexstock/contracts';
 import { Type } from '@sinclair/typebox';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -276,6 +296,23 @@ import {
   updateEmployeeStatus,
   updatePayrollItemAdjustments,
   uploadEmployeeDocument,
+  createWorkSchedule,
+  getActiveWorkSchedule,
+  listWorkSchedules,
+  checkIn,
+  checkOut,
+  recordManualAttendance,
+  listAttendance,
+  createLeaveRequest,
+  reviewLeaveRequest,
+  listLeaveRequests,
+  getLeaveBalances,
+  createOrgHoliday,
+  listOrgHolidays,
+  deleteOrgHoliday,
+  getOrgPayrollSettings,
+  updateOrgPayrollSettings,
+  validatePrePayrollRun,
 } from './modules/hrm/index.js';
 import {
   AppError,
@@ -5446,6 +5483,597 @@ export async function buildApp(
             endDate: request.query.endDate,
             frequency: request.query.frequency,
           }),
+      );
+    },
+  );
+
+  // 27. Pre-Calculation Payroll Run Validation
+  app.post(
+    '/v1/payroll/runs/validate-pre-run',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        body: CreatePayrollRunRequestSchema,
+        response: {
+          200: PreCalculationValidationResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => validatePrePayrollRun(trx, request.body),
+      );
+    },
+  );
+
+  // 28. Work Schedules
+  app.post(
+    '/v1/employees/:employeeId/work-schedules',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({
+          employeeId: UuidSchema,
+        }),
+        body: CreateWorkScheduleRequestSchema,
+        response: {
+          201: WorkScheduleResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      const created = await withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          createWorkSchedule(trx, request.params.employeeId, request.body),
+      );
+      return reply.status(201).send(created);
+    },
+  );
+
+  app.get(
+    '/v1/employees/:employeeId/work-schedules/active',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({
+          employeeId: UuidSchema,
+        }),
+        querystring: Type.Object({
+          date: Type.Optional(Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' })),
+        }),
+        response: {
+          200: Type.Union([WorkScheduleResponseSchema, Type.Null()]),
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          getActiveWorkSchedule(
+            trx,
+            request.params.employeeId,
+            request.query.date,
+          ),
+      );
+    },
+  );
+
+  app.get(
+    '/v1/employees/:employeeId/work-schedules',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({
+          employeeId: UuidSchema,
+        }),
+        response: {
+          200: Type.Array(WorkScheduleResponseSchema),
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => listWorkSchedules(trx, request.params.employeeId),
+      );
+    },
+  );
+
+  // 29. Attendance Management
+  app.post(
+    '/v1/attendance/check-in',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        body: CheckInRequestSchema,
+        response: {
+          200: AttendanceRecordResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => checkIn(trx, request.body),
+      );
+    },
+  );
+
+  app.post(
+    '/v1/attendance/check-out',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        body: CheckOutRequestSchema,
+        response: {
+          200: AttendanceRecordResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => checkOut(trx, request.body),
+      );
+    },
+  );
+
+  app.post(
+    '/v1/attendance/manual',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        body: RecordManualAttendanceRequestSchema,
+        response: {
+          200: AttendanceRecordResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => recordManualAttendance(trx, request.body),
+      );
+    },
+  );
+
+  app.get(
+    '/v1/attendance',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        querystring: Type.Object({
+          employeeId: Type.Optional(UuidSchema),
+          startDate: Type.Optional(Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' })),
+          endDate: Type.Optional(Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' })),
+          date: Type.Optional(Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' })),
+          status: Type.Optional(AttendanceStatusSchema),
+        }),
+        response: {
+          200: AttendanceListResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          listAttendance(trx, {
+            employeeId: request.query.employeeId,
+            startDate: request.query.startDate,
+            endDate: request.query.endDate,
+            date: request.query.date,
+            status: request.query.status,
+          }),
+      );
+    },
+  );
+
+  // 30. Leave Management
+  app.post(
+    '/v1/leaves/requests',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        body: CreateLeaveRequestSchema,
+        response: {
+          201: LeaveRequestResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      const created = await withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => createLeaveRequest(trx, request.body),
+      );
+      return reply.status(201).send(created);
+    },
+  );
+
+  app.post(
+    '/v1/leaves/requests/:requestId/review',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({
+          requestId: UuidSchema,
+        }),
+        body: ReviewLeaveRequestSchema,
+        response: {
+          200: LeaveRequestResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          reviewLeaveRequest(trx, request.params.requestId, request.body),
+      );
+    },
+  );
+
+  app.get(
+    '/v1/leaves/requests',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        querystring: Type.Object({
+          employeeId: Type.Optional(UuidSchema),
+          status: Type.Optional(LeaveRequestStatusSchema),
+          year: Type.Optional(Type.Integer()),
+        }),
+        response: {
+          200: LeaveRequestListResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          listLeaveRequests(trx, {
+            employeeId: request.query.employeeId,
+            status: request.query.status,
+            year: request.query.year,
+          }),
+      );
+    },
+  );
+
+  app.get(
+    '/v1/leaves/balances/:employeeId',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({
+          employeeId: UuidSchema,
+        }),
+        querystring: Type.Object({
+          year: Type.Optional(Type.Integer()),
+        }),
+        response: {
+          200: LeaveBalanceListResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          getLeaveBalances(
+            trx,
+            request.params.employeeId,
+            request.query.year,
+          ),
+      );
+    },
+  );
+
+  // 31. Organization Holidays
+  app.post(
+    '/v1/org/holidays',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        body: CreateOrgHolidayRequestSchema,
+        response: {
+          201: OrgHolidayResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      const created = await withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => createOrgHoliday(trx, request.body),
+      );
+      return reply.status(201).send(created);
+    },
+  );
+
+  app.get(
+    '/v1/org/holidays',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        querystring: Type.Object({
+          year: Type.Optional(Type.Integer()),
+        }),
+        response: {
+          200: OrgHolidayListResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => listOrgHolidays(trx, { year: request.query.year }),
+      );
+    },
+  );
+
+  app.delete(
+    '/v1/org/holidays/:holidayId',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({
+          holidayId: UuidSchema,
+        }),
+        response: {
+          200: Type.Object({ success: Type.Boolean() }),
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => deleteOrgHoliday(trx, request.params.holidayId),
+      );
+    },
+  );
+
+  // 32. Organization Payroll Settings & Proration
+  app.get(
+    '/v1/org/payroll-settings',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        response: {
+          200: OrgPayrollSettingsResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => getOrgPayrollSettings(trx),
+      );
+    },
+  );
+
+  app.patch(
+    '/v1/org/payroll-settings',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        body: UpdateOrgPayrollSettingsRequestSchema,
+        response: {
+          200: OrgPayrollSettingsResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => updateOrgPayrollSettings(trx, request.body),
       );
     },
   );

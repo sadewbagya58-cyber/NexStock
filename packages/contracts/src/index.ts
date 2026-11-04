@@ -148,6 +148,20 @@ export const ErrorCodeSchema = Type.Union([
   Type.Literal('HRM_PAYROLL_ITEM_NOT_FOUND'),
   Type.Literal('HRM_INVALID_PAYROLL_STATUS_TRANSITION'),
   Type.Literal('HRM_OVERPAYMENT_NOT_ALLOWED'),
+  Type.Literal('HRM_STAFF_ACCOUNT_NOT_LINKED'),
+  Type.Literal('HRM_GPS_REQUIRED'),
+  Type.Literal('HRM_GEOFENCE_FAILED'),
+  Type.Literal('HRM_ALREADY_CHECKED_IN'),
+  Type.Literal('HRM_CHECK_IN_REQUIRED'),
+  Type.Literal('HRM_ALREADY_CHECKED_OUT'),
+  Type.Literal('HRM_REASON_REQUIRED'),
+  Type.Literal('HRM_LEAVE_OVERLAP'),
+  Type.Literal('HRM_LEAVE_NOT_FOUND'),
+  Type.Literal('HRM_LEAVE_ALREADY_REVIEWED'),
+  Type.Literal('HRM_CANNOT_APPROVE_OWN_LEAVE'),
+  Type.Literal('HRM_UNAUTHORIZED_EMPLOYEE_ACCESS'),
+  Type.Literal('HRM_HOLIDAY_EXISTS'),
+  Type.Literal('HRM_HOLIDAY_NOT_FOUND'),
   Type.Literal('ERR_INTERNAL_SERVER_ERROR'),
 ]);
 export type ErrorCode = Static<typeof ErrorCodeSchema>;
@@ -2138,6 +2152,9 @@ export const CreateEmployeeRequestSchema = Type.Object(
     addressLine1: Type.Optional(Type.Union([Type.String(), Type.Null()])),
     addressLine2: Type.Optional(Type.Union([Type.String(), Type.Null()])),
     city: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+    district: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+    postalCode: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+    leavingDate: Type.Optional(Type.Union([Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' }), Type.Literal(''), Type.Null()])),
     emergencyContactName: Type.Optional(Type.Union([Type.String(), Type.Null()])),
     emergencyContactPhone: Type.Optional(Type.Union([Type.String(), Type.Null()])),
     notes: Type.Optional(Type.Union([Type.String(), Type.Null()])),
@@ -2203,6 +2220,9 @@ export const EmployeeResponseSchema = Type.Object({
   addressLine1: Type.Union([Type.String(), Type.Null()]),
   addressLine2: Type.Union([Type.String(), Type.Null()]),
   city: Type.Union([Type.String(), Type.Null()]),
+  district: Type.Union([Type.String(), Type.Null()]),
+  postalCode: Type.Union([Type.String(), Type.Null()]),
+  leavingDate: Type.Union([Type.String(), Type.Null()]),
   emergencyContactName: Type.Union([Type.String(), Type.Null()]),
   emergencyContactPhone: Type.Union([Type.String(), Type.Null()]),
   notes: Type.Union([Type.String(), Type.Null()]),
@@ -2250,6 +2270,12 @@ export type EmployeeDocumentResponse = Static<
   typeof EmployeeDocumentResponseSchema
 >;
 
+export const ProrationRuleSchema = Type.Union([
+  Type.Literal('PRORATE'),
+  Type.Literal('FULL'),
+]);
+export type ProrationRule = Static<typeof ProrationRuleSchema>;
+
 export const SalaryComponentInputSchema = Type.Object(
   {
     componentType: SalaryComponentTypeSchema,
@@ -2259,6 +2285,7 @@ export const SalaryComponentInputSchema = Type.Object(
     isTaxable: Type.Optional(Type.Boolean()),
     isStatutory: Type.Optional(Type.Boolean()),
     isEnabled: Type.Optional(Type.Boolean()),
+    prorationRule: Type.Optional(ProrationRuleSchema),
   },
   { additionalProperties: false },
 );
@@ -2274,6 +2301,7 @@ export const SalaryComponentResponseSchema = Type.Object({
   isTaxable: Type.Boolean(),
   isStatutory: Type.Boolean(),
   isEnabled: Type.Boolean(),
+  prorationRule: Type.Optional(ProrationRuleSchema),
 });
 export type SalaryComponentResponse = Static<
   typeof SalaryComponentResponseSchema
@@ -2380,6 +2408,7 @@ export const PayrollRunItemResponseSchema = Type.Object({
   paidAmount: DecimalMoneyStringSchema,
   paymentStatus: PayrollPaymentStatusSchema,
   componentsSnapshot: Type.Array(Type.Any()),
+  calculationBreakdown: Type.Optional(Type.Any()),
   notes: Type.Union([Type.String(), Type.Null()]),
 });
 export type PayrollRunItemResponse = Static<
@@ -2641,6 +2670,323 @@ export const UpdateMemberLocationScopesRequestSchema = Type.Object(
 export type UpdateMemberLocationScopesRequest = Static<
   typeof UpdateMemberLocationScopesRequestSchema
 >;
+
+// ============================================================================
+// Phase 7.1 Complete HRM: Work Schedules, Attendance, Leave, Holidays & Settings
+// ============================================================================
+
+// 1. Work Schedules
+export const ShiftTypeSchema = Type.Union([
+  Type.Literal('DAY'),
+  Type.Literal('NIGHT'),
+  Type.Literal('ROTATING'),
+]);
+export type ShiftType = Static<typeof ShiftTypeSchema>;
+
+export const CreateWorkScheduleRequestSchema = Type.Object(
+  {
+    shiftName: Type.Optional(Type.String({ minLength: 1, maxLength: 100 })),
+    shiftType: Type.Optional(ShiftTypeSchema),
+    shiftStartTime: Type.Optional(Type.String({ pattern: '^\\d{2}:\\d{2}(:\\d{2})?$' })),
+    shiftEndTime: Type.Optional(Type.String({ pattern: '^\\d{2}:\\d{2}(:\\d{2})?$' })),
+    breakDurationMinutes: Type.Optional(Type.Integer({ minimum: 0, maximum: 480 })),
+    mondayWorking: Type.Optional(Type.Boolean()),
+    tuesdayWorking: Type.Optional(Type.Boolean()),
+    wednesdayWorking: Type.Optional(Type.Boolean()),
+    thursdayWorking: Type.Optional(Type.Boolean()),
+    fridayWorking: Type.Optional(Type.Boolean()),
+    saturdayWorking: Type.Optional(Type.Boolean()),
+    sundayWorking: Type.Optional(Type.Boolean()),
+    effectiveFrom: Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' }),
+    effectiveTo: Type.Optional(Type.Union([Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' }), Type.Literal(''), Type.Null()])),
+    notes: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  },
+  { additionalProperties: false },
+);
+export type CreateWorkScheduleRequest = Static<typeof CreateWorkScheduleRequestSchema>;
+
+export const WorkScheduleResponseSchema = Type.Object({
+  id: UuidSchema,
+  tenantId: UuidSchema,
+  employeeId: UuidSchema,
+  shiftName: Type.String(),
+  shiftType: ShiftTypeSchema,
+  shiftStartTime: Type.String(),
+  shiftEndTime: Type.String(),
+  breakDurationMinutes: Type.Integer(),
+  mondayWorking: Type.Boolean(),
+  tuesdayWorking: Type.Boolean(),
+  wednesdayWorking: Type.Boolean(),
+  thursdayWorking: Type.Boolean(),
+  fridayWorking: Type.Boolean(),
+  saturdayWorking: Type.Boolean(),
+  sundayWorking: Type.Boolean(),
+  effectiveFrom: Type.String(),
+  effectiveTo: Type.Union([Type.String(), Type.Null()]),
+  isActive: Type.Boolean(),
+  notes: Type.Union([Type.String(), Type.Null()]),
+  createdAt: IsoTimestampSchema,
+  updatedAt: IsoTimestampSchema,
+});
+export type WorkScheduleResponse = Static<typeof WorkScheduleResponseSchema>;
+
+// 2. Attendance
+export const AttendanceStatusSchema = Type.Union([
+  Type.Literal('PRESENT'),
+  Type.Literal('ABSENT'),
+  Type.Literal('LATE'),
+  Type.Literal('HALF_DAY'),
+  Type.Literal('PAID_LEAVE'),
+  Type.Literal('NO_PAY_LEAVE'),
+  Type.Literal('WEEKLY_OFF'),
+  Type.Literal('PUBLIC_HOLIDAY'),
+]);
+export type AttendanceStatus = Static<typeof AttendanceStatusSchema>;
+
+export const CheckInRequestSchema = Type.Object(
+  {
+    latitude: Type.Optional(Type.Union([Type.Number(), Type.Null()])),
+    longitude: Type.Optional(Type.Union([Type.Number(), Type.Null()])),
+    notes: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  },
+  { additionalProperties: false },
+);
+export type CheckInRequest = Static<typeof CheckInRequestSchema>;
+
+export const CheckOutRequestSchema = Type.Object(
+  {
+    latitude: Type.Optional(Type.Union([Type.Number(), Type.Null()])),
+    longitude: Type.Optional(Type.Union([Type.Number(), Type.Null()])),
+    notes: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  },
+  { additionalProperties: false },
+);
+export type CheckOutRequest = Static<typeof CheckOutRequestSchema>;
+
+export const RecordManualAttendanceRequestSchema = Type.Object(
+  {
+    employeeId: UuidSchema,
+    attendanceDate: Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' }),
+    checkInTime: Type.Optional(Type.Union([IsoTimestampSchema, Type.Literal(''), Type.Null()])),
+    checkOutTime: Type.Optional(Type.Union([IsoTimestampSchema, Type.Literal(''), Type.Null()])),
+    status: AttendanceStatusSchema,
+    adjustmentReason: Type.String({ minLength: 1, maxLength: 500 }),
+    notes: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  },
+  { additionalProperties: false },
+);
+export type RecordManualAttendanceRequest = Static<typeof RecordManualAttendanceRequestSchema>;
+
+export const AttendanceRecordResponseSchema = Type.Object({
+  id: UuidSchema,
+  tenantId: UuidSchema,
+  employeeId: UuidSchema,
+  employeeCode: Type.Optional(Type.String()),
+  employeeName: Type.Optional(Type.String()),
+  attendanceDate: Type.String(),
+  checkInTime: Type.Union([IsoTimestampSchema, Type.Null()]),
+  checkOutTime: Type.Union([IsoTimestampSchema, Type.Null()]),
+  status: AttendanceStatusSchema,
+  latitude: Type.Union([Type.Number(), Type.Null()]),
+  longitude: Type.Union([Type.Number(), Type.Null()]),
+  gpsVerified: Type.Boolean(),
+  notes: Type.Union([Type.String(), Type.Null()]),
+  isManual: Type.Boolean(),
+  adjustmentReason: Type.Union([Type.String(), Type.Null()]),
+  adjustedByUserId: Type.Union([UuidSchema, Type.Null()]),
+  createdAt: IsoTimestampSchema,
+  updatedAt: IsoTimestampSchema,
+});
+export type AttendanceRecordResponse = Static<typeof AttendanceRecordResponseSchema>;
+
+export const AttendanceListResponseSchema = Type.Object({
+  items: Type.Array(AttendanceRecordResponseSchema),
+  total: Type.Integer({ minimum: 0 }),
+});
+export type AttendanceListResponse = Static<typeof AttendanceListResponseSchema>;
+
+// 3. Leaves
+export const LeaveTypeSchema = Type.Union([
+  Type.Literal('ANNUAL'),
+  Type.Literal('CASUAL'),
+  Type.Literal('SICK'),
+  Type.Literal('NO_PAY'),
+  Type.Literal('HALF_DAY'),
+  Type.Literal('SPECIAL'),
+]);
+export type LeaveType = Static<typeof LeaveTypeSchema>;
+
+export const LeaveRequestStatusSchema = Type.Union([
+  Type.Literal('PENDING'),
+  Type.Literal('APPROVED'),
+  Type.Literal('REJECTED'),
+  Type.Literal('CANCELLED'),
+]);
+export type LeaveRequestStatus = Static<typeof LeaveRequestStatusSchema>;
+
+export const CreateLeaveRequestSchema = Type.Object(
+  {
+    employeeId: Type.Optional(UuidSchema),
+    leaveType: LeaveTypeSchema,
+    startDate: Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' }),
+    endDate: Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' }),
+    daysCount: Type.Number({ minimum: 0.5 }),
+    isHalfDay: Type.Optional(Type.Boolean()),
+    reason: Type.String({ minLength: 1, maxLength: 500 }),
+  },
+  { additionalProperties: false },
+);
+export type CreateLeaveRequest = Static<typeof CreateLeaveRequestSchema>;
+
+export const ReviewLeaveRequestSchema = Type.Object(
+  {
+    status: Type.Union([Type.Literal('APPROVED'), Type.Literal('REJECTED')]),
+    reviewNotes: Type.Optional(Type.Union([Type.String({ maxLength: 500 }), Type.Null()])),
+  },
+  { additionalProperties: false },
+);
+export type ReviewLeaveRequest = Static<typeof ReviewLeaveRequestSchema>;
+
+export const LeaveRequestResponseSchema = Type.Object({
+  id: UuidSchema,
+  tenantId: UuidSchema,
+  employeeId: UuidSchema,
+  employeeCode: Type.Optional(Type.String()),
+  employeeName: Type.Optional(Type.String()),
+  leaveType: LeaveTypeSchema,
+  startDate: Type.String(),
+  endDate: Type.String(),
+  daysCount: Type.Number(),
+  isHalfDay: Type.Boolean(),
+  reason: Type.String(),
+  status: LeaveRequestStatusSchema,
+  requestedByUserId: Type.Union([UuidSchema, Type.Null()]),
+  reviewedByUserId: Type.Union([UuidSchema, Type.Null()]),
+  reviewedAt: Type.Union([IsoTimestampSchema, Type.Null()]),
+  reviewNotes: Type.Union([Type.String(), Type.Null()]),
+  createdAt: IsoTimestampSchema,
+  updatedAt: IsoTimestampSchema,
+});
+export type LeaveRequestResponse = Static<typeof LeaveRequestResponseSchema>;
+
+export const LeaveRequestListResponseSchema = Type.Object({
+  items: Type.Array(LeaveRequestResponseSchema),
+  total: Type.Integer({ minimum: 0 }),
+});
+export type LeaveRequestListResponse = Static<typeof LeaveRequestListResponseSchema>;
+
+export const LeaveBalanceResponseSchema = Type.Object({
+  id: UuidSchema,
+  tenantId: UuidSchema,
+  employeeId: UuidSchema,
+  year: Type.Integer(),
+  leaveType: LeaveTypeSchema,
+  annualEntitlement: Type.Number(),
+  usedDays: Type.Number(),
+  pendingDays: Type.Number(),
+  remainingDays: Type.Number(),
+});
+export type LeaveBalanceResponse = Static<typeof LeaveBalanceResponseSchema>;
+
+export const LeaveBalanceListResponseSchema = Type.Object({
+  items: Type.Array(LeaveBalanceResponseSchema),
+});
+export type LeaveBalanceListResponse = Static<typeof LeaveBalanceListResponseSchema>;
+
+// 4. Organization Holidays
+export const HolidayTypeSchema = Type.Union([
+  Type.Literal('PUBLIC'),
+  Type.Literal('ORG'),
+  Type.Literal('SPECIAL'),
+]);
+export type HolidayType = Static<typeof HolidayTypeSchema>;
+
+export const CreateOrgHolidayRequestSchema = Type.Object(
+  {
+    holidayDate: Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' }),
+    name: Type.String({ minLength: 1, maxLength: 100 }),
+    holidayType: Type.Optional(HolidayTypeSchema),
+    isRecurring: Type.Optional(Type.Boolean()),
+    notes: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  },
+  { additionalProperties: false },
+);
+export type CreateOrgHolidayRequest = Static<typeof CreateOrgHolidayRequestSchema>;
+
+export const OrgHolidayResponseSchema = Type.Object({
+  id: UuidSchema,
+  tenantId: UuidSchema,
+  holidayDate: Type.String(),
+  name: Type.String(),
+  holidayType: HolidayTypeSchema,
+  isRecurring: Type.Boolean(),
+  notes: Type.Union([Type.String(), Type.Null()]),
+  createdAt: IsoTimestampSchema,
+});
+export type OrgHolidayResponse = Static<typeof OrgHolidayResponseSchema>;
+
+export const OrgHolidayListResponseSchema = Type.Object({
+  items: Type.Array(OrgHolidayResponseSchema),
+});
+export type OrgHolidayListResponse = Static<typeof OrgHolidayListResponseSchema>;
+
+// 5. Organization Payroll Settings & Proration
+export const ProrationMethodSchema = Type.Union([
+  Type.Literal('CALENDAR_DAYS'),
+  Type.Literal('WORKING_DAYS'),
+  Type.Literal('FIXED_30_DAYS'),
+]);
+export type ProrationMethod = Static<typeof ProrationMethodSchema>;
+
+export const AllowanceProrationPolicySchema = Type.Union([
+  Type.Literal('PRORATE'),
+  Type.Literal('FULL'),
+]);
+export type AllowanceProrationPolicy = Static<typeof AllowanceProrationPolicySchema>;
+
+export const OrgPayrollSettingsResponseSchema = Type.Object({
+  tenantId: UuidSchema,
+  prorationMethod: ProrationMethodSchema,
+  gpsAttendanceEnabled: Type.Boolean(),
+  allowanceProrationPolicy: AllowanceProrationPolicySchema,
+  workplaceLatitude: Type.Union([Type.Number(), Type.Null()]),
+  workplaceLongitude: Type.Union([Type.Number(), Type.Null()]),
+  geofenceRadiusMeters: Type.Integer(),
+  updatedAt: IsoTimestampSchema,
+});
+export type OrgPayrollSettingsResponse = Static<typeof OrgPayrollSettingsResponseSchema>;
+
+export const UpdateOrgPayrollSettingsRequestSchema = Type.Object(
+  {
+    prorationMethod: Type.Optional(ProrationMethodSchema),
+    gpsAttendanceEnabled: Type.Optional(Type.Boolean()),
+    allowanceProrationPolicy: Type.Optional(AllowanceProrationPolicySchema),
+    workplaceLatitude: Type.Optional(Type.Union([Type.Number(), Type.Null()])),
+    workplaceLongitude: Type.Optional(Type.Union([Type.Number(), Type.Null()])),
+    geofenceRadiusMeters: Type.Optional(Type.Integer({ minimum: 10, maximum: 50000 })),
+  },
+  { additionalProperties: false },
+);
+export type UpdateOrgPayrollSettingsRequest = Static<typeof UpdateOrgPayrollSettingsRequestSchema>;
+
+// 6. Pre-Calculation Validation
+export const PreCalculationValidationItemSchema = Type.Object({
+  type: Type.String(),
+  severity: Type.Union([Type.Literal('ERROR'), Type.Literal('WARNING')]),
+  employeeId: Type.Optional(UuidSchema),
+  employeeCode: Type.Optional(Type.String()),
+  employeeName: Type.Optional(Type.String()),
+  message: Type.String(),
+});
+export type PreCalculationValidationItem = Static<typeof PreCalculationValidationItemSchema>;
+
+export const PreCalculationValidationResponseSchema = Type.Object({
+  isValid: Type.Boolean(),
+  canProceed: Type.Boolean(),
+  issues: Type.Array(PreCalculationValidationItemSchema),
+});
+export type PreCalculationValidationResponse = Static<typeof PreCalculationValidationResponseSchema>;
+
 
 
 

@@ -38,6 +38,7 @@ export function mapSalaryStructure(
     is_taxable: boolean;
     is_statutory: boolean;
     is_enabled: boolean;
+    proration_rule?: string;
   }> = [],
 ): SalaryStructureResponse {
   const effectiveFrom =
@@ -58,6 +59,7 @@ export function mapSalaryStructure(
     isTaxable: c.is_taxable,
     isStatutory: c.is_statutory,
     isEnabled: c.is_enabled,
+    prorationRule: (c.proration_rule === 'FULL' ? 'FULL' : 'PRORATE') as 'PRORATE' | 'FULL',
   }));
 
   return {
@@ -164,6 +166,7 @@ export async function createSalaryStructure(
         is_taxable: comp.isTaxable ?? true,
         is_statutory: comp.isStatutory ?? false,
         is_enabled: comp.isEnabled ?? true,
+        proration_rule: comp.prorationRule ?? 'PRORATE',
       })
       .execute();
   }

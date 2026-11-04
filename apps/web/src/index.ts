@@ -190,6 +190,8 @@ export const ALL_SPA_VIEW_IDS = [
   'pos-shifts',
   'pos-sales',
   'employees',
+  'attendance',
+  'leaves',
   'payroll',
   'payroll-reports',
   'roles-permissions',
@@ -199,7 +201,7 @@ export const ALL_SPA_VIEW_IDS = [
 export type SpaViewId = (typeof ALL_SPA_VIEW_IDS)[number];
 
 export interface HrmNavItem {
-  readonly id: 'employees' | 'payroll' | 'payroll-reports';
+  readonly id: 'employees' | 'attendance' | 'leaves' | 'payroll' | 'payroll-reports';
   readonly label: string;
   readonly href: string;
   readonly requiredPermission: string;
@@ -223,6 +225,22 @@ export const PHASE7_HRM_NAV_ITEMS: readonly HrmNavItem[] = [
     label: 'Payroll Reports',
     href: '/hrm/payroll-reports',
     requiredPermission: 'hrm:payroll:read',
+  },
+] as const;
+
+export const PHASE71_HRM_NAV_ITEMS: readonly HrmNavItem[] = [
+  ...PHASE7_HRM_NAV_ITEMS,
+  {
+    id: 'attendance',
+    label: 'Attendance & Time',
+    href: '/hrm/attendance',
+    requiredPermission: 'hrm:attendance:read',
+  },
+  {
+    id: 'leaves',
+    label: 'Leave Management',
+    href: '/hrm/leaves',
+    requiredPermission: 'hrm:leave:read',
   },
 ] as const;
 

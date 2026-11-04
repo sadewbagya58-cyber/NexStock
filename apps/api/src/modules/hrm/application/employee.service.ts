@@ -45,6 +45,9 @@ export interface EmployeeRow {
   address_line1: string | null;
   address_line2: string | null;
   city: string | null;
+  district: string | null;
+  postal_code: string | null;
+  leaving_date: Date | string | null;
   emergency_contact_name: string | null;
   emergency_contact_phone: string | null;
   notes: string | null;
@@ -103,6 +106,9 @@ function mapEmployee(
     addressLine1: row.address_line1,
     addressLine2: row.address_line2,
     city: row.city,
+    district: row.district ?? null,
+    postalCode: row.postal_code ?? null,
+    leavingDate: formatDateOnly(row.leaving_date),
     emergencyContactName: row.emergency_contact_name,
     emergencyContactPhone: row.emergency_contact_phone,
     notes: row.notes,
@@ -188,6 +194,9 @@ export async function createEmployee(
       address_line1: input.addressLine1?.trim() || null,
       address_line2: input.addressLine2?.trim() || null,
       city: input.city?.trim() || null,
+      district: input.district?.trim() || null,
+      postal_code: input.postalCode?.trim() || null,
+      leaving_date: input.leavingDate || null,
       emergency_contact_name: input.emergencyContactName?.trim() || null,
       emergency_contact_phone: input.emergencyContactPhone?.trim() || null,
       notes: input.notes?.trim() || null,
@@ -350,6 +359,9 @@ export async function updateEmployee(
       address_line1: input.addressLine1 !== undefined ? (input.addressLine1 && input.addressLine1.trim() ? input.addressLine1.trim() : null) : existing.address_line1,
       address_line2: input.addressLine2 !== undefined ? (input.addressLine2 && input.addressLine2.trim() ? input.addressLine2.trim() : null) : existing.address_line2,
       city: input.city !== undefined ? (input.city && input.city.trim() ? input.city.trim() : null) : existing.city,
+      district: input.district !== undefined ? (input.district && input.district.trim() ? input.district.trim() : null) : existing.district,
+      postal_code: input.postalCode !== undefined ? (input.postalCode && input.postalCode.trim() ? input.postalCode.trim() : null) : existing.postal_code,
+      leaving_date: input.leavingDate !== undefined ? (input.leavingDate && input.leavingDate.trim() ? input.leavingDate.trim() : null) : existing.leaving_date,
       emergency_contact_name: input.emergencyContactName !== undefined ? (input.emergencyContactName && input.emergencyContactName.trim() ? input.emergencyContactName.trim() : null) : existing.emergency_contact_name,
       emergency_contact_phone: input.emergencyContactPhone !== undefined ? (input.emergencyContactPhone && input.emergencyContactPhone.trim() ? input.emergencyContactPhone.trim() : null) : existing.emergency_contact_phone,
       notes: input.notes !== undefined ? (input.notes && input.notes.trim() ? input.notes.trim() : null) : existing.notes,

@@ -543,6 +543,13 @@ export function loadPhase7AdvancedPermissionsMigrationSql(): string {
   return sqlText;
 }
 
+export function loadPhase71HrmAttendanceLeaveProrationMigrationSql(): string {
+  const filename = '0017_phase71_hrm_attendance_leave_proration.sql';
+  const sqlText = readFileSync(resolve(migrationsDir, filename), 'utf-8');
+  assertPostgresMigrationSqlCompatible(sqlText, filename);
+  return sqlText;
+}
+
 export function getOrderedPostgresMigrations(): readonly PostgresMigrationSpec[] {
   return [
     {
@@ -656,6 +663,13 @@ export function getOrderedPostgresMigrations(): readonly PostgresMigrationSpec[]
       name: '0016_phase7_advanced_permissions',
       filename: '0016_phase7_advanced_permissions.sql',
       sql: loadPhase7AdvancedPermissionsMigrationSql(),
+    },
+    {
+      dialect: 'postgres',
+      version: 17,
+      name: '0017_phase71_hrm_attendance_leave_proration',
+      filename: '0017_phase71_hrm_attendance_leave_proration.sql',
+      sql: loadPhase71HrmAttendanceLeaveProrationMigrationSql(),
     },
   ];
 }

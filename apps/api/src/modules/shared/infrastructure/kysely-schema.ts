@@ -807,6 +807,9 @@ export interface EmployeesTable {
   address_line1: string | null;
   address_line2: string | null;
   city: string | null;
+  district: string | null;
+  postal_code: string | null;
+  leaving_date: ColumnType<Date | string | null, Date | string | null, Date | string | null>;
   emergency_contact_name: string | null;
   emergency_contact_phone: string | null;
   notes: string | null;
@@ -874,6 +877,7 @@ export interface EmployeeSalaryComponentsTable {
   is_taxable: Generated<boolean>;
   is_statutory: Generated<boolean>;
   is_enabled: Generated<boolean>;
+  proration_rule: Generated<'PRORATE' | 'FULL'>;
 }
 
 export interface PayrollRunsTable {
@@ -916,6 +920,7 @@ export interface PayrollItemsTable {
   paid_amount: Generated<string>;
   payment_status: Generated<PayrollPaymentStatus>;
   components_snapshot: Generated<unknown>;
+  calculation_breakdown: Generated<unknown>;
   notes: string | null;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
@@ -935,6 +940,104 @@ export interface PayrollPaymentsTable {
   recorded_by_user_id: string;
   notes: string | null;
   created_at: Generated<Date>;
+}
+
+export interface EmployeeWorkSchedulesTable {
+  id: string;
+  tenant_id: string;
+  employee_id: string;
+  shift_name: Generated<string>;
+  shift_type: Generated<'DAY' | 'NIGHT' | 'ROTATING'>;
+  shift_start_time: Generated<string>;
+  shift_end_time: Generated<string>;
+  break_duration_minutes: Generated<number>;
+  monday_working: Generated<boolean>;
+  tuesday_working: Generated<boolean>;
+  wednesday_working: Generated<boolean>;
+  thursday_working: Generated<boolean>;
+  friday_working: Generated<boolean>;
+  saturday_working: Generated<boolean>;
+  sunday_working: Generated<boolean>;
+  effective_from: ColumnType<Date | string, Date | string, Date | string>;
+  effective_to: ColumnType<Date | string | null, Date | string | null, Date | string | null>;
+  is_active: Generated<boolean>;
+  notes: string | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface EmployeeAttendanceTable {
+  id: string;
+  tenant_id: string;
+  employee_id: string;
+  attendance_date: ColumnType<Date | string, Date | string, Date | string>;
+  check_in_time: ColumnType<Date | string | null, Date | string | null, Date | string | null>;
+  check_out_time: ColumnType<Date | string | null, Date | string | null, Date | string | null>;
+  status: Generated<'PRESENT' | 'ABSENT' | 'LATE' | 'HALF_DAY' | 'PAID_LEAVE' | 'NO_PAY_LEAVE' | 'WEEKLY_OFF' | 'PUBLIC_HOLIDAY'>;
+  latitude: string | number | null;
+  longitude: string | number | null;
+  gps_verified: Generated<boolean>;
+  notes: string | null;
+  is_manual: Generated<boolean>;
+  adjustment_reason: string | null;
+  adjusted_by_user_id: string | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface EmployeeLeaveRequestsTable {
+  id: string;
+  tenant_id: string;
+  employee_id: string;
+  leave_type: 'ANNUAL' | 'CASUAL' | 'SICK' | 'NO_PAY' | 'HALF_DAY' | 'SPECIAL';
+  start_date: ColumnType<Date | string, Date | string, Date | string>;
+  end_date: ColumnType<Date | string, Date | string, Date | string>;
+  days_count: string | number;
+  is_half_day: Generated<boolean>;
+  reason: string;
+  status: Generated<'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED'>;
+  requested_by_user_id: string | null;
+  reviewed_by_user_id: string | null;
+  reviewed_at: ColumnType<Date | string | null, Date | string | null, Date | string | null>;
+  review_notes: string | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface EmployeeLeaveBalancesTable {
+  id: string;
+  tenant_id: string;
+  employee_id: string;
+  year: number;
+  leave_type: 'ANNUAL' | 'CASUAL' | 'SICK' | 'NO_PAY' | 'HALF_DAY' | 'SPECIAL';
+  annual_entitlement: Generated<string | number>;
+  used_days: Generated<string | number>;
+  pending_days: Generated<string | number>;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface OrgHolidaysTable {
+  id: string;
+  tenant_id: string;
+  holiday_date: ColumnType<Date | string, Date | string, Date | string>;
+  name: string;
+  holiday_type: Generated<'PUBLIC' | 'ORG' | 'SPECIAL'>;
+  is_recurring: Generated<boolean>;
+  notes: string | null;
+  created_at: Generated<Date>;
+}
+
+export interface OrgPayrollSettingsTable {
+  tenant_id: string;
+  proration_method: Generated<'CALENDAR_DAYS' | 'WORKING_DAYS' | 'FIXED_30_DAYS'>;
+  gps_attendance_enabled: Generated<boolean>;
+  allowance_proration_policy: Generated<'PRORATE' | 'FULL'>;
+  workplace_latitude: string | number | null;
+  workplace_longitude: string | number | null;
+  geofence_radius_meters: Generated<number>;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
 }
 
 export interface NexStockDatabase {
@@ -995,4 +1098,10 @@ export interface NexStockDatabase {
   payroll_runs: PayrollRunsTable;
   payroll_items: PayrollItemsTable;
   payroll_payments: PayrollPaymentsTable;
+  employee_work_schedules: EmployeeWorkSchedulesTable;
+  employee_attendance: EmployeeAttendanceTable;
+  employee_leave_requests: EmployeeLeaveRequestsTable;
+  employee_leave_balances: EmployeeLeaveBalancesTable;
+  org_holidays: OrgHolidaysTable;
+  org_payroll_settings: OrgPayrollSettingsTable;
 }

@@ -2417,5 +2417,87 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       expect(html).toContain('state._isInitRunning = true;');
       expect(html).toContain('async function retryAppInitialization(btnEl)');
     });
+
+    it('BUG-049: verifies employee creation & edit modals include all address fields and validation', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // 1. Create Employee Form Address Inputs (BUG-049)
+      expect(html).toContain('id="newEmpAddress1"');
+      expect(html).toContain('id="newEmpAddress2"');
+      expect(html).toContain('id="newEmpCity"');
+      expect(html).toContain('id="newEmpDistrict"');
+      expect(html).toContain('id="newEmpPostalCode"');
+
+      // 2. Create Employee Address Validation & Payload
+      expect(html).toContain("document.getElementById('newEmpAddress1')?.value.trim()");
+      expect(html).toContain("showToast('Address Line 1 is required *', 'error')");
+      expect(html).toContain('addressLine1: address1');
+      expect(html).toContain('addressLine2: address2');
+      expect(html).toContain('city');
+      expect(html).toContain('district');
+      expect(html).toContain('postalCode');
+
+      // 3. Edit Employee Form Address Inputs & Persistence (BUG-049)
+      expect(html).toContain('id="editEmpAddress"');
+      expect(html).toContain('id="editEmpAddress2"');
+      expect(html).toContain('id="editEmpCity"');
+      expect(html).toContain('id="editEmpDistrict"');
+      expect(html).toContain('id="editEmpPostalCode"');
+
+      // 4. Employee Profile Overview Address Display
+      expect(html).toContain('const addressParts = [emp.addressLine1, emp.addressLine2, emp.city, emp.district, emp.postalCode].filter(Boolean);');
+    });
+
+    it('Phase 7.1: verifies Attendance, Leaves, Work Schedules, and Org Payroll Settings UI components', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // 1. Attendance & Leaves Views Registered in VALID_VIEWS and renderView
+      expect(html).toContain("'attendance'");
+      expect(html).toContain("'leaves'");
+      expect(html).toContain("case 'attendance': renderAttendanceView(); break;");
+      expect(html).toContain("case 'leaves': renderLeavesView(); break;");
+
+      // 2. Attendance Time Tracking View & Self-Service
+      expect(html).toContain('async function renderAttendanceView()');
+      expect(html).toContain('async function clockInSelf(');
+      expect(html).toContain('async function clockOutSelf(');
+      expect(html).toContain('async function openManualAttendanceModal(');
+      expect(html).toContain('async function submitManualAttendance(');
+
+      // 3. Leaves Management View & Actions
+      expect(html).toContain('async function renderLeavesView()');
+      expect(html).toContain('function openCreateLeaveModal()');
+      expect(html).toContain('async function submitCreateLeave()');
+      expect(html).toContain('async function reviewLeaveAction(');
+
+      // 4. Holiday Calendar Modal
+      expect(html).toContain('async function openOrgHolidaysModal()');
+      expect(html).toContain('async function submitCreateHoliday()');
+      expect(html).toContain('async function deleteHolidayAction(');
+
+      // 5. Individual Employee Work Schedules
+      expect(html).toContain('async function openConfigureWorkScheduleModal(');
+      expect(html).toContain('async function submitConfigureWorkSchedule(');
+      expect(html).toContain('id="schedShiftName"');
+      expect(html).toContain('id="schedShiftType"');
+      expect(html).toContain('id="schedStartTime"');
+      expect(html).toContain('id="schedEndTime"');
+
+      // 6. Proration Breakdown Modal (BUG-051)
+      expect(html).toContain('function openProrationBreakdownModal(itemId)');
+      expect(html).toContain('Proration Breakdown:');
+      expect(html).toContain('calculationBreakdown');
+
+      // 7. Org Payroll & Proration Settings
+      expect(html).toContain('async function saveOrgPayrollSettings()');
+      expect(html).toContain('id="settingProrationMode"');
+      expect(html).toContain('id="settingAllowancePolicy"');
+      expect(html).toContain('id="settingGpsAttendance"');
+      expect(html).toContain('id="settingWorkplaceLat"');
+      expect(html).toContain('id="settingWorkplaceLon"');
+      expect(html).toContain('id="settingGeofenceRadius"');
+    });
   });
 });

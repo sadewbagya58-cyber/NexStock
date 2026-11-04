@@ -2083,6 +2083,14 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
         Employees
       </a>
+      <a class="nav-link" data-view="attendance">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+        Attendance
+      </a>
+      <a class="nav-link" data-view="leaves">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+        Leaves
+      </a>
       <a class="nav-link" data-view="payroll">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"></rect><line x1="2" y1="10" x2="22" y2="10"></line><line x1="7" y1="15" x2="7.01" y2="15"></line><line x1="12" y1="15" x2="17" y2="15"></line></svg>
         Payroll Runs
@@ -2285,6 +2293,8 @@
       'pos-shifts',
       'pos-sales',
       'employees',
+      'attendance',
+      'leaves',
       'payroll',
       'payroll-reports',
       'roles-permissions',
@@ -3110,6 +3120,8 @@
         case 'pos-shifts': renderPosShiftsView(); break;
         case 'pos-sales': renderPosSalesView(); break;
         case 'employees': renderEmployeesView(); break;
+        case 'attendance': renderAttendanceView(); break;
+        case 'leaves': renderLeavesView(); break;
         case 'payroll': renderPayrollView(); break;
         case 'payroll-reports': renderPayrollReportsView(); break;
         case 'roles-permissions': renderRolesPermissionsView(); break;
@@ -8472,7 +8484,7 @@
     async function renderOrgSettingsView() {
       const container = document.getElementById('mainContainer');
       try {
-        const [entRes, barcodeSettings] = await Promise.all([
+        const [entRes, barcodeSettings, payrollSettings] = await Promise.all([
           apiFetch('/v1/subscriptions/entitlement').catch(() => ({
             planCode: 'GROWTH',
             status: 'ACTIVE',
@@ -8491,6 +8503,15 @@
             incrementOnDuplicate: true,
             unknownBarcodeAction: 'PROMPT',
             defaultScanMode: 'HARDWARE'
+          })),
+          apiFetch('/v1/org/payroll-settings').catch(() => ({
+            defaultProrationRule: 'CALENDAR_DAYS',
+            allowanceProrationPolicy: 'PRORATE_ALL',
+            gpsAttendanceEnabled: false,
+            geofenceRadiusMeters: 200,
+            workplaceLatitude: null,
+            workplaceLongitude: null,
+            overtimeHourlyMultiplier: '1.50'
           }))
         ]);
 
@@ -8723,6 +8744,94 @@
               <button class="btn btn-primary" id="btnSaveBarcodeSettingsBottom" onclick="saveTenantBarcodeSettings()">Save Barcode Settings</button>
             </div>
           </div>
+
+          <!-- HRM, Attendance & Payroll Settings (Phase 7.1) -->
+          <div style="margin-top: 28px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
+              <div>
+                <h2 style="font-size: 18px; font-weight: 700; color: var(--text-primary); margin: 0;">Payroll, Attendance &amp; Proration Policy (Phase 7.1)</h2>
+                <div style="font-size: 13px; color: var(--text-secondary); margin-top: 2px;">
+                  Configure statutory salary proration rules (BUG-051), allowance policies, and GPS geofenced attendance verification.
+                </div>
+              </div>
+              <button class="btn btn-primary" id="btnSavePayrollSettings" onclick="saveOrgPayrollSettings()">Save Payroll Settings</button>
+            </div>
+
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px;">
+              <!-- Proration & Allowances Policy Card -->
+              <div class="card" style="margin: 0;">
+                <div class="card-title">
+                  <span>Salary Proration Rules (BUG-051)</span>
+                  <span class="badge-pill badge-green">Proration Engine</span>
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Default Proration Mode *</label>
+                  <select class="form-select" id="settingProrationMode">
+                    <option value="CALENDAR_DAYS" ${payrollSettings?.defaultProrationRule === 'CALENDAR_DAYS' ? 'selected' : ''}>Calendar Days Based (Standard)</option>
+                    <option value="SCHEDULED_WORKING_DAYS" ${payrollSettings?.defaultProrationRule === 'SCHEDULED_WORKING_DAYS' ? 'selected' : ''}>Scheduled Working Days (Shift-based)</option>
+                    <option value="FIXED_30_DAYS" ${payrollSettings?.defaultProrationRule === 'FIXED_30_DAYS' ? 'selected' : ''}>Fixed 30-Day Commercial Month</option>
+                  </select>
+                  <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">
+                    Determines divisor and multiplier when employees join mid-cycle or take unpaid leave.
+                  </div>
+                </div>
+
+                <div class="form-group">
+                  <label class="form-label">Allowance Proration Policy *</label>
+                  <select class="form-select" id="settingAllowancePolicy">
+                    <option value="PRORATE_ALL" ${payrollSettings?.allowanceProrationPolicy === 'PRORATE_ALL' ? 'selected' : ''}>Prorate All Eligible Allowances</option>
+                    <option value="BASIC_ONLY" ${payrollSettings?.allowanceProrationPolicy === 'BASIC_ONLY' ? 'selected' : ''}>Prorate Basic Salary Only (Allowances Full)</option>
+                  </select>
+                </div>
+
+                <div class="form-group">
+                  <label class="form-label">Overtime Hourly Multiplier</label>
+                  <input type="number" step="0.1" class="form-input" id="settingOtMultiplier" value="${payrollSettings?.overtimeHourlyMultiplier || '1.50'}">
+                </div>
+              </div>
+
+              <!-- GPS Geofence Attendance Card -->
+              <div class="card" style="margin: 0;">
+                <div class="card-title">
+                  <span>GPS Geofenced Timekeeping</span>
+                  <span class="badge-pill badge-blue">Location Verification</span>
+                </div>
+
+                <div class="switch-group" style="margin-bottom: 14px;">
+                  <label class="modern-switch">
+                    <input type="checkbox" id="settingGpsAttendance" ${payrollSettings?.gpsAttendanceEnabled ? 'checked' : ''}>
+                    <span class="modern-slider"></span>
+                  </label>
+                  <div style="flex: 1;">
+                    <div style="font-weight: 600; font-size: 13px;">Require GPS Verification on Check-in</div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">
+                      Rejects check-in attempts outside workplace coordinates radius.
+                    </div>
+                  </div>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                  <div class="form-group">
+                    <label class="form-label">Workplace Latitude</label>
+                    <input type="number" step="0.000001" class="form-input" id="settingWorkplaceLat" value="${payrollSettings?.workplaceLatitude ?? ''}" placeholder="e.g. 6.927079">
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label">Workplace Longitude</label>
+                    <input type="number" step="0.000001" class="form-input" id="settingWorkplaceLon" value="${payrollSettings?.workplaceLongitude ?? ''}" placeholder="e.g. 79.861244">
+                  </div>
+                </div>
+
+                <div class="form-group">
+                  <label class="form-label">Allowed Geofence Radius (Meters)</label>
+                  <input type="number" class="form-input" id="settingGeofenceRadius" value="${payrollSettings?.geofenceRadiusMeters ?? 200}" placeholder="200">
+                </div>
+              </div>
+            </div>
+
+            <div style="margin-top: 16px; display: flex; justify-content: flex-end;">
+              <button class="btn btn-primary" id="btnSavePayrollSettingsBottom" onclick="saveOrgPayrollSettings()">Save Payroll Settings</button>
+            </div>
+          </div>
         `;
       } catch (err) {
         container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load settings: ${err.message}</div>`;
@@ -8768,6 +8877,55 @@
           if (b) {
             b.disabled = false;
             b.textContent = 'Save Barcode Settings';
+          }
+        });
+      }
+    }
+
+    async function saveOrgPayrollSettings() {
+      const btn1 = document.getElementById('btnSavePayrollSettings');
+      const btn2 = document.getElementById('btnSavePayrollSettingsBottom');
+      [btn1, btn2].forEach(b => {
+        if (b) {
+          b.disabled = true;
+          b.innerText = 'Saving...';
+        }
+      });
+
+      const prorationRule = document.getElementById('settingProrationMode')?.value;
+      const allowancePolicy = document.getElementById('settingAllowancePolicy')?.value;
+      const otMultiplier = document.getElementById('settingOtMultiplier')?.value || '1.50';
+      const gpsEnabled = document.getElementById('settingGpsAttendance')?.checked ?? false;
+      const latVal = document.getElementById('settingWorkplaceLat')?.value.trim();
+      const lonVal = document.getElementById('settingWorkplaceLon')?.value.trim();
+      const radiusVal = document.getElementById('settingGeofenceRadius')?.value.trim();
+
+      const workplaceLatitude = latVal ? parseFloat(latVal) : null;
+      const workplaceLongitude = lonVal ? parseFloat(lonVal) : null;
+      const geofenceRadiusMeters = radiusVal ? parseInt(radiusVal, 10) : 200;
+
+      try {
+        await apiFetch('/v1/org/payroll-settings', {
+          method: 'PATCH',
+          body: JSON.stringify({
+            defaultProrationRule: prorationRule,
+            allowanceProrationPolicy: allowancePolicy,
+            overtimeHourlyMultiplier: otMultiplier,
+            gpsAttendanceEnabled: gpsEnabled,
+            workplaceLatitude,
+            workplaceLongitude,
+            geofenceRadiusMeters
+          })
+        });
+
+        showToast('Payroll & attendance settings saved successfully', 'success');
+      } catch (err) {
+        showToast(err.message || 'Failed to save settings', 'error');
+      } finally {
+        [btn1, btn2].forEach(b => {
+          if (b) {
+            b.disabled = false;
+            b.innerText = 'Save Payroll Settings';
           }
         });
       }
@@ -10532,6 +10690,33 @@
                 <input type="text" class="form-input" id="newEmpEpf" placeholder="EPF / Social Security #">
               </div>
             </div>
+
+            <!-- Residential Address Section (BUG-049) -->
+            <div style="margin-top: 10px; margin-bottom: 4px; font-weight: 600; font-size: 13px; color: var(--text-secondary); border-top: 1px solid var(--border-subtle); padding-top: 12px;">
+              RESIDENTIAL ADDRESS
+            </div>
+            <div class="form-group">
+              <label class="form-label">Address Line 1 *</label>
+              <input type="text" class="form-input" id="newEmpAddress1" placeholder="Street Address, House/Building #" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Address Line 2</label>
+              <input type="text" class="form-input" id="newEmpAddress2" placeholder="Apartment, suite, unit (optional)">
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 14px;">
+              <div class="form-group">
+                <label class="form-label">City</label>
+                <input type="text" class="form-input" id="newEmpCity" placeholder="City">
+              </div>
+              <div class="form-group">
+                <label class="form-label">District / State</label>
+                <input type="text" class="form-input" id="newEmpDistrict" placeholder="District / State">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Postal Code</label>
+                <input type="text" class="form-input" id="newEmpPostalCode" placeholder="Postal Code">
+              </div>
+            </div>
           `,
           footerHtml: `
             <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
@@ -10568,9 +10753,17 @@
       const bankName = document.getElementById('newEmpBankName').value.trim() || undefined;
       const bankAccount = document.getElementById('newEmpBankAccount').value.trim() || undefined;
       const epfNumber = document.getElementById('newEmpEpf').value.trim() || undefined;
+      const address1 = document.getElementById('newEmpAddress1')?.value.trim() || '';
+      const address2 = document.getElementById('newEmpAddress2')?.value.trim() || undefined;
+      const city = document.getElementById('newEmpCity')?.value.trim() || undefined;
+      const district = document.getElementById('newEmpDistrict')?.value.trim() || undefined;
+      const postalCode = document.getElementById('newEmpPostalCode')?.value.trim() || undefined;
 
       if (!code || !firstName || !lastName || !designation || !department || !joinedDate) {
         return showToast('Please fill in all required fields marked with *', 'error');
+      }
+      if (!address1) {
+        return showToast('Address Line 1 is required *', 'error');
       }
 
       try {
@@ -10597,7 +10790,12 @@
           primaryWarehouseId: warehouseId,
           bankName,
           bankAccountNumber: bankAccount,
-          epfNumber
+          epfNumber,
+          addressLine1: address1,
+          addressLine2: address2,
+          city,
+          district,
+          postalCode
         };
 
         await apiFetch('/v1/employees', {
@@ -10755,9 +10953,31 @@
               </div>
             </div>
 
+            <!-- Residential Address Section (BUG-049) -->
+            <div style="margin-top: 10px; margin-bottom: 4px; font-weight: 600; font-size: 13px; color: var(--text-secondary); border-top: 1px solid var(--border-subtle); padding-top: 12px;">
+              RESIDENTIAL ADDRESS
+            </div>
             <div class="form-group">
-              <label class="form-label">Address Line 1</label>
-              <input type="text" class="form-input" id="editEmpAddress" value="${escapeHtml(emp.addressLine1 || '')}">
+              <label class="form-label">Address Line 1 *</label>
+              <input type="text" class="form-input" id="editEmpAddress" value="${escapeHtml(emp.addressLine1 || '')}" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Address Line 2</label>
+              <input type="text" class="form-input" id="editEmpAddress2" value="${escapeHtml(emp.addressLine2 || '')}">
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 14px;">
+              <div class="form-group">
+                <label class="form-label">City</label>
+                <input type="text" class="form-input" id="editEmpCity" value="${escapeHtml(emp.city || '')}">
+              </div>
+              <div class="form-group">
+                <label class="form-label">District / State</label>
+                <input type="text" class="form-input" id="editEmpDistrict" value="${escapeHtml(emp.district || '')}">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Postal Code</label>
+                <input type="text" class="form-input" id="editEmpPostalCode" value="${escapeHtml(emp.postalCode || '')}">
+              </div>
             </div>
 
             <div class="form-group">
@@ -10795,10 +11015,17 @@
       const bankAccount = document.getElementById('editEmpBankAccount').value.trim() || null;
       const epfNumber = document.getElementById('editEmpEpf').value.trim() || null;
       const address = document.getElementById('editEmpAddress').value.trim() || null;
+      const address2 = document.getElementById('editEmpAddress2')?.value.trim() || null;
+      const city = document.getElementById('editEmpCity')?.value.trim() || null;
+      const district = document.getElementById('editEmpDistrict')?.value.trim() || null;
+      const postalCode = document.getElementById('editEmpPostalCode')?.value.trim() || null;
       const notes = document.getElementById('editEmpNotes').value.trim() || null;
 
       if (!code || !firstName || !lastName || !designation || !department) {
         return showToast('Please fill in all required fields marked with *', 'error');
+      }
+      if (!address) {
+        return showToast('Address Line 1 is required *', 'error');
       }
 
       try {
@@ -10829,6 +11056,10 @@
             bankAccountNumber: bankAccount,
             epfNumber,
             addressLine1: address,
+            addressLine2: address2,
+            city,
+            district,
+            postalCode,
             notes
           })
         });
@@ -10920,11 +11151,16 @@
       });
 
       try {
-        const profile = await apiFetch(`/v1/employees/${employeeId}/profile`);
+        const [profile, schedule] = await Promise.all([
+          apiFetch(`/v1/employees/${employeeId}/profile`),
+          apiFetch(`/v1/employees/${employeeId}/work-schedules/active`).catch(() => null)
+        ]);
         const emp = profile.employee;
         const salary = profile.activeSalaryStructure;
         const docs = profile.documents || [];
         const activity = profile.recentActivity || [];
+        const addressParts = [emp.addressLine1, emp.addressLine2, emp.city, emp.district, emp.postalCode].filter(Boolean);
+        const formattedAddress = addressParts.length > 0 ? addressParts.map(p => escapeHtml(p)).join(', ') : '—';
 
         openModal({
           title: `Employee Profile: ${emp.displayName}`,
@@ -10955,6 +11191,7 @@
             <!-- Profile Tabs (BUG-040: Horizontal Scrollable Tab Bar) -->
             <div style="display: flex; gap: 8px; border-bottom: 1px solid var(--border-subtle); margin-bottom: 16px; overflow-x: auto; -webkit-overflow-scrolling: touch; flex-wrap: nowrap; padding-bottom: 4px;" id="profileTabNav">
               <button class="btn btn-sm btn-secondary profile-tab-btn active" style="flex-shrink: 0; white-space: nowrap;" onclick="switchProfileTab('tabOverview')">Overview</button>
+              <button class="btn btn-sm btn-secondary profile-tab-btn" style="flex-shrink: 0; white-space: nowrap;" onclick="switchProfileTab('tabSchedule')">Work Schedule</button>
               <button class="btn btn-sm btn-secondary profile-tab-btn" style="flex-shrink: 0; white-space: nowrap;" onclick="switchProfileTab('tabSalary')">Compensation &amp; Salary</button>
               <button class="btn btn-sm btn-secondary profile-tab-btn" style="flex-shrink: 0; white-space: nowrap;" onclick="switchProfileTab('tabDocs')">Documents (${docs.length})</button>
               <button class="btn btn-sm btn-secondary profile-tab-btn" style="flex-shrink: 0; white-space: nowrap;" onclick="switchProfileTab('tabActivity')">Activity Log (${activity.length})</button>
@@ -10970,7 +11207,7 @@
                     <div><strong>Phone:</strong> ${escapeHtml(emp.phone || '—')}</div>
                     <div><strong>National ID:</strong> ${escapeHtml(emp.nationalId || '—')}</div>
                     <div><strong>Date of Birth:</strong> ${escapeHtml(emp.dateOfBirth || '—')}</div>
-                    <div><strong>Address:</strong> ${escapeHtml(emp.addressLine1 || '—')}</div>
+                    <div><strong>Address:</strong> ${formattedAddress}</div>
                   </div>
                 </div>
 
@@ -11016,6 +11253,57 @@
                   </div>
                 </div>
               </div>
+            </div>
+
+            <!-- TAB: WORK SCHEDULE -->
+            <div id="tabSchedule" class="profile-tab-content" style="display: none;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <div>
+                  <div style="font-size: 16px; font-weight: 600;">Individual Work Schedule</div>
+                  <div style="font-size: 12px; color: var(--text-secondary);">Configured shifts, weekly working days, and hours</div>
+                </div>
+                <button class="btn btn-primary btn-sm" onclick="openConfigureWorkScheduleModal('${emp.id}')">${schedule ? 'Update Schedule' : '+ Configure Schedule'}</button>
+              </div>
+
+              ${schedule ? `
+                <div class="card" style="margin-bottom: 16px; padding: 16px;">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                    <div>
+                      <div style="font-size: 12px; color: var(--text-secondary);">SHIFT CONFIGURATION</div>
+                      <div style="font-size: 18px; font-weight: 700; color: var(--accent-primary);">${escapeHtml(schedule.shiftName)} (${escapeHtml(schedule.shiftType)})</div>
+                    </div>
+                    <div>
+                      <span class="badge-pill badge-green">Effective from ${escapeHtml(schedule.effectiveFrom)}</span>
+                      <div style="font-size: 12px; color: var(--text-secondary); text-align: right; margin-top: 4px;">Times: <strong>${escapeHtml(schedule.shiftStartTime)} - ${escapeHtml(schedule.shiftEndTime)}</strong></div>
+                    </div>
+                  </div>
+
+                  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 14px; padding: 10px; background: var(--bg-primary); border-radius: 6px; font-size: 13px;">
+                    <div><strong>Shift Type:</strong> ${escapeHtml(schedule.shiftType)}</div>
+                    <div><strong>Break Duration:</strong> ${schedule.breakDurationMinutes} mins</div>
+                    <div><strong>Effective To:</strong> ${schedule.effectiveTo ? escapeHtml(schedule.effectiveTo) : 'Indefinite'}</div>
+                  </div>
+
+                  <div style="border-top: 1px solid var(--border-subtle); padding-top: 14px;">
+                    <div style="font-weight: 600; font-size: 13px; margin-bottom: 10px;">Weekly Working Days &amp; Off Days</div>
+                    <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                      <span class="badge-pill ${schedule.isMondayWorking ? 'badge-green' : 'badge-secondary'}" style="padding: 6px 12px;">Mon: ${schedule.isMondayWorking ? 'Working' : 'Off'}</span>
+                      <span class="badge-pill ${schedule.isTuesdayWorking ? 'badge-green' : 'badge-secondary'}" style="padding: 6px 12px;">Tue: ${schedule.isTuesdayWorking ? 'Working' : 'Off'}</span>
+                      <span class="badge-pill ${schedule.isWednesdayWorking ? 'badge-green' : 'badge-secondary'}" style="padding: 6px 12px;">Wed: ${schedule.isWednesdayWorking ? 'Working' : 'Off'}</span>
+                      <span class="badge-pill ${schedule.isThursdayWorking ? 'badge-green' : 'badge-secondary'}" style="padding: 6px 12px;">Thu: ${schedule.isThursdayWorking ? 'Working' : 'Off'}</span>
+                      <span class="badge-pill ${schedule.isFridayWorking ? 'badge-green' : 'badge-secondary'}" style="padding: 6px 12px;">Fri: ${schedule.isFridayWorking ? 'Working' : 'Off'}</span>
+                      <span class="badge-pill ${schedule.isSaturdayWorking ? 'badge-green' : 'badge-secondary'}" style="padding: 6px 12px;">Sat: ${schedule.isSaturdayWorking ? 'Working' : 'Off'}</span>
+                      <span class="badge-pill ${schedule.isSundayWorking ? 'badge-green' : 'badge-secondary'}" style="padding: 6px 12px;">Sun: ${schedule.isSundayWorking ? 'Working' : 'Off'}</span>
+                    </div>
+                  </div>
+                </div>
+              ` : `
+                <div class="empty-state-card" style="padding: 30px; text-align: center;">
+                  <div style="font-size: 14px; font-weight: 600; margin-bottom: 6px;">No Individual Schedule Configured</div>
+                  <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 12px;">This employee is currently using the default organization work week (Mon-Fri 09:00 - 18:00). Configure an individual schedule for customized shifts and days.</p>
+                  <button class="btn btn-primary btn-sm" onclick="openConfigureWorkScheduleModal('${emp.id}')">+ Configure Schedule Now</button>
+                </div>
+              `}
             </div>
 
             <!-- TAB 2: SALARY & COMPENSATION -->
@@ -11240,6 +11528,167 @@
         openEmployeeProfileModal(employeeId);
       } catch (err) {
         showToast(err.message || 'Failed to unlink user', 'error');
+      }
+    }
+
+    // --- 6.5 WORK SCHEDULE CONFIGURATION MODAL (PHASE 7.1) ---
+    async function openConfigureWorkScheduleModal(employeeId) {
+      openModal({
+        title: 'Configure Work Schedule',
+        maxWidth: '580px',
+        bodyHtml: '<div style="padding: 40px; text-align: center;"><div class="spinner-sm" style="display:inline-block; margin-bottom: 8px;"></div><div>Loading schedule details...</div></div>'
+      });
+
+      try {
+        const schedule = await apiFetch(`/v1/employees/${employeeId}/work-schedules/active`).catch(() => null);
+        const todayStr = new Date().toISOString().substring(0, 10);
+
+        openModal({
+          title: 'Configure Work Schedule',
+          maxWidth: '580px',
+          bodyHtml: `
+            <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 14px;">
+              Assign a customized shift, hours, and working days for this employee.
+            </div>
+
+            <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 14px;">
+              <div class="form-group">
+                <label class="form-label">Shift Name *</label>
+                <input type="text" class="form-input" id="schedShiftName" value="${escapeHtml(schedule?.shiftName || 'Standard Day Shift')}" required>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Shift Type *</label>
+                <select class="form-select" id="schedShiftType">
+                  <option value="DAY" ${schedule?.shiftType === 'DAY' || !schedule ? 'selected' : ''}>Day Shift</option>
+                  <option value="NIGHT" ${schedule?.shiftType === 'NIGHT' ? 'selected' : ''}>Night Shift</option>
+                  <option value="ROTATING" ${schedule?.shiftType === 'ROTATING' ? 'selected' : ''}>Rotating</option>
+                </select>
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px;">
+              <div class="form-group">
+                <label class="form-label">Shift Start *</label>
+                <input type="time" class="form-input" id="schedStartTime" value="${(schedule?.shiftStartTime || '09:00:00').substring(0, 5)}" required>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Shift End *</label>
+                <input type="time" class="form-input" id="schedEndTime" value="${(schedule?.shiftEndTime || '18:00:00').substring(0, 5)}" required>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Break (Mins)</label>
+                <input type="number" class="form-input" id="schedBreakMins" value="${schedule?.breakDurationMinutes ?? 60}" min="0" max="360">
+              </div>
+            </div>
+
+            <div style="margin-top: 6px; margin-bottom: 10px;">
+              <label class="form-label" style="margin-bottom: 6px;">Weekly Working Days</label>
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); gap: 8px;">
+                <label style="display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer;">
+                  <input type="checkbox" id="schedMon" ${schedule ? (schedule.isMondayWorking ? 'checked' : '') : 'checked'}> Mon
+                </label>
+                <label style="display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer;">
+                  <input type="checkbox" id="schedTue" ${schedule ? (schedule.isTuesdayWorking ? 'checked' : '') : 'checked'}> Tue
+                </label>
+                <label style="display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer;">
+                  <input type="checkbox" id="schedWed" ${schedule ? (schedule.isWednesdayWorking ? 'checked' : '') : 'checked'}> Wed
+                </label>
+                <label style="display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer;">
+                  <input type="checkbox" id="schedThu" ${schedule ? (schedule.isThursdayWorking ? 'checked' : '') : 'checked'}> Thu
+                </label>
+                <label style="display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer;">
+                  <input type="checkbox" id="schedFri" ${schedule ? (schedule.isFridayWorking ? 'checked' : '') : 'checked'}> Fri
+                </label>
+                <label style="display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer;">
+                  <input type="checkbox" id="schedSat" ${schedule?.isSaturdayWorking ? 'checked' : ''}> Sat
+                </label>
+                <label style="display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer;">
+                  <input type="checkbox" id="schedSun" ${schedule?.isSundayWorking ? 'checked' : ''}> Sun
+                </label>
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 10px;">
+              <div class="form-group">
+                <label class="form-label">Effective From *</label>
+                <input type="date" class="form-input" id="schedEffectiveFrom" value="${schedule?.effectiveFrom || todayStr}" required>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Effective To</label>
+                <input type="date" class="form-input" id="schedEffectiveTo" value="${schedule?.effectiveTo || ''}">
+              </div>
+            </div>
+          `,
+          footerHtml: `
+            <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+            <button class="btn btn-primary" id="btnSaveSchedule" onclick="submitConfigureWorkSchedule('${employeeId}')">Save Schedule</button>
+          `
+        });
+      } catch (err) {
+        showToast(err.message || 'Failed to load schedule', 'error');
+      }
+    }
+
+    async function submitConfigureWorkSchedule(employeeId) {
+      const btn = document.getElementById('btnSaveSchedule');
+      const shiftName = document.getElementById('schedShiftName')?.value.trim();
+      const shiftType = document.getElementById('schedShiftType')?.value;
+      let shiftStartTime = document.getElementById('schedStartTime')?.value.trim();
+      let shiftEndTime = document.getElementById('schedEndTime')?.value.trim();
+      const breakDurationMinutes = parseInt(document.getElementById('schedBreakMins')?.value || '60', 10);
+      const isMondayWorking = document.getElementById('schedMon')?.checked ?? true;
+      const isTuesdayWorking = document.getElementById('schedTue')?.checked ?? true;
+      const isWednesdayWorking = document.getElementById('schedWed')?.checked ?? true;
+      const isThursdayWorking = document.getElementById('schedThu')?.checked ?? true;
+      const isFridayWorking = document.getElementById('schedFri')?.checked ?? true;
+      const isSaturdayWorking = document.getElementById('schedSat')?.checked ?? false;
+      const isSundayWorking = document.getElementById('schedSun')?.checked ?? false;
+      const effectiveFrom = document.getElementById('schedEffectiveFrom')?.value;
+      const effectiveTo = document.getElementById('schedEffectiveTo')?.value || undefined;
+
+      if (!shiftName || !shiftStartTime || !shiftEndTime || !effectiveFrom) {
+        return showToast('Please complete all required schedule fields', 'error');
+      }
+
+      if (shiftStartTime.length === 5) shiftStartTime += ':00';
+      if (shiftEndTime.length === 5) shiftEndTime += ':00';
+
+      try {
+        if (btn) {
+          btn.disabled = true;
+          btn.innerText = 'Saving...';
+        }
+
+        await apiFetch(`/v1/employees/${employeeId}/work-schedules`, {
+          method: 'POST',
+          body: JSON.stringify({
+            shiftName,
+            shiftType,
+            shiftStartTime,
+            shiftEndTime,
+            breakDurationMinutes,
+            isMondayWorking,
+            isTuesdayWorking,
+            isWednesdayWorking,
+            isThursdayWorking,
+            isFridayWorking,
+            isSaturdayWorking,
+            isSundayWorking,
+            effectiveFrom,
+            effectiveTo
+          })
+        });
+
+        showToast('Work schedule configured successfully', 'success');
+        closeModal();
+        openEmployeeProfileModal(employeeId);
+      } catch (err) {
+        showToast(err.message || 'Failed to save schedule', 'error');
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerText = 'Save Schedule';
+        }
       }
     }
 
@@ -11686,6 +12135,701 @@
       }
     }
 
+    // =========================================================================
+    // 8.5 ATTENDANCE & TIME TRACKING VIEW (PHASE 7.1)
+    // =========================================================================
+    async function renderAttendanceView() {
+      const container = document.getElementById('mainContainer');
+      container.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-secondary);"><div class="spinner-sm" style="display:inline-block; margin-bottom: 8px;"></div><div>Loading attendance records...</div></div>';
+
+      try {
+        const todayStr = state._attendanceSelectedDate || new Date().toISOString().substring(0, 10);
+        state._attendanceSelectedDate = todayStr;
+
+        const [recordsRes, orgSettings, employeesRes] = await Promise.all([
+          apiFetch(`/v1/attendance/records?date=${encodeURIComponent(todayStr)}&limit=100`).catch(() => ({ items: [] })),
+          apiFetch('/v1/org/payroll-settings').catch(() => null),
+          state.cachedEmployees?.length ? Promise.resolve(state.cachedEmployees) : apiFetch('/v1/employees?limit=100').catch(() => [])
+        ]);
+
+        const records = Array.isArray(recordsRes) ? recordsRes : (recordsRes.items || []);
+        state.cachedAttendanceRecords = records;
+        if (Array.isArray(employeesRes) && employeesRes.length > 0) {
+          state.cachedEmployees = employeesRes;
+        }
+
+        const presentCount = records.filter(r => ['PRESENT', 'HALF_DAY', 'LATE'].includes(r.status)).length;
+        const absentCount = records.filter(r => r.status === 'ABSENT').length;
+        const leaveCount = records.filter(r => r.status === 'ON_LEAVE').length;
+
+        container.innerHTML = `
+          <div class="view-header">
+            <div>
+              <h1 class="view-title">Attendance &amp; Time Tracking</h1>
+              <div class="view-subtitle">Clock-in, clock-out, GPS verification, and staff timekeeping</div>
+            </div>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+              <button class="btn btn-secondary" onclick="openOrgHolidaysModal()">Holiday Calendar</button>
+              <button class="btn btn-secondary" onclick="openManualAttendanceModal()">+ Record Manual Entry</button>
+            </div>
+          </div>
+
+          <!-- Self-Service Clock In / Out Banner -->
+          <div class="card" style="margin-bottom: 16px; padding: 16px 20px; background: linear-gradient(135deg, var(--surface-card) 0%, var(--bg-primary) 100%);">
+            <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 16px;">
+              <div>
+                <div style="font-size: 12px; font-weight: 600; color: var(--text-secondary); letter-spacing: 0.5px;">STAFF ATTENDANCE SELF-SERVICE</div>
+                <div style="font-size: 20px; font-weight: 700; color: var(--text-primary); margin-top: 2px;">
+                  <span id="attendanceLiveTime">${new Date().toLocaleTimeString()}</span> &bull; <span style="font-size: 14px; color: var(--text-secondary);">${todayStr}</span>
+                </div>
+                <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">
+                  ${orgSettings?.gpsAttendanceEnabled
+                    ? '<span class="badge-pill badge-blue" style="font-size: 11px;">GPS Geofence Enabled</span> Location coordinates captured upon check-in.'
+                    : '<span class="badge-pill badge-secondary" style="font-size: 11px;">Standard Clock-in</span> No location restriction.'}
+                </div>
+              </div>
+              <div style="display: flex; gap: 10px;">
+                <button class="btn btn-primary" id="btnSelfCheckIn" onclick="clockInSelf(this)" style="padding: 10px 20px; font-weight: 600;">
+                  Check In
+                </button>
+                <button class="btn btn-secondary" id="btnSelfCheckOut" onclick="clockOutSelf(this)" style="padding: 10px 20px; font-weight: 600;">
+                  Check Out
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Metrics and Date Filter -->
+          <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 16px;">
+            <div class="kpi-grid" style="grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); flex: 1; margin-bottom: 0;">
+              <div class="kpi-card" style="padding: 10px 14px;">
+                <div class="kpi-label">Present Today</div>
+                <div class="kpi-value" style="color: var(--status-success); font-size: 20px;">${presentCount}</div>
+              </div>
+              <div class="kpi-card" style="padding: 10px 14px;">
+                <div class="kpi-label">On Leave</div>
+                <div class="kpi-value" style="color: var(--status-warning); font-size: 20px;">${leaveCount}</div>
+              </div>
+              <div class="kpi-card" style="padding: 10px 14px;">
+                <div class="kpi-label">Absent</div>
+                <div class="kpi-value" style="color: var(--status-danger); font-size: 20px;">${absentCount}</div>
+              </div>
+            </div>
+
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <label class="form-label" style="margin-bottom: 0; white-space: nowrap;">Date:</label>
+              <input type="date" class="form-input form-input-sm" id="attendanceDateFilter" value="${todayStr}" onchange="changeAttendanceDate(this.value)" style="width: 160px;">
+            </div>
+          </div>
+
+          <!-- Records Table -->
+          <div class="card">
+            ${records.length === 0 ? `
+              <div class="empty-state-card" style="padding: 40px; text-align: center;">
+                <div style="font-size: 40px; margin-bottom: 12px;">⏱️</div>
+                <div class="empty-state-title" style="font-size: 18px; font-weight: 600; margin-bottom: 6px;">No Attendance Records for ${todayStr}</div>
+                <p class="empty-state-desc" style="color: var(--text-secondary); margin-bottom: 16px;">Employees can check in using the button above, or a manager can record manual attendance.</p>
+                <button class="btn btn-primary" onclick="openManualAttendanceModal()">+ Record Manual Entry</button>
+              </div>
+            ` : `
+              <div class="desktop-table-container">
+                <div class="table-responsive">
+                  <table class="data-table">
+                    <thead>
+                      <tr>
+                        <th>Employee</th>
+                        <th>Date</th>
+                        <th>Check-in</th>
+                        <th>Check-out</th>
+                        <th>Hours</th>
+                        <th>Status</th>
+                        <th>Verification</th>
+                        <th style="text-align: right;">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${records.map(r => {
+                        const checkInStr = r.checkInTime ? new Date(r.checkInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—';
+                        const checkOutStr = r.checkOutTime ? new Date(r.checkOutTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—';
+                        const hours = r.totalHoursWorked ? `${parseFloat(r.totalHoursWorked).toFixed(1)} hrs` : '—';
+
+                        let statusBadge = '<span class="badge-pill badge-green">Present</span>';
+                        if (r.status === 'LATE') statusBadge = '<span class="badge-pill badge-yellow">Late</span>';
+                        else if (r.status === 'HALF_DAY') statusBadge = '<span class="badge-pill badge-blue">Half Day</span>';
+                        else if (r.status === 'ON_LEAVE') statusBadge = '<span class="badge-pill badge-secondary">On Leave</span>';
+                        else if (r.status === 'ABSENT') statusBadge = '<span class="badge-pill badge-red">Absent</span>';
+
+                        return `
+                          <tr>
+                            <td>
+                              <strong>${escapeHtml(r.employeeName || 'Staff')}</strong>
+                              <div style="font-size: 11px; color: var(--text-secondary); font-family: monospace;">${escapeHtml(r.employeeCode || '')}</div>
+                            </td>
+                            <td>${escapeHtml(r.attendanceDate)}</td>
+                            <td><strong>${checkInStr}</strong></td>
+                            <td><strong>${checkOutStr}</strong></td>
+                            <td>${hours}</td>
+                            <td>${statusBadge}</td>
+                            <td>
+                              <div style="display: flex; gap: 4px; flex-wrap: wrap;">
+                                ${r.gpsVerified ? '<span class="badge-pill badge-green" style="font-size: 10px;">GPS Verified</span>' : ''}
+                                ${r.isManualEntry ? '<span class="badge-pill badge-yellow" style="font-size: 10px;">Manual</span>' : ''}
+                                ${!r.gpsVerified && !r.isManualEntry ? '<span class="badge-pill badge-secondary" style="font-size: 10px;">Standard</span>' : ''}
+                              </div>
+                            </td>
+                            <td style="text-align: right;">
+                              <button class="btn btn-secondary btn-sm" onclick="openManualAttendanceModal('${r.id}')">Adjust</button>
+                            </td>
+                          </tr>
+                        `;
+                      }).join('')}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            `}
+          </div>
+        `;
+      } catch (err) {
+        container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load attendance: ${err.message}</div>`;
+      }
+    }
+
+    function changeAttendanceDate(val) {
+      state._attendanceSelectedDate = val;
+      renderAttendanceView();
+    }
+
+    async function clockInSelf(btn) {
+      if (btn) { btn.disabled = true; btn.innerText = 'Checking in...'; }
+
+      const doCheckIn = async (coords = null) => {
+        try {
+          const body = coords ? { latitude: coords.latitude, longitude: coords.longitude } : {};
+          await apiFetch('/v1/attendance/check-in', {
+            method: 'POST',
+            body: JSON.stringify(body)
+          });
+          showToast('Checked in successfully!', 'success');
+          renderAttendanceView();
+        } catch (err) {
+          showToast(err.message || 'Check-in failed', 'error');
+        } finally {
+          if (btn) { btn.disabled = false; btn.innerText = 'Check In'; }
+        }
+      };
+
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          pos => doCheckIn(pos.coords),
+          _err => doCheckIn(null),
+          { timeout: 5000, enableHighAccuracy: true }
+        );
+      } else {
+        doCheckIn(null);
+      }
+    }
+
+    async function clockOutSelf(btn) {
+      if (btn) { btn.disabled = true; btn.innerText = 'Checking out...'; }
+      try {
+        await apiFetch('/v1/attendance/check-out', {
+          method: 'POST',
+          body: JSON.stringify({})
+        });
+        showToast('Checked out successfully!', 'success');
+        renderAttendanceView();
+      } catch (err) {
+        showToast(err.message || 'Check-out failed', 'error');
+      } finally {
+        if (btn) { btn.disabled = false; btn.innerText = 'Check Out'; }
+      }
+    }
+
+    async function openManualAttendanceModal(existingRecordId = null) {
+      if (!state.cachedEmployees || state.cachedEmployees.length === 0) {
+        state.cachedEmployees = await apiFetch('/v1/employees?limit=100').catch(() => []);
+      }
+      const existing = existingRecordId
+        ? (state.cachedAttendanceRecords || []).find(r => r.id === existingRecordId)
+        : null;
+
+      const employees = state.cachedEmployees || [];
+      const todayStr = state._attendanceSelectedDate || new Date().toISOString().substring(0, 10);
+
+      openModal({
+        title: existing ? 'Adjust Attendance Entry' : 'Record Manual Attendance',
+        maxWidth: '540px',
+        bodyHtml: `
+          <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 14px;">
+            ${existing ? 'Modify attendance times and record the administrative justification.' : 'Add a manual attendance entry for an employee.'}
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Employee *</label>
+            <select class="form-select" id="manualEmpId" ${existing ? 'disabled' : ''}>
+              ${employees.map(e => `<option value="${e.id}" ${existing && existing.employeeId === e.id ? 'selected' : ''}>${escapeHtml(e.displayName)} (${escapeHtml(e.employeeCode)})</option>`).join('')}
+            </select>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+            <div class="form-group">
+              <label class="form-label">Attendance Date *</label>
+              <input type="date" class="form-input" id="manualAttendDate" value="${existing ? existing.attendanceDate : todayStr}" ${existing ? 'disabled' : ''} required>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Status *</label>
+              <select class="form-select" id="manualStatus">
+                <option value="PRESENT" ${existing?.status === 'PRESENT' || !existing ? 'selected' : ''}>Present</option>
+                <option value="LATE" ${existing?.status === 'LATE' ? 'selected' : ''}>Late</option>
+                <option value="HALF_DAY" ${existing?.status === 'HALF_DAY' ? 'selected' : ''}>Half Day</option>
+                <option value="ABSENT" ${existing?.status === 'ABSENT' ? 'selected' : ''}>Absent</option>
+                <option value="ON_LEAVE" ${existing?.status === 'ON_LEAVE' ? 'selected' : ''}>On Leave</option>
+              </select>
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+            <div class="form-group">
+              <label class="form-label">Check-in Time</label>
+              <input type="time" class="form-input" id="manualCheckIn" value="${existing?.checkInTime ? new Date(existing.checkInTime).toTimeString().substring(0, 5) : '09:00'}">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Check-out Time</label>
+              <input type="time" class="form-input" id="manualCheckOut" value="${existing?.checkOutTime ? new Date(existing.checkOutTime).toTimeString().substring(0, 5) : '18:00'}">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Adjustment Reason *</label>
+            <textarea class="form-textarea" id="manualReason" placeholder="e.g. Card scanner malfunction, supervisor confirmed arrival" rows="2" required>${escapeHtml(existing?.adjustmentReason || '')}</textarea>
+          </div>
+        `,
+        footerHtml: `
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-primary" id="btnSubmitManualAttend" onclick="submitManualAttendance('${existingRecordId || ''}')">Save Attendance</button>
+        `
+      });
+    }
+
+    async function submitManualAttendance(existingRecordId = null) {
+      const btn = document.getElementById('btnSubmitManualAttend');
+      const employeeId = document.getElementById('manualEmpId')?.value;
+      const attendanceDate = document.getElementById('manualAttendDate')?.value;
+      const status = document.getElementById('manualStatus')?.value;
+      const checkIn = document.getElementById('manualCheckIn')?.value;
+      const checkOut = document.getElementById('manualCheckOut')?.value;
+      const adjustmentReason = document.getElementById('manualReason')?.value.trim();
+
+      if (!adjustmentReason) {
+        return showToast('Adjustment reason is mandatory for manual records', 'error');
+      }
+
+      const checkInTime = checkIn ? `${attendanceDate}T${checkIn}:00.000Z` : undefined;
+      const checkOutTime = checkOut ? `${attendanceDate}T${checkOut}:00.000Z` : undefined;
+
+      try {
+        if (btn) { btn.disabled = true; btn.innerText = 'Saving...'; }
+
+        await apiFetch('/v1/attendance/manual', {
+          method: 'POST',
+          body: JSON.stringify({
+            employeeId,
+            attendanceDate,
+            status,
+            checkInTime,
+            checkOutTime,
+            adjustmentReason
+          })
+        });
+
+        showToast('Manual attendance recorded successfully', 'success');
+        closeModal();
+        renderAttendanceView();
+      } catch (err) {
+        showToast(err.message || 'Failed to record attendance', 'error');
+      } finally {
+        if (btn) { btn.disabled = false; btn.innerText = 'Save Attendance'; }
+      }
+    }
+
+    // =========================================================================
+    // 8.6 LEAVE MANAGEMENT VIEW (PHASE 7.1)
+    // =========================================================================
+    async function renderLeavesView() {
+      const container = document.getElementById('mainContainer');
+      container.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-secondary);"><div class="spinner-sm" style="display:inline-block; margin-bottom: 8px;"></div><div>Loading leave requests...</div></div>';
+
+      try {
+        const filterStatus = state._leavesSelectedStatus || '';
+        let queryUrl = '/v1/leaves/requests?limit=100';
+        if (filterStatus) queryUrl += `&status=${encodeURIComponent(filterStatus)}`;
+
+        const [requestsRes, employeesRes] = await Promise.all([
+          apiFetch(queryUrl).catch(() => ({ items: [] })),
+          state.cachedEmployees?.length ? Promise.resolve(state.cachedEmployees) : apiFetch('/v1/employees?limit=100').catch(() => [])
+        ]);
+
+        const requests = Array.isArray(requestsRes) ? requestsRes : (requestsRes.items || []);
+        state.cachedLeaveRequests = requests;
+        if (Array.isArray(employeesRes) && employeesRes.length > 0) {
+          state.cachedEmployees = employeesRes;
+        }
+
+        const pendingCount = requests.filter(r => r.status === 'PENDING').length;
+        const approvedCount = requests.filter(r => r.status === 'APPROVED').length;
+        const rejectedCount = requests.filter(r => r.status === 'REJECTED').length;
+
+        container.innerHTML = `
+          <div class="view-header">
+            <div>
+              <h1 class="view-title">Leave Management</h1>
+              <div class="view-subtitle">Apply for leave, track balances, and approve time-off applications</div>
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <button class="btn btn-primary" onclick="openCreateLeaveModal()">+ Apply for Leave</button>
+            </div>
+          </div>
+
+          <!-- KPI Cards -->
+          <div class="kpi-grid" style="grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); margin-bottom: 16px;">
+            <div class="kpi-card">
+              <div class="kpi-label">Pending Approval</div>
+              <div class="kpi-value" style="color: var(--accent-primary);">${pendingCount}</div>
+              <div class="kpi-trend">Requires manager review</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Approved Applications</div>
+              <div class="kpi-value" style="color: var(--status-success);">${approvedCount}</div>
+              <div class="kpi-trend">Active / Past approvals</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Rejected / Cancelled</div>
+              <div class="kpi-value" style="color: var(--status-danger);">${rejectedCount}</div>
+              <div class="kpi-trend">Disallowed requests</div>
+            </div>
+          </div>
+
+          <!-- Filter Bar -->
+          <div class="card" style="margin-bottom: 16px; padding: 12px 18px;">
+            <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+              <button class="btn btn-sm ${!filterStatus ? 'btn-primary' : 'btn-secondary'}" onclick="setLeaveStatusFilter('')">All Requests</button>
+              <button class="btn btn-sm ${filterStatus === 'PENDING' ? 'btn-primary' : 'btn-secondary'}" onclick="setLeaveStatusFilter('PENDING')">Pending</button>
+              <button class="btn btn-sm ${filterStatus === 'APPROVED' ? 'btn-primary' : 'btn-secondary'}" onclick="setLeaveStatusFilter('APPROVED')">Approved</button>
+              <button class="btn btn-sm ${filterStatus === 'REJECTED' ? 'btn-primary' : 'btn-secondary'}" onclick="setLeaveStatusFilter('REJECTED')">Rejected</button>
+            </div>
+          </div>
+
+          <!-- Leave Requests Table -->
+          <div class="card">
+            ${requests.length === 0 ? `
+              <div class="empty-state-card" style="padding: 40px; text-align: center;">
+                <div style="font-size: 40px; margin-bottom: 12px;">🏖️</div>
+                <div class="empty-state-title" style="font-size: 18px; font-weight: 600; margin-bottom: 6px;">No Leave Requests Found</div>
+                <p class="empty-state-desc" style="color: var(--text-secondary); margin-bottom: 16px;">Employees can submit annual, casual, sick, or no-pay leave applications.</p>
+                <button class="btn btn-primary" onclick="openCreateLeaveModal()">+ Apply for Leave</button>
+              </div>
+            ` : `
+              <div class="desktop-table-container">
+                <div class="table-responsive">
+                  <table class="data-table">
+                    <thead>
+                      <tr>
+                        <th>Employee</th>
+                        <th>Type</th>
+                        <th>Dates</th>
+                        <th>Days</th>
+                        <th>Reason</th>
+                        <th>Status</th>
+                        <th>Reviewer Info</th>
+                        <th style="text-align: right;">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${requests.map(req => {
+                        let statusBadge = '<span class="badge-pill badge-yellow">Pending</span>';
+                        if (req.status === 'APPROVED') statusBadge = '<span class="badge-pill badge-green">Approved</span>';
+                        else if (req.status === 'REJECTED') statusBadge = '<span class="badge-pill badge-red">Rejected</span>';
+                        else if (req.status === 'CANCELLED') statusBadge = '<span class="badge-pill badge-secondary">Cancelled</span>';
+
+                        const isPending = req.status === 'PENDING';
+
+                        return `
+                          <tr>
+                            <td>
+                              <strong>${escapeHtml(req.employeeName || 'Staff')}</strong>
+                              <div style="font-size: 11px; color: var(--text-secondary); font-family: monospace;">${escapeHtml(req.employeeCode || '')}</div>
+                            </td>
+                            <td><span class="badge-pill badge-blue">${escapeHtml(req.leaveType)}</span></td>
+                            <td>${escapeHtml(req.startDate)} to ${escapeHtml(req.endDate)}</td>
+                            <td><strong>${req.daysCount}</strong> ${req.isHalfDay ? '<span style="font-size: 10px; color: var(--accent-primary);">(Half Day)</span>' : ''}</td>
+                            <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(req.reason)}</td>
+                            <td>${statusBadge}</td>
+                            <td>
+                              ${req.reviewerNotes ? `<div style="font-size: 11px; color: var(--text-secondary);">${escapeHtml(req.reviewerNotes)}</div>` : '—'}
+                            </td>
+                            <td style="text-align: right;">
+                              <div style="display: inline-flex; gap: 4px;">
+                                ${isPending ? `
+                                  <button class="btn btn-primary btn-sm" onclick="reviewLeaveAction('${req.id}', 'APPROVED')">Approve</button>
+                                  <button class="btn btn-secondary btn-sm" style="color: var(--status-danger);" onclick="reviewLeaveAction('${req.id}', 'REJECTED')">Reject</button>
+                                ` : ''}
+                              </div>
+                            </td>
+                          </tr>
+                        `;
+                      }).join('')}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            `}
+          </div>
+        `;
+      } catch (err) {
+        container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load leaves: ${err.message}</div>`;
+      }
+    }
+
+    function setLeaveStatusFilter(val) {
+      state._leavesSelectedStatus = val;
+      renderLeavesView();
+    }
+
+    async function openCreateLeaveModal() {
+      if (!state.cachedEmployees || state.cachedEmployees.length === 0) {
+        state.cachedEmployees = await apiFetch('/v1/employees?limit=100').catch(() => []);
+      }
+      const employees = state.cachedEmployees || [];
+      const todayStr = new Date().toISOString().substring(0, 10);
+
+      openModal({
+        title: 'Apply for Leave',
+        maxWidth: '540px',
+        bodyHtml: `
+          <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 14px;">
+            Submit an employee leave request. Leaves deduct from entitlement balances or calculate as no-pay.
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Employee *</label>
+            <select class="form-select" id="newLeaveEmpId">
+              ${employees.map(e => `<option value="${e.id}">${escapeHtml(e.displayName)} (${escapeHtml(e.employeeCode)})</option>`).join('')}
+            </select>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+            <div class="form-group">
+              <label class="form-label">Leave Type *</label>
+              <select class="form-select" id="newLeaveType">
+                <option value="ANNUAL">Annual Leave</option>
+                <option value="CASUAL">Casual Leave</option>
+                <option value="SICK">Sick Leave</option>
+                <option value="NO_PAY">No-Pay Leave (Unpaid)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Days Count *</label>
+              <input type="number" class="form-input" id="newLeaveDays" value="1" step="0.5" min="0.5" max="365" required>
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+            <div class="form-group">
+              <label class="form-label">Start Date *</label>
+              <input type="date" class="form-input" id="newLeaveStart" value="${todayStr}" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label">End Date *</label>
+              <input type="date" class="form-input" id="newLeaveEnd" value="${todayStr}" required>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+              <input type="checkbox" id="newLeaveIsHalfDay"> Half-Day Leave
+            </label>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Reason *</label>
+            <textarea class="form-textarea" id="newLeaveReason" placeholder="State reason for leave request..." rows="2" required></textarea>
+          </div>
+        `,
+        footerHtml: `
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-primary" id="btnSubmitLeave" onclick="submitCreateLeave()">Submit Request</button>
+        `
+      });
+    }
+
+    async function submitCreateLeave() {
+      const btn = document.getElementById('btnSubmitLeave');
+      const employeeId = document.getElementById('newLeaveEmpId')?.value;
+      const leaveType = document.getElementById('newLeaveType')?.value;
+      const daysCount = parseFloat(document.getElementById('newLeaveDays')?.value || '1');
+      const startDate = document.getElementById('newLeaveStart')?.value;
+      const endDate = document.getElementById('newLeaveEnd')?.value;
+      const isHalfDay = document.getElementById('newLeaveIsHalfDay')?.checked ?? false;
+      const halfDaySession = isHalfDay ? 'HALF_DAY_MORNING' : undefined;
+      const reason = document.getElementById('newLeaveReason')?.value.trim();
+
+      if (!employeeId || !startDate || !endDate || !reason) {
+        return showToast('Please complete all required fields', 'error');
+      }
+
+      try {
+        if (btn) { btn.disabled = true; btn.innerText = 'Submitting...'; }
+
+        await apiFetch('/v1/leaves/requests', {
+          method: 'POST',
+          body: JSON.stringify({
+            employeeId,
+            leaveType,
+            startDate,
+            endDate,
+            daysCount,
+            isHalfDay,
+            halfDaySession,
+            reason
+          })
+        });
+
+        showToast('Leave request submitted successfully', 'success');
+        closeModal();
+        renderLeavesView();
+      } catch (err) {
+        showToast(err.message || 'Failed to submit leave', 'error');
+      } finally {
+        if (btn) { btn.disabled = false; btn.innerText = 'Submit Request'; }
+      }
+    }
+
+    async function reviewLeaveAction(requestId, status) {
+      const actionVerb = status === 'APPROVED' ? 'Approve' : 'Reject';
+      const reason = prompt(`Enter notes for ${actionVerb} (optional):`, '');
+      if (reason === null) return;
+
+      try {
+        await apiFetch(`/v1/leaves/requests/${requestId}/review`, {
+          method: 'POST',
+          body: JSON.stringify({
+            status,
+            reviewerNotes: reason || undefined
+          })
+        });
+        showToast(`Leave request ${status.toLowerCase()}`, 'success');
+        renderLeavesView();
+      } catch (err) {
+        showToast(err.message || 'Action failed', 'error');
+      }
+    }
+
+    // --- 8.7 HOLIDAYS CALENDAR MODAL (PHASE 7.1) ---
+    async function openOrgHolidaysModal() {
+      openModal({
+        title: 'Organization Holidays Calendar',
+        maxWidth: '560px',
+        bodyHtml: '<div style="padding: 40px; text-align: center;"><div class="spinner-sm" style="display:inline-block; margin-bottom: 8px;"></div><div>Loading holidays...</div></div>'
+      });
+
+      try {
+        const holidaysRes = await apiFetch('/v1/org/holidays').catch(() => []);
+        const holidays = Array.isArray(holidaysRes) ? holidaysRes : [];
+        const todayStr = new Date().toISOString().substring(0, 10);
+
+        openModal({
+          title: 'Organization Holidays Calendar',
+          maxWidth: '560px',
+          bodyHtml: `
+            <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 14px;">
+              Statutory and company paid holidays for payroll proration and attendance accounting.
+            </div>
+
+            <!-- Add Holiday Form -->
+            <div class="card" style="padding: 12px; margin-bottom: 14px; background: var(--bg-primary);">
+              <div style="font-weight: 600; font-size: 13px; margin-bottom: 8px;">+ Add New Holiday</div>
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 8px;">
+                <input type="date" class="form-input form-input-sm" id="newHolidayDate" value="${todayStr}">
+                <input type="text" class="form-input form-input-sm" id="newHolidayName" placeholder="Holiday Name (e.g. New Year)">
+              </div>
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <label style="display: flex; align-items: center; gap: 6px; font-size: 12px;">
+                  <input type="checkbox" id="newHolidayRecurring"> Annual Recurring
+                </label>
+                <button class="btn btn-primary btn-sm" onclick="submitCreateHoliday()">Add Holiday</button>
+              </div>
+            </div>
+
+            <!-- Holidays List -->
+            <div style="max-height: 280px; overflow-y: auto;">
+              ${holidays.length === 0 ? `
+                <div style="text-align: center; padding: 20px; color: var(--text-secondary); font-size: 13px;">No holidays configured for this organization.</div>
+              ` : `
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Name</th>
+                      <th>Recurring</th>
+                      <th style="text-align: right;">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${holidays.map(h => `
+                      <tr>
+                        <td><strong>${escapeHtml(h.holidayDate)}</strong></td>
+                        <td>${escapeHtml(h.holidayName)}</td>
+                        <td>${h.isRecurring ? '<span class="badge-pill badge-blue" style="font-size: 10px;">Yes</span>' : 'No'}</td>
+                        <td style="text-align: right;">
+                          <button class="btn btn-secondary btn-sm" style="color: var(--status-danger);" onclick="deleteHolidayAction('${h.id}')">Delete</button>
+                        </td>
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+              `}
+            </div>
+          `,
+          footerHtml: '<button class="btn btn-secondary" onclick="closeModal()">Close</button>'
+        });
+      } catch (err) {
+        showToast(err.message || 'Failed to load holidays', 'error');
+      }
+    }
+
+    async function submitCreateHoliday() {
+      const holidayDate = document.getElementById('newHolidayDate')?.value;
+      const holidayName = document.getElementById('newHolidayName')?.value.trim();
+      const isRecurring = document.getElementById('newHolidayRecurring')?.checked ?? false;
+
+      if (!holidayDate || !holidayName) {
+        return showToast('Date and holiday name are required', 'error');
+      }
+
+      try {
+        await apiFetch('/v1/org/holidays', {
+          method: 'POST',
+          body: JSON.stringify({ holidayDate, holidayName, isRecurring })
+        });
+        showToast('Holiday added', 'success');
+        openOrgHolidaysModal();
+      } catch (err) {
+        showToast(err.message || 'Failed to create holiday', 'error');
+      }
+    }
+
+    async function deleteHolidayAction(id) {
+      if (!confirm('Are you sure you want to remove this holiday?')) return;
+      try {
+        await apiFetch(`/v1/org/holidays/${id}`, { method: 'DELETE' });
+        showToast('Holiday removed', 'info');
+        openOrgHolidaysModal();
+      } catch (err) {
+        showToast(err.message || 'Failed to remove holiday', 'error');
+      }
+    }
+
     // --- 9. PAYROLL RUNS VIEW ---
     async function renderPayrollView() {
       const container = document.getElementById('mainContainer');
@@ -12104,6 +13248,89 @@
       }
     }
 
+    // --- 10.5 PRORATION & CALCULATION BREAKDOWN MODAL (PHASE 7.1) ---
+    function openProrationBreakdownModal(itemId) {
+      const item = (state._currentPayrollRunItems || []).find(i => i.id === itemId);
+      if (!item) return showToast('Item not found in current run', 'error');
+
+      const b = item.calculationBreakdown || {};
+      const prorationRule = b.prorationRule || 'CALENDAR_DAYS';
+      const factorPct = typeof b.prorationFactor === 'number' ? (b.prorationFactor * 100).toFixed(2) : '100.00';
+
+      openModal({
+        title: `Proration Breakdown: ${escapeHtml(item.employeeName)} (${escapeHtml(item.employeeCode)})`,
+        maxWidth: '620px',
+        bodyHtml: `
+          <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 14px;">
+            Auditable calculation details used to compute salary proration and time deductions for this pay period.
+          </div>
+
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-bottom: 16px;">
+            <div class="kpi-card" style="padding: 10px;">
+              <div class="kpi-label" style="font-size: 11px;">Proration Rule</div>
+              <div style="font-weight: 700; font-size: 13px; color: var(--accent-primary);">${escapeHtml(prorationRule)}</div>
+            </div>
+            <div class="kpi-card" style="padding: 10px;">
+              <div class="kpi-label" style="font-size: 11px;">Proration Factor</div>
+              <div style="font-weight: 700; font-size: 15px; color: var(--text-primary);">${factorPct}%</div>
+            </div>
+            <div class="kpi-card" style="padding: 10px;">
+              <div class="kpi-label" style="font-size: 11px;">Eligible Days</div>
+              <div style="font-weight: 700; font-size: 15px; color: var(--text-primary);">${b.eligibleDays ?? b.totalDays ?? '—'} / ${b.totalDays ?? '—'}</div>
+            </div>
+            <div class="kpi-card" style="padding: 10px;">
+              <div class="kpi-label" style="font-size: 11px;">Scheduled Shifts</div>
+              <div style="font-weight: 700; font-size: 15px; color: var(--text-primary);">${b.scheduledWorkingDays ?? '—'}</div>
+            </div>
+          </div>
+
+          <div class="card" style="padding: 12px 14px; margin-bottom: 14px; font-size: 13px;">
+            <div style="font-weight: 600; margin-bottom: 8px;">Attendance &amp; Leave Metrics</div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; line-height: 1.8;">
+              <div><strong>Actual Present Days:</strong> ${b.actualWorkingDays ?? '—'}</div>
+              <div><strong>Paid Leave Days:</strong> ${b.paidLeaveDays ?? 0}</div>
+              <div><strong>No-Pay Leave Days:</strong> ${b.unpaidLeaveDays ?? 0}</div>
+              <div><strong>Department:</strong> ${escapeHtml(item.department)}</div>
+            </div>
+          </div>
+
+          <div class="card" style="padding: 12px 14px; font-size: 13px;">
+            <div style="font-weight: 600; margin-bottom: 8px;">Earnings Comparison</div>
+            <div class="table-responsive">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Component</th>
+                    <th style="text-align: right;">Configured Full</th>
+                    <th style="text-align: right;">Calculated (Prorated)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><strong>Basic Salary</strong></td>
+                    <td style="text-align: right;">${formatTenantMoney(b.originalBasicSalary || item.basicSalary)}</td>
+                    <td style="text-align: right; color: var(--accent-primary); font-weight: 700;">${formatTenantMoney(b.proratedBasicSalary || item.basicSalary)}</td>
+                  </tr>
+                  <tr>
+                    <td><strong>Allowances Total</strong></td>
+                    <td style="text-align: right;">${formatTenantMoney(b.originalAllowances || item.allowancesTotal)}</td>
+                    <td style="text-align: right; color: var(--status-success); font-weight: 700;">${formatTenantMoney(b.proratedAllowances || item.allowancesTotal)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          ${b.details ? `
+            <div style="margin-top: 12px; font-size: 12px; color: var(--text-secondary); background: var(--bg-primary); padding: 8px 12px; border-radius: 6px;">
+              <strong>Calculation Details:</strong> ${escapeHtml(b.details)}
+            </div>
+          ` : ''}
+        `,
+        footerHtml: '<button class="btn btn-secondary" onclick="closeModal()">Close</button>'
+      });
+    }
+
     // --- 11. PAYROLL RUN DETAIL MODAL (BUG-039: Instant 0ms Modal Feedback) ---
     async function openPayrollRunDetailModal(runId) {
       const cached = (state.cachedPayrollRuns || []).find(r => r.id === runId);
@@ -12123,6 +13350,7 @@
         const run = await apiFetch(`/v1/payroll/runs/${runId}`);
         window._activePayrollRunCache = run;
         const items = run.items || [];
+        state._currentPayrollRunItems = items;
         const isDraft = run.status === 'DRAFT';
         const isApprovedOrPartial = ['APPROVED', 'PARTIALLY_PAID'].includes(run.status);
 
@@ -12232,6 +13460,7 @@
                             </td>
                             <td style="text-align: right;">
                               <div style="display: inline-flex; gap: 4px;">
+                                ${it.calculationBreakdown ? `<button class="btn btn-secondary btn-sm" onclick="openProrationBreakdownModal('${it.id}')" title="View Proration &amp; Calculation Breakdown">Breakdown</button>` : ''}
                                 ${isDraft ? `<button class="btn btn-secondary btn-sm" onclick="openAdjustPayrollItemModal('${run.id}', '${it.id}', this)" title="Adjust OT, Bonus & Commissions">Adjust</button>` : ''}
                                 ${isApprovedOrPartial && !isItemFullyPaid ? `<button class="btn btn-primary btn-sm" onclick="openRecordPayrollItemPaymentModal('${run.id}', '${it.id}')" title="Record Payment">Pay</button>` : ''}
                                 <button class="btn btn-secondary btn-sm" onclick="openPayslipModal('${run.id}', '${it.employeeId}', this)" title="Generate Payslip">Payslip</button>
@@ -12289,6 +13518,7 @@
                       </div>
 
                       <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                        ${it.calculationBreakdown ? `<button class="btn btn-secondary btn-sm" style="flex: 1;" onclick="openProrationBreakdownModal('${it.id}')" title="View Proration &amp; Calculation Breakdown">Breakdown</button>` : ''}
                         ${isDraft ? `<button class="btn btn-secondary btn-sm" style="flex: 1;" onclick="openAdjustPayrollItemModal('${run.id}', '${it.id}', this)" title="Adjust OT, Bonus & Commissions">Adjust</button>` : ''}
                         ${isApprovedOrPartial && !isItemFullyPaid ? `<button class="btn btn-primary btn-sm" style="flex: 1;" onclick="openRecordPayrollItemPaymentModal('${run.id}', '${it.id}')" title="Record Payment">Pay</button>` : ''}
                         <button class="btn btn-secondary btn-sm" style="flex: 1;" onclick="openPayslipModal('${run.id}', '${it.employeeId}', this)" title="Generate Payslip">Payslip</button>

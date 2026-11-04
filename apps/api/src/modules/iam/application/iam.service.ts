@@ -81,6 +81,19 @@ export type PermissionKey =
   | 'hrm:payroll:process'
   | 'hrm:payroll:approve'
   | 'hrm:payroll:pay'
+  | 'hrm:attendance:read'
+  | 'hrm:attendance:manage'
+  | 'hrm:attendance:self'
+  | 'hrm:leave:read'
+  | 'hrm:leave:manage'
+  | 'hrm:leave:approve'
+  | 'hrm:leave:self'
+  | 'hrm:schedule:read'
+  | 'hrm:schedule:manage'
+  | 'hrm:holiday:read'
+  | 'hrm:holiday:manage'
+  | 'hrm:settings:read'
+  | 'hrm:settings:manage'
   | 'exp:expense:read'
   | 'exp:expense:manage'
   | 'crm:credit:read'
@@ -160,6 +173,19 @@ export const PERMISSIONS_CATALOG: readonly PermissionItem[] = [
   { key: 'hrm:payroll:process', module: 'Payroll', action: 'Create', name: 'Process Payroll Runs', description: 'Initialize payroll cycles and compute gross-to-net pay.' },
   { key: 'hrm:payroll:approve', module: 'Payroll', action: 'Approve', name: 'Approve Payroll Runs', description: 'Lock payroll calculations for disbursement.' },
   { key: 'hrm:payroll:pay', module: 'Payroll', action: 'Manage', name: 'Disburse Payroll Payments', description: 'Record bank transfers, cheques, and cash disbursements.' },
+  { key: 'hrm:attendance:read', module: 'HRM', action: 'View', name: 'View Attendance Records', description: 'View organization-wide staff attendance ledgers and logs.' },
+  { key: 'hrm:attendance:manage', module: 'HRM', action: 'Manage', name: 'Manage Attendance', description: 'Record and correct employee attendance records manually.' },
+  { key: 'hrm:attendance:self', module: 'HRM', action: 'Create', name: 'Staff Attendance Check-In', description: 'Clock in and clock out for authenticated staff profile.' },
+  { key: 'hrm:leave:read', module: 'HRM', action: 'View', name: 'View Leave Requests', description: 'Browse submitted staff leave requests and leave balances.' },
+  { key: 'hrm:leave:manage', module: 'HRM', action: 'Manage', name: 'Manage Leave Requests', description: 'Submit leave directly on behalf of employees.' },
+  { key: 'hrm:leave:approve', module: 'HRM', action: 'Approve', name: 'Approve Leave Requests', description: 'Approve or reject employee leave applications.' },
+  { key: 'hrm:leave:self', module: 'HRM', action: 'Create', name: 'Staff Leave Self-Service', description: 'Submit leave applications and check personal leave balances.' },
+  { key: 'hrm:schedule:read', module: 'HRM', action: 'View', name: 'View Work Schedules', description: 'Inspect individual employee work schedules and shifts.' },
+  { key: 'hrm:schedule:manage', module: 'HRM', action: 'Manage', name: 'Manage Work Schedules', description: 'Configure weekly shifts and work days per employee.' },
+  { key: 'hrm:holiday:read', module: 'HRM', action: 'View', name: 'View Holiday Calendar', description: 'Inspect public and organization holiday dates.' },
+  { key: 'hrm:holiday:manage', module: 'HRM', action: 'Manage', name: 'Manage Holiday Calendar', description: 'Create and configure official holidays.' },
+  { key: 'hrm:settings:read', module: 'HRM', action: 'View', name: 'View Payroll & HR Settings', description: 'Inspect proration and GPS attendance policies.' },
+  { key: 'hrm:settings:manage', module: 'HRM', action: 'Manage', name: 'Manage Payroll & HR Settings', description: 'Configure salary proration rules and GPS geofence settings.' },
 
   // 17. Expenses
   { key: 'exp:expense:read', module: 'Expenses', action: 'View', name: 'View Expenses', description: 'Inspect operating expenses and vendor payout records.' },
@@ -266,6 +292,12 @@ export const SYSTEM_ROLE_DEFINITIONS: Readonly<
       'inv:count:approve',
       'inv:count:post',
       'hrm:employee:read',
+      'hrm:attendance:self',
+      'hrm:attendance:read',
+      'hrm:leave:self',
+      'hrm:leave:read',
+      'hrm:holiday:read',
+      'hrm:schedule:read',
       'exp:expense:read',
       'exp:expense:manage',
       'crm:credit:read',
@@ -291,6 +323,8 @@ export const SYSTEM_ROLE_DEFINITIONS: Readonly<
       'inv:batch:read',
       'inv:serial:read',
       'crm:credit:read',
+      'hrm:attendance:self',
+      'hrm:leave:self',
     ],
   },
   WAREHOUSE_CLERK: {
@@ -312,6 +346,8 @@ export const SYSTEM_ROLE_DEFINITIONS: Readonly<
       'inv:count:read',
       'inv:count:create',
       'inv:count:submit',
+      'hrm:attendance:self',
+      'hrm:leave:self',
     ],
   },
   PURCHASER: {
@@ -333,6 +369,8 @@ export const SYSTEM_ROLE_DEFINITIONS: Readonly<
       'inv:batch:manage',
       'inv:serial:read',
       'inv:costing:read',
+      'hrm:attendance:self',
+      'hrm:leave:self',
     ],
   },
   ACCOUNTANT: {
@@ -361,6 +399,12 @@ export const SYSTEM_ROLE_DEFINITIONS: Readonly<
       'inv:count:read',
       'inv:count:approve',
       'hrm:employee:read',
+      'hrm:attendance:self',
+      'hrm:attendance:read',
+      'hrm:leave:self',
+      'hrm:leave:read',
+      'hrm:holiday:read',
+      'hrm:schedule:read',
       'hrm:salary:read',
       'hrm:salary:manage',
       'hrm:payroll:read',

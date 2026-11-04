@@ -8,6 +8,7 @@ import type {
   PayrollRunResponse,
   PayrollRunStatus,
   PayslipResponse,
+  PreCalculationValidationResponse,
   RecordPayrollPaymentRequest,
   UpdatePayrollItemRequest,
 } from '@nexstock/contracts';
@@ -35,10 +36,21 @@ export interface ComponentSnapshotItem {
   readonly isStatutory: boolean;
 }
 
-function formatDate(d: Date | string | null): string {
+function formatDate(d: Date | string | null | undefined): string {
   if (!d) return '';
   if (typeof d === 'string') return d.substring(0, 10);
-  return d.toISOString().substring(0, 10);
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function parseUtcDate(dateStr: string): Date {
+  const parts = dateStr.substring(0, 10).split('-').map(Number);
+  const y = parts[0] ?? 1970;
+  const m = parts[1] ?? 1;
+  const d = parts[2] ?? 1;
+  return new Date(Date.UTC(y, m - 1, d));
 }
 
 function calculateComponentAmount(
@@ -67,6 +79,191 @@ function calculateComponentAmount(
   const amountScaled = divideAndRoundBigInt(product, divisor, 'HALF_EVEN');
 
   return Money.fromScaledUnits(amountScaled, currencyCode);
+}
+
+export async function validatePrePayrollRun(
+  trx: TenantTransactionContext,
+  input: CreatePayrollRunRequest,
+): Promise<PreCalculationValidationResponse> {
+  await assertAuthorized(trx, { permission: 'hrm:payroll:process' });
+
+  const issues: Array<{
+    type: string;
+    severity: 'ERROR' | 'WARNING';
+    employeeId?: string;
+    employeeCode?: string;
+    employeeName?: string;
+    message: string;
+  }> = [];
+
+  // Check if active run exists
+  const existingRun = await trx.db
+    .selectFrom('payroll_runs')
+    .select(['id', 'run_number'])
+    .where('tenant_id', '=', trx.tenantId)
+    .where('frequency', '=', input.frequency)
+    .where('period_start', '=', input.periodStart)
+    .where('period_end', '=', input.periodEnd)
+    .where('status', '!=', 'CANCELLED')
+    .executeTakeFirst();
+
+  if (existingRun) {
+    issues.push({
+      type: 'PAYROLL_RUN_EXISTS',
+      severity: 'ERROR',
+      message: `Active payroll run (${existingRun.run_number}) already exists for this period.`,
+    });
+  }
+
+  // Find eligible active employees
+  const eligibleEmployees = await trx.db
+    .selectFrom('employees')
+    .selectAll()
+    .where('tenant_id', '=', trx.tenantId)
+    .where('payroll_frequency', '=', input.frequency)
+    .where('employment_status', 'in', ['ACTIVE', 'PROBATION'])
+    .orderBy('employee_code', 'asc')
+    .execute();
+
+  if (eligibleEmployees.length === 0) {
+    issues.push({
+      type: 'NO_ELIGIBLE_EMPLOYEES',
+      severity: 'ERROR',
+      message: `No active or probation employees enrolled with ${input.frequency} payroll frequency.`,
+    });
+    return {
+      isValid: false,
+      canProceed: false,
+      issues,
+    };
+  }
+
+  const eligibleEmpIds = eligibleEmployees.map((e) => e.id);
+
+  // Check active salary structures
+  const activeStructures = await trx.db
+    .selectFrom('employee_salary_structures')
+    .selectAll()
+    .where('tenant_id', '=', trx.tenantId)
+    .where('employee_id', 'in', eligibleEmpIds)
+    .where('is_active', '=', true)
+    .execute();
+
+  const structureByEmployeeId = new Map(activeStructures.map((s) => [s.employee_id, s]));
+
+  // Check work schedules
+  const workSchedules = await trx.db
+    .selectFrom('employee_work_schedules')
+    .selectAll()
+    .where('tenant_id', '=', trx.tenantId)
+    .where('employee_id', 'in', eligibleEmpIds)
+    .where('is_active', '=', true)
+    .execute();
+
+  const scheduleByEmployeeId = new Map(workSchedules.map((ws) => [ws.employee_id, ws]));
+
+  // Check pending leave requests in period
+  const pendingLeaves = await trx.db
+    .selectFrom('employee_leave_requests')
+    .selectAll()
+    .where('tenant_id', '=', trx.tenantId)
+    .where('employee_id', 'in', eligibleEmpIds)
+    .where('status', '=', 'PENDING')
+    .where('start_date', '<=', input.periodEnd)
+    .where('end_date', '>=', input.periodStart)
+    .execute();
+
+  // Check incomplete attendances (check-in without check-out)
+  const incompleteAttendances = await trx.db
+    .selectFrom('employee_attendance')
+    .selectAll()
+    .where('tenant_id', '=', trx.tenantId)
+    .where('employee_id', 'in', eligibleEmpIds)
+    .where('attendance_date', '>=', input.periodStart)
+    .where('attendance_date', '<=', input.periodEnd)
+    .where('check_in_time', 'is not', null)
+    .where('check_out_time', 'is', null)
+    .execute();
+
+  for (const emp of eligibleEmployees) {
+    const joinedStr = typeof emp.joined_date === 'string' ? emp.joined_date.substring(0, 10) : emp.joined_date.toISOString().substring(0, 10);
+    const leavingStr = emp.leaving_date ? (typeof emp.leaving_date === 'string' ? emp.leaving_date.substring(0, 10) : emp.leaving_date.toISOString().substring(0, 10)) : null;
+
+    if (joinedStr > input.periodEnd) {
+      issues.push({
+        type: 'INVALID_EMPLOYMENT_DATES',
+        severity: 'ERROR',
+        employeeId: emp.id,
+        employeeCode: emp.employee_code,
+        employeeName: emp.display_name,
+        message: `Employee ${emp.employee_code} joined on ${joinedStr}, which is after period end ${input.periodEnd}.`,
+      });
+    }
+
+    if (leavingStr && leavingStr < input.periodStart) {
+      issues.push({
+        type: 'INVALID_EMPLOYMENT_DATES',
+        severity: 'ERROR',
+        employeeId: emp.id,
+        employeeCode: emp.employee_code,
+        employeeName: emp.display_name,
+        message: `Employee ${emp.employee_code} left on ${leavingStr}, which is before period start ${input.periodStart}.`,
+      });
+    }
+
+    if (!structureByEmployeeId.has(emp.id)) {
+      issues.push({
+        type: 'MISSING_SALARY_STRUCTURE',
+        severity: 'ERROR',
+        employeeId: emp.id,
+        employeeCode: emp.employee_code,
+        employeeName: emp.display_name,
+        message: `Employee ${emp.employee_code} (${emp.display_name}) has no active salary plan assigned.`,
+      });
+    }
+
+    if (!scheduleByEmployeeId.has(emp.id)) {
+      issues.push({
+        type: 'MISSING_WORK_SCHEDULE',
+        severity: 'WARNING',
+        employeeId: emp.id,
+        employeeCode: emp.employee_code,
+        employeeName: emp.display_name,
+        message: `Employee ${emp.employee_code} has no individual work schedule; default Mon-Fri workweek will be applied.`,
+      });
+    }
+
+    const empPending = pendingLeaves.filter((l) => l.employee_id === emp.id);
+    if (empPending.length > 0) {
+      issues.push({
+        type: 'PENDING_LEAVE_REQUESTS',
+        severity: 'WARNING',
+        employeeId: emp.id,
+        employeeCode: emp.employee_code,
+        employeeName: emp.display_name,
+        message: `Employee ${emp.employee_code} has ${empPending.length} pending leave request(s) within the period that should be reviewed.`,
+      });
+    }
+
+    const empIncomplete = incompleteAttendances.filter((a) => a.employee_id === emp.id);
+    if (empIncomplete.length > 0) {
+      issues.push({
+        type: 'INCOMPLETE_ATTENDANCE',
+        severity: 'WARNING',
+        employeeId: emp.id,
+        employeeCode: emp.employee_code,
+        employeeName: emp.display_name,
+        message: `Employee ${emp.employee_code} has ${empIncomplete.length} check-in(s) missing checkout during this period.`,
+      });
+    }
+  }
+
+  const hasErrors = issues.some((i) => i.severity === 'ERROR');
+  return {
+    isValid: issues.length === 0,
+    canProceed: !hasErrors,
+    issues,
+  };
 }
 
 export async function createPayrollRun(
@@ -131,10 +328,91 @@ export async function createPayrollRun(
     paid_amount: string;
     payment_status: PayrollPaymentStatus;
     components_snapshot: string;
+    calculation_breakdown: Record<string, unknown>;
     notes: string | null;
   }> = [];
 
   const eligibleEmpIds = eligibleEmployees.map((e) => e.id);
+
+  // Load organization payroll settings for proration & allowances
+  const orgSettings = await trx.db
+    .selectFrom('org_payroll_settings')
+    .selectAll()
+    .where('tenant_id', '=', trx.tenantId)
+    .executeTakeFirst();
+
+  const prorationMethod = orgSettings?.proration_method || 'CALENDAR_DAYS';
+  const allowancePolicy = orgSettings?.allowance_proration_policy || 'PRORATE';
+
+  // Load organization holidays in the period
+  const holidays = await trx.db
+    .selectFrom('org_holidays')
+    .selectAll()
+    .where('tenant_id', '=', trx.tenantId)
+    .where('holiday_date', '>=', input.periodStart)
+    .where('holiday_date', '<=', input.periodEnd)
+    .execute();
+
+  const holidayDates = new Set(
+    holidays.map((h) =>
+      typeof h.holiday_date === 'string'
+        ? h.holiday_date.substring(0, 10)
+        : h.holiday_date.toISOString().substring(0, 10),
+    ),
+  );
+
+  // Load active work schedules for eligible employees
+  const workSchedules =
+    eligibleEmpIds.length > 0
+      ? await trx.db
+          .selectFrom('employee_work_schedules')
+          .selectAll()
+          .where('tenant_id', '=', trx.tenantId)
+          .where('employee_id', 'in', eligibleEmpIds)
+          .where('is_active', '=', true)
+          .execute()
+      : [];
+
+  const scheduleByEmployeeId = new Map(
+    workSchedules.map((ws) => [ws.employee_id, ws]),
+  );
+
+  // Load attendance records for the period
+  const attendances =
+    eligibleEmpIds.length > 0
+      ? await trx.db
+          .selectFrom('employee_attendance')
+          .selectAll()
+          .where('tenant_id', '=', trx.tenantId)
+          .where('employee_id', 'in', eligibleEmpIds)
+          .where('attendance_date', '>=', input.periodStart)
+          .where('attendance_date', '<=', input.periodEnd)
+          .execute()
+      : [];
+
+  const attendanceByEmpAndDate = new Map<string, (typeof attendances)[number]>();
+  for (const a of attendances) {
+    const dStr =
+      typeof a.attendance_date === 'string'
+        ? a.attendance_date.substring(0, 10)
+        : a.attendance_date.toISOString().substring(0, 10);
+    attendanceByEmpAndDate.set(`${a.employee_id}_${dStr}`, a);
+  }
+
+  // Load approved leaves for the period
+  const approvedLeaves =
+    eligibleEmpIds.length > 0
+      ? await trx.db
+          .selectFrom('employee_leave_requests')
+          .selectAll()
+          .where('tenant_id', '=', trx.tenantId)
+          .where('employee_id', 'in', eligibleEmpIds)
+          .where('status', '=', 'APPROVED')
+          .where('start_date', '<=', input.periodEnd)
+          .where('end_date', '>=', input.periodStart)
+          .execute()
+      : [];
+
   const activeStructures =
     eligibleEmpIds.length > 0
       ? await trx.db
@@ -175,27 +453,176 @@ export async function createPayrollRun(
   for (const emp of eligibleEmployees) {
     const structure = structureByEmployeeId.get(emp.id);
 
+    const empJoinedStr = formatDate(emp.joined_date);
+    const empLeavingStr = emp.leaving_date ? formatDate(emp.leaving_date) : null;
+
+    const startUtc = parseUtcDate(input.periodStart);
+    const endUtc = parseUtcDate(input.periodEnd);
+    let totalCalendarDays = 0;
+    let totalScheduledWorkingDays = 0;
+    let eligibleEmploymentDays = 0;
+    let eligibleScheduledWorkingDays = 0;
+    let presentDays = 0;
+    let paidLeaveDays = 0;
+    let noPayLeaveDays = 0;
+    let publicHolidayDays = 0;
+    let weeklyOffDays = 0;
+    let halfDays = 0;
+    let absentDays = 0;
+    const warnings: string[] = [];
+
+    const empSchedule = scheduleByEmployeeId.get(emp.id);
+    if (!empSchedule) {
+      warnings.push('No individual work schedule configured; default Mon-Fri workweek assumed.');
+    }
+
+    for (
+      let cur = new Date(startUtc);
+      cur.getTime() <= endUtc.getTime();
+      cur.setUTCDate(cur.getUTCDate() + 1)
+    ) {
+      totalCalendarDays++;
+      const dStr = formatDate(cur);
+      const dayOfWeek = cur.getUTCDay(); // 0 = Sun, 1 = Mon, ..., 6 = Sat
+
+      let isWorkingDay = true;
+      if (empSchedule) {
+        if (dayOfWeek === 1) isWorkingDay = Boolean(empSchedule.monday_working);
+        else if (dayOfWeek === 2) isWorkingDay = Boolean(empSchedule.tuesday_working);
+        else if (dayOfWeek === 3) isWorkingDay = Boolean(empSchedule.wednesday_working);
+        else if (dayOfWeek === 4) isWorkingDay = Boolean(empSchedule.thursday_working);
+        else if (dayOfWeek === 5) isWorkingDay = Boolean(empSchedule.friday_working);
+        else if (dayOfWeek === 6) isWorkingDay = Boolean(empSchedule.saturday_working);
+        else if (dayOfWeek === 0) isWorkingDay = Boolean(empSchedule.sunday_working);
+      } else {
+        isWorkingDay = dayOfWeek >= 1 && dayOfWeek <= 5;
+      }
+
+      if (isWorkingDay) {
+        totalScheduledWorkingDays++;
+      } else {
+        weeklyOffDays++;
+      }
+
+      const isEmployed = dStr >= empJoinedStr && (!empLeavingStr || dStr <= empLeavingStr);
+      if (isEmployed) {
+        eligibleEmploymentDays++;
+        if (isWorkingDay) {
+          eligibleScheduledWorkingDays++;
+        }
+      }
+
+      const isHoliday = holidayDates.has(dStr);
+      if (isHoliday && isWorkingDay) {
+        publicHolidayDays++;
+      }
+
+      const att = attendanceByEmpAndDate.get(`${emp.id}_${dStr}`);
+      if (att) {
+        if (att.status === 'PRESENT' || att.status === 'LATE') presentDays++;
+        else if (att.status === 'HALF_DAY') halfDays++;
+        else if (att.status === 'PAID_LEAVE') paidLeaveDays++;
+        else if (att.status === 'NO_PAY_LEAVE') noPayLeaveDays++;
+        else if (att.status === 'ABSENT') absentDays++;
+      } else {
+        const matchingLeave = approvedLeaves.find(
+          (l) =>
+            l.employee_id === emp.id &&
+            (typeof l.start_date === 'string'
+              ? l.start_date.substring(0, 10)
+              : l.start_date.toISOString().substring(0, 10)) <= dStr &&
+            (typeof l.end_date === 'string'
+              ? l.end_date.substring(0, 10)
+              : l.end_date.toISOString().substring(0, 10)) >= dStr,
+        );
+        if (matchingLeave) {
+          if (matchingLeave.leave_type === 'NO_PAY') noPayLeaveDays++;
+          else paidLeaveDays++;
+        } else if (isEmployed && isWorkingDay && !isHoliday) {
+          presentDays++;
+        }
+      }
+    }
+
+    const isFullMonthEmployed =
+      empJoinedStr <= input.periodStart && (!empLeavingStr || empLeavingStr >= input.periodEnd);
+    const hasUnpaidLeaveOrAbsence = noPayLeaveDays > 0 || absentDays > 0 || halfDays > 0;
+
+    let prorationFactor = 1.0;
+    let payableUnits = totalCalendarDays;
+    let totalUnits = totalCalendarDays;
+
+    if (!isFullMonthEmployed || hasUnpaidLeaveOrAbsence) {
+      if (prorationMethod === 'WORKING_DAYS') {
+        totalUnits = totalScheduledWorkingDays;
+        payableUnits = Math.max(
+          0,
+          eligibleScheduledWorkingDays - noPayLeaveDays - 0.5 * halfDays - absentDays,
+        );
+        prorationFactor = totalUnits > 0 ? Math.min(1.0, payableUnits / totalUnits) : 1.0;
+      } else if (prorationMethod === 'FIXED_30_DAYS') {
+        totalUnits = 30;
+        payableUnits = Math.min(
+          30,
+          Math.max(0, eligibleEmploymentDays - noPayLeaveDays - 0.5 * halfDays - absentDays),
+        );
+        prorationFactor = Math.min(1.0, payableUnits / 30);
+      } else {
+        // CALENDAR_DAYS
+        totalUnits = totalCalendarDays;
+        payableUnits = Math.max(
+          0,
+          eligibleEmploymentDays - noPayLeaveDays - 0.5 * halfDays - absentDays,
+        );
+        prorationFactor = totalUnits > 0 ? Math.min(1.0, payableUnits / totalUnits) : 1.0;
+      }
+    }
+
     let basicMoney = Money.zero(input.currencyCode);
     let allowancesMoney = Money.zero(input.currencyCode);
     let deductionsMoney = Money.zero(input.currencyCode);
     const snapshot: ComponentSnapshotItem[] = [];
 
     if (structure) {
-      basicMoney = Money.fromDecimalString(
+      const fullBasicMoney = Money.fromDecimalString(
         structure.basic_salary,
         input.currencyCode,
       );
 
+      if (prorationFactor < 1.0) {
+        const factorScaled = BigInt(Math.round(prorationFactor * 100000000));
+        const proratedScaled = divideAndRoundBigInt(
+          fullBasicMoney.scaledUnits * factorScaled,
+          100000000n,
+          'HALF_EVEN',
+        );
+        basicMoney = Money.fromScaledUnits(proratedScaled, input.currencyCode);
+      } else {
+        basicMoney = fullBasicMoney;
+      }
+
       const components = componentsByStructureId.get(structure.id) ?? [];
 
       for (const comp of components) {
-        const compAmount = calculateComponentAmount(
+        let compAmount = calculateComponentAmount(
           basicMoney,
           comp,
           input.currencyCode,
         );
 
         if (comp.component_type === 'EARNING') {
+          const isFull =
+            (comp as { proration_rule?: string }).proration_rule === 'FULL' ||
+            allowancePolicy === 'FULL';
+          if (!isFull && prorationFactor < 1.0) {
+            const factorScaled = BigInt(Math.round(prorationFactor * 100000000));
+            const proratedCompScaled = divideAndRoundBigInt(
+              compAmount.scaledUnits * factorScaled,
+              100000000n,
+              'HALF_EVEN',
+            );
+            compAmount = Money.fromScaledUnits(proratedCompScaled, input.currencyCode);
+          }
           allowancesMoney = allowancesMoney.add(compAmount);
         } else {
           deductionsMoney = deductionsMoney.add(compAmount);
@@ -223,6 +650,36 @@ export async function createPayrollRun(
     totalDeductionsMoney = totalDeductionsMoney.add(deductionsMoney);
     totalNetMoney = totalNetMoney.add(netMoney);
 
+    const calculationBreakdown = {
+      basicSalary: structure ? structure.basic_salary : '0.0000',
+      allowances: allowancesMoney.toDecimalString(),
+      fullMonthlyGross: structure ? structure.basic_salary : '0.0000',
+      periodStart: input.periodStart,
+      periodEnd: input.periodEnd,
+      prorationMethod,
+      prorationMode: prorationMethod,
+      totalCalendarDays,
+      totalScheduledWorkingDays,
+      eligibleEmploymentDays,
+      presentDays,
+      paidLeaveDays,
+      noPayLeaveDays,
+      publicHolidayDays,
+      weeklyOffDays,
+      halfDays,
+      payableUnits: Number(payableUnits.toFixed(2)),
+      totalUnits,
+      prorationFactor: Number(prorationFactor.toFixed(6)),
+      originalBasicSalary: structure ? structure.basic_salary : '0.0000',
+      proratedBasicSalary: basicMoney.toDecimalString(),
+      proratedBasic: basicMoney.toDecimalString(),
+      proratedAllowances: allowancesMoney.toDecimalString(),
+      grossPay: grossMoney.toDecimalString(),
+      deductions: deductionsMoney.toDecimalString(),
+      netPay: netMoney.toDecimalString(),
+      warnings,
+    };
+
     runItemsToInsert.push({
       id: generateUuidV7(),
       tenant_id: trx.tenantId,
@@ -240,6 +697,7 @@ export async function createPayrollRun(
       paid_amount: Money.zero(input.currencyCode).toDecimalString(),
       payment_status: 'UNPAID',
       components_snapshot: JSON.stringify(snapshot),
+      calculation_breakdown: calculationBreakdown,
       notes: null,
     });
   }
@@ -289,6 +747,7 @@ export async function createPayrollRun(
           paid_amount: item.paid_amount,
           payment_status: item.payment_status,
           components_snapshot: item.components_snapshot as unknown as Record<string, unknown>,
+          calculation_breakdown: JSON.stringify(item.calculation_breakdown) as unknown as Record<string, unknown>,
           notes: item.notes,
         })),
       )
@@ -360,6 +819,7 @@ export async function getPayrollRunById(
       'payroll_items.paid_amount as paid_amount',
       'payroll_items.payment_status as payment_status',
       'payroll_items.components_snapshot as components_snapshot',
+      'payroll_items.calculation_breakdown as calculation_breakdown',
       'payroll_items.notes as notes',
     ])
     .where('payroll_items.tenant_id', '=', trx.tenantId)
@@ -377,6 +837,17 @@ export async function getPayrollRunById(
       }
     } else if (Array.isArray(i.components_snapshot)) {
       snapshotList = i.components_snapshot;
+    }
+
+    let breakdownObj: Record<string, unknown> | undefined;
+    if (typeof (i as unknown as { calculation_breakdown?: unknown }).calculation_breakdown === 'string') {
+      try {
+        breakdownObj = JSON.parse((i as unknown as { calculation_breakdown: string }).calculation_breakdown);
+      } catch {
+        breakdownObj = undefined;
+      }
+    } else if ((i as unknown as { calculation_breakdown?: unknown }).calculation_breakdown) {
+      breakdownObj = (i as unknown as { calculation_breakdown: Record<string, unknown> }).calculation_breakdown;
     }
 
     return {
@@ -426,6 +897,7 @@ export async function getPayrollRunById(
       ).toDecimalString(),
       paymentStatus: i.payment_status as PayrollPaymentStatus,
       componentsSnapshot: snapshotList,
+      calculationBreakdown: breakdownObj,
       notes: i.notes,
     };
   });
