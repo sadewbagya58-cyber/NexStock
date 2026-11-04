@@ -2181,5 +2181,124 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       expect(html).toContain('Department Cost Allocation');
       expect(html).toContain('Schedule Frequency Breakdown');
     });
+
+    it('BUG-045: verifies openCreateEmployeeModal robust button recovery and eliminates ReferenceError on triggerBtn', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // Verifies triggerBtn resolution with fallback
+      expect(html).toContain('const triggerBtn = (arguments && arguments[0]) || document.getElementById(\'btnOpenCreateEmployee\');');
+
+      // Verifies ReferenceError on btn is completely removed from openCreateEmployeeModal
+      const openCreateModalBody = html.substring(
+        html.indexOf('async function openCreateEmployeeModal()'),
+        html.indexOf('async function submitCreateEmployee()'),
+      );
+      expect(openCreateModalBody).not.toMatch(/finally\s*\{\s*if\s*\(\s*btn\s*\)/);
+      expect(openCreateModalBody).toContain('if (triggerBtn) {');
+      expect(openCreateModalBody).toContain('triggerBtn.disabled = false;');
+      expect(openCreateModalBody).toContain('triggerBtn.innerHTML = origHtml || \'+ Add Employee\';');
+      expect(openCreateModalBody).toContain('Unable to open employee creation form. Please try again.');
+    });
+
+    it('BUG-046: verifies submitPayrollRunAction and approvePayrollRunAction send explicit JSON payloads and apiFetch does not send Content-Type on bodyless requests', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // Verifies apiFetch only sets Content-Type when options.body is defined
+      expect(html).toContain("...(options.body !== undefined ? { 'Content-Type': 'application/json' } : {})");
+
+      // Verifies submitPayrollRunAction sends explicit JSON body
+      const submitActionBody = html.substring(
+        html.indexOf('async function submitPayrollRunAction'),
+        html.indexOf('async function approvePayrollRunAction'),
+      );
+      expect(submitActionBody).toContain("body: JSON.stringify({})");
+
+      // Verifies approvePayrollRunAction sends explicit JSON body
+      const approveActionBody = html.substring(
+        html.indexOf('async function approvePayrollRunAction'),
+        html.indexOf('async function cancelPayrollRunAction'),
+      );
+      expect(approveActionBody).toContain("body: JSON.stringify({})");
+    });
+
+    it('BUG-039: verifies immediate visual feedback, active cache utilization, and in-flight locks on Adjust and Payslip buttons', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // Cache active run for 0ms modal responsiveness
+      expect(html).toContain('window._activePayrollRunCache = run;');
+
+      // Adjust item modal uses cached run and provides button loading state
+      const adjustItemBody = html.substring(
+        html.indexOf('async function openAdjustPayrollItemModal'),
+        html.indexOf('async function submitAdjustPayrollItem'),
+      );
+      expect(adjustItemBody).toContain('window._activePayrollRunCache.id === runId');
+      expect(adjustItemBody).toContain("targetBtn.innerHTML = '<span class=\"spinner-sm\" style=\"display:inline-block; vertical-align:middle; margin-right:4px;\"></span> Loading...'");
+
+      // Payslip modal provides button loading state and immediate loading modal shell
+      const payslipBody = html.substring(
+        html.indexOf('async function openPayslipModal'),
+        html.indexOf('async function renderPayrollReportsView'),
+      );
+      expect(payslipBody).toContain("targetBtn.innerHTML = '<span class=\"spinner-sm\" style=\"display:inline-block; vertical-align:middle; margin-right:4px;\"></span> Loading...'");
+      expect(payslipBody).toContain("title: 'Generating Payslip...'");
+      expect(payslipBody).toContain('Generating employee payslip...');
+    });
+
+    it('BUG-042: verifies Payroll Run Detail responsive stats grid and mobile cards, and Payroll Reports Department & Frequency mobile cards', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // Run Detail Modal responsive stats grid
+      expect(html).toContain('class="payroll-run-stats-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr))');
+
+      // Run Detail Modal desktop container and mobile cards container for line items
+      const runDetailBody = html.substring(
+        html.indexOf('async function openPayrollRunDetailModal'),
+        html.indexOf('async function openAdjustPayrollItemModal'),
+      );
+      expect(runDetailBody).toContain('<div class="desktop-table-container">');
+      expect(runDetailBody).toContain('<div class="mobile-cards-container" style="max-height: 440px; overflow-y: auto;">');
+      expect(runDetailBody).toContain('<!-- Mobile Card View (BUG-042: Touch-Friendly Responsive Line Items) -->');
+
+      // Department Allocation desktop container and mobile cards
+      expect(html).toContain('<!-- Mobile Card View (BUG-042: Touch-Friendly Department Allocation Cards) -->');
+
+      // Schedule Frequency Breakdown desktop container and mobile cards
+      expect(html).toContain('<!-- Mobile Card View (BUG-042: Touch-Friendly Schedule Frequency Cards) -->');
+    });
+
+    it('BUG-047: verifies Payslip modal responsive layout, tabular-nums formatting, and strict 2-column print preservation', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // Responsive classes defined in CSS
+      expect(html).toContain('.payslip-details-grid {');
+      expect(html).toContain('.payslip-breakdown-grid {');
+      expect(html).toContain('.payslip-net-summary {');
+
+      // Mobile media query stacks into single column
+      expect(html).toContain('@media (max-width: 640px) {');
+      expect(html).toContain('.payslip-details-grid {\n        grid-template-columns: 1fr !important;');
+      expect(html).toContain('.payslip-breakdown-grid {\n        grid-template-columns: 1fr !important;');
+
+      // Print styles strictly preserve 2-column layout
+      expect(html).toContain('.payslip-details-grid {\n        display: grid !important;\n        grid-template-columns: 1fr 1fr !important;');
+      expect(html).toContain('.payslip-breakdown-grid {\n        display: grid !important;\n        grid-template-columns: 1fr 1fr !important;');
+      expect(html).toContain('.payslip-net-summary {\n        display: flex !important;\n        flex-direction: row !important;');
+
+      // Currency amounts have white-space nowrap and tabular-nums
+      const payslipBody = html.substring(
+        html.indexOf('async function openPayslipModal'),
+        html.indexOf('async function renderPayrollReportsView'),
+      );
+      expect(payslipBody).toContain('class="payslip-details-grid"');
+      expect(payslipBody).toContain('class="payslip-breakdown-grid"');
+      expect(payslipBody).toContain('class="payslip-net-summary"');
+      expect(payslipBody).toContain('style="white-space: nowrap; font-variant-numeric: tabular-nums;"');
+    });
   });
 });

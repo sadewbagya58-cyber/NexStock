@@ -855,9 +855,66 @@
         border: 1px solid #e5e7eb !important;
         color: #111827 !important;
       }
-      #printableReceipt, #printableBarcodeLabel, #payrollReportPrintArea {
+      #printableReceipt, #printableBarcodeLabel, #payrollReportPrintArea, #payslipPrintArea {
         page-break-inside: avoid !important;
         page-break-after: avoid !important;
+      }
+      .payslip-details-grid {
+        display: grid !important;
+        grid-template-columns: 1fr 1fr !important;
+      }
+      .payslip-breakdown-grid {
+        display: grid !important;
+        grid-template-columns: 1fr 1fr !important;
+      }
+      .payslip-net-summary {
+        display: flex !important;
+        flex-direction: row !important;
+        justify-content: space-between !important;
+        align-items: center !important;
+      }
+      #payslipPrintArea {
+        padding: 20px !important;
+        max-width: 680px !important;
+      }
+    }
+
+    /* Payslip Responsive & Print Layout (BUG-047) */
+    .payslip-details-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+    .payslip-breakdown-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+    .payslip-net-summary {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    @media (max-width: 640px) {
+      .payslip-details-grid {
+        grid-template-columns: 1fr !important;
+        gap: 10px !important;
+      }
+      .payslip-breakdown-grid {
+        grid-template-columns: 1fr !important;
+        gap: 12px !important;
+      }
+      .payslip-net-summary {
+        flex-direction: column !important;
+        align-items: flex-start !important;
+        gap: 10px !important;
+      }
+      .payslip-net-summary > div:last-child {
+        text-align: left !important;
+        width: 100% !important;
+      }
+      #payslipPrintArea {
+        padding: 12px 10px !important;
       }
     }
 
@@ -2448,7 +2505,7 @@
       }
 
       const headers = {
-        'Content-Type': 'application/json',
+        ...(options.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
         ...(state.tenantId ? { 'x-tenant-id': state.tenantId } : {}),
         ...(state.token ? { 'Authorization': `Bearer ${state.token}` } : {}),
         ...(options.headers || {})
@@ -9786,7 +9843,7 @@
               <div class="view-subtitle">Manage staff profiles, department structures, documents, and branch assignments</div>
             </div>
             <div style="display: flex; gap: 8px;">
-              <button class="btn btn-primary" id="btnOpenCreateEmployee" onclick="openCreateEmployeeModal()">+ Add Employee</button>
+              <button class="btn btn-primary" id="btnOpenCreateEmployee" onclick="openCreateEmployeeModal(this)">+ Add Employee</button>
             </div>
           </div>
 
@@ -9856,7 +9913,7 @@
                     ? 'No staff members match the selected filters. Try clearing your search parameters.'
                     : 'Start building your team by registering your first employee profile.'}
                 </p>
-                <button class="btn btn-primary" onclick="openCreateEmployeeModal()">+ Add First Employee</button>
+                <button class="btn btn-primary" onclick="openCreateEmployeeModal(this)">+ Add First Employee</button>
               </div>
             ` : `
               <div class="desktop-table-container">
@@ -10073,7 +10130,7 @@
     }
 
     async function openCreateEmployeeModal() {
-      const triggerBtn = arguments[0] || document.getElementById('btnOpenCreateEmployee');
+      const triggerBtn = (arguments && arguments[0]) || document.getElementById('btnOpenCreateEmployee');
       let origHtml = '';
       if (triggerBtn) {
         origHtml = triggerBtn.innerHTML;
@@ -10081,145 +10138,151 @@
         triggerBtn.innerHTML = '<span class="spinner-sm" style="display:inline-block; vertical-align:middle; margin-right:6px;"></span> Loading...';
       }
 
-      // Check if branches and warehouses are cached for 0ms instant display
-      let branches = window._employeeBranchesCache || [];
-      let warehouses = window._employeeWarehousesCache || [];
-
       try {
+        // Check if branches and warehouses are cached for 0ms instant display
+        let branches = window._employeeBranchesCache || [];
+        let warehouses = window._employeeWarehousesCache || [];
+
         if (!branches.length || !warehouses.length) {
-          const [bRes, wRes] = await Promise.all([
-            apiFetch('/v1/org/branches').catch(() => ({ items: [] })),
-            apiFetch('/v1/org/warehouses').catch(() => ({ items: [] }))
-          ]);
-          branches = bRes?.items || (Array.isArray(bRes) ? bRes : bRes?.data || []);
-          warehouses = wRes?.items || (Array.isArray(wRes) ? wRes : wRes?.data || []);
-          window._employeeBranchesCache = branches;
-          window._employeeWarehousesCache = warehouses;
+          try {
+            const [bRes, wRes] = await Promise.all([
+              apiFetch('/v1/org/branches').catch(() => ({ items: [] })),
+              apiFetch('/v1/org/warehouses').catch(() => ({ items: [] }))
+            ]);
+            branches = bRes?.items || (Array.isArray(bRes) ? bRes : bRes?.data || []);
+            warehouses = wRes?.items || (Array.isArray(wRes) ? wRes : wRes?.data || []);
+            window._employeeBranchesCache = branches;
+            window._employeeWarehousesCache = warehouses;
+          } catch (fetchErr) {
+            console.warn('Failed to load branches/warehouses:', fetchErr);
+          }
         }
+
+        openModal({
+          title: 'Add New Employee',
+          maxWidth: '680px',
+          bodyHtml: `
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px;">
+              <div class="form-group">
+                <label class="form-label">Employee Code *</label>
+                <input type="text" class="form-input" id="newEmpCode" placeholder="EMP-001" required>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Joined Date *</label>
+                <input type="date" class="form-input" id="newEmpJoinedDate" value="${new Date().toISOString().substring(0, 10)}" required>
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px;">
+              <div class="form-group">
+                <label class="form-label">First Name *</label>
+                <input type="text" class="form-input" id="newEmpFirstName" placeholder="Jane" required>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Last Name *</label>
+                <input type="text" class="form-input" id="newEmpLastName" placeholder="Doe" required>
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px;">
+              <div class="form-group">
+                <label class="form-label">Job Designation *</label>
+                <input type="text" class="form-input" id="newEmpDesignation" placeholder="Store Manager / Cashier" required>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Department *</label>
+                <input type="text" class="form-input" id="newEmpDepartment" placeholder="Retail Operations / Logistics" required>
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px;">
+              <div class="form-group">
+                <label class="form-label">Payroll Frequency *</label>
+                <select class="form-select" id="newEmpFrequency">
+                  <option value="MONTHLY" selected>Monthly Payroll</option>
+                  <option value="WEEKLY">Weekly Payroll</option>
+                  <option value="DAILY">Daily Payroll</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Employment Status *</label>
+                <select class="form-select" id="newEmpStatus">
+                  <option value="ACTIVE" selected>Active</option>
+                  <option value="PROBATION">Probation</option>
+                  <option value="INACTIVE">Inactive</option>
+                </select>
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px;">
+              <div class="form-group">
+                <label class="form-label">Email Address</label>
+                <input type="email" class="form-input" id="newEmpEmail" placeholder="jane.doe@company.com">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Phone Number</label>
+                <input type="text" class="form-input" id="newEmpPhone" placeholder="+1-555-0144">
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px;">
+              <div class="form-group">
+                <label class="form-label">National ID / Passport</label>
+                <input type="text" class="form-input" id="newEmpNationalId" placeholder="NIC / Passport #">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Date of Birth</label>
+                <input type="date" class="form-input" id="newEmpDob">
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px;">
+              <div class="form-group">
+                <label class="form-label">Primary Branch</label>
+                <select class="form-select" id="newEmpBranch" onchange="updateWarehouseOptions('newEmpBranch', 'newEmpWarehouse')">
+                  <option value="">Default Branch</option>
+                  ${branches.map(b => `<option value="${b.id}">${escapeHtml(b.name || b.code)}</option>`).join('')}
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Primary Warehouse</label>
+                <select class="form-select" id="newEmpWarehouse">
+                  <option value="">Default Warehouse (All)</option>
+                  ${warehouses.map(w => `<option value="${w.id}">${escapeHtml(w.name || w.code)}</option>`).join('')}
+                </select>
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px;">
+              <div class="form-group">
+                <label class="form-label">Bank Name</label>
+                <input type="text" class="form-input" id="newEmpBankName" placeholder="Bank Name">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Bank Account #</label>
+                <input type="text" class="form-input" id="newEmpBankAccount" placeholder="Account Number">
+              </div>
+              <div class="form-group">
+                <label class="form-label">EPF / Tax Number</label>
+                <input type="text" class="form-input" id="newEmpEpf" placeholder="EPF / Social Security #">
+              </div>
+            </div>
+          `,
+          footerHtml: `
+            <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+            <button class="btn btn-primary" id="btnSubmitCreateEmp" onclick="submitCreateEmployee()">Create Employee</button>
+          `
+        });
       } catch (err) {
-        console.warn('Failed to load branches/warehouses:', err);
+        console.error('Failed to open employee creation modal:', err);
+        showToast('Unable to open employee creation form. Please try again.', 'error');
       } finally {
-        if (btn) {
-          btn.disabled = false;
-          btn.innerHTML = origHtml || '+ Add Employee';
+        if (triggerBtn) {
+          triggerBtn.disabled = false;
+          triggerBtn.innerHTML = origHtml || '+ Add Employee';
         }
       }
-
-      openModal({
-        title: 'Add New Employee',
-        maxWidth: '680px',
-        bodyHtml: `
-          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px;">
-            <div class="form-group">
-              <label class="form-label">Employee Code *</label>
-              <input type="text" class="form-input" id="newEmpCode" placeholder="EMP-001" required>
-            </div>
-            <div class="form-group">
-              <label class="form-label">Joined Date *</label>
-              <input type="date" class="form-input" id="newEmpJoinedDate" value="${new Date().toISOString().substring(0, 10)}" required>
-            </div>
-          </div>
-
-          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px;">
-            <div class="form-group">
-              <label class="form-label">First Name *</label>
-              <input type="text" class="form-input" id="newEmpFirstName" placeholder="Jane" required>
-            </div>
-            <div class="form-group">
-              <label class="form-label">Last Name *</label>
-              <input type="text" class="form-input" id="newEmpLastName" placeholder="Doe" required>
-            </div>
-          </div>
-
-          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px;">
-            <div class="form-group">
-              <label class="form-label">Job Designation *</label>
-              <input type="text" class="form-input" id="newEmpDesignation" placeholder="Store Manager / Cashier" required>
-            </div>
-            <div class="form-group">
-              <label class="form-label">Department *</label>
-              <input type="text" class="form-input" id="newEmpDepartment" placeholder="Retail Operations / Logistics" required>
-            </div>
-          </div>
-
-          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px;">
-            <div class="form-group">
-              <label class="form-label">Payroll Frequency *</label>
-              <select class="form-select" id="newEmpFrequency">
-                <option value="MONTHLY" selected>Monthly Payroll</option>
-                <option value="WEEKLY">Weekly Payroll</option>
-                <option value="DAILY">Daily Payroll</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label class="form-label">Employment Status *</label>
-              <select class="form-select" id="newEmpStatus">
-                <option value="ACTIVE" selected>Active</option>
-                <option value="PROBATION">Probation</option>
-                <option value="INACTIVE">Inactive</option>
-              </select>
-            </div>
-          </div>
-
-          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px;">
-            <div class="form-group">
-              <label class="form-label">Email Address</label>
-              <input type="email" class="form-input" id="newEmpEmail" placeholder="jane.doe@company.com">
-            </div>
-            <div class="form-group">
-              <label class="form-label">Phone Number</label>
-              <input type="text" class="form-input" id="newEmpPhone" placeholder="+1-555-0144">
-            </div>
-          </div>
-
-          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px;">
-            <div class="form-group">
-              <label class="form-label">National ID / Passport</label>
-              <input type="text" class="form-input" id="newEmpNationalId" placeholder="NIC / Passport #">
-            </div>
-            <div class="form-group">
-              <label class="form-label">Date of Birth</label>
-              <input type="date" class="form-input" id="newEmpDob">
-            </div>
-          </div>
-
-          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px;">
-            <div class="form-group">
-              <label class="form-label">Primary Branch</label>
-              <select class="form-select" id="newEmpBranch" onchange="updateWarehouseOptions('newEmpBranch', 'newEmpWarehouse')">
-                <option value="">Default Branch</option>
-                ${branches.map(b => `<option value="${b.id}">${escapeHtml(b.name || b.code)}</option>`).join('')}
-              </select>
-            </div>
-            <div class="form-group">
-              <label class="form-label">Primary Warehouse</label>
-              <select class="form-select" id="newEmpWarehouse">
-                <option value="">Default Warehouse (All)</option>
-                ${warehouses.map(w => `<option value="${w.id}">${escapeHtml(w.name || w.code)}</option>`).join('')}
-              </select>
-            </div>
-          </div>
-
-          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px;">
-            <div class="form-group">
-              <label class="form-label">Bank Name</label>
-              <input type="text" class="form-input" id="newEmpBankName" placeholder="Bank Name">
-            </div>
-            <div class="form-group">
-              <label class="form-label">Bank Account #</label>
-              <input type="text" class="form-input" id="newEmpBankAccount" placeholder="Account Number">
-            </div>
-            <div class="form-group">
-              <label class="form-label">EPF / Tax Number</label>
-              <input type="text" class="form-input" id="newEmpEpf" placeholder="EPF / Social Security #">
-            </div>
-          </div>
-        `,
-        footerHtml: `
-          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-          <button class="btn btn-primary" id="btnSubmitCreateEmp" onclick="submitCreateEmployee()">Create Employee</button>
-        `
-      });
+    }
     }
 
     async function submitCreateEmployee() {
@@ -11794,6 +11857,7 @@
 
       try {
         const run = await apiFetch(`/v1/payroll/runs/${runId}`);
+        window._activePayrollRunCache = run;
         const items = run.items || [];
         const isDraft = run.status === 'DRAFT';
         const isApprovedOrPartial = ['APPROVED', 'PARTIALLY_PAID'].includes(run.status);
@@ -11802,40 +11866,40 @@
           title: `Payroll Run: ${run.runNumber}`,
           maxWidth: '880px',
           bodyHtml: `
-            <!-- Run Header Stats -->
-            <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; padding: 14px 18px; background: var(--bg-primary); border-radius: var(--radius); margin-bottom: 20px;">
-              <div>
+            <!-- Run Header Stats (BUG-042: Responsive Stats Grid) -->
+            <div style="display: flex; flex-direction: column; gap: 12px; padding: 14px 18px; background: var(--bg-primary); border-radius: var(--radius); margin-bottom: 20px;">
+              <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px;">
                 <div style="display: flex; align-items: center; gap: 8px;">
                   <span style="font-size: 16px; font-weight: 700;">${escapeHtml(run.runNumber)}</span>
                   ${getFrequencyBadgeHtml(run.frequency)}
                   ${getPayrollStatusBadgeHtml(run.status)}
                 </div>
-                <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">
-                  Period: <strong>${escapeHtml(run.periodStart)}</strong> to <strong>${escapeHtml(run.periodEnd)}</strong> &bull; Payment Date: <strong>${escapeHtml(run.paymentDate)}</strong>
+                <div style="font-size: 12px; color: var(--text-secondary);">
+                  Period: <strong>${escapeHtml(run.periodStart)}</strong> to <strong>${escapeHtml(run.periodEnd)}</strong> &bull; Payment: <strong>${escapeHtml(run.paymentDate)}</strong>
                 </div>
               </div>
 
-              <div style="display: flex; gap: 16px; text-align: right;">
-                <div>
-                  <div style="font-size: 11px; color: var(--text-secondary);">TOTAL GROSS</div>
-                  <div style="font-size: 15px; font-weight: 700;">${formatTenantMoney(run.totalGrossPay, run.currencyCode)}</div>
+              <div class="payroll-run-stats-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; width: 100%; border-top: 1px solid var(--border-color); padding-top: 10px;">
+                <div style="padding: 6px 10px; background: var(--surface-card); border: 1px solid var(--border-subtle); border-radius: 6px;">
+                  <div style="font-size: 11px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase;">Total Gross</div>
+                  <div style="font-size: 15px; font-weight: 700; color: var(--text-primary); margin-top: 2px; font-variant-numeric: tabular-nums;">${formatTenantMoney(run.totalGrossPay, run.currencyCode)}</div>
                 </div>
-                <div>
-                  <div style="font-size: 11px; color: var(--text-secondary);">DEDUCTIONS</div>
-                  <div style="font-size: 15px; font-weight: 700; color: var(--status-danger);">${formatTenantMoney(run.totalDeductions, run.currencyCode)}</div>
+                <div style="padding: 6px 10px; background: var(--surface-card); border: 1px solid var(--border-subtle); border-radius: 6px;">
+                  <div style="font-size: 11px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase;">Deductions</div>
+                  <div style="font-size: 15px; font-weight: 700; color: var(--status-danger); margin-top: 2px; font-variant-numeric: tabular-nums;">${formatTenantMoney(run.totalDeductions, run.currencyCode)}</div>
                 </div>
-                <div>
-                  <div style="font-size: 11px; color: var(--text-secondary);">TOTAL NET</div>
-                  <div style="font-size: 16px; font-weight: 700; color: var(--accent-primary);">${formatTenantMoney(run.totalNetPay, run.currencyCode)}</div>
+                <div style="padding: 6px 10px; background: var(--surface-card); border: 1px solid var(--border-subtle); border-radius: 6px;">
+                  <div style="font-size: 11px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase;">Total Net</div>
+                  <div style="font-size: 15px; font-weight: 700; color: var(--accent-primary); margin-top: 2px; font-variant-numeric: tabular-nums;">${formatTenantMoney(run.totalNetPay, run.currencyCode)}</div>
                 </div>
-                <div>
-                  <div style="font-size: 11px; color: var(--text-secondary);">DISBURSED</div>
-                  <div style="font-size: 15px; font-weight: 700; color: var(--status-success);">${formatTenantMoney(run.totalPaidAmount, run.currencyCode)}</div>
+                <div style="padding: 6px 10px; background: var(--surface-card); border: 1px solid var(--border-subtle); border-radius: 6px;">
+                  <div style="font-size: 11px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase;">Disbursed</div>
+                  <div style="font-size: 15px; font-weight: 700; color: var(--status-success); margin-top: 2px; font-variant-numeric: tabular-nums;">${formatTenantMoney(run.totalPaidAmount, run.currencyCode)}</div>
                 </div>
               </div>
             </div>
 
-            <!-- Employee Line Items Table -->
+            <!-- Employee Line Items Section -->
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
               <div style="font-weight: 600; font-size: 14px;">Employee Line Items (${items.length})</div>
               ${isDraft ? '<div style="font-size: 12px; color: var(--text-secondary);">Click "Adjust" to update Overtime, Bonus or Commissions</div>' : ''}
@@ -11844,80 +11908,136 @@
             ${items.length === 0 ? `
               <div style="padding: 24px; text-align: center; color: var(--text-secondary); font-size: 13px;">No eligible active employees enrolled for ${run.frequency} frequency.</div>
             ` : `
-              <div class="table-responsive" style="max-height: 420px; overflow-y: auto;">
-                <table class="data-table">
-                  <thead>
-                    <tr>
-                      <th>Employee</th>
-                      <th>Basic</th>
-                      <th>Allowances</th>
-                      <th>OT Pay</th>
-                      <th>Bonus/Comm</th>
-                      <th>Gross Pay</th>
-                      <th>Deductions</th>
-                      <th>Net Pay</th>
-                      <th>Paid</th>
-                      <th>Status</th>
-                      <th style="text-align: right;">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    ${items.map(it => {
-                      const net = parseFloat(it.netPay || 0);
-                      const paid = parseFloat(it.paidAmount || 0);
-                      const due = Math.max(0, net - paid);
-                      const isItemFullyPaid = it.paymentStatus === 'PAID';
+              <!-- Desktop Table View -->
+              <div class="desktop-table-container">
+                <div class="table-responsive" style="max-height: 420px; overflow-y: auto;">
+                  <table class="data-table">
+                    <thead>
+                      <tr>
+                        <th>Employee</th>
+                        <th>Basic</th>
+                        <th>Allowances</th>
+                        <th>OT Pay</th>
+                        <th>Bonus/Comm</th>
+                        <th>Gross Pay</th>
+                        <th>Deductions</th>
+                        <th>Net Pay</th>
+                        <th>Paid</th>
+                        <th>Status</th>
+                        <th style="text-align: right;">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${items.map(it => {
+                        const net = parseFloat(it.netPay || 0);
+                        const paid = parseFloat(it.paidAmount || 0);
+                        const due = Math.max(0, net - paid);
+                        const isItemFullyPaid = it.paymentStatus === 'PAID';
 
-                      return `
-                        <tr>
-                          <td>
-                            <strong style="color: var(--text-primary);">${escapeHtml(it.employeeName)}</strong>
-                            <div style="font-size: 11px; color: var(--text-secondary); font-family: monospace;">${escapeHtml(it.employeeCode)} &bull; ${escapeHtml(it.department)}</div>
-                          </td>
-                          <td>${formatTenantMoney(it.basicSalary, run.currencyCode)}</td>
-                          <td>${formatTenantMoney(it.allowancesTotal, run.currencyCode)}</td>
-                          <td>
-                            ${parseFloat(it.overtimePay) > 0
-                              ? `<div>${formatTenantMoney(it.overtimePay, run.currencyCode)}</div><div style="font-size: 10px; color: var(--text-secondary);">${it.overtimeHours} hrs</div>`
-                              : '—'}
-                          </td>
-                          <td>
-                            ${parseFloat(it.bonusPay) > 0 || parseFloat(it.commissionsPay) > 0
-                              ? formatTenantMoney(parseFloat(it.bonusPay) + parseFloat(it.commissionsPay), run.currencyCode)
-                              : '—'}
-                          </td>
-                          <td>${formatTenantMoney(it.grossPay, run.currencyCode)}</td>
-                          <td style="color: var(--status-danger);">${formatTenantMoney(it.deductionsTotal, run.currencyCode)}</td>
-                          <td><strong>${formatTenantMoney(it.netPay, run.currencyCode)}</strong></td>
-                          <td>
-                            <div>${formatTenantMoney(it.paidAmount, run.currencyCode)}</div>
-                            ${due > 0 && isApprovedOrPartial ? `<div style="font-size: 10px; color: var(--status-warning);">Due: ${formatTenantMoney(due, run.currencyCode)}</div>` : ''}
-                          </td>
-                          <td>
-                            ${it.paymentStatus === 'PAID'
-                              ? '<span class="badge-pill badge-green">Paid</span>'
-                              : it.paymentStatus === 'PARTIALLY_PAID'
-                                ? '<span class="badge-pill badge-yellow">Partial</span>'
-                                : '<span class="badge-pill" style="background:#E2E8F0; color:#475569;">Unpaid</span>'}
-                          </td>
-                          <td style="text-align: right;">
-                            <div style="display: inline-flex; gap: 4px;">
-                              ${isDraft ? `<button class="btn btn-secondary btn-sm" onclick="openAdjustPayrollItemModal('${run.id}', '${it.id}')" title="Adjust OT, Bonus & Commissions">Adjust</button>` : ''}
-                              ${isApprovedOrPartial && !isItemFullyPaid ? `<button class="btn btn-primary btn-sm" onclick="openRecordPayrollItemPaymentModal('${run.id}', '${it.id}')" title="Record Payment">Pay</button>` : ''}
-                              <button class="btn btn-secondary btn-sm" onclick="openPayslipModal('${run.id}', '${it.employeeId}')" title="Generate Payslip">Payslip</button>
-                            </div>
-                          </td>
-                        </tr>
-                      `;
-                    }).join('')}
-                  </tbody>
-                </table>
+                        return `
+                          <tr>
+                            <td>
+                              <strong style="color: var(--text-primary);">${escapeHtml(it.employeeName)}</strong>
+                              <div style="font-size: 11px; color: var(--text-secondary); font-family: monospace;">${escapeHtml(it.employeeCode)} &bull; ${escapeHtml(it.department)}</div>
+                            </td>
+                            <td>${formatTenantMoney(it.basicSalary, run.currencyCode)}</td>
+                            <td>${formatTenantMoney(it.allowancesTotal, run.currencyCode)}</td>
+                            <td>
+                              ${parseFloat(it.overtimePay) > 0
+                                ? `<div>${formatTenantMoney(it.overtimePay, run.currencyCode)}</div><div style="font-size: 10px; color: var(--text-secondary);">${it.overtimeHours} hrs</div>`
+                                : '—'}
+                            </td>
+                            <td>
+                              ${parseFloat(it.bonusPay) > 0 || parseFloat(it.commissionsPay) > 0
+                                ? formatTenantMoney(parseFloat(it.bonusPay) + parseFloat(it.commissionsPay), run.currencyCode)
+                                : '—'}
+                            </td>
+                            <td>${formatTenantMoney(it.grossPay, run.currencyCode)}</td>
+                            <td style="color: var(--status-danger);">${formatTenantMoney(it.deductionsTotal, run.currencyCode)}</td>
+                            <td><strong>${formatTenantMoney(it.netPay, run.currencyCode)}</strong></td>
+                            <td>
+                              <div>${formatTenantMoney(it.paidAmount, run.currencyCode)}</div>
+                              ${due > 0 && isApprovedOrPartial ? `<div style="font-size: 10px; color: var(--status-warning);">Due: ${formatTenantMoney(due, run.currencyCode)}</div>` : ''}
+                            </td>
+                            <td>
+                              ${it.paymentStatus === 'PAID'
+                                ? '<span class="badge-pill badge-green">Paid</span>'
+                                : it.paymentStatus === 'PARTIALLY_PAID'
+                                  ? '<span class="badge-pill badge-yellow">Partial</span>'
+                                  : '<span class="badge-pill" style="background:#E2E8F0; color:#475569;">Unpaid</span>'}
+                            </td>
+                            <td style="text-align: right;">
+                              <div style="display: inline-flex; gap: 4px;">
+                                ${isDraft ? `<button class="btn btn-secondary btn-sm" onclick="openAdjustPayrollItemModal('${run.id}', '${it.id}', this)" title="Adjust OT, Bonus & Commissions">Adjust</button>` : ''}
+                                ${isApprovedOrPartial && !isItemFullyPaid ? `<button class="btn btn-primary btn-sm" onclick="openRecordPayrollItemPaymentModal('${run.id}', '${it.id}')" title="Record Payment">Pay</button>` : ''}
+                                <button class="btn btn-secondary btn-sm" onclick="openPayslipModal('${run.id}', '${it.employeeId}', this)" title="Generate Payslip">Payslip</button>
+                              </div>
+                            </td>
+                          </tr>
+                        `;
+                      }).join('')}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <!-- Mobile Card View (BUG-042: Touch-Friendly Responsive Line Items) -->
+              <div class="mobile-cards-container" style="max-height: 440px; overflow-y: auto;">
+                ${items.map(it => {
+                  const net = parseFloat(it.netPay || 0);
+                  const paid = parseFloat(it.paidAmount || 0);
+                  const due = Math.max(0, net - paid);
+                  const isItemFullyPaid = it.paymentStatus === 'PAID';
+                  const statusBadge = it.paymentStatus === 'PAID'
+                    ? '<span class="badge-pill badge-green">Paid</span>'
+                    : it.paymentStatus === 'PARTIALLY_PAID'
+                      ? '<span class="badge-pill badge-yellow">Partial</span>'
+                      : '<span class="badge-pill" style="background:#E2E8F0; color:#475569;">Unpaid</span>';
+
+                  return `
+                    <div class="entity-card" style="padding: 14px; border-radius: 8px; border: 1px solid var(--border-subtle); background: var(--surface-card); margin-bottom: 10px;">
+                      <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-bottom: 8px;">
+                        <div>
+                          <strong style="color: var(--text-primary); font-size: 14px;">${escapeHtml(it.employeeName)}</strong>
+                          <div style="font-size: 11px; color: var(--text-secondary); font-family: monospace;">${escapeHtml(it.employeeCode)} &bull; ${escapeHtml(it.department)}</div>
+                        </div>
+                        <div>${statusBadge}</div>
+                      </div>
+
+                      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 10px; background: var(--bg-primary); border-radius: 6px; font-size: 11px; margin-bottom: 10px;">
+                        <div>
+                          <div style="color: var(--text-secondary);">BASIC + ALLOWANCES</div>
+                          <div style="font-weight: 600; color: var(--text-primary); font-variant-numeric: tabular-nums;">${formatTenantMoney(parseFloat(it.basicSalary || 0) + parseFloat(it.allowancesTotal || 0), run.currencyCode)}</div>
+                        </div>
+                        <div>
+                          <div style="color: var(--text-secondary);">DEDUCTIONS</div>
+                          <div style="font-weight: 600; color: var(--status-danger); font-variant-numeric: tabular-nums;">-${formatTenantMoney(it.deductionsTotal, run.currencyCode)}</div>
+                        </div>
+                        <div>
+                          <div style="color: var(--text-secondary);">NET PAY</div>
+                          <div style="font-weight: 700; color: var(--accent-primary); font-size: 13px; font-variant-numeric: tabular-nums;">${formatTenantMoney(it.netPay, run.currencyCode)}</div>
+                        </div>
+                        <div>
+                          <div style="color: var(--text-secondary);">PAID</div>
+                          <div style="font-weight: 600; color: var(--status-success); font-variant-numeric: tabular-nums;">${formatTenantMoney(it.paidAmount, run.currencyCode)}</div>
+                          ${due > 0 && isApprovedOrPartial ? `<div style="font-size: 10px; color: var(--status-warning);">Due: ${formatTenantMoney(due, run.currencyCode)}</div>` : ''}
+                        </div>
+                      </div>
+
+                      <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                        ${isDraft ? `<button class="btn btn-secondary btn-sm" style="flex: 1;" onclick="openAdjustPayrollItemModal('${run.id}', '${it.id}', this)" title="Adjust OT, Bonus & Commissions">Adjust</button>` : ''}
+                        ${isApprovedOrPartial && !isItemFullyPaid ? `<button class="btn btn-primary btn-sm" style="flex: 1;" onclick="openRecordPayrollItemPaymentModal('${run.id}', '${it.id}')" title="Record Payment">Pay</button>` : ''}
+                        <button class="btn btn-secondary btn-sm" style="flex: 1;" onclick="openPayslipModal('${run.id}', '${it.employeeId}', this)" title="Generate Payslip">Payslip</button>
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
               </div>
             `}
           `,
           footerHtml: `
-            <div style="display: flex; justify-content: space-between; width: 100%;">
-              <div>
+            <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; width: 100%;">
+              <div style="display: flex; flex-wrap: wrap; gap: 8px;">
                 ${isDraft ? `
                   <button class="btn btn-secondary" onclick="submitPayrollRunAction('${run.id}', this)">Submit for Approval</button>
                   <button class="btn btn-primary" onclick="approvePayrollRunAction('${run.id}', this)">Approve Run</button>
@@ -11947,11 +12067,78 @@
     }
 
     // --- 12. ADJUST PAYROLL ITEM MODAL ---
-    async function openAdjustPayrollItemModal(runId, itemId) {
+    async function openAdjustPayrollItemModal(runId, itemId, btnElement = null) {
+      let targetBtn = btnElement;
+      if (!targetBtn && typeof event !== 'undefined' && event?.currentTarget) {
+        targetBtn = event.currentTarget;
+      }
+      let origHtml = '';
+      if (targetBtn) {
+        origHtml = targetBtn.innerHTML;
+        targetBtn.disabled = true;
+        targetBtn.innerHTML = '<span class="spinner-sm" style="display:inline-block; vertical-align:middle; margin-right:4px;"></span> Loading...';
+      }
+
       try {
-        const run = await apiFetch(`/v1/payroll/runs/${runId}`);
+        let run = (window._activePayrollRunCache && window._activePayrollRunCache.id === runId)
+          ? window._activePayrollRunCache
+          : null;
+        if (!run) {
+          run = await apiFetch(`/v1/payroll/runs/${runId}`);
+          window._activePayrollRunCache = run;
+        }
         const it = (run.items || []).find(x => x.id === itemId);
         if (!it) return showToast('Item not found', 'error');
+
+        openModal({
+          title: `Adjust Earnings: ${it.employeeName} (${it.employeeCode})`,
+          maxWidth: '520px',
+          bodyHtml: `
+            <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 14px;">
+              Basic Salary: <strong>${formatTenantMoney(it.basicSalary, run.currencyCode)}</strong> &bull; Fixed Allowances: <strong>${formatTenantMoney(it.allowancesTotal, run.currencyCode)}</strong>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+              <div class="form-group">
+                <label class="form-label">Overtime Hours</label>
+                <input type="number" step="0.25" min="0" class="form-input" id="adjOtHours" value="${parseFloat(it.overtimeHours || 0).toFixed(2)}">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Overtime Pay (${run.currencyCode})</label>
+                <input type="number" step="0.01" min="0" class="form-input" id="adjOtPay" value="${parseFloat(it.overtimePay || 0).toFixed(2)}">
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+              <div class="form-group">
+                <label class="form-label">Bonus Pay (${run.currencyCode})</label>
+                <input type="number" step="0.01" min="0" class="form-input" id="adjBonus" value="${parseFloat(it.bonusPay || 0).toFixed(2)}">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Commissions (${run.currencyCode})</label>
+                <input type="number" step="0.01" min="0" class="form-input" id="adjCommissions" value="${parseFloat(it.commissionsPay || 0).toFixed(2)}">
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Adjustment Notes / Memo</label>
+              <textarea class="form-textarea" id="adjNotes" placeholder="Reason for overtime or bonus..." rows="2">${escapeHtml(it.notes || '')}</textarea>
+            </div>
+          `,
+          footerHtml: `
+            <button class="btn btn-secondary" onclick="openPayrollRunDetailModal('${runId}')">Back</button>
+            <button class="btn btn-primary" id="btnSubmitAdjustItem" onclick="submitAdjustPayrollItem('${runId}', '${itemId}')">Save Adjustments</button>
+          `
+        });
+      } catch (err) {
+        showToast(err.message || 'Failed to open adjustment', 'error');
+      } finally {
+        if (targetBtn) {
+          targetBtn.disabled = false;
+          targetBtn.innerHTML = origHtml;
+        }
+      }
+    }
 
         openModal({
           title: `Adjust Earnings: ${it.employeeName} (${it.employeeCode})`,
@@ -12056,7 +12243,10 @@
       }
 
       try {
-        await apiFetch(`/v1/payroll/runs/${runId}/submit`, { method: 'POST' });
+        await apiFetch(`/v1/payroll/runs/${runId}/submit`, {
+          method: 'POST',
+          body: JSON.stringify({})
+        });
         showToast('Payroll run submitted for approval', 'success');
         openPayrollRunDetailModal(runId);
         renderPayrollView();
@@ -12090,7 +12280,10 @@
       }
 
       try {
-        await apiFetch(`/v1/payroll/runs/${runId}/approve`, { method: 'POST' });
+        await apiFetch(`/v1/payroll/runs/${runId}/approve`, {
+          method: 'POST',
+          body: JSON.stringify({})
+        });
         showToast('Payroll run approved! Ready for disbursements.', 'success');
         openPayrollRunDetailModal(runId);
         renderPayrollView();
@@ -12270,7 +12463,30 @@
     }
 
     // --- 15. PAYSLIP MODAL & PRINTING ---
-    async function openPayslipModal(runId, employeeId) {
+    async function openPayslipModal(runId, employeeId, btnElement = null) {
+      let targetBtn = btnElement;
+      if (!targetBtn && typeof event !== 'undefined' && event?.currentTarget) {
+        targetBtn = event.currentTarget;
+      }
+      let origHtml = '';
+      if (targetBtn) {
+        origHtml = targetBtn.innerHTML;
+        targetBtn.disabled = true;
+        targetBtn.innerHTML = '<span class="spinner-sm" style="display:inline-block; vertical-align:middle; margin-right:4px;"></span> Loading...';
+      }
+
+      openModal({
+        title: 'Generating Payslip...',
+        maxWidth: '720px',
+        bodyHtml: `
+          <div style="padding: 48px 24px; text-align: center;">
+            <div class="spinner-sm" style="display:inline-block; width: 32px; height: 32px; border-width: 3px; margin-bottom: 12px;"></div>
+            <div style="font-weight: 600; font-size: 15px; color: var(--text-primary);">Generating employee payslip...</div>
+            <div style="color: var(--text-secondary); font-size: 12px; margin-top: 4px;">Calculating gross earnings, allowances, and statutory withholdings</div>
+          </div>
+        `
+      });
+
       try {
         const slip = await apiFetch(`/v1/payroll/runs/${runId}/payslips/${employeeId}`);
         const it = slip.item;
@@ -12292,8 +12508,8 @@
               </div>
             </div>
 
-            <!-- Employee & Pay Period Details -->
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; background: #f8fafc; padding: 12px 16px; border-radius: 6px; margin-bottom: 16px; font-size: 12px; line-height: 1.7;">
+            <!-- Employee & Pay Period Details (BUG-047: Stack on Mobile, 2-Col on Desktop & Print) -->
+            <div class="payslip-details-grid" style="background: #f8fafc; padding: 12px 16px; border-radius: 6px; margin-bottom: 16px; font-size: 12px; line-height: 1.7;">
               <div>
                 <div><strong>Employee Name:</strong> ${escapeHtml(emp.fullName)}</div>
                 <div><strong>Employee Code:</strong> <span style="font-family: monospace;">${escapeHtml(emp.employeeCode)}</span></div>
@@ -12308,8 +12524,8 @@
               </div>
             </div>
 
-            <!-- Earnings & Deductions Breakdown -->
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+            <!-- Earnings & Deductions Breakdown (BUG-047: Stack on Mobile, 2-Col on Desktop & Print) -->
+            <div class="payslip-breakdown-grid" style="margin-bottom: 16px;">
               <!-- Earnings Column -->
               <div style="border: 1px solid #e2e8f0; border-radius: 6px; overflow: hidden;">
                 <div style="background: #f1f5f9; padding: 8px 12px; font-size: 12px; font-weight: 700; color: #0f172a; border-bottom: 1px solid #e2e8f0;">
@@ -12317,15 +12533,15 @@
                 </div>
                 <div style="padding: 8px 12px; font-size: 12px; min-height: 120px;">
                   ${earnings.map(e => `
-                    <div style="display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px dashed #f1f5f9;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px dashed #f1f5f9; gap: 8px;">
                       <span>${escapeHtml(e.name)}</span>
-                      <strong>${formatTenantMoney(e.amount, slip.currencyCode)}</strong>
+                      <strong style="white-space: nowrap; font-variant-numeric: tabular-nums;">${formatTenantMoney(e.amount, slip.currencyCode)}</strong>
                     </div>
                   `).join('')}
                 </div>
-                <div style="background: #eff6ff; padding: 8px 12px; font-size: 12px; font-weight: 700; color: #1e3a8a; border-top: 1px solid #e2e8f0; display: flex; justify-content: space-between;">
+                <div style="background: #eff6ff; padding: 8px 12px; font-size: 12px; font-weight: 700; color: #1e3a8a; border-top: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; gap: 8px;">
                   <span>GROSS EARNINGS:</span>
-                  <span>${formatTenantMoney(it.grossPay, slip.currencyCode)}</span>
+                  <span style="white-space: nowrap; font-variant-numeric: tabular-nums;">${formatTenantMoney(it.grossPay, slip.currencyCode)}</span>
                 </div>
               </div>
 
@@ -12338,28 +12554,28 @@
                   ${deductions.length === 0 ? `
                     <div style="color: #94a3b8; font-style: italic; padding: 8px 0;">No deductions recorded</div>
                   ` : deductions.map(d => `
-                    <div style="display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px dashed #f1f5f9;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px dashed #f1f5f9; gap: 8px;">
                       <span>${escapeHtml(d.name)}</span>
-                      <strong style="color: #dc2626;">-${formatTenantMoney(d.amount, slip.currencyCode)}</strong>
+                      <strong style="color: #dc2626; white-space: nowrap; font-variant-numeric: tabular-nums;">-${formatTenantMoney(d.amount, slip.currencyCode)}</strong>
                     </div>
                   `).join('')}
                 </div>
-                <div style="background: #fef2f2; padding: 8px 12px; font-size: 12px; font-weight: 700; color: #991b1b; border-top: 1px solid #e2e8f0; display: flex; justify-content: space-between;">
+                <div style="background: #fef2f2; padding: 8px 12px; font-size: 12px; font-weight: 700; color: #991b1b; border-top: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; gap: 8px;">
                   <span>TOTAL DEDUCTIONS:</span>
-                  <span>-${formatTenantMoney(it.deductionsTotal, slip.currencyCode)}</span>
+                  <span style="white-space: nowrap; font-variant-numeric: tabular-nums;">-${formatTenantMoney(it.deductionsTotal, slip.currencyCode)}</span>
                 </div>
               </div>
             </div>
 
-            <!-- Net Payable Summary -->
-            <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px; padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <!-- Net Payable Summary (BUG-047: Responsive Layout) -->
+            <div class="payslip-net-summary" style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px; padding: 12px 16px; margin-bottom: 16px;">
               <div>
                 <div style="font-size: 11px; font-weight: 700; color: #166534; text-transform: uppercase;">NET PAYABLE SALARY</div>
-                <div style="font-size: 22px; font-weight: 800; color: #15803d;">${formatTenantMoney(it.netPay, slip.currencyCode)}</div>
+                <div style="font-size: 22px; font-weight: 800; color: #15803d; white-space: nowrap; font-variant-numeric: tabular-nums;">${formatTenantMoney(it.netPay, slip.currencyCode)}</div>
               </div>
               <div style="text-align: right; font-size: 12px;">
-                <div>Disbursed: <strong>${formatTenantMoney(it.paidAmount, slip.currencyCode)}</strong></div>
-                <div>Status: <span class="badge-pill ${it.paymentStatus === 'PAID' ? 'badge-green' : 'badge-yellow'}">${it.paymentStatus}</span></div>
+                <div>Disbursed: <strong style="white-space: nowrap; font-variant-numeric: tabular-nums;">${formatTenantMoney(it.paidAmount, slip.currencyCode)}</strong></div>
+                <div style="margin-top: 4px;">Status: <span class="badge-pill ${it.paymentStatus === 'PAID' ? 'badge-green' : 'badge-yellow'}">${it.paymentStatus}</span></div>
               </div>
             </div>
 
@@ -12376,14 +12592,19 @@
           maxWidth: '720px',
           bodyHtml: payslipHtml,
           footerHtml: `
-            <div style="display: flex; justify-content: space-between; width: 100%;">
-              <button class="btn btn-primary" onclick="printHtmlDocument(document.getElementById('payslipPrintArea').outerHTML, '@page { size: auto; margin: 15mm; }')">🖨️ Print Payslip</button>
+            <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; width: 100%;">
+              <button class="btn btn-primary" onclick="printHtmlDocument(document.getElementById('payslipPrintArea').outerHTML, '@page { size: auto; margin: 15mm; } .payslip-details-grid { display: grid !important; grid-template-columns: 1fr 1fr !important; } .payslip-breakdown-grid { display: grid !important; grid-template-columns: 1fr 1fr !important; } .payslip-net-summary { display: flex !important; flex-direction: row !important; justify-content: space-between !important; }')">🖨️ Print Payslip</button>
               <button class="btn btn-secondary" onclick="closeModal()">Close</button>
             </div>
           `
         });
       } catch (err) {
         showToast(`Failed to load payslip: ${err.message}`, 'error');
+      } finally {
+        if (targetBtn) {
+          targetBtn.disabled = false;
+          targetBtn.innerHTML = origHtml;
+        }
       }
     }
 
@@ -12441,7 +12662,7 @@
               </div>
             </div>
 
-            <!-- Two Breakdown Tables: Department and Frequency (BUG-042: Responsive Auto-Fit Grid) -->
+            <!-- Two Breakdown Tables: Department and Frequency (BUG-042: Responsive Auto-Fit Grid & Mobile Cards) -->
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px;">
               <!-- Department Breakdown -->
               <div class="card">
@@ -12449,29 +12670,58 @@
                 ${depts.length === 0 ? `
                   <div style="padding: 24px; text-align: center; color: var(--text-secondary); font-size: 13px;">No departmental payroll data recorded.</div>
                 ` : `
-                  <div class="table-responsive">
-                    <table class="data-table">
-                      <thead>
-                        <tr>
-                          <th>Department</th>
-                          <th style="text-align: right; min-width: 80px;">Employees</th>
-                          <th style="text-align: right; min-width: 110px;">Gross Total</th>
-                          <th style="text-align: right; min-width: 110px;">Net Total</th>
-                          <th style="text-align: right; min-width: 110px;">Disbursed</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        ${depts.map(d => `
+                  <!-- Desktop Table View -->
+                  <div class="desktop-table-container">
+                    <div class="table-responsive">
+                      <table class="data-table">
+                        <thead>
                           <tr>
-                            <td><strong>${escapeHtml(d.department)}</strong></td>
-                            <td style="text-align: right;">${d.employeeCount}</td>
-                            <td style="text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap;">${formatTenantMoney(d.gross, currency)}</td>
-                            <td style="text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap;"><strong>${formatTenantMoney(d.net, currency)}</strong></td>
-                            <td style="text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--status-success);">${formatTenantMoney(d.paid, currency)}</td>
+                            <th>Department</th>
+                            <th style="text-align: right; min-width: 80px;">Employees</th>
+                            <th style="text-align: right; min-width: 110px;">Gross Total</th>
+                            <th style="text-align: right; min-width: 110px;">Net Total</th>
+                            <th style="text-align: right; min-width: 110px;">Disbursed</th>
                           </tr>
-                        `).join('')}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody>
+                          ${depts.map(d => `
+                            <tr>
+                              <td><strong>${escapeHtml(d.department)}</strong></td>
+                              <td style="text-align: right;">${d.employeeCount}</td>
+                              <td style="text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap;">${formatTenantMoney(d.gross, currency)}</td>
+                              <td style="text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap;"><strong>${formatTenantMoney(d.net, currency)}</strong></td>
+                              <td style="text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--status-success);">${formatTenantMoney(d.paid, currency)}</td>
+                            </tr>
+                          `).join('')}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  <!-- Mobile Card View (BUG-042: Touch-Friendly Department Allocation Cards) -->
+                  <div class="mobile-cards-container">
+                    ${depts.map(d => `
+                      <div class="entity-card" style="padding: 14px; border-radius: 8px; border: 1px solid var(--border-subtle); background: var(--surface-card); margin-bottom: 10px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                          <strong style="font-size: 14px; color: var(--text-primary);">${escapeHtml(d.department)}</strong>
+                          <span class="badge-pill" style="background: var(--bg-primary);">${d.employeeCount} staff</span>
+                        </div>
+                        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 8px; background: var(--bg-primary); border-radius: 6px; font-size: 11px;">
+                          <div>
+                            <div style="color: var(--text-secondary);">GROSS</div>
+                            <div style="font-weight: 600; font-size: 12px; margin-top: 2px; font-variant-numeric: tabular-nums;">${formatTenantMoney(d.gross, currency)}</div>
+                          </div>
+                          <div>
+                            <div style="color: var(--text-secondary);">NET</div>
+                            <div style="font-weight: 700; font-size: 12px; color: var(--accent-primary); margin-top: 2px; font-variant-numeric: tabular-nums;">${formatTenantMoney(d.net, currency)}</div>
+                          </div>
+                          <div>
+                            <div style="color: var(--text-secondary);">PAID</div>
+                            <div style="font-weight: 600; font-size: 12px; color: var(--status-success); margin-top: 2px; font-variant-numeric: tabular-nums;">${formatTenantMoney(d.paid, currency)}</div>
+                          </div>
+                        </div>
+                      </div>
+                    `).join('')}
                   </div>
                 `}
               </div>
@@ -12482,27 +12732,52 @@
                 ${freqs.length === 0 ? `
                   <div style="padding: 24px; text-align: center; color: var(--text-secondary); font-size: 13px;">No frequency data recorded.</div>
                 ` : `
-                  <div class="table-responsive">
-                    <table class="data-table">
-                      <thead>
-                        <tr>
-                          <th>Frequency</th>
-                          <th style="text-align: right; min-width: 70px;">Runs</th>
-                          <th style="text-align: right; min-width: 110px;">Total Gross</th>
-                          <th style="text-align: right; min-width: 110px;">Total Net</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        ${freqs.map(f => `
+                  <!-- Desktop Table View -->
+                  <div class="desktop-table-container">
+                    <div class="table-responsive">
+                      <table class="data-table">
+                        <thead>
                           <tr>
-                            <td>${getFrequencyBadgeHtml(f.frequency)}</td>
-                            <td style="text-align: right; font-weight: 600;">${f.runsCount}</td>
-                            <td style="text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap;">${formatTenantMoney(f.gross, currency)}</td>
-                            <td style="text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap;"><strong>${formatTenantMoney(f.net, currency)}</strong></td>
+                            <th>Frequency</th>
+                            <th style="text-align: right; min-width: 70px;">Runs</th>
+                            <th style="text-align: right; min-width: 110px;">Total Gross</th>
+                            <th style="text-align: right; min-width: 110px;">Total Net</th>
                           </tr>
-                        `).join('')}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody>
+                          ${freqs.map(f => `
+                            <tr>
+                              <td>${getFrequencyBadgeHtml(f.frequency)}</td>
+                              <td style="text-align: right; font-weight: 600;">${f.runsCount}</td>
+                              <td style="text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap;">${formatTenantMoney(f.gross, currency)}</td>
+                              <td style="text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap;"><strong>${formatTenantMoney(f.net, currency)}</strong></td>
+                            </tr>
+                          `).join('')}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  <!-- Mobile Card View (BUG-042: Touch-Friendly Schedule Frequency Cards) -->
+                  <div class="mobile-cards-container">
+                    ${freqs.map(f => `
+                      <div class="entity-card" style="padding: 14px; border-radius: 8px; border: 1px solid var(--border-subtle); background: var(--surface-card); margin-bottom: 10px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                          <div>${getFrequencyBadgeHtml(f.frequency)}</div>
+                          <span style="font-size: 12px; font-weight: 600; color: var(--text-secondary);">${f.runsCount} run${f.runsCount !== 1 ? 's' : ''}</span>
+                        </div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 8px; background: var(--bg-primary); border-radius: 6px; font-size: 11px;">
+                          <div>
+                            <div style="color: var(--text-secondary);">TOTAL GROSS</div>
+                            <div style="font-weight: 600; font-size: 12px; margin-top: 2px; font-variant-numeric: tabular-nums;">${formatTenantMoney(f.gross, currency)}</div>
+                          </div>
+                          <div>
+                            <div style="color: var(--text-secondary);">TOTAL NET</div>
+                            <div style="font-weight: 700; font-size: 12px; color: var(--accent-primary); margin-top: 2px; font-variant-numeric: tabular-nums;">${formatTenantMoney(f.net, currency)}</div>
+                          </div>
+                        </div>
+                      </div>
+                    `).join('')}
                   </div>
                 `}
               </div>

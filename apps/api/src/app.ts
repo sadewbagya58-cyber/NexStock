@@ -5237,6 +5237,7 @@ export async function buildApp(
       schema: {
         headers: AuthenticatedTenantHeadersSchema,
         params: Type.Object({ runId: UuidSchema }),
+        body: Type.Optional(Type.Object({ notes: Type.Optional(Type.String()) })),
         response: {
           200: PayrollRunResponseSchema,
           401: ProblemDetailsSchema,
@@ -5270,6 +5271,7 @@ export async function buildApp(
       schema: {
         headers: AuthenticatedTenantHeadersSchema,
         params: Type.Object({ runId: UuidSchema }),
+        body: Type.Optional(Type.Object({ notes: Type.Optional(Type.String()) })),
         response: {
           200: PayrollRunResponseSchema,
           401: ProblemDetailsSchema,

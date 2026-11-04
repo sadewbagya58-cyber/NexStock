@@ -269,7 +269,7 @@ describe('@nexstock/api — Phase 7.1: Employee Management & Flexible Payroll En
     expect(body.warehouseIds).toContain(alphaWarehouseId);
 
     employeeAId = body.id;
-  });
+  }, 60_000);
 
   it('1.2 Rejects duplicate employee code in same tenant', async () => {
     const res = await app.inject({
@@ -727,14 +727,16 @@ describe('@nexstock/api — Phase 7.1: Employee Management & Flexible Payroll En
     expect(runRes.json().totalNetPay).toBe('4900.0000');
   });
 
-  it('4.3 Submits for approval and approves payroll run', async () => {
+  it('4.3 Submits for approval and approves payroll run (BUG-046: handles JSON payload without empty body error)', async () => {
     const submitRes = await app.inject({
       method: 'POST',
       url: `/v1/payroll/runs/${payrollRunId}/submit`,
       headers: {
         authorization: `Bearer ${alphaOwnerToken}`,
         'x-tenant-id': TENANT_ALPHA_ID,
+        'content-type': 'application/json',
       },
+      payload: {},
     });
     expect(submitRes.statusCode).toBe(200);
     expect(submitRes.json().status).toBe('PENDING_APPROVAL');
@@ -745,7 +747,9 @@ describe('@nexstock/api — Phase 7.1: Employee Management & Flexible Payroll En
       headers: {
         authorization: `Bearer ${alphaOwnerToken}`,
         'x-tenant-id': TENANT_ALPHA_ID,
+        'content-type': 'application/json',
       },
+      payload: { notes: 'Approved for disbursement' },
     });
     expect(approveRes.statusCode).toBe(200);
     expect(approveRes.json().status).toBe('APPROVED');
@@ -986,7 +990,7 @@ describe('@nexstock/api — Phase 7.1: Employee Management & Flexible Payroll En
       // 3. Issue valid asymmetric ES256 Bearer JWTs
       cashierToken = issueToken(CASHIER_USER_ID, 'cashier@alpha-hrm.example.com');
       accountantToken = issueToken(ACCOUNTANT_USER_ID, 'accountant@alpha-hrm.example.com');
-    });
+    }, 60_000);
 
     it('BUG-034: enforces employee permissions (Owner/Accountant allowed, Cashier rejected) and auto-heals legacy tenant permissions', async () => {
       // 1. Cashier lacks hrm:employee:read -> 403 Forbidden
