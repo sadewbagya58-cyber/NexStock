@@ -1,20 +1,36 @@
+import * as crypto from 'node:crypto';
 import type {
+  AcceptInvitationRequest,
   CreateRoleRequest,
+  InviteStaffRequest,
+  LoginResponse,
   MemberSummaryResponse,
   PermissionAction,
   PermissionItem,
   PermissionsCatalogResponse,
   RoleDetailResponse,
   RoleSummaryResponse,
+  StaffInvitationResponse,
   UpdateMemberLocationScopesRequest,
   UpdateRoleRequest,
+  ValidateInvitationResponse,
 } from '@nexstock/contracts';
+import type { Kysely } from 'kysely';
 import {
   AppError,
+  type NexStockDatabase,
   type TenantTransactionContext,
   appendAuditLog,
   generateUuidV7,
+  withAppUserTransaction,
+  withTenantTransaction,
 } from '../../shared/index.js';
+import { DEFAULT_SUPABASE_URL, signDevJwt } from '../domain/jwt-verifier.js';
+import {
+  type AuthServiceConfig,
+  ensureUserRecordDirect,
+  getUserProfileAndMemberships,
+} from './auth.service.js';
 
 export type SystemRoleCode =
   | 'TENANT_OWNER'
@@ -1512,7 +1528,7 @@ export async function listMembers(
 ): Promise<MemberSummaryResponse[]> {
   await assertAuthorized(trx, { permission: 'iam:member:read' });
 
-  const [members, assignments, scopes] = await Promise.all([
+  const [members, assignments, scopes, employees] = await Promise.all([
     trx.db
       .selectFrom('tenant_memberships')
       .innerJoin('users', 'users.id', 'tenant_memberships.user_id')
@@ -1550,6 +1566,19 @@ export async function listMembers(
       .select(['membership_id', 'branch_id', 'warehouse_id'])
       .where('tenant_id', '=', trx.tenantId)
       .execute(),
+    trx.db
+      .selectFrom('employees')
+      .select([
+        'id',
+        'employee_code',
+        'display_name',
+        'designation',
+        'department',
+        'linked_user_id',
+      ])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('linked_user_id', 'is not', null)
+      .execute(),
   ]);
 
   const roleMap = new Map<
@@ -1579,6 +1608,22 @@ export async function listMembers(
     scopeMap.set(s.membership_id, current);
   }
 
+  const employeeByUserId = new Map<
+    string,
+    { id: string; employeeCode: string; displayName: string; designation?: string; department?: string }
+  >();
+  for (const e of employees) {
+    if (e.linked_user_id) {
+      employeeByUserId.set(e.linked_user_id, {
+        id: e.id,
+        employeeCode: e.employee_code,
+        displayName: e.display_name,
+        designation: e.designation,
+        department: e.department,
+      });
+    }
+  }
+
   return members.map((m) => ({
     id: m.membership_id,
     tenantId: m.tenant_id,
@@ -1589,6 +1634,7 @@ export async function listMembers(
     allLocationsAccess: Boolean(m.all_locations_access),
     roles: roleMap.get(m.membership_id) ?? [],
     locationScopes: scopeMap.get(m.membership_id) ?? { branchIds: [], warehouseIds: [] },
+    linkedEmployee: employeeByUserId.get(m.user_id) ?? null,
     createdAt: m.created_at.toISOString(),
   }));
 }
@@ -1933,4 +1979,1029 @@ export async function updateMemberLocationScopes(
   }
 
   return updatedMember;
+}
+
+// ============================================================================
+// Phase 7.2 Staff Invitation & Account Provisioning Engine
+// ============================================================================
+
+export async function createStaffInvitation(
+  trx: TenantTransactionContext,
+  input: InviteStaffRequest,
+): Promise<StaffInvitationResponse> {
+  await assertAuthorized(trx, { permission: 'iam:member:manage' });
+
+  const normalizedEmail = input.email.trim().toLowerCase();
+  const roleCode = input.roleCode?.trim() || 'STAFF';
+
+  // 1. Quota check
+  const activeMembers = await trx.db
+    .selectFrom('tenant_memberships')
+    .select(['id'])
+    .where('tenant_id', '=', trx.tenantId)
+    .where('status', '=', 'ACTIVE')
+    .execute();
+
+  const plan = await trx.db
+    .selectFrom('tenant_subscriptions')
+    .innerJoin('subscription_plans', 'subscription_plans.id', 'tenant_subscriptions.plan_id')
+    .select(['subscription_plans.max_users'])
+    .where('tenant_subscriptions.tenant_id', '=', trx.tenantId)
+    .executeTakeFirst();
+
+  if (plan?.max_users != null && activeMembers.length >= plan.max_users) {
+    throw new AppError({
+      statusCode: 403,
+      errorCode: 'SUB_QUOTA_EXCEEDED',
+      title: 'Subscription Quota Exceeded',
+      detail: `Your organization has reached the maximum user limit (${plan.max_users}) allowed by your subscription plan.`,
+    });
+  }
+
+  // 2. Prevent assigning OWNER or ADMIN automatically
+  if (roleCode === 'TENANT_OWNER' || roleCode === 'ORG_ADMIN') {
+    throw new AppError({
+      statusCode: 400,
+      errorCode: 'IAM_INVALID_INVITATION_ROLE',
+      title: 'Invalid Invitation Role',
+      detail: 'Elevated roles (Owner, Administrator) cannot be assigned via staff invitations.',
+    });
+  }
+
+  // 3. Verify role exists in tenant
+  const role = await trx.db
+    .selectFrom('roles')
+    .select(['id', 'code', 'name'])
+    .where('tenant_id', '=', trx.tenantId)
+    .where('code', '=', roleCode)
+    .executeTakeFirst();
+
+  if (!role) {
+    throw new AppError({
+      statusCode: 404,
+      errorCode: 'IAM_ROLE_NOT_FOUND',
+      title: 'Role Not Found',
+      detail: `Role with code "${roleCode}" was not found in this organization.`,
+    });
+  }
+
+  // 4. Check whether email belongs to the Tenant Owner
+  const owner = await trx.db
+    .selectFrom('tenant_memberships')
+    .innerJoin('users', 'users.id', 'tenant_memberships.user_id')
+    .innerJoin('member_role_assignments', 'member_role_assignments.membership_id', 'tenant_memberships.id')
+    .innerJoin('roles', 'roles.id', 'member_role_assignments.role_id')
+    .select(['users.email'])
+    .where('tenant_memberships.tenant_id', '=', trx.tenantId)
+    .where('roles.code', '=', 'TENANT_OWNER')
+    .executeTakeFirst();
+
+  if (owner && owner.email.toLowerCase().trim() === normalizedEmail) {
+    throw new AppError({
+      statusCode: 400,
+      errorCode: 'IAM_CANNOT_INVITE_OWNER',
+      title: 'Cannot Invite Owner Account',
+      detail: 'The email address belongs to the Tenant Owner. Staff invitations must use a distinct staff email address.',
+    });
+  }
+
+  // 5. Check no existing ACTIVE membership with this email
+  const existingActiveMember = await trx.db
+    .selectFrom('tenant_memberships')
+    .innerJoin('users', 'users.id', 'tenant_memberships.user_id')
+    .select(['tenant_memberships.id', 'tenant_memberships.status'])
+    .where('tenant_memberships.tenant_id', '=', trx.tenantId)
+    .where('users.email', '=', normalizedEmail)
+    .executeTakeFirst();
+
+  if (existingActiveMember && existingActiveMember.status === 'ACTIVE') {
+    throw new AppError({
+      statusCode: 409,
+      errorCode: 'IAM_USER_ALREADY_MEMBER',
+      title: 'User Already a Member',
+      detail: `A user with email "${input.email}" is already an active member of this organization.`,
+    });
+  }
+
+  // 6. Check no active PENDING invitation for this email
+  const pending = await trx.db
+    .selectFrom('tenant_invitations')
+    .select(['id', 'expires_at'])
+    .where('tenant_id', '=', trx.tenantId)
+    .where('email', '=', normalizedEmail)
+    .where('status', '=', 'PENDING')
+    .executeTakeFirst();
+
+  if (pending) {
+    if (new Date(pending.expires_at) > new Date()) {
+      throw new AppError({
+        statusCode: 409,
+        errorCode: 'IAM_INVITATION_ALREADY_EXISTS',
+        title: 'Pending Invitation Exists',
+        detail: `An active invitation has already been sent to "${input.email}". You can resend or cancel it.`,
+      });
+    } else {
+      await trx.db
+        .updateTable('tenant_invitations')
+        .set({ status: 'EXPIRED', updated_at: new Date() })
+        .where('id', '=', pending.id)
+        .execute();
+    }
+  }
+
+  // 7. Verify employee profile if provided
+  let employeeCode: string | null = null;
+  let employeeName: string | null = null;
+  if (input.employeeId) {
+    const employee = await trx.db
+      .selectFrom('employees')
+      .select(['id', 'employee_code', 'display_name', 'linked_user_id', 'email'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('id', '=', input.employeeId)
+      .executeTakeFirst();
+
+    if (!employee) {
+      throw new AppError({
+        statusCode: 404,
+        errorCode: 'HRM_EMPLOYEE_NOT_FOUND',
+        title: 'Employee Not Found',
+        detail: `Employee profile "${input.employeeId}" was not found.`,
+      });
+    }
+
+    if (employee.linked_user_id) {
+      throw new AppError({
+        statusCode: 409,
+        errorCode: 'HRM_EMPLOYEE_ALREADY_LINKED',
+        title: 'Employee Already Linked',
+        detail: `Employee "${employee.employee_code}" is already linked to another user account.`,
+      });
+    }
+
+    employeeCode = employee.employee_code;
+    employeeName = employee.display_name;
+  }
+
+  // 8. Generate secure token & hash
+  const rawToken = crypto.randomBytes(32).toString('hex');
+  const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+  const expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000);
+  const invitationId = generateUuidV7();
+  const now = new Date();
+
+  await trx.db
+    .insertInto('tenant_invitations')
+    .values({
+      id: invitationId,
+      tenant_id: trx.tenantId,
+      email: normalizedEmail,
+      role_code: roleCode,
+      employee_id: input.employeeId ?? null,
+      token_hash: tokenHash,
+      status: 'PENDING',
+      invited_by_user_id: trx.userId,
+      accepted_by_user_id: null,
+      expires_at: expiresAt,
+      accepted_at: null,
+      cancelled_at: null,
+      created_at: now,
+      updated_at: now,
+    })
+    .execute();
+
+  await appendAuditLog(trx, {
+    action: 'iam.invitation.created',
+    resourceType: 'invitation',
+    resourceId: invitationId,
+    metadata: {
+      email: normalizedEmail,
+      roleCode,
+      employeeId: input.employeeId ?? null,
+      expiresAt: expiresAt.toISOString(),
+    },
+  });
+
+  const inviter = await trx.db
+    .selectFrom('users')
+    .select(['email', 'full_name'])
+    .where('id', '=', trx.userId)
+    .executeTakeFirst();
+
+  return {
+    id: invitationId,
+    tenantId: trx.tenantId,
+    email: normalizedEmail,
+    roleCode,
+    employeeId: input.employeeId ?? null,
+    employeeCode,
+    employeeName,
+    status: 'PENDING',
+    invitedByUserId: trx.userId,
+    invitedByEmail: inviter?.email ?? null,
+    invitedByName: inviter?.full_name ?? null,
+    acceptedByUserId: null,
+    expiresAt: expiresAt.toISOString(),
+    acceptedAt: null,
+    cancelledAt: null,
+    createdAt: now.toISOString(),
+    updatedAt: now.toISOString(),
+    token: rawToken,
+    invitationToken: rawToken,
+    invitationLink: `/accept-invitation?token=${rawToken}`,
+  };
+}
+
+export async function listStaffInvitations(
+  trx: TenantTransactionContext,
+  statusFilter?: string,
+): Promise<StaffInvitationResponse[]> {
+  await assertAuthorized(trx, { permission: 'iam:member:read' });
+
+  // Lazily update expired invitations
+  await trx.db
+    .updateTable('tenant_invitations')
+    .set({ status: 'EXPIRED', updated_at: new Date() })
+    .where('tenant_id', '=', trx.tenantId)
+    .where('status', '=', 'PENDING')
+    .where('expires_at', '<', new Date())
+    .execute();
+
+  let query = trx.db
+    .selectFrom('tenant_invitations')
+    .leftJoin('employees', 'employees.id', 'tenant_invitations.employee_id')
+    .leftJoin('users as inviter', 'inviter.id', 'tenant_invitations.invited_by_user_id')
+    .select([
+      'tenant_invitations.id',
+      'tenant_invitations.tenant_id',
+      'tenant_invitations.email',
+      'tenant_invitations.role_code',
+      'tenant_invitations.employee_id',
+      'employees.employee_code',
+      'employees.display_name as employee_name',
+      'tenant_invitations.status',
+      'tenant_invitations.invited_by_user_id',
+      'inviter.email as invited_by_email',
+      'inviter.full_name as invited_by_name',
+      'tenant_invitations.accepted_by_user_id',
+      'tenant_invitations.expires_at',
+      'tenant_invitations.accepted_at',
+      'tenant_invitations.cancelled_at',
+      'tenant_invitations.created_at',
+      'tenant_invitations.updated_at',
+    ])
+    .where('tenant_invitations.tenant_id', '=', trx.tenantId)
+    .orderBy('tenant_invitations.created_at', 'desc');
+
+  if (statusFilter && ['PENDING', 'ACCEPTED', 'EXPIRED', 'CANCELLED', 'FAILED'].includes(statusFilter)) {
+    query = query.where('tenant_invitations.status', '=', statusFilter as 'PENDING' | 'ACCEPTED' | 'EXPIRED' | 'CANCELLED' | 'FAILED');
+  }
+
+  const rows = await query.execute();
+
+  return rows.map((r) => ({
+    id: r.id,
+    tenantId: r.tenant_id,
+    email: r.email,
+    roleCode: r.role_code,
+    employeeId: r.employee_id,
+    employeeCode: r.employee_code ?? null,
+    employeeName: r.employee_name ?? null,
+    status: r.status as StaffInvitationResponse['status'],
+    invitedByUserId: r.invited_by_user_id,
+    invitedByEmail: r.invited_by_email ?? null,
+    invitedByName: r.invited_by_name ?? null,
+    acceptedByUserId: r.accepted_by_user_id,
+    expiresAt: r.expires_at.toISOString(),
+    acceptedAt: r.accepted_at ? r.accepted_at.toISOString() : null,
+    cancelledAt: r.cancelled_at ? r.cancelled_at.toISOString() : null,
+    createdAt: r.created_at.toISOString(),
+    updatedAt: r.updated_at.toISOString(),
+  }));
+}
+
+export async function resendStaffInvitation(
+  trx: TenantTransactionContext,
+  invitationId: string,
+): Promise<StaffInvitationResponse> {
+  await assertAuthorized(trx, { permission: 'iam:member:manage' });
+
+  const existing = await trx.db
+    .selectFrom('tenant_invitations')
+    .leftJoin('employees', 'employees.id', 'tenant_invitations.employee_id')
+    .leftJoin('users as inviter', 'inviter.id', 'tenant_invitations.invited_by_user_id')
+    .select([
+      'tenant_invitations.id',
+      'tenant_invitations.tenant_id',
+      'tenant_invitations.email',
+      'tenant_invitations.role_code',
+      'tenant_invitations.employee_id',
+      'employees.employee_code',
+      'employees.display_name as employee_name',
+      'tenant_invitations.status',
+      'tenant_invitations.invited_by_user_id',
+      'inviter.email as invited_by_email',
+      'inviter.full_name as invited_by_name',
+      'tenant_invitations.accepted_by_user_id',
+      'tenant_invitations.expires_at',
+      'tenant_invitations.accepted_at',
+      'tenant_invitations.cancelled_at',
+      'tenant_invitations.created_at',
+      'tenant_invitations.updated_at',
+    ])
+    .where('tenant_invitations.tenant_id', '=', trx.tenantId)
+    .where('tenant_invitations.id', '=', invitationId)
+    .executeTakeFirst();
+
+  if (!existing) {
+    throw new AppError({
+      statusCode: 404,
+      errorCode: 'IAM_INVITATION_NOT_FOUND',
+      title: 'Invitation Not Found',
+      detail: `Invitation "${invitationId}" was not found.`,
+    });
+  }
+
+  if (existing.status === 'ACCEPTED') {
+    throw new AppError({
+      statusCode: 400,
+      errorCode: 'IAM_INVITATION_ALREADY_ACCEPTED',
+      title: 'Invitation Already Accepted',
+      detail: 'This invitation has already been accepted and cannot be resent.',
+    });
+  }
+
+  const rawToken = crypto.randomBytes(32).toString('hex');
+  const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+  const expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000);
+  const now = new Date();
+
+  await trx.db
+    .updateTable('tenant_invitations')
+    .set({
+      token_hash: tokenHash,
+      status: 'PENDING',
+      expires_at: expiresAt,
+      cancelled_at: null,
+      updated_at: now,
+    })
+    .where('tenant_id', '=', trx.tenantId)
+    .where('id', '=', invitationId)
+    .execute();
+
+  await appendAuditLog(trx, {
+    action: 'iam.invitation.resent',
+    resourceType: 'invitation',
+    resourceId: invitationId,
+    metadata: {
+      email: existing.email,
+      expiresAt: expiresAt.toISOString(),
+    },
+  });
+
+  return {
+    id: existing.id,
+    tenantId: existing.tenant_id,
+    email: existing.email,
+    roleCode: existing.role_code,
+    employeeId: existing.employee_id,
+    employeeCode: existing.employee_code ?? null,
+    employeeName: existing.employee_name ?? null,
+    status: 'PENDING',
+    invitedByUserId: existing.invited_by_user_id,
+    invitedByEmail: existing.invited_by_email ?? null,
+    invitedByName: existing.invited_by_name ?? null,
+    acceptedByUserId: null,
+    expiresAt: expiresAt.toISOString(),
+    acceptedAt: null,
+    cancelledAt: null,
+    createdAt: existing.created_at.toISOString(),
+    updatedAt: now.toISOString(),
+    token: rawToken,
+    invitationToken: rawToken,
+    invitationLink: `/accept-invitation?token=${rawToken}`,
+  };
+}
+
+export async function cancelStaffInvitation(
+  trx: TenantTransactionContext,
+  invitationId: string,
+): Promise<StaffInvitationResponse> {
+  await assertAuthorized(trx, { permission: 'iam:member:manage' });
+
+  const existing = await trx.db
+    .selectFrom('tenant_invitations')
+    .leftJoin('employees', 'employees.id', 'tenant_invitations.employee_id')
+    .leftJoin('users as inviter', 'inviter.id', 'tenant_invitations.invited_by_user_id')
+    .select([
+      'tenant_invitations.id',
+      'tenant_invitations.tenant_id',
+      'tenant_invitations.email',
+      'tenant_invitations.role_code',
+      'tenant_invitations.employee_id',
+      'employees.employee_code',
+      'employees.display_name as employee_name',
+      'tenant_invitations.status',
+      'tenant_invitations.invited_by_user_id',
+      'inviter.email as invited_by_email',
+      'inviter.full_name as invited_by_name',
+      'tenant_invitations.accepted_by_user_id',
+      'tenant_invitations.expires_at',
+      'tenant_invitations.accepted_at',
+      'tenant_invitations.cancelled_at',
+      'tenant_invitations.created_at',
+      'tenant_invitations.updated_at',
+    ])
+    .where('tenant_invitations.tenant_id', '=', trx.tenantId)
+    .where('tenant_invitations.id', '=', invitationId)
+    .executeTakeFirst();
+
+  if (!existing) {
+    throw new AppError({
+      statusCode: 404,
+      errorCode: 'IAM_INVITATION_NOT_FOUND',
+      title: 'Invitation Not Found',
+      detail: `Invitation "${invitationId}" was not found.`,
+    });
+  }
+
+  if (existing.status === 'ACCEPTED') {
+    throw new AppError({
+      statusCode: 400,
+      errorCode: 'IAM_INVITATION_ALREADY_ACCEPTED',
+      title: 'Invitation Already Accepted',
+      detail: 'This invitation has already been accepted and cannot be cancelled.',
+    });
+  }
+
+  const now = new Date();
+  await trx.db
+    .updateTable('tenant_invitations')
+    .set({
+      status: 'CANCELLED',
+      cancelled_at: now,
+      updated_at: now,
+    })
+    .where('tenant_id', '=', trx.tenantId)
+    .where('id', '=', invitationId)
+    .execute();
+
+  await appendAuditLog(trx, {
+    action: 'iam.invitation.cancelled',
+    resourceType: 'invitation',
+    resourceId: invitationId,
+    metadata: {
+      email: existing.email,
+    },
+  });
+
+  return {
+    id: existing.id,
+    tenantId: existing.tenant_id,
+    email: existing.email,
+    roleCode: existing.role_code,
+    employeeId: existing.employee_id,
+    employeeCode: existing.employee_code ?? null,
+    employeeName: existing.employee_name ?? null,
+    status: 'CANCELLED',
+    invitedByUserId: existing.invited_by_user_id,
+    invitedByEmail: existing.invited_by_email ?? null,
+    invitedByName: existing.invited_by_name ?? null,
+    acceptedByUserId: null,
+    expiresAt: existing.expires_at.toISOString(),
+    acceptedAt: null,
+    cancelledAt: now.toISOString(),
+    createdAt: existing.created_at.toISOString(),
+    updatedAt: now.toISOString(),
+  };
+}
+
+export async function validateStaffInvitation(
+  db: Kysely<NexStockDatabase>,
+  token: string,
+  traceId?: string,
+): Promise<ValidateInvitationResponse> {
+  const tokenHash = crypto.createHash('sha256').update(token.trim()).digest('hex');
+
+  const invitation = await withAppUserTransaction(db, { traceId }, async (trx) => {
+    return trx
+      .selectFrom('tenant_invitations')
+      .selectAll()
+      .where('token_hash', '=', tokenHash)
+      .executeTakeFirst();
+  });
+
+  if (!invitation) {
+    throw new AppError({
+      statusCode: 404,
+      errorCode: 'IAM_INVITATION_NOT_FOUND',
+      title: 'Invitation Not Found',
+      detail: 'The invitation token is invalid or does not exist.',
+    });
+  }
+
+  if (invitation.status === 'ACCEPTED') {
+    throw new AppError({
+      statusCode: 400,
+      errorCode: 'IAM_INVITATION_ALREADY_ACCEPTED',
+      title: 'Invitation Already Accepted',
+      detail: 'This invitation has already been accepted.',
+    });
+  }
+
+  if (invitation.status !== 'PENDING') {
+    throw new AppError({
+      statusCode: 400,
+      errorCode: 'IAM_INVITATION_INACTIVE',
+      title: 'Invitation Inactive',
+      detail: `This invitation is no longer active (status: ${invitation.status}).`,
+    });
+  }
+
+  if (new Date(invitation.expires_at) < new Date()) {
+    await withAppUserTransaction(db, { traceId }, async (trx) => {
+      await trx
+        .updateTable('tenant_invitations')
+        .set({ status: 'EXPIRED', updated_at: new Date() })
+        .where('id', '=', invitation.id)
+        .execute();
+    });
+
+    throw new AppError({
+      statusCode: 410,
+      errorCode: 'IAM_INVITATION_EXPIRED',
+      title: 'Invitation Expired',
+      detail: 'This invitation link has expired. Please contact your organization administrator to receive a new invitation.',
+    });
+  }
+
+  const effectiveTraceId = traceId ?? generateUuidV7();
+  return withTenantTransaction(
+    db,
+    { tenantId: invitation.tenant_id, userId: invitation.invited_by_user_id, traceId: effectiveTraceId },
+    async (trx) => {
+      const tenant = await trx.db
+        .selectFrom('tenants')
+        .select(['legal_name'])
+        .where('id', '=', invitation.tenant_id)
+        .executeTakeFirst();
+
+      let employeeName: string | null = null;
+      if (invitation.employee_id) {
+        const emp = await trx.db
+          .selectFrom('employees')
+          .select(['display_name'])
+          .where('id', '=', invitation.employee_id)
+          .executeTakeFirst();
+        employeeName = emp?.display_name ?? null;
+      }
+
+      return {
+        valid: true,
+        email: invitation.email,
+        roleCode: invitation.role_code,
+        tenantId: invitation.tenant_id,
+        tenantName: tenant?.legal_name ?? 'NexStock Organization',
+        employeeName,
+      };
+    },
+  );
+}
+
+export async function acceptStaffInvitation(
+  db: Kysely<NexStockDatabase>,
+  config: AuthServiceConfig,
+  input: AcceptInvitationRequest,
+  traceId?: string,
+): Promise<LoginResponse> {
+  const currentTraceId = traceId ?? `inv_acc_${generateUuidV7()}`;
+  const tokenHash = crypto.createHash('sha256').update(input.token.trim()).digest('hex');
+
+  if (input.password.length < 8) {
+    throw new AppError({
+      statusCode: 400,
+      errorCode: 'AUTH_WEAK_PASSWORD',
+      title: 'Weak Password',
+      detail: 'Password must be at least 8 characters long.',
+    });
+  }
+
+  // 1. Look up invitation using app user transaction
+  const invitation = await withAppUserTransaction(db, { traceId: currentTraceId }, async (trx) => {
+    return trx
+      .selectFrom('tenant_invitations')
+      .selectAll()
+      .where('token_hash', '=', tokenHash)
+      .executeTakeFirst();
+  });
+
+  if (!invitation) {
+    throw new AppError({
+      statusCode: 404,
+      errorCode: 'IAM_INVITATION_NOT_FOUND',
+      title: 'Invitation Not Found',
+      detail: 'The invitation token is invalid or does not exist.',
+    });
+  }
+
+  if (invitation.status === 'ACCEPTED') {
+    throw new AppError({
+      statusCode: 400,
+      errorCode: 'IAM_INVITATION_ALREADY_ACCEPTED',
+      title: 'Invitation Already Accepted',
+      detail: 'This invitation has already been accepted.',
+    });
+  }
+
+  if (invitation.status === 'EXPIRED' || new Date(invitation.expires_at) < new Date()) {
+    if (invitation.status !== 'EXPIRED') {
+      await withAppUserTransaction(db, { traceId: currentTraceId }, async (trx) => {
+        await trx
+          .updateTable('tenant_invitations')
+          .set({ status: 'EXPIRED', updated_at: new Date() })
+          .where('id', '=', invitation.id)
+          .execute();
+      });
+    }
+
+    throw new AppError({
+      statusCode: 410,
+      errorCode: 'IAM_INVITATION_EXPIRED',
+      title: 'Invitation Expired',
+      detail: 'This invitation has expired. Request a new invitation from your administrator.',
+    });
+  }
+
+  if (invitation.status !== 'PENDING') {
+    throw new AppError({
+      statusCode: 400,
+      errorCode: 'IAM_INVITATION_INACTIVE',
+      title: 'Invitation Inactive',
+      detail: `This invitation is no longer active (status: ${invitation.status}).`,
+    });
+  }
+
+  const normalizedEmail = invitation.email.toLowerCase().trim();
+  const fullName = input.fullName?.trim() || normalizedEmail.split('@')[0] || 'Staff Member';
+
+  // 2. Ensure User Account exists in auth provider / users table
+  let userId: string;
+  const existingUser = await withAppUserTransaction(db, { traceId: currentTraceId }, async (trx) => {
+    return trx
+      .selectFrom('users')
+      .select(['id', 'email', 'full_name'])
+      .where('email', '=', normalizedEmail)
+      .executeTakeFirst();
+  });
+
+  if (existingUser) {
+    userId = existingUser.id;
+  } else {
+    // Register user via Supabase or dev fallback
+    const supabaseUrl = config.supabaseUrl ?? process.env['SUPABASE_URL'] ?? DEFAULT_SUPABASE_URL;
+    const anonKey = config.supabaseAnonKey ?? process.env['SUPABASE_ANON_KEY'] ?? process.env['SUPABASE_PUBLISHABLE_KEY'];
+
+    if (anonKey && anonKey !== 'SET_IN_LOCAL_ENV') {
+      try {
+        const resp = await fetch(`${supabaseUrl}/auth/v1/signup`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            apikey: anonKey,
+            Authorization: `Bearer ${anonKey}`,
+          },
+          body: JSON.stringify({
+            email: normalizedEmail,
+            password: input.password,
+            data: { full_name: fullName },
+          }),
+        });
+
+        const data = (await resp.json()) as { user?: { id?: string }; id?: string };
+        const foundUserId = data.user?.id ?? data.id;
+        if (resp.ok && foundUserId) {
+          userId = foundUserId;
+        } else {
+          userId = generateUuidV7();
+        }
+      } catch {
+        userId = generateUuidV7();
+      }
+    } else {
+      userId = generateUuidV7();
+    }
+
+    await ensureUserRecordDirect(
+      db,
+      {
+        userId,
+        email: normalizedEmail,
+        fullName,
+      },
+      currentTraceId,
+    );
+  }
+
+  // 3. Atomically activate membership, assign role, link employee, and mark invitation accepted
+  await withTenantTransaction(
+    db,
+    { tenantId: invitation.tenant_id, userId, traceId: currentTraceId },
+    async (trx) => {
+      // A. Quota check
+      const existingMembership = await trx.db
+        .selectFrom('tenant_memberships')
+        .select(['id', 'status'])
+        .where('tenant_id', '=', trx.tenantId)
+        .where('user_id', '=', userId)
+        .executeTakeFirst();
+
+      const activeMembers = await trx.db
+        .selectFrom('tenant_memberships')
+        .select(['id'])
+        .where('tenant_id', '=', trx.tenantId)
+        .where('status', '=', 'ACTIVE')
+        .execute();
+
+      const plan = await trx.db
+        .selectFrom('tenant_subscriptions')
+        .innerJoin('subscription_plans', 'subscription_plans.id', 'tenant_subscriptions.plan_id')
+        .select(['subscription_plans.max_users'])
+        .where('tenant_subscriptions.tenant_id', '=', trx.tenantId)
+        .executeTakeFirst();
+
+      const isNewActive = !existingMembership || existingMembership.status !== 'ACTIVE';
+      const projectedCount = isNewActive ? activeMembers.length + 1 : activeMembers.length;
+
+      if (plan?.max_users != null && projectedCount > plan.max_users) {
+        throw new AppError({
+          statusCode: 403,
+          errorCode: 'SUB_QUOTA_EXCEEDED',
+          title: 'Subscription Quota Exceeded',
+          detail: `Your organization has reached the maximum user limit (${plan.max_users}) allowed by your subscription plan.`,
+        });
+      }
+
+      // B. Create or update tenant_memberships
+      let membershipId: string;
+      if (existingMembership) {
+        membershipId = existingMembership.id;
+        await trx.db
+          .updateTable('tenant_memberships')
+          .set({
+            status: 'ACTIVE',
+            updated_at: new Date(),
+          })
+          .where('tenant_id', '=', trx.tenantId)
+          .where('id', '=', membershipId)
+          .execute();
+      } else {
+        membershipId = generateUuidV7();
+        await trx.db
+          .insertInto('tenant_memberships')
+          .values({
+            id: membershipId,
+            tenant_id: trx.tenantId,
+            user_id: userId,
+            status: 'ACTIVE',
+            all_locations_access: false,
+          })
+          .execute();
+      }
+
+      // C. Role assignment
+      const targetRole = await trx.db
+        .selectFrom('roles')
+        .select(['id', 'code'])
+        .where('tenant_id', '=', trx.tenantId)
+        .where('code', '=', invitation.role_code)
+        .executeTakeFirst();
+
+      if (targetRole) {
+        const existingRoleAssignment = await trx.db
+          .selectFrom('member_role_assignments')
+          .select(['id'])
+          .where('tenant_id', '=', trx.tenantId)
+          .where('membership_id', '=', membershipId)
+          .where('role_id', '=', targetRole.id)
+          .executeTakeFirst();
+
+        if (!existingRoleAssignment) {
+          await trx.db
+            .insertInto('member_role_assignments')
+            .values({
+              id: generateUuidV7(),
+              tenant_id: trx.tenantId,
+              membership_id: membershipId,
+              role_id: targetRole.id,
+            })
+            .execute();
+        }
+      }
+
+      // D. Link employee if employee_id was specified
+      if (invitation.employee_id) {
+        await trx.db
+          .updateTable('employees')
+          .set({
+            linked_user_id: userId,
+            updated_at: new Date(),
+          })
+          .where('tenant_id', '=', trx.tenantId)
+          .where('id', '=', invitation.employee_id)
+          .execute();
+      }
+
+      // E. Mark invitation ACCEPTED
+      const now = new Date();
+      await trx.db
+        .updateTable('tenant_invitations')
+        .set({
+          status: 'ACCEPTED',
+          accepted_by_user_id: userId,
+          accepted_at: now,
+          updated_at: now,
+        })
+        .where('tenant_id', '=', trx.tenantId)
+        .where('id', '=', invitation.id)
+        .execute();
+
+      await appendAuditLog(trx, {
+        action: 'iam.invitation.accepted',
+        resourceType: 'invitation',
+        resourceId: invitation.id,
+        metadata: {
+          acceptedByUserId: userId,
+          roleCode: invitation.role_code,
+          employeeId: invitation.employee_id,
+        },
+      });
+    },
+  );
+
+  // 4. Generate login session for staff member
+  const token = signDevJwt({
+    userId,
+    email: normalizedEmail,
+    userMetadata: { full_name: fullName },
+  });
+
+  const profile = await getUserProfileAndMemberships(db, userId, currentTraceId);
+
+  return {
+    token,
+    refreshToken: `dev_refresh_${generateUuidV7()}`,
+    expiresIn: 86400 * 7,
+    user: profile.user,
+    memberships: profile.memberships,
+  };
+}
+
+export async function updateMemberStatus(
+  trx: TenantTransactionContext,
+  membershipId: string,
+  status: 'ACTIVE' | 'DISABLED',
+): Promise<MemberSummaryResponse> {
+  await assertAuthorized(trx, { permission: 'iam:member:manage' });
+
+  const membership = await trx.db
+    .selectFrom('tenant_memberships')
+    .selectAll()
+    .where('tenant_id', '=', trx.tenantId)
+    .where('id', '=', membershipId)
+    .executeTakeFirst();
+
+  if (!membership) {
+    throw new AppError({
+      statusCode: 404,
+      errorCode: 'IAM_MEMBERSHIP_NOT_FOUND',
+      title: 'Membership Not Found',
+      detail: `Membership "${membershipId}" was not found.`,
+    });
+  }
+
+  // Prevent disabling tenant owner
+  const roles = await trx.db
+    .selectFrom('member_role_assignments')
+    .innerJoin('roles', 'roles.id', 'member_role_assignments.role_id')
+    .select(['roles.code'])
+    .where('member_role_assignments.tenant_id', '=', trx.tenantId)
+    .where('member_role_assignments.membership_id', '=', membershipId)
+    .execute();
+
+  const isOwner = roles.some((r) => r.code === 'TENANT_OWNER');
+  if (isOwner && status === 'DISABLED') {
+    throw new AppError({
+      statusCode: 400,
+      errorCode: 'IAM_CANNOT_DISABLE_OWNER',
+      title: 'Cannot Disable Owner Account',
+      detail: 'The Organization Owner account cannot be deactivated.',
+    });
+  }
+
+  await trx.db
+    .updateTable('tenant_memberships')
+    .set({
+      status,
+      updated_at: new Date(),
+    })
+    .where('tenant_id', '=', trx.tenantId)
+    .where('id', '=', membershipId)
+    .execute();
+
+  await appendAuditLog(trx, {
+    action: 'iam.member.status_updated',
+    resourceType: 'membership',
+    resourceId: membershipId,
+    metadata: {
+      userId: membership.user_id,
+      previousStatus: membership.status,
+      newStatus: status,
+    },
+  });
+
+  const allMembers = await listMembers(trx);
+  const updated = allMembers.find((m) => m.id === membershipId);
+  return updated!;
+}
+
+export async function revokeMemberAccess(
+  trx: TenantTransactionContext,
+  membershipId: string,
+): Promise<{ success: boolean; message: string }> {
+  await assertAuthorized(trx, { permission: 'iam:member:manage' });
+
+  const membership = await trx.db
+    .selectFrom('tenant_memberships')
+    .selectAll()
+    .where('tenant_id', '=', trx.tenantId)
+    .where('id', '=', membershipId)
+    .executeTakeFirst();
+
+  if (!membership) {
+    throw new AppError({
+      statusCode: 404,
+      errorCode: 'IAM_MEMBERSHIP_NOT_FOUND',
+      title: 'Membership Not Found',
+      detail: `Membership "${membershipId}" was not found.`,
+    });
+  }
+
+  // Prevent revoking tenant owner
+  const roles = await trx.db
+    .selectFrom('member_role_assignments')
+    .innerJoin('roles', 'roles.id', 'member_role_assignments.role_id')
+    .select(['roles.code'])
+    .where('member_role_assignments.tenant_id', '=', trx.tenantId)
+    .where('member_role_assignments.membership_id', '=', membershipId)
+    .execute();
+
+  const isOwner = roles.some((r) => r.code === 'TENANT_OWNER');
+  if (isOwner) {
+    throw new AppError({
+      statusCode: 400,
+      errorCode: 'IAM_CANNOT_REVOKE_OWNER',
+      title: 'Cannot Revoke Owner Account',
+      detail: 'The Organization Owner access cannot be revoked.',
+    });
+  }
+
+  // Unlink any employee linked to this user in this tenant
+  await trx.db
+    .updateTable('employees')
+    .set({
+      linked_user_id: null,
+      updated_at: new Date(),
+    })
+    .where('tenant_id', '=', trx.tenantId)
+    .where('linked_user_id', '=', membership.user_id)
+    .execute();
+
+  // Remove role assignments, location scopes, and membership
+  await trx.db
+    .deleteFrom('member_role_assignments')
+    .where('tenant_id', '=', trx.tenantId)
+    .where('membership_id', '=', membershipId)
+    .execute();
+
+  await trx.db
+    .deleteFrom('member_location_scopes')
+    .where('tenant_id', '=', trx.tenantId)
+    .where('membership_id', '=', membershipId)
+    .execute();
+
+  await trx.db
+    .deleteFrom('tenant_memberships')
+    .where('tenant_id', '=', trx.tenantId)
+    .where('id', '=', membershipId)
+    .execute();
+
+  await appendAuditLog(trx, {
+    action: 'iam.member.revoked',
+    resourceType: 'membership',
+    resourceId: membershipId,
+    metadata: {
+      userId: membership.user_id,
+    },
+  });
+
+  return { success: true, message: 'Member access revoked successfully.' };
 }

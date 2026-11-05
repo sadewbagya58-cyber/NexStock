@@ -198,11 +198,34 @@ export const ALL_SPA_VIEW_IDS = [
   'credit-dashboard',
   'customers',
   'credit-accounts',
+  'team-staff',
   'roles-permissions',
   'org-settings',
 ] as const;
 
 export type SpaViewId = (typeof ALL_SPA_VIEW_IDS)[number];
+
+export interface TeamNavItem {
+  readonly id: 'team-staff' | 'roles-permissions';
+  readonly label: string;
+  readonly href: string;
+  readonly requiredPermission: string;
+}
+
+export const PHASE72_TEAM_NAV_ITEMS: readonly TeamNavItem[] = [
+  {
+    id: 'team-staff',
+    label: 'Team & Staff Accounts',
+    href: '/org/team-staff',
+    requiredPermission: 'iam:member:read',
+  },
+  {
+    id: 'roles-permissions',
+    label: 'Roles & Permissions',
+    href: '/org/roles-permissions',
+    requiredPermission: 'iam:role:manage',
+  },
+] as const;
 
 export interface CreditNavItem {
   readonly id: 'credit-dashboard' | 'customers' | 'credit-accounts';

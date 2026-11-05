@@ -4,6 +4,7 @@ import {
   TypeBoxValidatorCompiler,
 } from '@fastify/type-provider-typebox';
 import {
+  AcceptInvitationRequestSchema,
   AssignMemberRolesRequestSchema,
   AuthenticatedIdempotentHeadersSchema,
   AuthenticatedTenantHeadersSchema,
@@ -45,6 +46,7 @@ import {
   InventoryBalanceResponseSchema,
   InventoryReconciliationResponseSchema,
   InventoryValuationResponseSchema,
+  InviteStaffRequestSchema,
   LinkEmployeeUserRequestSchema,
   LinkSupplierProductRequestSchema,
   ListBatchesQuerySchema,
@@ -98,6 +100,7 @@ import {
   SerialResponseSchema,
   SignUpRequestSchema,
   SignUpResponseSchema,
+  StaffInvitationResponseSchema,
   StockMovementResponseSchema,
   StocktakeSessionResponseSchema,
   SubscriptionStatusSchema,
@@ -113,6 +116,7 @@ import {
   UpdateEmployeeRequestSchema,
   UpdateEmployeeStatusRequestSchema,
   UpdateMemberLocationScopesRequestSchema,
+  UpdateMemberStatusRequestSchema,
   UpdatePayrollItemRequestSchema,
   UpdatePosRegisterRequestSchema,
   UpdateProductBarcodeRequestSchema,
@@ -127,6 +131,7 @@ import {
   UpsertLocalizationSettingsRequestSchema,
   UserMeResponseSchema,
   UuidSchema,
+  ValidateInvitationResponseSchema,
   VoidSaleRequestSchema,
   WarehouseResponseSchema,
   createCursorPageResponseSchema,
@@ -234,9 +239,12 @@ import {
   type JwtVerificationOptions,
   RemoteJwksProvider,
   type SystemRoleCode,
+  acceptStaffInvitation,
   assertAuthorized,
   assignMemberRoles,
+  cancelStaffInvitation,
   createRole,
+  createStaffInvitation,
   deleteRole,
   getPermissionsCatalog,
   getRoleById,
@@ -248,10 +256,15 @@ import {
   handleSignUp,
   listMembers,
   listRoles,
+  listStaffInvitations,
   provisionTenantMember,
   removeMemberRole,
+  resendStaffInvitation,
+  revokeMemberAccess,
   updateMemberLocationScopes,
+  updateMemberStatus,
   updateRole,
+  validateStaffInvitation,
   verifySupabaseJwt,
 } from './modules/iam/index.js';
 import {
@@ -927,6 +940,60 @@ export async function buildApp(
       const result = await getUserProfileAndMemberships(
         options.db,
         principal.userId,
+        traceId,
+      );
+      return reply.send(result);
+    },
+  );
+
+  // Auth 7: Validate Staff Invitation Token (Public)
+  app.get(
+    '/v1/auth/invitations/validate',
+    {
+      schema: {
+        querystring: Type.Object({
+          token: Type.String({ minLength: 10 }),
+        }),
+        response: {
+          200: ValidateInvitationResponseSchema,
+          400: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          410: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const traceId = String(request.id);
+      const result = await validateStaffInvitation(
+        options.db,
+        request.query.token,
+        traceId,
+      );
+      return reply.send(result);
+    },
+  );
+
+  // Auth 8: Accept Staff Invitation & Provision Account (Public)
+  app.post(
+    '/v1/auth/invitations/accept',
+    {
+      schema: {
+        body: AcceptInvitationRequestSchema,
+        response: {
+          200: LoginResponseSchema,
+          400: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+          410: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const traceId = String(request.id);
+      const result = await acceptStaffInvitation(
+        options.db,
+        authConfig,
+        request.body,
         traceId,
       );
       return reply.send(result);
@@ -1963,6 +2030,219 @@ export async function buildApp(
             request.params.membershipId,
             request.body,
           ),
+      );
+    },
+  );
+
+  // 13l. Update Member Status (Active/Disabled) (Phase 7.2)
+  app.patch(
+    '/v1/iam/members/:membershipId/status',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ membershipId: UuidSchema }),
+        body: UpdateMemberStatusRequestSchema,
+        response: {
+          200: MemberSummaryResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          updateMemberStatus(
+            trx,
+            request.params.membershipId,
+            request.body.status,
+          ),
+      );
+    },
+  );
+
+  // 13m. Revoke Member Access (Phase 7.2)
+  app.delete(
+    '/v1/iam/members/:membershipId',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ membershipId: UuidSchema }),
+        response: {
+          200: Type.Object({ success: Type.Boolean(), message: Type.String() }),
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => revokeMemberAccess(trx, request.params.membershipId),
+      );
+    },
+  );
+
+  // 13n. Create Staff Invitation (Phase 7.2)
+  app.post(
+    '/v1/iam/invitations',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        body: InviteStaffRequestSchema,
+        response: {
+          201: StaffInvitationResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      const invitation = await withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => createStaffInvitation(trx, request.body),
+      );
+
+      return reply.status(201).send(invitation);
+    },
+  );
+
+  // 13o. List Staff Invitations (Phase 7.2)
+  app.get(
+    '/v1/iam/invitations',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        querystring: Type.Optional(
+          Type.Object({
+            status: Type.Optional(Type.String()),
+          }),
+        ),
+        response: {
+          200: Type.Array(StaffInvitationResponseSchema),
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          listStaffInvitations(
+            trx,
+            (request.query as { status?: string } | undefined)?.status,
+          ),
+      );
+    },
+  );
+
+  // 13p. Resend Staff Invitation (Phase 7.2)
+  app.post(
+    '/v1/iam/invitations/:invitationId/resend',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ invitationId: UuidSchema }),
+        response: {
+          200: StaffInvitationResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => resendStaffInvitation(trx, request.params.invitationId),
+      );
+    },
+  );
+
+  // 13q. Cancel Staff Invitation (Phase 7.2)
+  app.post(
+    '/v1/iam/invitations/:invitationId/cancel',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ invitationId: UuidSchema }),
+        response: {
+          200: StaffInvitationResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => cancelStaffInvitation(trx, request.params.invitationId),
       );
     },
   );

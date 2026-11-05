@@ -510,7 +510,17 @@ export async function linkEmployeeUser(
   }
 
   if (userId) {
-    // Check user exists
+    // 1. Prevent accidental reassignment if employee is already linked to a different user
+    if (existing.linked_user_id && existing.linked_user_id !== userId) {
+      throw new AppError({
+        statusCode: 409,
+        errorCode: 'HRM_EMPLOYEE_ALREADY_LINKED',
+        title: 'Employee Already Linked',
+        detail: `Employee "${existing.employee_code}" is already linked to another user account. Unlink the existing account first before reassigning.`,
+      });
+    }
+
+    // 2. Check user exists
     const user = await trx.db
       .selectFrom('users')
       .select(['id', 'email'])
@@ -526,7 +536,47 @@ export async function linkEmployeeUser(
       });
     }
 
-    // Check no other employee linked to this user
+    // 3. Check membership in tenant
+    const membership = await trx.db
+      .selectFrom('tenant_memberships')
+      .select(['id', 'status'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('user_id', '=', userId)
+      .executeTakeFirst();
+
+    if (!membership) {
+      throw new AppError({
+        statusCode: 400,
+        errorCode: 'HRM_USER_NOT_TENANT_MEMBER',
+        title: 'User Not Organization Member',
+        detail: `User "${user.email}" is not a member of this organization.`,
+      });
+    }
+
+    // 4. Check user roles: BLOCK linking TENANT_OWNER or ORG_ADMIN to standard staff
+    const roles = await trx.db
+      .selectFrom('member_role_assignments')
+      .innerJoin('roles', (join) =>
+        join
+          .onRef('roles.tenant_id', '=', 'member_role_assignments.tenant_id')
+          .onRef('roles.id', '=', 'member_role_assignments.role_id'),
+      )
+      .select(['roles.code'])
+      .where('member_role_assignments.tenant_id', '=', trx.tenantId)
+      .where('member_role_assignments.membership_id', '=', membership.id)
+      .execute();
+
+    const roleCodes = roles.map((r) => r.code);
+    if (roleCodes.includes('TENANT_OWNER') || roleCodes.includes('ORG_ADMIN')) {
+      throw new AppError({
+        statusCode: 400,
+        errorCode: 'HRM_INVALID_STAFF_LINK',
+        title: 'Cannot Link Owner/Admin Account',
+        detail: 'Owner and Organization Administrator accounts cannot be linked to standard employee staff profiles.',
+      });
+    }
+
+    // 5. Check no other employee linked to this user
     const otherEmployee = await trx.db
       .selectFrom('employees')
       .select(['id', 'employee_code'])
@@ -571,6 +621,22 @@ export async function linkEmployeeUser(
 export async function getMyEmployee(
   trx: TenantTransactionContext,
 ): Promise<EmployeeResponse> {
+  const membership = await trx.db
+    .selectFrom('tenant_memberships')
+    .select(['status'])
+    .where('tenant_id', '=', trx.tenantId)
+    .where('user_id', '=', trx.userId)
+    .executeTakeFirst();
+
+  if (!membership || membership.status !== 'ACTIVE') {
+    throw new AppError({
+      statusCode: 403,
+      errorCode: 'IAM_TENANT_MEMBERSHIP_REQUIRED',
+      title: 'Active Tenant Membership Required',
+      detail: `User "${trx.userId}" does not hold an active membership in tenant "${trx.tenantId}".`,
+    });
+  }
+
   const row = await trx.db
     .selectFrom('employees')
     .selectAll()

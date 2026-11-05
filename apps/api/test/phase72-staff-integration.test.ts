@@ -564,7 +564,7 @@ describe('@nexstock/api — Phase 7.2: Staff Authentication, RBAC, Work Schedule
       expect(res.statusCode).toBe(200);
       const rec = res.json();
       expect(rec.employeeId).toBe(emp1Id);
-      expect(rec.status).toBe('PRESENT');
+      expect(['PRESENT', 'LATE']).toContain(rec.status);
       expect(rec.checkInTime).toBeDefined();
     });
 

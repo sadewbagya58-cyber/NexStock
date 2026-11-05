@@ -330,6 +330,11 @@ describe('@nexstock/api — Milestone 0 Foundation, RLS, Idempotency & Sync Inva
           name: '0019_phase74_customer_credit',
           filename: '0019_phase74_customer_credit.sql',
         },
+        {
+          version: 20,
+          name: '0020_phase72_staff_invitations',
+          filename: '0020_phase72_staff_invitations.sql',
+        },
       ]);
     });
 
@@ -407,6 +412,7 @@ describe('@nexstock/api — Milestone 0 Foundation, RLS, Idempotency & Sync Inva
         '0017_phase71_hrm_attendance_leave_proration.sql',
         '0018_phase73_expenses_management.sql',
         '0019_phase74_customer_credit.sql',
+        '0020_phase72_staff_invitations.sql',
       ]);
 
       await expect(

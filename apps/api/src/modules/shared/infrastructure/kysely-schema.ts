@@ -1370,6 +1370,23 @@ export interface CustomerCreditNotesTable {
   created_at: Generated<Date>;
 }
 
+export interface TenantInvitationsTable {
+  id: string;
+  tenant_id: string;
+  email: string;
+  role_code: string;
+  employee_id: string | null;
+  token_hash: string;
+  status: 'PENDING' | 'ACCEPTED' | 'EXPIRED' | 'CANCELLED' | 'FAILED';
+  invited_by_user_id: string;
+  accepted_by_user_id: string | null;
+  expires_at: ColumnType<Date, Date | string, Date | string>;
+  accepted_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  cancelled_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
 export interface NexStockDatabase {
   schema_migrations: SchemaMigrationsTable;
   idempotency_keys: IdempotencyKeysTable;
@@ -1450,4 +1467,5 @@ export interface NexStockDatabase {
   customer_credit_collections: CustomerCreditCollectionsTable;
   customer_credit_writeoffs: CustomerCreditWriteoffsTable;
   customer_credit_notes: CustomerCreditNotesTable;
+  tenant_invitations: TenantInvitationsTable;
 }

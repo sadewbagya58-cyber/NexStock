@@ -27,6 +27,7 @@ import {
   getCurrencyMinorUnits,
   resolveMediaUrl,
   PHASE7_HRM_NAV_ITEMS,
+  PHASE72_TEAM_NAV_ITEMS,
 } from '../src/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -2655,6 +2656,42 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       expect(html).toContain('id="creditPaymentFields"');
       expect(html).toContain('<option value="CREDIT">Customer Credit Account (On Account)</option>');
       expect(html).toContain('paymentMethod: \'CREDIT\'');
+    });
+  });
+
+  describe('29. Phase 7.2 Staff Invitation & Account Provisioning UI', () => {
+    it('verifies team-staff navigation, view registration, and contracts export', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // 1. View ID in ALL_SPA_VIEW_IDS
+      expect(ALL_SPA_VIEW_IDS).toContain('team-staff');
+      expect(PHASE72_TEAM_NAV_ITEMS).toHaveLength(2);
+      expect(PHASE72_TEAM_NAV_ITEMS[0].id).toBe('team-staff');
+      expect(PHASE72_TEAM_NAV_ITEMS[0].requiredPermission).toBe('iam:member:read');
+
+      // 2. Navigation in HTML sidebar
+      expect(html).toContain('data-view="team-staff"');
+      expect(html).toContain('Team &amp; Staff Accounts');
+
+      // 3. Router switch cases
+      expect(html).toContain("case 'team-staff': renderTeamStaffAccountsView(); break;");
+      expect(html).toContain("case 'accept-invitation': renderAcceptInvitationView(); break;");
+
+      // 4. View functions
+      expect(html).toContain('async function renderTeamStaffAccountsView()');
+      expect(html).toContain('async function renderAcceptInvitationView()');
+      expect(html).toContain('async function openInviteStaffModal()');
+      expect(html).toContain('async function submitStaffInvitationForm()');
+      expect(html).toContain('async function resendStaffInvitationAction(');
+      expect(html).toContain('async function cancelStaffInvitationAction(');
+      expect(html).toContain('async function toggleMemberStatus(');
+      expect(html).toContain('async function confirmRevokeMember(');
+
+      // 5. Link user modal filtering (excluding OWNER and ADMIN)
+      expect(html).toContain('isOwnerOrAdmin');
+      expect(html).toContain('TENANT_OWNER');
+      expect(html).toContain('ORG_ADMIN');
     });
   });
 });

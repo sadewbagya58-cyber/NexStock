@@ -193,6 +193,19 @@ export const ErrorCodeSchema = Type.Union([
   Type.Literal('CREDIT_LATE_FEE_DISABLED'),
   Type.Literal('CREDIT_INVALID_STATUS_TRANSITION'),
   Type.Literal('CREDIT_CUSTOMER_REQUIRED_FOR_CREDIT_SALE'),
+  Type.Literal('HRM_EMPLOYEE_ALREADY_LINKED'),
+  Type.Literal('HRM_USER_NOT_TENANT_MEMBER'),
+  Type.Literal('HRM_INVALID_STAFF_LINK'),
+  Type.Literal('IAM_INVALID_INVITATION_ROLE'),
+  Type.Literal('IAM_CANNOT_INVITE_OWNER'),
+  Type.Literal('IAM_USER_ALREADY_MEMBER'),
+  Type.Literal('IAM_INVITATION_ALREADY_EXISTS'),
+  Type.Literal('IAM_INVITATION_NOT_FOUND'),
+  Type.Literal('IAM_INVITATION_ALREADY_ACCEPTED'),
+  Type.Literal('IAM_INVITATION_INACTIVE'),
+  Type.Literal('IAM_INVITATION_EXPIRED'),
+  Type.Literal('IAM_CANNOT_DISABLE_OWNER'),
+  Type.Literal('IAM_CANNOT_REVOKE_OWNER'),
   Type.Literal('ERR_INTERNAL_SERVER_ERROR'),
 ]);
 export type ErrorCode = Static<typeof ErrorCodeSchema>;
@@ -2676,6 +2689,15 @@ export const MemberLocationScopeDetailSchema = Type.Object({
 });
 export type MemberLocationScopeDetail = Static<typeof MemberLocationScopeDetailSchema>;
 
+export const MemberLinkedEmployeeSummarySchema = Type.Object({
+  id: UuidSchema,
+  employeeCode: Type.String(),
+  displayName: Type.String(),
+  designation: Type.Optional(Type.String()),
+  department: Type.Optional(Type.String()),
+});
+export type MemberLinkedEmployeeSummary = Static<typeof MemberLinkedEmployeeSummarySchema>;
+
 export const MemberSummaryResponseSchema = Type.Object({
   id: UuidSchema,
   tenantId: UuidSchema,
@@ -2686,6 +2708,7 @@ export const MemberSummaryResponseSchema = Type.Object({
   allLocationsAccess: Type.Boolean(),
   roles: Type.Array(MemberRoleAssignmentSummarySchema),
   locationScopes: MemberLocationScopeDetailSchema,
+  linkedEmployee: Type.Optional(Type.Union([MemberLinkedEmployeeSummarySchema, Type.Null()])),
   createdAt: Type.String(),
 });
 export type MemberSummaryResponse = Static<typeof MemberSummaryResponseSchema>;
@@ -2709,6 +2732,79 @@ export const UpdateMemberLocationScopesRequestSchema = Type.Object(
 export type UpdateMemberLocationScopesRequest = Static<
   typeof UpdateMemberLocationScopesRequestSchema
 >;
+
+export const UpdateMemberStatusRequestSchema = Type.Object(
+  {
+    status: Type.Union([Type.Literal('ACTIVE'), Type.Literal('DISABLED')]),
+  },
+  { additionalProperties: false },
+);
+export type UpdateMemberStatusRequest = Static<typeof UpdateMemberStatusRequestSchema>;
+
+// Phase 7.2 Staff Invitation & Account Provisioning Schemas
+export const InviteStaffRequestSchema = Type.Object(
+  {
+    email: Type.String({
+      minLength: 3,
+      maxLength: 255,
+      pattern: '^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$',
+    }),
+    roleCode: Type.Optional(Type.String({ minLength: 2, maxLength: 50 })),
+    employeeId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
+  },
+  { additionalProperties: false },
+);
+export type InviteStaffRequest = Static<typeof InviteStaffRequestSchema>;
+
+export const StaffInvitationResponseSchema = Type.Object({
+  id: UuidSchema,
+  tenantId: UuidSchema,
+  email: Type.String(),
+  roleCode: Type.String(),
+  employeeId: Type.Union([UuidSchema, Type.Null()]),
+  employeeCode: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  employeeName: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  status: Type.Union([
+    Type.Literal('PENDING'),
+    Type.Literal('ACCEPTED'),
+    Type.Literal('EXPIRED'),
+    Type.Literal('CANCELLED'),
+    Type.Literal('FAILED'),
+  ]),
+  invitedByUserId: UuidSchema,
+  invitedByEmail: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  invitedByName: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  acceptedByUserId: Type.Union([UuidSchema, Type.Null()]),
+  expiresAt: Type.String(),
+  acceptedAt: Type.Union([Type.String(), Type.Null()]),
+  cancelledAt: Type.Union([Type.String(), Type.Null()]),
+  createdAt: Type.String(),
+  updatedAt: Type.String(),
+  token: Type.Optional(Type.String()),
+  invitationToken: Type.Optional(Type.String()),
+  invitationLink: Type.Optional(Type.String()),
+});
+export type StaffInvitationResponse = Static<typeof StaffInvitationResponseSchema>;
+
+export const ValidateInvitationResponseSchema = Type.Object({
+  valid: Type.Boolean(),
+  email: Type.String(),
+  roleCode: Type.String(),
+  tenantId: UuidSchema,
+  tenantName: Type.String(),
+  employeeName: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+});
+export type ValidateInvitationResponse = Static<typeof ValidateInvitationResponseSchema>;
+
+export const AcceptInvitationRequestSchema = Type.Object(
+  {
+    token: Type.String({ minLength: 10 }),
+    password: Type.String({ minLength: 8, maxLength: 128 }),
+    fullName: Type.Optional(Type.String({ minLength: 1, maxLength: 160 })),
+  },
+  { additionalProperties: false },
+);
+export type AcceptInvitationRequest = Static<typeof AcceptInvitationRequestSchema>;
 
 // ============================================================================
 // Phase 7.1 Complete HRM: Work Schedules, Attendance, Leave, Holidays & Settings

@@ -564,6 +564,13 @@ export function loadPhase74CustomerCreditMigrationSql(): string {
   return sqlText;
 }
 
+export function loadPhase72StaffInvitationsMigrationSql(): string {
+  const filename = '0020_phase72_staff_invitations.sql';
+  const sqlText = readFileSync(resolve(migrationsDir, filename), 'utf-8');
+  assertPostgresMigrationSqlCompatible(sqlText, filename);
+  return sqlText;
+}
+
 export function getOrderedPostgresMigrations(): readonly PostgresMigrationSpec[] {
   return [
     {
@@ -698,6 +705,13 @@ export function getOrderedPostgresMigrations(): readonly PostgresMigrationSpec[]
       name: '0019_phase74_customer_credit',
       filename: '0019_phase74_customer_credit.sql',
       sql: loadPhase74CustomerCreditMigrationSql(),
+    },
+    {
+      dialect: 'postgres',
+      version: 20,
+      name: '0020_phase72_staff_invitations',
+      filename: '0020_phase72_staff_invitations.sql',
+      sql: loadPhase72StaffInvitationsMigrationSql(),
     },
   ];
 }

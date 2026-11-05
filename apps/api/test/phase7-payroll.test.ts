@@ -211,6 +211,17 @@ describe('@nexstock/api — Phase 7.1: Employee Management & Flexible Payroll En
         full_name: 'John Staff Doe',
       })
       .execute();
+
+    await harness.db
+      .insertInto('tenant_memberships')
+      .values({
+        id: '0192b4c0-7777-7000-8000-000000000077',
+        tenant_id: TENANT_ALPHA_ID,
+        user_id: TENANT_ALPHA_STAFF,
+        status: 'ACTIVE',
+        all_locations_access: true,
+      })
+      .execute();
   }, 60_000);
 
   afterAll(async () => {
