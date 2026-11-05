@@ -23,7 +23,8 @@ export type SystemRoleCode =
   | 'CASHIER'
   | 'WAREHOUSE_CLERK'
   | 'PURCHASER'
-  | 'ACCOUNTANT';
+  | 'ACCOUNTANT'
+  | 'STAFF';
 
 export type PermissionKey =
   | 'dash:view'
@@ -236,6 +237,8 @@ export const SYSTEM_ROLE_DESCRIPTIONS: Readonly<Record<SystemRoleCode, string>> 
     'Procurement coordinator managing supplier relationships, purchase orders, and stock intake catalog items.',
   ACCOUNTANT:
     'Financial controller managing compensation plans, payroll calculation runs, disbursements, and accounting reports.',
+  STAFF:
+    'Standard employee account with self-service access to personal attendance, work schedule, holidays, and leave requests.',
 };
 
 export const SYSTEM_ROLE_DEFINITIONS: Readonly<
@@ -419,6 +422,16 @@ export const SYSTEM_ROLE_DEFINITIONS: Readonly<
       'rep:report:export',
     ],
   },
+  STAFF: {
+    name: 'Staff Employee',
+    permissions: [
+      'dash:view',
+      'hrm:attendance:self',
+      'hrm:leave:self',
+      'hrm:schedule:read',
+      'hrm:holiday:read',
+    ],
+  },
 };
 
 export interface AuthorizedMemberContext {
@@ -600,12 +613,30 @@ export async function provisionTenantMember(
     .execute();
 
   for (const roleCode of input.roleCodes) {
-    const roleRow = await trx.db
+    let roleRow = await trx.db
       .selectFrom('roles')
       .select(['id'])
       .where('tenant_id', '=', trx.tenantId)
       .where('code', '=', roleCode)
       .executeTakeFirst();
+
+    if (!roleRow && roleCode in SYSTEM_ROLE_DEFINITIONS) {
+      const def = SYSTEM_ROLE_DEFINITIONS[roleCode as SystemRoleCode];
+      const desc = SYSTEM_ROLE_DESCRIPTIONS[roleCode as SystemRoleCode];
+      const newRoleId = generateUuidV7();
+      await trx.db
+        .insertInto('roles')
+        .values({
+          id: newRoleId,
+          tenant_id: trx.tenantId,
+          code: roleCode,
+          name: def.name,
+          description: desc,
+          is_system_role: true,
+        })
+        .execute();
+      roleRow = { id: newRoleId };
+    }
 
     if (!roleRow) {
       throw new AppError({

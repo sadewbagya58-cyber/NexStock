@@ -41,6 +41,14 @@ function formatDateOnly(d: Date | string | null): string | null {
 }
 
 export function mapWorkSchedule(row: WorkScheduleRow): WorkScheduleResponse {
+  const mon = Boolean(row.monday_working);
+  const tue = Boolean(row.tuesday_working);
+  const wed = Boolean(row.wednesday_working);
+  const thu = Boolean(row.thursday_working);
+  const fri = Boolean(row.friday_working);
+  const sat = Boolean(row.saturday_working);
+  const sun = Boolean(row.sunday_working);
+
   return {
     id: row.id,
     tenantId: row.tenant_id,
@@ -50,13 +58,20 @@ export function mapWorkSchedule(row: WorkScheduleRow): WorkScheduleResponse {
     shiftStartTime: row.shift_start_time,
     shiftEndTime: row.shift_end_time,
     breakDurationMinutes: Number(row.break_duration_minutes),
-    mondayWorking: Boolean(row.monday_working),
-    tuesdayWorking: Boolean(row.tuesday_working),
-    wednesdayWorking: Boolean(row.wednesday_working),
-    thursdayWorking: Boolean(row.thursday_working),
-    fridayWorking: Boolean(row.friday_working),
-    saturdayWorking: Boolean(row.saturday_working),
-    sundayWorking: Boolean(row.sunday_working),
+    mondayWorking: mon,
+    isMondayWorking: mon,
+    tuesdayWorking: tue,
+    isTuesdayWorking: tue,
+    wednesdayWorking: wed,
+    isWednesdayWorking: wed,
+    thursdayWorking: thu,
+    isThursdayWorking: thu,
+    fridayWorking: fri,
+    isFridayWorking: fri,
+    saturdayWorking: sat,
+    isSaturdayWorking: sat,
+    sundayWorking: sun,
+    isSundayWorking: sun,
     effectiveFrom: formatDateOnly(row.effective_from) ?? '',
     effectiveTo: formatDateOnly(row.effective_to),
     isActive: Boolean(row.is_active),
@@ -131,13 +146,13 @@ export async function createWorkSchedule(
       shift_start_time: input.shiftStartTime || '09:00',
       shift_end_time: input.shiftEndTime || '17:00',
       break_duration_minutes: input.breakDurationMinutes ?? 60,
-      monday_working: input.mondayWorking ?? true,
-      tuesday_working: input.tuesdayWorking ?? true,
-      wednesday_working: input.wednesdayWorking ?? true,
-      thursday_working: input.thursdayWorking ?? true,
-      friday_working: input.fridayWorking ?? true,
-      saturday_working: input.saturdayWorking ?? false,
-      sunday_working: input.sundayWorking ?? false,
+      monday_working: input.isMondayWorking ?? input.mondayWorking ?? true,
+      tuesday_working: input.isTuesdayWorking ?? input.tuesdayWorking ?? true,
+      wednesday_working: input.isWednesdayWorking ?? input.wednesdayWorking ?? true,
+      thursday_working: input.isThursdayWorking ?? input.thursdayWorking ?? true,
+      friday_working: input.isFridayWorking ?? input.fridayWorking ?? true,
+      saturday_working: input.isSaturdayWorking ?? input.saturdayWorking ?? false,
+      sunday_working: input.isSundayWorking ?? input.sundayWorking ?? false,
       effective_from: input.effectiveFrom,
       effective_to: input.effectiveTo || null,
       is_active: true,

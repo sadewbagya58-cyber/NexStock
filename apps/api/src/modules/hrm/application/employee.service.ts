@@ -568,11 +568,112 @@ export async function linkEmployeeUser(
   return getEmployeeById(trx, employeeId);
 }
 
+export async function getMyEmployee(
+  trx: TenantTransactionContext,
+): Promise<EmployeeResponse> {
+  const row = await trx.db
+    .selectFrom('employees')
+    .selectAll()
+    .where('tenant_id', '=', trx.tenantId)
+    .where('linked_user_id', '=', trx.userId)
+    .executeTakeFirst();
+
+  if (!row) {
+    throw new AppError({
+      statusCode: 404,
+      errorCode: 'HRM_STAFF_ACCOUNT_NOT_LINKED',
+      title: 'Staff Account Not Linked',
+      detail: 'Your user account is not linked to any active employee profile.',
+    });
+  }
+
+  // Branch assignments
+  const branchRows = await trx.db
+    .selectFrom('employee_branch_assignments')
+    .select(['branch_id', 'is_primary'])
+    .where('tenant_id', '=', trx.tenantId)
+    .where('employee_id', '=', row.id)
+    .execute();
+
+  // Warehouse assignments
+  const warehouseRows = await trx.db
+    .selectFrom('employee_warehouse_assignments')
+    .select(['warehouse_id', 'is_primary'])
+    .where('tenant_id', '=', trx.tenantId)
+    .where('employee_id', '=', row.id)
+    .execute();
+
+  // Branch name
+  let primaryBranchName: string | null = null;
+  if (row.primary_branch_id) {
+    const b = await trx.db
+      .selectFrom('branches')
+      .select(['name'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('id', '=', row.primary_branch_id)
+      .executeTakeFirst();
+    if (b) primaryBranchName = b.name;
+  }
+
+  // Warehouse name
+  let primaryWarehouseName: string | null = null;
+  if (row.primary_warehouse_id) {
+    const w = await trx.db
+      .selectFrom('warehouses')
+      .select(['name'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('id', '=', row.primary_warehouse_id)
+      .executeTakeFirst();
+    if (w) primaryWarehouseName = w.name;
+  }
+
+  // Linked user email
+  let linkedUserEmail: string | null = null;
+  const u = await trx.db
+    .selectFrom('users')
+    .select(['email'])
+    .where('id', '=', trx.userId)
+    .executeTakeFirst();
+  if (u) linkedUserEmail = u.email;
+
+  return mapEmployee(
+    row as unknown as EmployeeRow,
+    branchRows.map((b) => b.branch_id),
+    warehouseRows.map((w) => w.warehouse_id),
+    {
+      primaryBranchName,
+      primaryWarehouseName,
+      linkedUserEmail,
+    },
+  );
+}
+
 export async function getEmployeeById(
   trx: TenantTransactionContext,
   employeeId: string,
 ): Promise<EmployeeResponse> {
-  await assertAuthorized(trx, { permission: 'hrm:employee:read' });
+  const hasManageOrRead = await (async () => {
+    try {
+      await assertAuthorized(trx, { permission: 'hrm:employee:read' });
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+
+  if (!hasManageOrRead) {
+    const linked = await trx.db
+      .selectFrom('employees')
+      .select(['id'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('id', '=', employeeId)
+      .where('linked_user_id', '=', trx.userId)
+      .executeTakeFirst();
+
+    if (!linked) {
+      await assertAuthorized(trx, { permission: 'hrm:employee:read' });
+    }
+  }
 
   const row = await trx.db
     .selectFrom('employees')

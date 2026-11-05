@@ -102,14 +102,29 @@ export async function createLeaveRequest(
   let targetEmployeeId = input.employeeId;
   let isDirectAdminEntry = false;
 
-  if (targetEmployeeId) {
-    // If specifying an employee ID, must have hrm:leave:manage
-    await assertAuthorized(trx, { permission: 'hrm:leave:manage' });
+  const hasManage = await (async () => {
+    try {
+      await assertAuthorized(trx, { permission: 'hrm:leave:manage' });
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+
+  if (hasManage && targetEmployeeId) {
     isDirectAdminEntry = true;
   } else {
     // Self-service
     await assertAuthorized(trx, { permission: 'hrm:leave:self' });
     const emp = await getLinkedEmployee(trx);
+    if (targetEmployeeId && targetEmployeeId !== emp.id) {
+      throw new AppError({
+        statusCode: 403,
+        errorCode: 'ERR_FORBIDDEN',
+        title: 'Access Denied',
+        detail: 'You are only authorized to request leave for yourself.',
+      });
+    }
     targetEmployeeId = emp.id;
   }
 

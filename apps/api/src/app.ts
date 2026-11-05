@@ -280,6 +280,7 @@ import {
   getActiveSalaryStructure,
   getEmployeeActivity,
   getEmployeeById,
+  getMyEmployee,
   getEmployeeDocument,
   getEmployeeDocumentContent,
   getEmployeeProfile,
@@ -4602,6 +4603,37 @@ export async function buildApp(
     },
   );
 
+  // 2.5 Get My Employee Profile (Self-Service)
+  app.get(
+    '/v1/employees/me',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        response: {
+          200: EmployeeResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => getMyEmployee(trx),
+      );
+    },
+  );
+
   // 3. Get Employee By ID
   app.get(
     '/v1/employees/:employeeId',
@@ -5725,48 +5757,75 @@ export async function buildApp(
     },
   );
 
-  app.get(
-    '/v1/attendance',
-    {
-      schema: {
-        headers: AuthenticatedTenantHeadersSchema,
-        querystring: Type.Object({
-          employeeId: Type.Optional(UuidSchema),
-          startDate: Type.Optional(Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' })),
-          endDate: Type.Optional(Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' })),
-          date: Type.Optional(Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' })),
-          status: Type.Optional(AttendanceStatusSchema),
-        }),
-        response: {
-          200: AttendanceListResponseSchema,
-          401: ProblemDetailsSchema,
-          403: ProblemDetailsSchema,
-        },
+  const attendanceListRouteOpts = {
+    schema: {
+      headers: AuthenticatedTenantHeadersSchema,
+      querystring: Type.Object({
+        employeeId: Type.Optional(UuidSchema),
+        startDate: Type.Optional(Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' })),
+        endDate: Type.Optional(Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' })),
+        date: Type.Optional(Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' })),
+        status: Type.Optional(AttendanceStatusSchema),
+        limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 500 })),
+        offset: Type.Optional(Type.Integer({ minimum: 0 })),
+      }),
+      response: {
+        200: AttendanceListResponseSchema,
+        401: ProblemDetailsSchema,
+        403: ProblemDetailsSchema,
       },
     },
-    async (request) => {
-      const principal = await verifySupabaseJwt(
-        request.headers.authorization,
-        jwksProvider,
-        jwtOptions,
-      );
-      const tenantId = request.headers['x-tenant-id'];
-      const traceId = String(request.id);
+  };
 
-      return withTenantTransaction(
-        options.db,
-        { tenantId, userId: principal.userId, traceId },
-        (trx) =>
-          listAttendance(trx, {
-            employeeId: request.query.employeeId,
-            startDate: request.query.startDate,
-            endDate: request.query.endDate,
-            date: request.query.date,
-            status: request.query.status,
-          }),
-      );
-    },
-  );
+  app.get('/v1/attendance', attendanceListRouteOpts, async (request) => {
+    const principal = await verifySupabaseJwt(
+      request.headers.authorization,
+      jwksProvider,
+      jwtOptions,
+    );
+    const tenantId = request.headers['x-tenant-id'];
+    const traceId = String(request.id);
+
+    return withTenantTransaction(
+      options.db,
+      { tenantId, userId: principal.userId, traceId },
+      (trx) =>
+        listAttendance(trx, {
+          employeeId: request.query.employeeId,
+          startDate: request.query.startDate,
+          endDate: request.query.endDate,
+          date: request.query.date,
+          status: request.query.status,
+          limit: request.query.limit,
+          offset: request.query.offset,
+        }),
+    );
+  });
+
+  app.get('/v1/attendance/records', attendanceListRouteOpts, async (request) => {
+    const principal = await verifySupabaseJwt(
+      request.headers.authorization,
+      jwksProvider,
+      jwtOptions,
+    );
+    const tenantId = request.headers['x-tenant-id'];
+    const traceId = String(request.id);
+
+    return withTenantTransaction(
+      options.db,
+      { tenantId, userId: principal.userId, traceId },
+      (trx) =>
+        listAttendance(trx, {
+          employeeId: request.query.employeeId,
+          startDate: request.query.startDate,
+          endDate: request.query.endDate,
+          date: request.query.date,
+          status: request.query.status,
+          limit: request.query.limit,
+          offset: request.query.offset,
+        }),
+    );
+  });
 
   // 30. Leave Management
   app.post(

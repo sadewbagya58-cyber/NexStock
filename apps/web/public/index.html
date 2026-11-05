@@ -8821,6 +8821,13 @@
                   </div>
                 </div>
 
+                <div style="margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                  <button type="button" class="btn btn-secondary btn-sm" id="btnUseCurrentLocation" onclick="captureWorkplaceCurrentLocation(this)">
+                    📍 Use Current Location
+                  </button>
+                  <span id="currentLocationStatus" style="font-size: 12px; color: var(--text-secondary);"></span>
+                </div>
+
                 <div class="form-group">
                   <label class="form-label">Allowed Geofence Radius (Meters)</label>
                   <input type="number" class="form-input" id="settingGeofenceRadius" value="${payrollSettings?.geofenceRadiusMeters ?? 200}" placeholder="200">
@@ -8880,6 +8887,87 @@
           }
         });
       }
+    }
+
+    function captureWorkplaceCurrentLocation(btn) {
+      const statusEl = document.getElementById('currentLocationStatus');
+      const latInput = document.getElementById('settingWorkplaceLat');
+      const lonInput = document.getElementById('settingWorkplaceLon');
+
+      if (!('geolocation' in navigator)) {
+        showToast('Geolocation is not supported by your browser', 'error');
+        if (statusEl) statusEl.textContent = 'Geolocation unsupported';
+        return;
+      }
+
+      const origText = btn ? btn.innerText : '📍 Use Current Location';
+      if (btn) {
+        btn.disabled = true;
+        btn.innerText = 'Detecting Location...';
+      }
+      if (statusEl) {
+        statusEl.textContent = 'Requesting GPS coordinates...';
+        statusEl.style.color = 'var(--text-secondary)';
+      }
+
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          try {
+            const lat = Number(pos.coords.latitude);
+            const lon = Number(pos.coords.longitude);
+
+            if (isNaN(lat) || lat < -90 || lat > 90 || isNaN(lon) || lon < -180 || lon > 180) {
+              throw new Error('Received invalid coordinate values from GPS');
+            }
+
+            if (latInput) latInput.value = lat.toFixed(6);
+            if (lonInput) lonInput.value = lon.toFixed(6);
+
+            const accuracy = Math.round(pos.coords.accuracy || 0);
+            const accText = accuracy > 0 ? ` (±${accuracy}m)` : '';
+            if (statusEl) {
+              statusEl.textContent = `Captured: ${lat.toFixed(4)}, ${lon.toFixed(4)}${accText}`;
+              statusEl.style.color = 'var(--status-success)';
+            }
+            showToast(`Current location captured successfully${accText}`, 'success');
+          } catch (err) {
+            showToast(err.message || 'Failed to process location', 'error');
+            if (statusEl) {
+              statusEl.textContent = 'Coordinate error';
+              statusEl.style.color = 'var(--status-danger)';
+            }
+          } finally {
+            if (btn) {
+              btn.disabled = false;
+              btn.innerText = origText;
+            }
+          }
+        },
+        (err) => {
+          let msg = 'Failed to retrieve location.';
+          if (err.code === err.PERMISSION_DENIED || err.code === 1) {
+            msg = 'Location permission denied. Please allow location access in your browser settings.';
+          } else if (err.code === err.POSITION_UNAVAILABLE || err.code === 2) {
+            msg = 'Location unavailable. Please check your GPS or network connection.';
+          } else if (err.code === err.TIMEOUT || err.code === 3) {
+            msg = 'Location request timed out. Please try again.';
+          }
+          showToast(msg, 'error');
+          if (statusEl) {
+            statusEl.textContent = 'Location detection failed';
+            statusEl.style.color = 'var(--status-danger)';
+          }
+          if (btn) {
+            btn.disabled = false;
+            btn.innerText = origText;
+          }
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 0
+        }
+      );
     }
 
     async function saveOrgPayrollSettings() {
@@ -11467,24 +11555,74 @@
     }
 
     // --- 6. LINK SYSTEM USER MODAL ---
-    function openLinkEmployeeUserModal(employeeId) {
+    async function openLinkEmployeeUserModal(employeeId) {
       openModal({
-        title: 'Link System User Account',
-        maxWidth: '480px',
-        bodyHtml: `
-          <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 14px;">
-            Link an existing NexStock user login UUID to this employee profile.
-          </div>
-          <div class="form-group">
-            <label class="form-label">System User UUID *</label>
-            <input type="text" class="form-input" id="linkUserUuid" placeholder="0192b4c0-7777-7000-8000-..." required>
-          </div>
-        `,
-        footerHtml: `
-          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-          <button class="btn btn-primary" id="btnSubmitLinkUser" onclick="submitLinkEmployeeUser('${employeeId}')">Link User</button>
-        `
+        title: 'Link System Staff Account',
+        maxWidth: '520px',
+        bodyHtml: '<div style="padding: 30px; text-align: center;"><div class="spinner-sm" style="display:inline-block; margin-bottom: 8px;"></div><div>Loading available members...</div></div>'
       });
+
+      try {
+        const [membersRes, empRes] = await Promise.all([
+          apiFetch('/v1/iam/members').catch(() => []),
+          apiFetch(`/v1/employees/${employeeId}`).catch(() => null)
+        ]);
+
+        const members = Array.isArray(membersRes) ? membersRes : [];
+
+        openModal({
+          title: `Link Staff Account: ${escapeHtml(empRes?.displayName || 'Employee')}`,
+          maxWidth: '520px',
+          bodyHtml: `
+            <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px;">
+              Link a system login user to enable attendance self-service, check-in, and leave requests for this employee.
+            </div>
+
+            <div class="form-group" style="margin-bottom: 14px;">
+              <label class="form-label">Select Registered Organization Member</label>
+              <select class="form-input" id="linkSelectMember" onchange="onSelectMemberForLink(this.value)">
+                <option value="">-- Choose Member from Organization --</option>
+                ${members.map(m => `
+                  <option value="${m.userId}">${escapeHtml(m.fullName || m.email)} (${escapeHtml(m.email)}) - [${(m.roleCodes || []).join(', ')}]</option>
+                `).join('')}
+              </select>
+            </div>
+
+            <div style="text-align: center; margin: 12px 0; font-size: 12px; color: var(--text-secondary); font-weight: 600;">OR ENTER USER UUID DIRECTLY</div>
+
+            <div class="form-group">
+              <label class="form-label">System User UUID *</label>
+              <input type="text" class="form-input" id="linkUserUuid" placeholder="0192b4c0-7777-7000-8000-..." required>
+            </div>
+          `,
+          footerHtml: `
+            <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+            <button class="btn btn-primary" id="btnSubmitLinkUser" onclick="submitLinkEmployeeUser('${employeeId}')">Link Staff Account</button>
+          `
+        });
+      } catch (err) {
+        openModal({
+          title: 'Link System User Account',
+          maxWidth: '480px',
+          bodyHtml: `
+            <div class="form-group">
+              <label class="form-label">System User UUID *</label>
+              <input type="text" class="form-input" id="linkUserUuid" placeholder="0192b4c0-7777-7000-8000-..." required>
+            </div>
+          `,
+          footerHtml: `
+            <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+            <button class="btn btn-primary" id="btnSubmitLinkUser" onclick="submitLinkEmployeeUser('${employeeId}')">Link User</button>
+          `
+        });
+      }
+    }
+
+    function onSelectMemberForLink(userId) {
+      const input = document.getElementById('linkUserUuid');
+      if (input && userId) {
+        input.value = userId;
+      }
     }
 
     async function submitLinkEmployeeUser(employeeId) {
@@ -11667,12 +11805,19 @@
             shiftStartTime,
             shiftEndTime,
             breakDurationMinutes,
+            mondayWorking: isMondayWorking,
             isMondayWorking,
+            tuesdayWorking: isTuesdayWorking,
             isTuesdayWorking,
+            wednesdayWorking: isWednesdayWorking,
             isWednesdayWorking,
+            thursdayWorking: isThursdayWorking,
             isThursdayWorking,
+            fridayWorking: isFridayWorking,
             isFridayWorking,
+            saturdayWorking: isSaturdayWorking,
             isSaturdayWorking,
+            sundayWorking: isSundayWorking,
             isSundayWorking,
             effectiveFrom,
             effectiveTo

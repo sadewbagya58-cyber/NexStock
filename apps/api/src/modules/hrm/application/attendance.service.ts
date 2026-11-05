@@ -47,6 +47,14 @@ function formatIso(d: Date | string | null): string | null {
 }
 
 export function mapAttendanceRecord(row: AttendanceRow): AttendanceRecordResponse {
+  let totalHoursWorked: number | null = null;
+  if (row.check_in_time && row.check_out_time) {
+    const diffMs = new Date(row.check_out_time).getTime() - new Date(row.check_in_time).getTime();
+    if (diffMs > 0) {
+      totalHoursWorked = Number((diffMs / (1000 * 60 * 60)).toFixed(2));
+    }
+  }
+
   return {
     id: row.id,
     tenantId: row.tenant_id,
@@ -62,6 +70,8 @@ export function mapAttendanceRecord(row: AttendanceRow): AttendanceRecordRespons
     gpsVerified: Boolean(row.gps_verified),
     notes: row.notes,
     isManual: Boolean(row.is_manual),
+    isManualEntry: Boolean(row.is_manual),
+    totalHoursWorked,
     adjustmentReason: row.adjustment_reason,
     adjustedByUserId: row.adjusted_by_user_id,
     createdAt: new Date(row.created_at).toISOString(),
@@ -476,6 +486,8 @@ export async function listAttendance(
     endDate?: string | undefined;
     date?: string | undefined;
     status?: AttendanceStatus | undefined;
+    limit?: number | undefined;
+    offset?: number | undefined;
   },
 ): Promise<AttendanceListResponse> {
   // Check permission: if user only has hrm:attendance:self, restrict to self
@@ -536,10 +548,18 @@ export async function listAttendance(
     dbQuery = dbQuery.where('employee_attendance.status', '=', query.status);
   }
 
-  const rows = await dbQuery
+  dbQuery = dbQuery
     .orderBy('employee_attendance.attendance_date', 'desc')
-    .orderBy('employees.employee_code', 'asc')
-    .execute();
+    .orderBy('employees.employee_code', 'asc');
+
+  if (query.limit != null && query.limit > 0) {
+    dbQuery = dbQuery.limit(Math.min(query.limit, 500));
+  }
+  if (query.offset != null && query.offset > 0) {
+    dbQuery = dbQuery.offset(query.offset);
+  }
+
+  const rows = await dbQuery.execute();
 
   return {
     items: rows.map((r) => mapAttendanceRecord(r as unknown as AttendanceRow)),

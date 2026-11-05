@@ -2499,5 +2499,36 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       expect(html).toContain('id="settingWorkplaceLon"');
       expect(html).toContain('id="settingGeofenceRadius"');
     });
+
+    it('BUG-052, BUG-053, BUG-054, BUG-050: verifies integration fixes in web client', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // BUG-052: Work schedule payload includes both mondayWorking and isMondayWorking
+      expect(html).toContain('mondayWorking: isMondayWorking');
+      expect(html).toContain('isMondayWorking');
+      expect(html).toContain('tuesdayWorking: isTuesdayWorking');
+      expect(html).toContain('isTuesdayWorking');
+
+      // BUG-053: Attendance records route called and supports records
+      expect(html).toContain('/v1/attendance/records?date=');
+      expect(html).toContain('state.cachedAttendanceRecords = records');
+
+      // BUG-054: GPS Workplace Current Location Picker
+      expect(html).toContain('id="btnUseCurrentLocation"');
+      expect(html).toContain('captureWorkplaceCurrentLocation(this)');
+      expect(html).toContain('function captureWorkplaceCurrentLocation(');
+      expect(html).toContain('navigator.geolocation.getCurrentPosition(');
+      expect(html).toContain('PERMISSION_DENIED');
+      expect(html).toContain('POSITION_UNAVAILABLE');
+      expect(html).toContain('TIMEOUT');
+
+      // BUG-050: Staff user account link with organization members dropdown
+      expect(html).toContain('async function openLinkEmployeeUserModal(');
+      expect(html).toContain('/v1/iam/members');
+      expect(html).toContain('id="linkSelectMember"');
+      expect(html).toContain('onSelectMemberForLink(');
+      expect(html).toContain('id="linkUserUuid"');
+    });
   });
 });
