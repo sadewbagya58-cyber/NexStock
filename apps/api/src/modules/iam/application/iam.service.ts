@@ -105,8 +105,27 @@ export type PermissionKey =
   | 'exp:category:manage'
   | 'exp:report:view'
   | 'exp:expense:manage'
+  | 'crm:customer:read'
+  | 'crm:customer:manage'
   | 'crm:credit:read'
+  | 'crm:credit:create'
   | 'crm:credit:manage'
+  | 'crm:credit:hold'
+  | 'crm:limit:manage'
+  | 'crm:sale:create'
+  | 'crm:sale:approve'
+  | 'crm:transaction:create'
+  | 'crm:payment:create'
+  | 'crm:payment:reverse'
+  | 'crm:ledger:read'
+  | 'crm:adjustment:create'
+  | 'crm:interest:manage'
+  | 'crm:interest:waive'
+  | 'crm:collection:manage'
+  | 'crm:writeoff:create'
+  | 'crm:writeoff:approve'
+  | 'crm:report:read'
+  | 'crm:settings:manage'
   | 'rep:report:view'
   | 'rep:report:export';
 
@@ -208,9 +227,28 @@ export const PERMISSIONS_CATALOG: readonly PermissionItem[] = [
   { key: 'exp:report:view', module: 'Expenses', action: 'View', name: 'View Expense Reports', description: 'Access expense dashboard summaries and analytics.' },
   { key: 'exp:expense:manage', module: 'Expenses', action: 'Manage', name: 'Manage Expenses', description: 'Record and categorize store and warehouse operational expenses.' },
 
-  // 18. Customer Credit
+  // 18. Customers & Customer Credit
+  { key: 'crm:customer:read', module: 'Customers', action: 'View', name: 'View Customers', description: 'Browse and inspect customer accounts and directory.' },
+  { key: 'crm:customer:manage', module: 'Customers', action: 'Manage', name: 'Manage Customers', description: 'Create and update customer profiles and contact details.' },
   { key: 'crm:credit:read', module: 'Customer Credit', action: 'View', name: 'View Customer Credit', description: 'Check customer accounts receivable and credit limits.' },
+  { key: 'crm:credit:create', module: 'Customer Credit', action: 'Create', name: 'Create Credit Accounts', description: 'Open new customer credit accounts and terms.' },
   { key: 'crm:credit:manage', module: 'Customer Credit', action: 'Manage', name: 'Manage Customer Credit', description: 'Adjust customer credit terms and record debt settlements.' },
+  { key: 'crm:credit:hold', module: 'Customer Credit', action: 'Manage', name: 'Manage Credit Holds', description: 'Place or release customer accounts on credit hold.' },
+  { key: 'crm:limit:manage', module: 'Customer Credit', action: 'Manage', name: 'Manage Credit Limits', description: 'Increase, decrease, or override customer credit limits.' },
+  { key: 'crm:sale:create', module: 'Customer Credit', action: 'Create', name: 'Process Credit Sales', description: 'Execute POS and manual customer credit sales.' },
+  { key: 'crm:sale:approve', module: 'Customer Credit', action: 'Approve', name: 'Approve Credit Sales', description: 'Authorize credit sales requiring management sign-off.' },
+  { key: 'crm:transaction:create', module: 'Customer Credit', action: 'Create', name: 'Create Credit Transactions', description: 'Post manual credit and debit entries and notes.' },
+  { key: 'crm:payment:create', module: 'Customer Credit', action: 'Create', name: 'Record Credit Payments', description: 'Accept customer debt payments and allocate to invoices.' },
+  { key: 'crm:payment:reverse', module: 'Customer Credit', action: 'Manage', name: 'Reverse Credit Payments', description: 'Reverse erroneous customer credit payments.' },
+  { key: 'crm:ledger:read', module: 'Customer Credit', action: 'View', name: 'View Credit Ledger', description: 'Inspect immutable customer credit ledger history.' },
+  { key: 'crm:adjustment:create', module: 'Customer Credit', action: 'Manage', name: 'Create Credit Adjustments', description: 'Create authorized ledger balance adjustments.' },
+  { key: 'crm:interest:manage', module: 'Customer Credit', action: 'Manage', name: 'Manage Interest & Late Fees', description: 'Configure and accrue interest and overdue penalties.' },
+  { key: 'crm:interest:waive', module: 'Customer Credit', action: 'Approve', name: 'Waive Interest & Fees', description: 'Authorize waivers for customer interest and late fees.' },
+  { key: 'crm:collection:manage', module: 'Customer Credit', action: 'Manage', name: 'Manage Collections', description: 'Track debt follow-ups and collection commitments.' },
+  { key: 'crm:writeoff:create', module: 'Customer Credit', action: 'Create', name: 'Submit Bad Debt Write-offs', description: 'Submit bad debt write-off requests for approval.' },
+  { key: 'crm:writeoff:approve', module: 'Customer Credit', action: 'Approve', name: 'Approve Bad Debt Write-offs', description: 'Authorize uncollectible debt write-offs.' },
+  { key: 'crm:report:read', module: 'Customer Credit', action: 'View', name: 'View Credit Reports', description: 'Access credit aging, customer statements, and risk analytics.' },
+  { key: 'crm:settings:manage', module: 'Customer Credit', action: 'Manage', name: 'Manage Credit Settings', description: 'Configure organization credit limits, terms, and policies.' },
 
   // 19. Reports
   { key: 'rep:report:view', module: 'Reports', action: 'View', name: 'View Analytics & Reports', description: 'Access operational, financial, and inventory analytics.' },
@@ -325,8 +363,19 @@ export const SYSTEM_ROLE_DEFINITIONS: Readonly<
       'exp:expense:approve',
       'exp:report:view',
       'exp:expense:manage',
+      'crm:customer:read',
       'crm:credit:read',
+      'crm:credit:create',
       'crm:credit:manage',
+      'crm:credit:hold',
+      'crm:limit:manage',
+      'crm:sale:create',
+      'crm:sale:approve',
+      'crm:transaction:create',
+      'crm:payment:create',
+      'crm:ledger:read',
+      'crm:collection:manage',
+      'crm:report:read',
       'rep:report:view',
     ],
   },
@@ -347,7 +396,11 @@ export const SYSTEM_ROLE_DEFINITIONS: Readonly<
       'pos:payment:create',
       'inv:batch:read',
       'inv:serial:read',
+      'crm:customer:read',
       'crm:credit:read',
+      'crm:sale:create',
+      'crm:payment:create',
+      'crm:ledger:read',
       'hrm:attendance:self',
       'hrm:leave:self',
       'exp:expense:read',
@@ -449,8 +502,27 @@ export const SYSTEM_ROLE_DEFINITIONS: Readonly<
       'exp:category:manage',
       'exp:report:view',
       'exp:expense:manage',
+      'crm:customer:read',
+      'crm:customer:manage',
       'crm:credit:read',
+      'crm:credit:create',
       'crm:credit:manage',
+      'crm:credit:hold',
+      'crm:limit:manage',
+      'crm:sale:create',
+      'crm:sale:approve',
+      'crm:transaction:create',
+      'crm:payment:create',
+      'crm:payment:reverse',
+      'crm:ledger:read',
+      'crm:adjustment:create',
+      'crm:interest:manage',
+      'crm:interest:waive',
+      'crm:collection:manage',
+      'crm:writeoff:create',
+      'crm:writeoff:approve',
+      'crm:report:read',
+      'crm:settings:manage',
       'rep:report:view',
       'rep:report:export',
     ],

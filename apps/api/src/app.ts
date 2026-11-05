@@ -167,6 +167,36 @@ import {
   UploadExpenseAttachmentRequestSchema,
   type ApproveExpenseRequest,
   type SubmitExpenseRequest,
+  CustomerResponseSchema,
+  CustomerListResponseSchema,
+  CreateCustomerRequestSchema,
+  UpdateCustomerRequestSchema,
+  ListCustomersQuerySchema,
+  CustomerCreditAccountResponseSchema,
+  CustomerCreditAccountListResponseSchema,
+  CreateCustomerCreditAccountRequestSchema,
+  UpdateCreditAccountStatusRequestSchema,
+  ManageCreditLimitRequestSchema,
+  CreditLimitHistoryResponseSchema,
+  ListCreditAccountsQuerySchema,
+  CustomerCreditTransactionResponseSchema,
+  CustomerCreditTransactionListResponseSchema,
+  CreateManualCreditTransactionRequestSchema,
+  ListCreditTransactionsQuerySchema,
+  CustomerCreditPaymentResponseSchema,
+  RecordCustomerCreditPaymentRequestSchema,
+  ReverseCustomerCreditPaymentRequestSchema,
+  AllocateUnappliedPaymentRequestSchema,
+  PaymentReceiptResponseSchema,
+  CustomerCreditSettingsResponseSchema,
+  UpdateCustomerCreditSettingsRequestSchema,
+  CollectionRecordResponseSchema,
+  RecordCollectionFollowUpRequestSchema,
+  ProcessBadDebtWriteOffRequestSchema,
+  CreditAgingReportResponseSchema,
+  CustomerStatementResponseSchema,
+  CreditDashboardKpisResponseSchema,
+  AgingBucketSchema,
 } from '@nexstock/contracts';
 import { Type } from '@sinclair/typebox';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -352,6 +382,38 @@ import {
   updateExpenseCategory,
   uploadExpenseAttachment,
 } from './modules/expenses/index.js';
+import {
+  createCustomer,
+  getCustomerById,
+  listCustomers,
+  updateCustomer,
+  createCustomerCreditAccount,
+  getCreditAccountById,
+  getCreditAccountByCustomerId,
+  listCreditAccounts,
+  updateCreditAccountStatus,
+  manageCreditLimit,
+  listCreditLimitHistory,
+  createManualCreditTransaction,
+  getCreditTransactionById,
+  listCreditTransactions,
+  recordCustomerCreditPayment,
+  reverseCustomerCreditPayment,
+  allocateUnappliedPayment,
+  getPaymentReceipt,
+  getOrInitCreditSettings,
+  updateCreditSettings,
+  calculateAndAccrueInterest,
+  calculateAndApplyLateFees,
+  waiveInterestOrLateFee,
+  getAccountAging,
+  recordCollectionFollowUp,
+  listCollectionHistory,
+  processBadDebtWriteOff,
+  getCreditDashboardKpis,
+  getCreditAgingReport,
+  getCustomerCreditStatement,
+} from './modules/credit/index.js';
 import {
   AppError,
   type NexStockDatabase,
@@ -6843,6 +6905,1000 @@ export async function buildApp(
           ),
       );
       return { success: true };
+    },
+  );
+
+  // ============================================================================
+  // PHASE 7.4 CUSTOMER CREDIT MANAGEMENT ROUTES
+  // ============================================================================
+
+  // 1. Customers
+  app.post(
+    '/v1/customers',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        body: CreateCustomerRequestSchema,
+        response: {
+          201: CustomerResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      const customer = await withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => createCustomer(trx, request.body),
+      );
+      return reply.status(201).send(customer);
+    },
+  );
+
+  app.get(
+    '/v1/customers',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        querystring: ListCustomersQuerySchema,
+        response: {
+          200: CustomerListResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => listCustomers(trx, request.query),
+      );
+    },
+  );
+
+  app.get(
+    '/v1/customers/:customerId',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ customerId: UuidSchema }),
+        response: {
+          200: CustomerResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => getCustomerById(trx, request.params.customerId),
+      );
+    },
+  );
+
+  app.patch(
+    '/v1/customers/:customerId',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ customerId: UuidSchema }),
+        body: UpdateCustomerRequestSchema,
+        response: {
+          200: CustomerResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => updateCustomer(trx, request.params.customerId, request.body),
+      );
+    },
+  );
+
+  // 2. Customer Credit Accounts
+  app.post(
+    '/v1/credit/accounts',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        body: CreateCustomerCreditAccountRequestSchema,
+        response: {
+          201: CustomerCreditAccountResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      const account = await withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => createCustomerCreditAccount(trx, request.body),
+      );
+      return reply.status(201).send(account);
+    },
+  );
+
+  app.get(
+    '/v1/credit/accounts',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        querystring: ListCreditAccountsQuerySchema,
+        response: {
+          200: CustomerCreditAccountListResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => listCreditAccounts(trx, request.query),
+      );
+    },
+  );
+
+  app.get(
+    '/v1/credit/accounts/:accountId',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ accountId: UuidSchema }),
+        response: {
+          200: CustomerCreditAccountResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => getCreditAccountById(trx, request.params.accountId),
+      );
+    },
+  );
+
+  app.get(
+    '/v1/credit/accounts/customer/:customerId',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ customerId: UuidSchema }),
+        response: {
+          200: CustomerCreditAccountResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => getCreditAccountByCustomerId(trx, request.params.customerId),
+      );
+    },
+  );
+
+  app.patch(
+    '/v1/credit/accounts/:accountId/status',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ accountId: UuidSchema }),
+        body: UpdateCreditAccountStatusRequestSchema,
+        response: {
+          200: CustomerCreditAccountResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => updateCreditAccountStatus(trx, request.params.accountId, request.body),
+      );
+    },
+  );
+
+  app.post(
+    '/v1/credit/accounts/:accountId/limits',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ accountId: UuidSchema }),
+        body: ManageCreditLimitRequestSchema,
+        response: {
+          200: CustomerCreditAccountResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => manageCreditLimit(trx, request.params.accountId, request.body),
+      );
+    },
+  );
+
+  app.get(
+    '/v1/credit/accounts/:accountId/limits/history',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ accountId: UuidSchema }),
+        response: {
+          200: Type.Array(CreditLimitHistoryResponseSchema),
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => listCreditLimitHistory(trx, request.params.accountId),
+      );
+    },
+  );
+
+  app.get(
+    '/v1/credit/accounts/:accountId/aging',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ accountId: UuidSchema }),
+        querystring: Type.Object({ asOfDate: Type.Optional(Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' })) }),
+        response: {
+          200: AgingBucketSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => getAccountAging(trx, request.params.accountId, request.query.asOfDate),
+      );
+    },
+  );
+
+  // 3. Credit Transactions & Ledger
+  app.post(
+    '/v1/credit/transactions',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        body: CreateManualCreditTransactionRequestSchema,
+        response: {
+          201: CustomerCreditTransactionResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      const tx = await withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => createManualCreditTransaction(trx, request.body),
+      );
+      return reply.status(201).send(tx);
+    },
+  );
+
+  app.get(
+    '/v1/credit/transactions',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        querystring: ListCreditTransactionsQuerySchema,
+        response: {
+          200: CustomerCreditTransactionListResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => listCreditTransactions(trx, request.query),
+      );
+    },
+  );
+
+  app.get(
+    '/v1/credit/transactions/:transactionId',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ transactionId: UuidSchema }),
+        response: {
+          200: CustomerCreditTransactionResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => getCreditTransactionById(trx, request.params.transactionId),
+      );
+    },
+  );
+
+  // 4. Payments & Allocations
+  app.post(
+    '/v1/credit/payments',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        body: RecordCustomerCreditPaymentRequestSchema,
+        response: {
+          201: CustomerCreditPaymentResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      const pay = await withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => recordCustomerCreditPayment(trx, request.body),
+      );
+      return reply.status(201).send(pay);
+    },
+  );
+
+  app.post(
+    '/v1/credit/payments/:paymentId/reverse',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ paymentId: UuidSchema }),
+        body: ReverseCustomerCreditPaymentRequestSchema,
+        response: {
+          200: CustomerCreditPaymentResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => reverseCustomerCreditPayment(trx, request.params.paymentId, request.body),
+      );
+    },
+  );
+
+  app.post(
+    '/v1/credit/payments/allocate',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        body: AllocateUnappliedPaymentRequestSchema,
+        response: {
+          200: CustomerCreditPaymentResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => allocateUnappliedPayment(trx, request.body),
+      );
+    },
+  );
+
+  app.get(
+    '/v1/credit/payments/:paymentId/receipt',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ paymentId: UuidSchema }),
+        response: {
+          200: PaymentReceiptResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => getPaymentReceipt(trx, request.params.paymentId),
+      );
+    },
+  );
+
+  // 5. Interest & Late Fees
+  app.post(
+    '/v1/credit/interest/accrue',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        body: Type.Optional(Type.Object({
+          accountId: Type.Optional(UuidSchema),
+          asOfDate: Type.Optional(Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' })),
+        })),
+        response: {
+          200: Type.Object({
+            processedCount: Type.Integer(),
+            totalInterestAccrued: DecimalMoneyStringSchema,
+          }),
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => calculateAndAccrueInterest(trx, (request.body as { accountId?: string; asOfDate?: string } | undefined)),
+      );
+    },
+  );
+
+  app.post(
+    '/v1/credit/late-fees/apply',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        body: Type.Optional(Type.Object({
+          accountId: Type.Optional(UuidSchema),
+          asOfDate: Type.Optional(Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' })),
+        })),
+        response: {
+          200: Type.Object({
+            processedCount: Type.Integer(),
+            totalLateFeesApplied: DecimalMoneyStringSchema,
+          }),
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => calculateAndApplyLateFees(trx, (request.body as { accountId?: string; asOfDate?: string } | undefined)),
+      );
+    },
+  );
+
+  app.post(
+    '/v1/credit/waivers',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        body: Type.Object({
+          entryId: UuidSchema,
+          feeType: Type.Union([Type.Literal('INTEREST'), Type.Literal('LATE_FEE')]),
+          reason: Type.String({ minLength: 3, maxLength: 500 }),
+        }),
+        response: {
+          200: Type.Object({
+            success: Type.Boolean(),
+            waivedAmount: DecimalMoneyStringSchema,
+          }),
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => waiveInterestOrLateFee(trx, request.body),
+      );
+    },
+  );
+
+  // 6. Collections & Bad Debt Write-offs
+  app.post(
+    '/v1/credit/collections',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        body: RecordCollectionFollowUpRequestSchema,
+        response: {
+          201: CollectionRecordResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      const record = await withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => recordCollectionFollowUp(trx, request.body),
+      );
+      return reply.status(201).send(record);
+    },
+  );
+
+  app.get(
+    '/v1/credit/accounts/:accountId/collections',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ accountId: UuidSchema }),
+        response: {
+          200: Type.Array(CollectionRecordResponseSchema),
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => listCollectionHistory(trx, request.params.accountId),
+      );
+    },
+  );
+
+  app.post(
+    '/v1/credit/writeoffs',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        body: ProcessBadDebtWriteOffRequestSchema,
+        response: {
+          200: Type.Object({
+            success: Type.Boolean(),
+            writeoffAmount: DecimalMoneyStringSchema,
+            remainingBalance: DecimalMoneyStringSchema,
+          }),
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => processBadDebtWriteOff(trx, request.body),
+      );
+    },
+  );
+
+  // 7. Settings & Reports
+  app.get(
+    '/v1/credit/settings',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        response: {
+          200: CustomerCreditSettingsResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => getOrInitCreditSettings(trx),
+      );
+    },
+  );
+
+  app.patch(
+    '/v1/credit/settings',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        body: UpdateCustomerCreditSettingsRequestSchema,
+        response: {
+          200: CustomerCreditSettingsResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => updateCreditSettings(trx, request.body),
+      );
+    },
+  );
+
+  app.get(
+    '/v1/credit/reports/dashboard',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        response: {
+          200: CreditDashboardKpisResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => getCreditDashboardKpis(trx),
+      );
+    },
+  );
+
+  app.get(
+    '/v1/credit/reports/aging',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        querystring: Type.Object({ asOfDate: Type.Optional(Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' })) }),
+        response: {
+          200: CreditAgingReportResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => getCreditAgingReport(trx, request.query.asOfDate),
+      );
+    },
+  );
+
+  app.get(
+    '/v1/credit/reports/statement/:customerId',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ customerId: UuidSchema }),
+        querystring: Type.Object({
+          startDate: Type.Optional(Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' })),
+          endDate: Type.Optional(Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' })),
+        }),
+        response: {
+          200: CustomerStatementResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          getCustomerCreditStatement(
+            trx,
+            request.params.customerId,
+            request.query.startDate,
+            request.query.endDate,
+          ),
+      );
     },
   );
 

@@ -2100,7 +2100,19 @@
         Payroll Reports
       </a>
 
-      <div class="nav-section-title">Finance &amp; Expenses</div>
+      <div class="nav-section-title">Finance &amp; Credit</div>
+      <a class="nav-link" data-view="credit-dashboard">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
+        Credit Dashboard
+      </a>
+      <a class="nav-link" data-view="customers">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+        Customers
+      </a>
+      <a class="nav-link" data-view="credit-accounts">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"></rect><line x1="1" y1="10" x2="23" y2="10"></line></svg>
+        Credit Accounts
+      </a>
       <a class="nav-link" data-view="expenses">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
         Expenses
@@ -2304,6 +2316,9 @@
       'payroll',
       'payroll-reports',
       'expenses',
+      'credit-dashboard',
+      'customers',
+      'credit-accounts',
       'roles-permissions',
       'org-settings'
     ];
@@ -2356,7 +2371,14 @@
       activeCheckoutKey: null,
       expenseFilters: { status: '', categoryId: '', branchId: '', search: '', startDate: '', endDate: '' },
       cachedExpenses: [],
-      cachedExpenseCategories: []
+      cachedExpenseCategories: [],
+      creditFilters: { status: '', risk: '', search: '', branchId: '' },
+      customerFilters: { status: '', search: '' },
+      cachedCustomers: [],
+      cachedCreditAccounts: [],
+      cachedCreditDashboard: null,
+      selectedCheckoutCustomerId: null,
+      selectedCustomerCreditAccount: null
     };
 
     // Synchronous Cache Restoration for Cold Start Elimination (BUG-030)
@@ -3135,6 +3157,9 @@
         case 'payroll': renderPayrollView(); break;
         case 'payroll-reports': renderPayrollReportsView(); break;
         case 'expenses': renderExpensesView(); break;
+        case 'credit-dashboard': renderCreditDashboardView(); break;
+        case 'customers': renderCustomersView(); break;
+        case 'credit-accounts': renderCreditAccountsView(); break;
         case 'roles-permissions': renderRolesPermissionsView(); break;
         case 'org-settings': renderOrgSettingsView(); break;
         default: renderDashboardView();
@@ -7220,6 +7245,26 @@
 
       const grandTotal = calculateCartGrandTotal();
       const decimals = getCurrencyMinorUnits();
+
+      // Ensure customer cache is populated
+      if (!state.cachedCustomers || state.cachedCustomers.length === 0) {
+        apiFetch('/v1/customers?limit=100', { silent: true }).then(res => {
+          state.cachedCustomers = res?.items || [];
+          const selectEl = document.getElementById('payCustomerSelect');
+          if (selectEl) {
+            const currentVal = selectEl.value;
+            selectEl.innerHTML = `
+              <option value="">-- Walk-in / Anonymous Customer --</option>
+              ${state.cachedCustomers.map(c => `
+                <option value="${c.id}" ${currentVal === c.id ? 'selected' : ''}>
+                  ${escapeHtml(c.customerNumber)} — ${escapeHtml(c.name)}
+                </option>
+              `).join('')}
+            `;
+          }
+        }).catch(() => {});
+      }
+
       openModal({
         title: 'Complete Sale Checkout',
         bodyHtml: `
@@ -7228,11 +7273,28 @@
             <div style="font-size: 32px; font-weight: 800; color: var(--accent-primary);">${formatTenantMoney(grandTotal)}</div>
           </div>
 
+          <div class="form-group" style="margin-bottom: 14px;">
+            <label class="form-label">Customer Profile</label>
+            <div style="display: flex; gap: 8px;">
+              <select class="form-select" id="payCustomerSelect" onchange="onSelectCheckoutCustomer(this.value)">
+                <option value="">-- Walk-in / Anonymous Customer --</option>
+                ${(state.cachedCustomers || []).map(c => `
+                  <option value="${c.id}" ${state.selectedCheckoutCustomerId === c.id ? 'selected' : ''}>
+                    ${escapeHtml(c.customerNumber)} — ${escapeHtml(c.name)}
+                  </option>
+                `).join('')}
+              </select>
+              <button class="btn btn-secondary btn-sm" type="button" onclick="openCustomerModal()" title="Add New Customer">+</button>
+            </div>
+            <div id="payCustomerCreditBadge" style="margin-top: 6px; font-size: 12px;"></div>
+          </div>
+
           <div class="form-group">
             <label class="form-label">Payment Method</label>
             <select class="form-select" id="payMethod" onchange="togglePaymentInputs()">
               <option value="CASH">Cash Payment</option>
               <option value="CARD">Credit / Debit Card</option>
+              <option value="CREDIT">Customer Credit Account (On Account)</option>
               <option value="SPLIT">Split Payment (Cash + Card)</option>
             </select>
           </div>
@@ -7261,8 +7323,15 @@
             </div>
           </div>
 
+          <div id="creditPaymentFields" style="display: none; margin-top: 12px; padding: 14px; background: var(--bg-primary); border-radius: var(--radius); border: 1px solid var(--border-subtle);">
+            <div style="font-weight: 700; font-size: 13px; margin-bottom: 6px; color: var(--text-primary);">Customer Credit Verification</div>
+            <div id="creditAccountStatusDetails" style="font-size: 12px; color: var(--text-secondary); line-height: 1.4;">
+              Please select a registered customer with an active credit account to bill this sale on credit.
+            </div>
+          </div>
+
           <div class="form-group" style="margin-top: 14px;">
-            <label class="form-label">Customer Name (Optional)</label>
+            <label class="form-label">Customer Name Note (Optional)</label>
             <input type="text" class="form-input" id="payCustomerName" placeholder="Walk-in Customer" onkeydown="if(event.key==='Enter'){event.preventDefault();submitPosCheckout();}">
           </div>
         `,
@@ -7271,22 +7340,94 @@
           <button class="btn btn-primary" id="btnSubmitPosCheckout" onclick="submitPosCheckout()">Process Payment (${formatTenantMoney(grandTotal)})</button>
         `
       });
+
+      if (state.selectedCheckoutCustomerId) {
+        onSelectCheckoutCustomer(state.selectedCheckoutCustomerId);
+      }
+    }
+
+    async function onSelectCheckoutCustomer(customerId) {
+      state.selectedCheckoutCustomerId = customerId || null;
+      state.selectedCustomerCreditAccount = null;
+      const badge = document.getElementById('payCustomerCreditBadge');
+      const details = document.getElementById('creditAccountStatusDetails');
+      const nameInput = document.getElementById('payCustomerName');
+
+      if (!customerId) {
+        if (badge) badge.innerHTML = '';
+        if (details) details.innerHTML = 'Please select a registered customer with an active credit account to bill on credit.';
+        return;
+      }
+
+      const cust = (state.cachedCustomers || []).find(c => c.id === customerId);
+      if (cust && nameInput && !nameInput.value) {
+        nameInput.value = cust.name;
+      }
+
+      if (badge) badge.innerHTML = '<span class="spinner-sm" style="display:inline-block;"></span> Checking credit account...';
+
+      try {
+        const accountsRes = await apiFetch(`/v1/credit/accounts?customerId=${encodeURIComponent(customerId)}`);
+        const account = accountsRes?.items?.[0] || null;
+        state.selectedCustomerCreditAccount = account;
+
+        if (!account) {
+          if (badge) badge.innerHTML = '<span style="color: var(--status-warning);">⚠️ No Credit Account found for this customer</span>';
+          if (details) details.innerHTML = '<div style="color: var(--status-warning);">This customer does not have a credit account. Sales cannot be charged on credit.</div>';
+          return;
+        }
+
+        const isGood = account.status === 'ACTIVE';
+        const limitStr = formatTenantMoney(account.creditLimit, 'LKR');
+        const availStr = formatTenantMoney(account.availableCredit, 'LKR');
+        const balStr = formatTenantMoney(account.currentBalance, 'LKR');
+
+        if (badge) {
+          badge.innerHTML = `
+            <span style="font-weight: 600; color: ${isGood ? 'var(--status-success)' : 'var(--status-danger)'};">
+              ${escapeHtml(account.status)}
+            </span> | Limit: ${limitStr} | Available: <strong>${availStr}</strong>
+          `;
+        }
+
+        if (details) {
+          details.innerHTML = `
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 4px;">
+              <div>Account #: <strong>${escapeHtml(account.accountNumber)}</strong></div>
+              <div>Status: <span class="badge ${isGood ? 'badge-success' : 'badge-danger'}">${escapeHtml(account.status)}</span></div>
+              <div>Credit Limit: <strong>${limitStr}</strong></div>
+              <div>Current Balance: <strong>${balStr}</strong></div>
+              <div style="grid-column: span 2; padding: 6px; background: var(--bg-surface); border-radius: 4px; margin-top: 4px;">
+                Available Credit: <strong style="color: ${parseFloat(account.availableCredit) > 0 ? 'var(--status-success)' : 'var(--status-danger)'};">${availStr}</strong>
+              </div>
+            </div>
+          `;
+        }
+      } catch (err) {
+        if (badge) badge.innerHTML = '<span style="color: var(--status-danger);">Failed to verify credit account</span>';
+        if (details) details.innerHTML = `<span style="color: var(--status-danger);">${escapeHtml(err.message)}</span>`;
+      }
     }
 
     function togglePaymentInputs() {
       const method = document.getElementById('payMethod').value;
       const cashDiv = document.getElementById('cashPaymentFields');
       const cardDiv = document.getElementById('cardPaymentFields');
+      const creditDiv = document.getElementById('creditPaymentFields');
+
+      if (cashDiv) cashDiv.style.display = 'none';
+      if (cardDiv) cardDiv.style.display = 'none';
+      if (creditDiv) creditDiv.style.display = 'none';
 
       if (method === 'CASH') {
-        cashDiv.style.display = 'block';
-        cardDiv.style.display = 'none';
+        if (cashDiv) cashDiv.style.display = 'block';
       } else if (method === 'CARD') {
-        cashDiv.style.display = 'none';
-        cardDiv.style.display = 'block';
+        if (cardDiv) cardDiv.style.display = 'block';
+      } else if (method === 'CREDIT') {
+        if (creditDiv) creditDiv.style.display = 'block';
       } else {
-        cashDiv.style.display = 'block';
-        cardDiv.style.display = 'block';
+        if (cashDiv) cashDiv.style.display = 'block';
+        if (cardDiv) cardDiv.style.display = 'block';
       }
       calculateChangeDue();
     }
@@ -7365,6 +7506,34 @@
           cardReference: auth,
           cardLastFour: last4
         });
+      } else if (method === 'CREDIT') {
+        if (!state.selectedCheckoutCustomerId) {
+          showToast('Customer selection required: Please select a customer with an active credit account', 'error');
+          state.isSubmittingCheckout = false;
+          if (submitBtn) { submitBtn.disabled = false; submitBtn.innerText = `Process Payment (${formatTenantMoney(grandTotal)})`; }
+          if (cancelBtn) cancelBtn.disabled = false;
+          return;
+        }
+        if (!state.selectedCustomerCreditAccount || state.selectedCustomerCreditAccount.status !== 'ACTIVE') {
+          showToast('Credit account inactive: Selected customer does not have an active credit account', 'error');
+          state.isSubmittingCheckout = false;
+          if (submitBtn) { submitBtn.disabled = false; submitBtn.innerText = `Process Payment (${formatTenantMoney(grandTotal)})`; }
+          if (cancelBtn) cancelBtn.disabled = false;
+          return;
+        }
+        const avail = parseFloat(state.selectedCustomerCreditAccount.availableCredit || '0');
+        if (avail < grandTotal) {
+          showToast(`Credit limit exceeded: Available credit (${formatTenantMoney(avail, 'LKR')}) is less than amount due (${formatTenantMoney(grandTotal, 'LKR')})`, 'error');
+          state.isSubmittingCheckout = false;
+          if (submitBtn) { submitBtn.disabled = false; submitBtn.innerText = `Process Payment (${formatTenantMoney(grandTotal)})`; }
+          if (cancelBtn) cancelBtn.disabled = false;
+          return;
+        }
+        payments.push({
+          paymentMethod: 'CREDIT',
+          amount: grandTotal.toFixed(4),
+          tenderedAmount: grandTotal.toFixed(4)
+        });
       } else {
         // Split 50/50
         const half = (grandTotal / 2).toFixed(4);
@@ -7398,6 +7567,7 @@
           body: JSON.stringify({
             registerId: state.registerId,
             shiftId: state.activeShift?.id || null,
+            customerId: state.selectedCheckoutCustomerId || null,
             customerName,
             lines,
             payments
@@ -15769,6 +15939,1719 @@
           bodyHtml,
           footerHtml,
           maxWidth: '720px',
+        });
+      } catch (err) {
+        showToast(err.message, 'error');
+        closeModal();
+      }
+    }
+
+    // ============================================================================
+    // --- PHASE 7.4: CUSTOMER CREDIT MANAGEMENT & RECEIVABLES LEDGER ---
+    // ============================================================================
+
+    async function renderCreditDashboardView() {
+      const container = document.getElementById('mainContainer');
+      container.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-secondary);"><div class="spinner-sm" style="display:inline-block; margin-bottom: 8px;"></div><div>Loading credit analytics and receivables dashboard...</div></div>';
+
+      try {
+        const [dashRes, agingRes] = await Promise.all([
+          apiFetch('/v1/credit/reports/dashboard').catch(() => null),
+          apiFetch('/v1/credit/reports/aging').catch(() => null)
+        ]);
+
+        const totalOutstanding = dashRes?.totalOutstanding || '0.00';
+        const totalAvailable = dashRes?.totalAvailableCredit || '0.00';
+        const totalOverdue = dashRes?.totalOverdue || '0.00';
+        const activeAccounts = dashRes?.activeAccountsCount || 0;
+        const totalCollections = dashRes?.totalCollectionsMonth || '0.00';
+
+        const aging = agingRes?.buckets || {
+          current: '0.00',
+          days31To60: '0.00',
+          days61To90: '0.00',
+          days90Plus: '0.00',
+          total: '0.00'
+        };
+
+        container.innerHTML = `
+          <div class="view-header">
+            <div>
+              <h1 class="view-title">Customer Credit &amp; Receivables</h1>
+              <div class="view-subtitle">Monitor customer credit accounts, available limits, receivables aging, and cash collections (LKR)</div>
+            </div>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+              <button class="btn btn-secondary" onclick="renderView('customers')">👥 Customers</button>
+              <button class="btn btn-secondary" onclick="renderView('credit-accounts')">💳 Credit Accounts</button>
+              <button class="btn btn-secondary" onclick="openAgingReportModal()">📊 Aging Report</button>
+              <button class="btn btn-primary" onclick="openCreateCreditAccountModal()">+ Open Credit Account</button>
+            </div>
+          </div>
+
+          <!-- 5 Metric Cards -->
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; margin-bottom: 20px;">
+            <div class="card" style="padding: 16px;">
+              <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--text-secondary);">Total Outstanding Credit</div>
+              <div style="font-size: 24px; font-weight: 800; margin-top: 6px; color: var(--text-primary); font-variant-numeric: tabular-nums;">
+                ${formatTenantMoney(totalOutstanding, 'LKR')}
+              </div>
+              <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">Active receivables balance</div>
+            </div>
+
+            <div class="card" style="padding: 16px;">
+              <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--text-secondary);">Available Credit Pool</div>
+              <div style="font-size: 24px; font-weight: 800; margin-top: 6px; color: var(--accent-primary); font-variant-numeric: tabular-nums;">
+                ${formatTenantMoney(totalAvailable, 'LKR')}
+              </div>
+              <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">Available limit across all active accounts</div>
+            </div>
+
+            <div class="card" style="padding: 16px;">
+              <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--status-danger);">Total Overdue Receivables</div>
+              <div style="font-size: 24px; font-weight: 800; margin-top: 6px; color: var(--status-danger); font-variant-numeric: tabular-nums;">
+                ${formatTenantMoney(totalOverdue, 'LKR')}
+              </div>
+              <div style="font-size: 11px; color: var(--status-danger); margin-top: 4px;">Balance past payment terms</div>
+            </div>
+
+            <div class="card" style="padding: 16px;">
+              <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--text-secondary);">Active Credit Accounts</div>
+              <div style="font-size: 24px; font-weight: 800; margin-top: 6px; color: var(--status-success); font-variant-numeric: tabular-nums;">
+                ${activeAccounts}
+              </div>
+              <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">Open approved accounts</div>
+            </div>
+
+            <div class="card" style="padding: 16px;">
+              <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--text-secondary);">Collections This Month</div>
+              <div style="font-size: 24px; font-weight: 800; margin-top: 6px; color: var(--status-success); font-variant-numeric: tabular-nums;">
+                ${formatTenantMoney(totalCollections, 'LKR')}
+              </div>
+              <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">Cash / payments collected</div>
+            </div>
+          </div>
+
+          <!-- Aging Analysis Section -->
+          <div class="card" style="padding: 20px; margin-bottom: 20px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+              <div>
+                <h3 style="margin: 0; font-size: 16px; font-weight: 700;">Receivables Aging Breakdown</h3>
+                <div style="font-size: 12px; color: var(--text-secondary);">Outstanding balances categorized by maturity from due date</div>
+              </div>
+              <button class="btn btn-secondary btn-sm" onclick="openAgingReportModal()">Detailed Aging View &rarr;</button>
+            </div>
+
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px;">
+              <div style="background: var(--bg-surface); padding: 12px 14px; border-radius: 6px; border-left: 4px solid var(--status-success);">
+                <div style="font-size: 11px; font-weight: 600; color: var(--text-secondary);">Current (0–30 Days)</div>
+                <div style="font-size: 18px; font-weight: 700; margin-top: 4px; color: var(--text-primary); font-variant-numeric: tabular-nums;">${formatTenantMoney(aging.current, 'LKR')}</div>
+              </div>
+              <div style="background: var(--bg-surface); padding: 12px 14px; border-radius: 6px; border-left: 4px solid #eab308;">
+                <div style="font-size: 11px; font-weight: 600; color: var(--text-secondary);">31–60 Days Overdue</div>
+                <div style="font-size: 18px; font-weight: 700; margin-top: 4px; color: #eab308; font-variant-numeric: tabular-nums;">${formatTenantMoney(aging.days31To60, 'LKR')}</div>
+              </div>
+              <div style="background: var(--bg-surface); padding: 12px 14px; border-radius: 6px; border-left: 4px solid #f97316;">
+                <div style="font-size: 11px; font-weight: 600; color: var(--text-secondary);">61–90 Days Overdue</div>
+                <div style="font-size: 18px; font-weight: 700; margin-top: 4px; color: #f97316; font-variant-numeric: tabular-nums;">${formatTenantMoney(aging.days61To90, 'LKR')}</div>
+              </div>
+              <div style="background: var(--bg-surface); padding: 12px 14px; border-radius: 6px; border-left: 4px solid var(--status-danger);">
+                <div style="font-size: 11px; font-weight: 600; color: var(--status-danger);">90+ Days (High Risk)</div>
+                <div style="font-size: 18px; font-weight: 700; margin-top: 4px; color: var(--status-danger); font-variant-numeric: tabular-nums;">${formatTenantMoney(aging.days90Plus, 'LKR')}</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Quick Actions & Top Credit Balances -->
+          <div class="card" style="padding: 20px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+              <h3 style="margin: 0; font-size: 16px; font-weight: 700;">Top Customer Credit Accounts</h3>
+              <button class="btn btn-secondary btn-sm" onclick="renderView('credit-accounts')">View All Accounts &rarr;</button>
+            </div>
+            <div id="dashboardAccountsList">
+              <div style="text-align: center; padding: 20px; color: var(--text-secondary);"><span class="spinner-sm"></span> Loading accounts...</div>
+            </div>
+          </div>
+        `;
+
+        // Load preview accounts
+        apiFetch('/v1/credit/accounts?limit=5').then(res => {
+          const listEl = document.getElementById('dashboardAccountsList');
+          if (!listEl) return;
+          const items = res?.items || [];
+          if (items.length === 0) {
+            listEl.innerHTML = `
+              <div style="text-align: center; padding: 30px; color: var(--text-secondary);">
+                <div>No customer credit accounts opened yet.</div>
+                <button class="btn btn-primary btn-sm" style="margin-top: 10px;" onclick="openCreateCreditAccountModal()">+ Open First Credit Account</button>
+              </div>
+            `;
+            return;
+          }
+          listEl.innerHTML = `
+            <table class="table" style="font-size: 12px; margin: 0;">
+              <thead>
+                <tr>
+                  <th>Account #</th>
+                  <th>Customer</th>
+                  <th>Terms</th>
+                  <th class="text-right">Credit Limit</th>
+                  <th class="text-right">Current Balance</th>
+                  <th class="text-right">Available Credit</th>
+                  <th>Risk</th>
+                  <th>Status</th>
+                  <th class="text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${items.map(acc => `
+                  <tr>
+                    <td><strong style="font-family: monospace;">${escapeHtml(acc.accountNumber)}</strong></td>
+                    <td>${escapeHtml(acc.customerName)}</td>
+                    <td><span class="badge badge-secondary">${escapeHtml(acc.creditTerms)}</span></td>
+                    <td class="text-right" style="font-weight: 600;">${formatTenantMoney(acc.creditLimit, 'LKR')}</td>
+                    <td class="text-right" style="font-weight: 700; color: ${parseFloat(acc.currentBalance) > 0 ? 'var(--status-danger)' : 'var(--text-secondary)'};">${formatTenantMoney(acc.currentBalance, 'LKR')}</td>
+                    <td class="text-right" style="font-weight: 700; color: var(--status-success);">${formatTenantMoney(acc.availableCredit, 'LKR')}</td>
+                    <td><span class="badge ${acc.riskClassification === 'LOW_RISK' ? 'badge-success' : acc.riskClassification === 'MEDIUM_RISK' ? 'badge-warning' : 'badge-danger'}">${escapeHtml(acc.riskClassification)}</span></td>
+                    <td><span class="badge ${acc.status === 'ACTIVE' ? 'badge-success' : acc.status === 'ON_HOLD' ? 'badge-warning' : 'badge-danger'}">${escapeHtml(acc.status)}</span></td>
+                    <td class="text-right">
+                      <button class="btn btn-secondary btn-sm" onclick="openCreditAccountDetailsModal('${acc.id}')">Manage</button>
+                    </td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          `;
+        }).catch(err => {
+          const listEl = document.getElementById('dashboardAccountsList');
+          if (listEl) listEl.innerHTML = `<div style="color: var(--status-danger); padding: 12px;">Failed to load accounts: ${escapeHtml(err.message)}</div>`;
+        });
+
+      } catch (err) {
+        container.innerHTML = `
+          <div class="card" style="padding: 40px; text-align: center;">
+            <div style="font-size: 24px; color: var(--status-danger); margin-bottom: 8px;">⚠️</div>
+            <div style="font-weight: 700; font-size: 16px; margin-bottom: 8px;">Failed to Load Credit Dashboard</div>
+            <p style="color: var(--text-secondary); margin-bottom: 16px;">${escapeHtml(err.message)}</p>
+            <button class="btn btn-primary" onclick="renderCreditDashboardView()">Try Again</button>
+          </div>
+        `;
+      }
+    }
+
+    async function renderCustomersView() {
+      const container = document.getElementById('mainContainer');
+      container.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-secondary);"><div class="spinner-sm" style="display:inline-block; margin-bottom: 8px;"></div><div>Loading customer directory...</div></div>';
+
+      try {
+        let queryParams = '?limit=100';
+        if (state.customerFilters.status) queryParams += `&status=${encodeURIComponent(state.customerFilters.status)}`;
+        if (state.customerFilters.search) queryParams += `&search=${encodeURIComponent(state.customerFilters.search)}`;
+
+        const [custRes, accountsRes] = await Promise.all([
+          apiFetch(`/v1/customers${queryParams}`),
+          apiFetch('/v1/credit/accounts?limit=100').catch(() => ({ items: [] }))
+        ]);
+
+        const customers = custRes?.items || [];
+        state.cachedCustomers = customers;
+        const accounts = accountsRes?.items || [];
+        state.cachedCreditAccounts = accounts;
+
+        // Map accounts by customerId
+        const accountMap = new Map();
+        for (const a of accounts) {
+          accountMap.set(a.customerId, a);
+        }
+
+        container.innerHTML = `
+          <div class="view-header">
+            <div>
+              <h1 class="view-title">Customer Directory</h1>
+              <div class="view-subtitle">Manage customer master data, corporate identities, contacts, and linked credit accounts</div>
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <button class="btn btn-secondary" onclick="renderView('credit-dashboard')">&larr; Credit Dashboard</button>
+              <button class="btn btn-primary" onclick="openCustomerModal()">+ Add New Customer</button>
+            </div>
+          </div>
+
+          <!-- Filters -->
+          <div class="card" style="padding: 12px 16px; margin-bottom: 16px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 200px;">
+              <input type="text" class="form-input" id="custSearchInput" placeholder="Search by customer name, code, email, or phone..." value="${escapeHtml(state.customerFilters.search)}" onkeydown="if(event.key==='Enter'){state.customerFilters.search=this.value.trim(); renderCustomersView();}">
+            </div>
+            <div>
+              <select class="form-select" id="custStatusFilter" onchange="state.customerFilters.status=this.value; renderCustomersView();">
+                <option value="" ${state.customerFilters.status === '' ? 'selected' : ''}>All Statuses</option>
+                <option value="ACTIVE" ${state.customerFilters.status === 'ACTIVE' ? 'selected' : ''}>Active Only</option>
+                <option value="INACTIVE" ${state.customerFilters.status === 'INACTIVE' ? 'selected' : ''}>Inactive Only</option>
+              </select>
+            </div>
+            <button class="btn btn-secondary" onclick="state.customerFilters.search=document.getElementById('custSearchInput')?.value.trim()||''; renderCustomersView();">Search</button>
+            <button class="btn btn-secondary" onclick="state.customerFilters.search=''; state.customerFilters.status=''; renderCustomersView();">Reset</button>
+          </div>
+
+          <!-- Customer List Table -->
+          <div class="card" style="padding: 0; overflow: hidden;">
+            ${customers.length === 0 ? `
+              <div style="padding: 40px; text-align: center; color: var(--text-secondary);">
+                <div>No customers found matching the criteria.</div>
+                <button class="btn btn-primary btn-sm" style="margin-top: 12px;" onclick="openCustomerModal()">+ Add Customer</button>
+              </div>
+            ` : `
+              <table class="table" style="font-size: 13px; margin: 0;">
+                <thead>
+                  <tr>
+                    <th>Customer #</th>
+                    <th>Name / Business</th>
+                    <th>Contact Info</th>
+                    <th>City</th>
+                    <th>Credit Account</th>
+                    <th class="text-right">Credit Limit</th>
+                    <th class="text-right">Balance</th>
+                    <th>Status</th>
+                    <th class="text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${customers.map(c => {
+                    const acc = accountMap.get(c.id);
+                    return `
+                      <tr>
+                        <td><strong style="font-family: monospace; color: var(--accent-primary);">${escapeHtml(c.customerNumber)}</strong></td>
+                        <td>
+                          <div style="font-weight: 600;">${escapeHtml(c.name)}</div>
+                          ${c.companyName ? `<div style="font-size: 11px; color: var(--text-secondary);">${escapeHtml(c.companyName)}</div>` : ''}
+                        </td>
+                        <td>
+                          <div>${escapeHtml(c.phone || '—')}</div>
+                          ${c.email ? `<div style="font-size: 11px; color: var(--text-secondary);">${escapeHtml(c.email)}</div>` : ''}
+                        </td>
+                        <td>${escapeHtml(c.addressCity || '—')}</td>
+                        <td>
+                          ${acc ? `
+                            <span class="badge ${acc.status === 'ACTIVE' ? 'badge-success' : 'badge-warning'}">
+                              ${escapeHtml(acc.status)}
+                            </span>
+                          ` : `
+                            <span style="font-size: 11px; color: var(--text-secondary); font-style: italic;">No Account</span>
+                          `}
+                        </td>
+                        <td class="text-right" style="font-weight: 600; font-variant-numeric: tabular-nums;">
+                          ${acc ? formatTenantMoney(acc.creditLimit, 'LKR') : '—'}
+                        </td>
+                        <td class="text-right" style="font-weight: 700; font-variant-numeric: tabular-nums; color: ${acc && parseFloat(acc.currentBalance) > 0 ? 'var(--status-danger)' : 'var(--text-secondary)'};">
+                          ${acc ? formatTenantMoney(acc.currentBalance, 'LKR') : '—'}
+                        </td>
+                        <td>
+                          <span class="badge ${c.isActive ? 'badge-success' : 'badge-secondary'}">
+                            ${c.isActive ? 'ACTIVE' : 'INACTIVE'}
+                          </span>
+                        </td>
+                        <td class="text-right">
+                          <div style="display: flex; gap: 6px; justify-content: flex-end;">
+                            <button class="btn btn-secondary btn-sm" onclick="openCustomerModal('${c.id}')" title="Edit Customer Details">Edit</button>
+                            ${acc ? `
+                              <button class="btn btn-secondary btn-sm" onclick="openCreditAccountDetailsModal('${acc.id}')" title="Manage Credit Account">Credit</button>
+                            ` : `
+                              <button class="btn btn-primary btn-sm" onclick="openCreateCreditAccountModal('${c.id}')" title="Open New Credit Account">+ Credit</button>
+                            `}
+                          </div>
+                        </td>
+                      </tr>
+                    `;
+                  }).join('')}
+                </tbody>
+              </table>
+            `}
+          </div>
+        `;
+      } catch (err) {
+        container.innerHTML = `
+          <div class="card" style="padding: 40px; text-align: center;">
+            <div style="font-size: 24px; color: var(--status-danger); margin-bottom: 8px;">⚠️</div>
+            <div style="font-weight: 700; font-size: 16px; margin-bottom: 8px;">Failed to Load Customers</div>
+            <p style="color: var(--text-secondary); margin-bottom: 16px;">${escapeHtml(err.message)}</p>
+            <button class="btn btn-primary" onclick="renderCustomersView()">Try Again</button>
+          </div>
+        `;
+      }
+    }
+
+    async function renderCreditAccountsView() {
+      const container = document.getElementById('mainContainer');
+      container.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-secondary);"><div class="spinner-sm" style="display:inline-block; margin-bottom: 8px;"></div><div>Loading credit accounts and balances...</div></div>';
+
+      try {
+        let queryParams = '?limit=100';
+        if (state.creditFilters.status) queryParams += `&status=${encodeURIComponent(state.creditFilters.status)}`;
+        if (state.creditFilters.risk) queryParams += `&risk=${encodeURIComponent(state.creditFilters.risk)}`;
+        if (state.creditFilters.search) queryParams += `&search=${encodeURIComponent(state.creditFilters.search)}`;
+
+        const res = await apiFetch(`/v1/credit/accounts${queryParams}`);
+        const accounts = res?.items || [];
+        state.cachedCreditAccounts = accounts;
+
+        container.innerHTML = `
+          <div class="view-header">
+            <div>
+              <h1 class="view-title">Customer Credit Accounts</h1>
+              <div class="view-subtitle">Manage credit terms, limits, approvals, ledger balances, and payment allocations (LKR)</div>
+            </div>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+              <button class="btn btn-secondary" onclick="renderView('credit-dashboard')">&larr; Dashboard</button>
+              <button class="btn btn-secondary" onclick="renderView('customers')">👥 Customers</button>
+              <button class="btn btn-primary" onclick="openCreateCreditAccountModal()">+ Open Credit Account</button>
+            </div>
+          </div>
+
+          <!-- Filters -->
+          <div class="card" style="padding: 12px 16px; margin-bottom: 16px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 200px;">
+              <input type="text" class="form-input" id="creditSearchInput" placeholder="Search account #, customer name..." value="${escapeHtml(state.creditFilters.search)}" onkeydown="if(event.key==='Enter'){state.creditFilters.search=this.value.trim(); renderCreditAccountsView();}">
+            </div>
+            <div>
+              <select class="form-select" id="creditStatusFilter" onchange="state.creditFilters.status=this.value; renderCreditAccountsView();">
+                <option value="" ${state.creditFilters.status === '' ? 'selected' : ''}>All Statuses</option>
+                <option value="ACTIVE" ${state.creditFilters.status === 'ACTIVE' ? 'selected' : ''}>Active</option>
+                <option value="ON_HOLD" ${state.creditFilters.status === 'ON_HOLD' ? 'selected' : ''}>On Hold</option>
+                <option value="SUSPENDED" ${state.creditFilters.status === 'SUSPENDED' ? 'selected' : ''}>Suspended</option>
+                <option value="BLOCKED" ${state.creditFilters.status === 'BLOCKED' ? 'selected' : ''}>Blocked</option>
+                <option value="CLOSED" ${state.creditFilters.status === 'CLOSED' ? 'selected' : ''}>Closed</option>
+              </select>
+            </div>
+            <div>
+              <select class="form-select" id="creditRiskFilter" onchange="state.creditFilters.risk=this.value; renderCreditAccountsView();">
+                <option value="" ${state.creditFilters.risk === '' ? 'selected' : ''}>All Risk Ratings</option>
+                <option value="LOW_RISK" ${state.creditFilters.risk === 'LOW_RISK' ? 'selected' : ''}>Low Risk</option>
+                <option value="MEDIUM_RISK" ${state.creditFilters.risk === 'MEDIUM_RISK' ? 'selected' : ''}>Medium Risk</option>
+                <option value="HIGH_RISK" ${state.creditFilters.risk === 'HIGH_RISK' ? 'selected' : ''}>High Risk</option>
+                <option value="DEFAULTED" ${state.creditFilters.risk === 'DEFAULTED' ? 'selected' : ''}>Defaulted</option>
+              </select>
+            </div>
+            <button class="btn btn-secondary" onclick="state.creditFilters.search=document.getElementById('creditSearchInput')?.value.trim()||''; renderCreditAccountsView();">Search</button>
+            <button class="btn btn-secondary" onclick="state.creditFilters.search=''; state.creditFilters.status=''; state.creditFilters.risk=''; renderCreditAccountsView();">Reset</button>
+          </div>
+
+          <!-- Accounts Table -->
+          <div class="card" style="padding: 0; overflow: hidden;">
+            ${accounts.length === 0 ? `
+              <div style="padding: 40px; text-align: center; color: var(--text-secondary);">
+                <div>No customer credit accounts found.</div>
+                <button class="btn btn-primary btn-sm" style="margin-top: 12px;" onclick="openCreateCreditAccountModal()">+ Open Credit Account</button>
+              </div>
+            ` : `
+              <table class="table" style="font-size: 13px; margin: 0;">
+                <thead>
+                  <tr>
+                    <th>Account #</th>
+                    <th>Customer Name</th>
+                    <th>Terms</th>
+                    <th class="text-right">Credit Limit</th>
+                    <th class="text-right">Current Balance</th>
+                    <th class="text-right">Available Credit</th>
+                    <th>Risk Class</th>
+                    <th>Status</th>
+                    <th class="text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${accounts.map(acc => {
+                    const isGood = acc.status === 'ACTIVE';
+                    const riskBadge = acc.riskClassification === 'LOW_RISK' ? 'badge-success' : acc.riskClassification === 'MEDIUM_RISK' ? 'badge-warning' : 'badge-danger';
+                    return `
+                      <tr>
+                        <td><strong style="font-family: monospace; color: var(--accent-primary);">${escapeHtml(acc.accountNumber)}</strong></td>
+                        <td>
+                          <div style="font-weight: 600;">${escapeHtml(acc.customerName)}</div>
+                          <div style="font-size: 11px; color: var(--text-secondary);">${escapeHtml(acc.customerNumber)}</div>
+                        </td>
+                        <td><span class="badge badge-secondary">${escapeHtml(acc.creditTerms)}</span></td>
+                        <td class="text-right" style="font-weight: 600; font-variant-numeric: tabular-nums;">${formatTenantMoney(acc.creditLimit, 'LKR')}</td>
+                        <td class="text-right" style="font-weight: 700; font-variant-numeric: tabular-nums; color: ${parseFloat(acc.currentBalance) > 0 ? 'var(--status-danger)' : 'var(--text-secondary)'};">
+                          ${formatTenantMoney(acc.currentBalance, 'LKR')}
+                        </td>
+                        <td class="text-right" style="font-weight: 700; font-variant-numeric: tabular-nums; color: var(--status-success);">
+                          ${formatTenantMoney(acc.availableCredit, 'LKR')}
+                        </td>
+                        <td><span class="badge ${riskBadge}">${escapeHtml(acc.riskClassification)}</span></td>
+                        <td>
+                          <span class="badge ${isGood ? 'badge-success' : acc.status === 'ON_HOLD' ? 'badge-warning' : 'badge-danger'}">
+                            ${escapeHtml(acc.status)}
+                          </span>
+                        </td>
+                        <td class="text-right">
+                          <div style="display: flex; gap: 6px; justify-content: flex-end;">
+                            <button class="btn btn-primary btn-sm" onclick="openCreditAccountDetailsModal('${acc.id}')">Manage</button>
+                            <button class="btn btn-secondary btn-sm" onclick="openRecordCreditPaymentModal('${acc.id}')" title="Record Payment">Pay</button>
+                          </div>
+                        </td>
+                      </tr>
+                    `;
+                  }).join('')}
+                </tbody>
+              </table>
+            `}
+          </div>
+        `;
+      } catch (err) {
+        container.innerHTML = `
+          <div class="card" style="padding: 40px; text-align: center;">
+            <div style="font-size: 24px; color: var(--status-danger); margin-bottom: 8px;">⚠️</div>
+            <div style="font-weight: 700; font-size: 16px; margin-bottom: 8px;">Failed to Load Credit Accounts</div>
+            <p style="color: var(--text-secondary); margin-bottom: 16px;">${escapeHtml(err.message)}</p>
+            <button class="btn btn-primary" onclick="renderCreditAccountsView()">Try Again</button>
+          </div>
+        `;
+      }
+    }
+
+    async function openCustomerModal(customerId = null) {
+      let cust = null;
+      if (customerId) {
+        try {
+          cust = await apiFetch(`/v1/customers/${customerId}`);
+        } catch (err) {
+          showToast(err.message, 'error');
+          return;
+        }
+      }
+
+      openModal({
+        title: cust ? 'Edit Customer Details' : 'Register New Customer',
+        bodyHtml: `
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <div class="form-group" style="grid-column: span 2;">
+              <label class="form-label">Full Name / Trading Entity *</label>
+              <input type="text" class="form-input" id="custNameInput" value="${escapeHtml(cust?.name || '')}" placeholder="e.g. Acme Lanka Logistics" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Customer Code / ID</label>
+              <input type="text" class="form-input" id="custNumberInput" value="${escapeHtml(cust?.customerNumber || '')}" placeholder="Auto-generated if blank (CUST-XXXXX)">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Registered Company Name</label>
+              <input type="text" class="form-input" id="custCompanyInput" value="${escapeHtml(cust?.companyName || '')}" placeholder="e.g. Acme (Pvt) Ltd">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Email Address</label>
+              <input type="email" class="form-input" id="custEmailInput" value="${escapeHtml(cust?.email || '')}" placeholder="billing@company.com">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Phone Number</label>
+              <input type="text" class="form-input" id="custPhoneInput" value="${escapeHtml(cust?.phone || '')}" placeholder="+94 77 123 4567">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Tax ID / TIN</label>
+              <input type="text" class="form-input" id="custTaxIdInput" value="${escapeHtml(cust?.taxId || '')}" placeholder="e.g. TIN-123456789">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Credit Status</label>
+              <select class="form-select" id="custActiveSelect">
+                <option value="true" ${cust?.isActive !== false ? 'selected' : ''}>Active</option>
+                <option value="false" ${cust?.isActive === false ? 'selected' : ''}>Inactive</option>
+              </select>
+            </div>
+            <div class="form-group" style="grid-column: span 2;">
+              <label class="form-label">Street Address</label>
+              <input type="text" class="form-input" id="custAddress1Input" value="${escapeHtml(cust?.addressLine1 || '')}" placeholder="No. 45, Galle Road">
+            </div>
+            <div class="form-group">
+              <label class="form-label">City</label>
+              <input type="text" class="form-input" id="custCityInput" value="${escapeHtml(cust?.addressCity || '')}" placeholder="Colombo">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Postal Code</label>
+              <input type="text" class="form-input" id="custPostalInput" value="${escapeHtml(cust?.addressPostalCode || '')}" placeholder="00300">
+            </div>
+            <div class="form-group" style="grid-column: span 2;">
+              <label class="form-label">Notes</label>
+              <textarea class="form-input" id="custNotesInput" rows="2" placeholder="Customer background, preferred terms, or credit remarks...">${escapeHtml(cust?.notes || '')}</textarea>
+            </div>
+          </div>
+        `,
+        footerHtml: `
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-primary" id="btnSaveCustomer" onclick="submitSaveCustomer('${customerId || ''}')">${cust ? 'Save Changes' : 'Create Customer'}</button>
+        `,
+        maxWidth: '640px'
+      });
+    }
+
+    async function submitSaveCustomer(customerId) {
+      const name = document.getElementById('custNameInput')?.value.trim();
+      if (!name) {
+        showToast('Please enter customer full name', 'error');
+        return;
+      }
+      const customerNumber = document.getElementById('custNumberInput')?.value.trim() || undefined;
+      const companyName = document.getElementById('custCompanyInput')?.value.trim() || undefined;
+      const email = document.getElementById('custEmailInput')?.value.trim() || undefined;
+      const phone = document.getElementById('custPhoneInput')?.value.trim() || undefined;
+      const taxId = document.getElementById('custTaxIdInput')?.value.trim() || undefined;
+      const addressLine1 = document.getElementById('custAddress1Input')?.value.trim() || undefined;
+      const addressCity = document.getElementById('custCityInput')?.value.trim() || undefined;
+      const addressPostalCode = document.getElementById('custPostalInput')?.value.trim() || undefined;
+      const notes = document.getElementById('custNotesInput')?.value.trim() || undefined;
+      const isActive = document.getElementById('custActiveSelect')?.value === 'true';
+
+      const payload = {
+        name,
+        customerNumber,
+        companyName,
+        email,
+        phone,
+        taxId,
+        addressLine1,
+        addressCity,
+        addressPostalCode,
+        notes,
+        isActive
+      };
+
+      const btn = document.getElementById('btnSaveCustomer');
+      if (btn) { btn.disabled = true; btn.innerText = 'Saving...'; }
+
+      try {
+        if (customerId) {
+          await apiFetch(`/v1/customers/${customerId}`, {
+            method: 'PATCH',
+            body: JSON.stringify(payload)
+          });
+          showToast('Customer updated successfully', 'success');
+        } else {
+          await apiFetch('/v1/customers', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+          });
+          showToast('Customer registered successfully', 'success');
+        }
+        closeModal();
+        renderCustomersView();
+      } catch (err) {
+        showToast(err.message, 'error');
+        if (btn) { btn.disabled = false; btn.innerText = customerId ? 'Save Changes' : 'Create Customer'; }
+      }
+    }
+
+    async function openCreateCreditAccountModal(preselectedCustomerId = null) {
+      let customers = state.cachedCustomers || [];
+      if (customers.length === 0) {
+        try {
+          const res = await apiFetch('/v1/customers?limit=100');
+          customers = res?.items || [];
+          state.cachedCustomers = customers;
+        } catch { customers = []; }
+      }
+
+      openModal({
+        title: 'Open Customer Credit Account',
+        bodyHtml: `
+          <div class="form-group">
+            <label class="form-label">Customer *</label>
+            <select class="form-select" id="newAccCustomerId" ${preselectedCustomerId ? 'disabled' : ''}>
+              <option value="">-- Select Customer --</option>
+              ${customers.map(c => `
+                <option value="${c.id}" ${c.id === preselectedCustomerId ? 'selected' : ''}>
+                  ${escapeHtml(c.customerNumber)} — ${escapeHtml(c.name)} ${c.companyName ? `(${escapeHtml(c.companyName)})` : ''}
+                </option>
+              `).join('')}
+            </select>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <div class="form-group">
+              <label class="form-label">Approved Credit Limit (LKR) *</label>
+              <input type="number" step="0.01" min="0" class="form-input" id="newAccLimit" value="50000.00" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Payment Terms *</label>
+              <select class="form-select" id="newAccTerms" onchange="document.getElementById('newAccCustomDaysGroup').style.display = this.value === 'CUSTOM' ? 'block' : 'none';">
+                <option value="NET_30" selected>NET 30 (30 Days)</option>
+                <option value="NET_15">NET 15 (15 Days)</option>
+                <option value="NET_60">NET 60 (60 Days)</option>
+                <option value="DUE_ON_RECEIPT">Due on Receipt</option>
+                <option value="CUSTOM">Custom Days</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-group" id="newAccCustomDaysGroup" style="display: none;">
+            <label class="form-label">Custom Term Days</label>
+            <input type="number" min="1" max="365" class="form-input" id="newAccCustomDays" value="45">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Opening Debit Balance (LKR, Optional)</label>
+            <input type="number" step="0.01" min="0" class="form-input" id="newAccOpeningBalance" value="0.00" placeholder="0.00">
+            <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">Initial outstanding balance carried over from legacy receivables ledger.</div>
+          </div>
+        `,
+        footerHtml: `
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-primary" id="btnSubmitCreateAccount" onclick="submitCreateCreditAccount('${preselectedCustomerId || ''}')">Approve &amp; Open Account</button>
+        `,
+        maxWidth: '560px'
+      });
+    }
+
+    async function submitCreateCreditAccount(preselectedCustomerId) {
+      const customerId = preselectedCustomerId || document.getElementById('newAccCustomerId')?.value;
+      if (!customerId) {
+        showToast('Please select a customer', 'error');
+        return;
+      }
+      const limitVal = parseFloat(document.getElementById('newAccLimit')?.value || '0');
+      if (isNaN(limitVal) || limitVal < 0) {
+        showToast('Please enter a valid credit limit', 'error');
+        return;
+      }
+      const creditTerms = document.getElementById('newAccTerms')?.value || 'NET_30';
+      const customTermDays = creditTerms === 'CUSTOM' ? parseInt(document.getElementById('newAccCustomDays')?.value || '30', 10) : undefined;
+      const initialBalance = parseFloat(document.getElementById('newAccOpeningBalance')?.value || '0');
+
+      const payload = {
+        customerId,
+        creditLimit: limitVal.toFixed(4),
+        creditTerms,
+        customTermDays,
+        initialBalance: !isNaN(initialBalance) && initialBalance > 0 ? initialBalance.toFixed(4) : undefined
+      };
+
+      const btn = document.getElementById('btnSubmitCreateAccount');
+      if (btn) { btn.disabled = true; btn.innerText = 'Creating Account...'; }
+
+      try {
+        await apiFetch('/v1/credit/accounts', {
+          method: 'POST',
+          body: JSON.stringify(payload)
+        });
+        showToast('Customer credit account successfully opened', 'success');
+        closeModal();
+        renderCreditAccountsView();
+      } catch (err) {
+        showToast(err.message, 'error');
+        if (btn) { btn.disabled = false; btn.innerText = 'Approve & Open Account'; }
+      }
+    }
+
+    async function openCreditAccountDetailsModal(accountId, activeTab = 'overview') {
+      openModal({
+        title: 'Customer Credit Account & Ledger',
+        bodyHtml: '<div style="padding: 40px; text-align: center;"><div class="spinner-sm" style="display:inline-block;"></div><div>Loading account details and transactions...</div></div>',
+        maxWidth: '840px'
+      });
+
+      try {
+        const [acc, txRes, payRes, colRes] = await Promise.all([
+          apiFetch(`/v1/credit/accounts/${accountId}`),
+          apiFetch(`/v1/credit/accounts/${accountId}/transactions?limit=50`).catch(() => ({ items: [] })),
+          apiFetch(`/v1/credit/accounts/${accountId}/payments?limit=50`).catch(() => ({ items: [] })),
+          apiFetch(`/v1/credit/accounts/${accountId}/collections`).catch(() => ({ items: [] }))
+        ]);
+
+        const transactions = txRes?.items || [];
+        const payments = payRes?.items || [];
+        const collections = colRes?.items || [];
+
+        const isGood = acc.status === 'ACTIVE';
+
+        const bodyHtml = `
+          <div style="background: var(--bg-primary); padding: 14px 16px; border-radius: 8px; margin-bottom: 16px;">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 8px;">
+              <div>
+                <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--text-secondary); font-family: monospace;">${escapeHtml(acc.accountNumber)}</div>
+                <h2 style="font-size: 18px; font-weight: 800; margin: 2px 0 0; color: var(--text-primary);">${escapeHtml(acc.customerName)}</h2>
+                <div style="font-size: 11px; color: var(--text-secondary);">Customer Code: ${escapeHtml(acc.customerNumber)} | Terms: <strong>${escapeHtml(acc.creditTerms)}</strong></div>
+              </div>
+              <div style="text-align: right;">
+                <div>
+                  <span class="badge ${isGood ? 'badge-success' : acc.status === 'ON_HOLD' ? 'badge-warning' : 'badge-danger'}" style="font-size: 12px; padding: 4px 8px;">${escapeHtml(acc.status)}</span>
+                  <span class="badge ${acc.riskClassification === 'LOW_RISK' ? 'badge-success' : acc.riskClassification === 'MEDIUM_RISK' ? 'badge-warning' : 'badge-danger'}" style="font-size: 12px; padding: 4px 8px;">${escapeHtml(acc.riskClassification)}</span>
+                </div>
+                <div style="margin-top: 6px; font-size: 11px; color: var(--text-secondary);">
+                  Unallocated Advance: <strong style="color: var(--accent-primary);">${formatTenantMoney(acc.unallocatedPaymentBalance, 'LKR')}</strong>
+                </div>
+              </div>
+            </div>
+
+            <!-- Balances Row -->
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-subtle);">
+              <div>
+                <div style="font-size: 10px; font-weight: 700; text-transform: uppercase; color: var(--text-secondary);">Approved Credit Limit</div>
+                <div style="font-size: 16px; font-weight: 800; color: var(--text-primary); font-variant-numeric: tabular-nums;">${formatTenantMoney(acc.creditLimit, 'LKR')}</div>
+              </div>
+              <div>
+                <div style="font-size: 10px; font-weight: 700; text-transform: uppercase; color: var(--status-danger);">Current Outstanding</div>
+                <div style="font-size: 16px; font-weight: 800; color: ${parseFloat(acc.currentBalance) > 0 ? 'var(--status-danger)' : 'var(--text-secondary)'}; font-variant-numeric: tabular-nums;">${formatTenantMoney(acc.currentBalance, 'LKR')}</div>
+              </div>
+              <div>
+                <div style="font-size: 10px; font-weight: 700; text-transform: uppercase; color: var(--status-success);">Available Credit</div>
+                <div style="font-size: 16px; font-weight: 800; color: var(--status-success); font-variant-numeric: tabular-nums;">${formatTenantMoney(acc.availableCredit, 'LKR')}</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Tabs Header -->
+          <div style="display: flex; gap: 4px; border-bottom: 2px solid var(--border-subtle); margin-bottom: 16px;">
+            <button class="btn ${activeTab === 'overview' ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="openCreditAccountDetailsModal('${accountId}', 'overview')">Overview &amp; Limits</button>
+            <button class="btn ${activeTab === 'ledger' ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="openCreditAccountDetailsModal('${accountId}', 'ledger')">Ledger (${transactions.length})</button>
+            <button class="btn ${activeTab === 'payments' ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="openCreditAccountDetailsModal('${accountId}', 'payments')">Payments (${payments.length})</button>
+            <button class="btn ${activeTab === 'collections' ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="openCreditAccountDetailsModal('${accountId}', 'collections')">Collections &amp; Aging</button>
+            <button class="btn ${activeTab === 'statement' ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="openCreditAccountDetailsModal('${accountId}', 'statement')">Customer Statement</button>
+          </div>
+
+          <!-- Tab Content -->
+          <div id="creditModalTabContent">
+            ${activeTab === 'overview' ? `
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                <h4 style="margin: 0; font-size: 14px; font-weight: 700;">Account Actions &amp; Controls</h4>
+                <div style="display: flex; gap: 8px;">
+                  <button class="btn btn-secondary btn-sm" onclick="openAdjustCreditLimitModal('${accountId}')">Adjust Credit Limit</button>
+                  <button class="btn btn-secondary btn-sm" onclick="openChangeCreditStatusModal('${accountId}')">Change Status</button>
+                </div>
+              </div>
+
+              <div style="background: var(--bg-surface); padding: 12px; border-radius: 6px; font-size: 12px; margin-bottom: 16px;">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                  <div>Total Credit Sales: <strong>${formatTenantMoney(acc.totalCreditSales, 'LKR')}</strong></div>
+                  <div>Total Payments Received: <strong>${formatTenantMoney(acc.totalPayments, 'LKR')}</strong></div>
+                  <div>Interest Charged: <strong>${formatTenantMoney(acc.totalInterestCharged, 'LKR')}</strong></div>
+                  <div>Late Fees Charged: <strong>${formatTenantMoney(acc.totalLateFees, 'LKR')}</strong></div>
+                  <div>Bad Debt Written Off: <strong>${formatTenantMoney(acc.totalWrittenOff, 'LKR')}</strong></div>
+                  <div>Account Opened: <strong>${acc.openedAt ? new Date(acc.openedAt).toLocaleDateString() : '—'}</strong></div>
+                </div>
+              </div>
+
+              <h4 style="font-size: 13px; font-weight: 700; margin: 16px 0 8px;">Credit Limit Audit History</h4>
+              <div id="limitHistoryContainer">
+                <button class="btn btn-secondary btn-sm" onclick="loadLimitHistory('${accountId}')">Load Limit History</button>
+              </div>
+            ` : activeTab === 'ledger' ? `
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                <h4 style="margin: 0; font-size: 14px; font-weight: 700;">Receivables Ledger Transactions</h4>
+                <button class="btn btn-primary btn-sm" onclick="openManualCreditTransactionModal('${accountId}')">+ Manual Transaction</button>
+              </div>
+
+              ${transactions.length === 0 ? `
+                <div style="text-align: center; padding: 30px; color: var(--text-secondary);">No ledger transactions recorded for this account.</div>
+              ` : `
+                <table class="table" style="font-size: 12px; margin: 0;">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Ref</th>
+                      <th>Type</th>
+                      <th>Description</th>
+                      <th class="text-right">Debit (+)</th>
+                      <th class="text-right">Credit (-)</th>
+                      <th class="text-right">Running Balance</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${transactions.map(tx => `
+                      <tr>
+                        <td>${new Date(tx.createdAt).toLocaleDateString()}</td>
+                        <td><strong style="font-family: monospace;">${escapeHtml(tx.transactionReference)}</strong></td>
+                        <td><span class="badge badge-secondary">${escapeHtml(tx.transactionType)}</span></td>
+                        <td>${escapeHtml(tx.description || tx.notes || '—')}</td>
+                        <td class="text-right" style="color: ${parseFloat(tx.debitAmount) > 0 ? 'var(--status-danger)' : 'var(--text-secondary)'}; font-weight: 600;">
+                          ${parseFloat(tx.debitAmount) > 0 ? formatTenantMoney(tx.debitAmount, 'LKR') : '—'}
+                        </td>
+                        <td class="text-right" style="color: ${parseFloat(tx.creditAmount) > 0 ? 'var(--status-success)' : 'var(--text-secondary)'}; font-weight: 600;">
+                          ${parseFloat(tx.creditAmount) > 0 ? formatTenantMoney(tx.creditAmount, 'LKR') : '—'}
+                        </td>
+                        <td class="text-right" style="font-weight: 700; font-variant-numeric: tabular-nums;">
+                          ${formatTenantMoney(tx.runningBalance, 'LKR')}
+                        </td>
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+              `}
+            ` : activeTab === 'payments' ? `
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                <h4 style="margin: 0; font-size: 14px; font-weight: 700;">Customer Payment Records</h4>
+                <button class="btn btn-primary btn-sm" onclick="openRecordCreditPaymentModal('${accountId}')">+ Record Payment</button>
+              </div>
+
+              ${payments.length === 0 ? `
+                <div style="text-align: center; padding: 30px; color: var(--text-secondary);">No payments received yet.</div>
+              ` : `
+                <table class="table" style="font-size: 12px; margin: 0;">
+                  <thead>
+                    <tr>
+                      <th>Payment Ref</th>
+                      <th>Date</th>
+                      <th>Method</th>
+                      <th class="text-right">Paid Amount</th>
+                      <th class="text-right">Unallocated</th>
+                      <th>Status</th>
+                      <th class="text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${payments.map(p => `
+                      <tr>
+                        <td><strong style="font-family: monospace;">${escapeHtml(p.paymentReference)}</strong></td>
+                        <td>${p.paymentDate}</td>
+                        <td><span class="badge badge-secondary">${escapeHtml(p.paymentMethod)}</span></td>
+                        <td class="text-right" style="font-weight: 700; color: var(--status-success);">${formatTenantMoney(p.amount, 'LKR')}</td>
+                        <td class="text-right" style="color: var(--accent-primary);">${formatTenantMoney(p.unallocatedAmount, 'LKR')}</td>
+                        <td><span class="badge ${p.status === 'POSTED' ? 'badge-success' : 'badge-danger'}">${escapeHtml(p.status)}</span></td>
+                        <td class="text-right">
+                          <button class="btn btn-secondary btn-sm" onclick="printCreditPaymentReceipt('${p.id}')">Receipt</button>
+                          ${p.status === 'POSTED' ? `
+                            <button class="btn btn-danger btn-sm" onclick="reverseCreditPayment('${p.id}', '${accountId}')">Reverse</button>
+                          ` : ''}
+                        </td>
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+              `}
+            ` : activeTab === 'collections' ? `
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                <h4 style="margin: 0; font-size: 14px; font-weight: 700;">Collection Follow-Ups &amp; Bad Debt</h4>
+                <div style="display: flex; gap: 8px;">
+                  <button class="btn btn-secondary btn-sm" onclick="openCollectionModal('${accountId}')">+ Log Follow-Up</button>
+                  <button class="btn btn-danger btn-sm" onclick="openWriteoffModal('${accountId}')">+ Write Off Bad Debt</button>
+                </div>
+              </div>
+
+              ${collections.length === 0 ? `
+                <div style="text-align: center; padding: 30px; color: var(--text-secondary);">No collection follow-ups logged.</div>
+              ` : `
+                <div style="display: flex; flex-direction: column; gap: 8px;">
+                  ${collections.map(col => `
+                    <div style="background: var(--bg-surface); padding: 10px 12px; border-radius: 6px; border-left: 3px solid var(--accent-primary); font-size: 12px;">
+                      <div style="display: flex; justify-content: space-between; font-weight: 600;">
+                        <span>Action: ${escapeHtml(col.actionTaken)}</span>
+                        <span>Contact Date: ${col.contactDate}</span>
+                      </div>
+                      <div style="margin-top: 4px; color: var(--text-secondary);">${escapeHtml(col.notes || 'No remarks recorded')}</div>
+                      ${col.promisedPaymentDate ? `
+                        <div style="margin-top: 4px; color: var(--status-success); font-weight: 600;">
+                          Promise to Pay: ${formatTenantMoney(col.promisedAmount, 'LKR')} by ${col.promisedPaymentDate}
+                        </div>
+                      ` : ''}
+                    </div>
+                  `).join('')}
+                </div>
+              `}
+            ` : `
+              <!-- Statement View -->
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+                <div style="display: flex; gap: 8px; align-items: center;">
+                  <input type="date" class="form-input" id="stmtStartDate" value="${new Date(new Date().setMonth(new Date().getMonth() - 1)).toISOString().slice(0, 10)}" style="font-size: 12px; width: 140px;">
+                  <span>to</span>
+                  <input type="date" class="form-input" id="stmtEndDate" value="${new Date().toISOString().slice(0, 10)}" style="font-size: 12px; width: 140px;">
+                  <button class="btn btn-secondary btn-sm" onclick="loadCustomerStatement('${acc.customerId}')">Generate</button>
+                </div>
+                <button class="btn btn-primary btn-sm" onclick="printCustomerStatement('${acc.customerId}')">🖨️ Print Statement</button>
+              </div>
+              <div id="customerStatementContainer">
+                <div style="text-align: center; padding: 20px; color: var(--text-secondary);">Click "Generate" to compile statement for the selected date range.</div>
+              </div>
+            `}
+          </div>
+        `;
+
+        openModal({
+          title: 'Customer Credit Account & Ledger',
+          bodyHtml,
+          footerHtml: '<button class="btn btn-secondary" onclick="closeModal()">Close</button>',
+          maxWidth: '840px'
+        });
+
+      } catch (err) {
+        showToast(err.message, 'error');
+        closeModal();
+      }
+    }
+
+    async function loadLimitHistory(accountId) {
+      const container = document.getElementById('limitHistoryContainer');
+      if (!container) return;
+      container.innerHTML = '<span class="spinner-sm"></span> Loading limit audit...';
+      try {
+        const res = await apiFetch(`/v1/credit/accounts/${accountId}/limit-history`);
+        const items = res?.items || [];
+        if (items.length === 0) {
+          container.innerHTML = '<div style="color: var(--text-secondary); font-size: 12px;">No limit changes recorded.</div>';
+          return;
+        }
+        container.innerHTML = `
+          <table class="table" style="font-size: 11px; margin: 0;">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Change Type</th>
+                <th class="text-right">Prev Limit</th>
+                <th class="text-right">New Limit</th>
+                <th>Reason</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${items.map(h => `
+                <tr>
+                  <td>${h.effectiveDate || new Date(h.createdAt).toLocaleDateString()}</td>
+                  <td><span class="badge badge-secondary">${escapeHtml(h.changeType)}</span></td>
+                  <td class="text-right">${formatTenantMoney(h.previousLimit, 'LKR')}</td>
+                  <td class="text-right" style="font-weight: 700;">${formatTenantMoney(h.newLimit, 'LKR')}</td>
+                  <td>${escapeHtml(h.reason || '—')}</td>
+                  <td><span class="badge ${h.approvalStatus === 'APPROVED' ? 'badge-success' : 'badge-warning'}">${escapeHtml(h.approvalStatus)}</span></td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        `;
+      } catch (err) {
+        container.innerHTML = `<div style="color: var(--status-danger); font-size: 12px;">${escapeHtml(err.message)}</div>`;
+      }
+    }
+
+    async function openAdjustCreditLimitModal(accountId) {
+      let acc = null;
+      try {
+        acc = await apiFetch(`/v1/credit/accounts/${accountId}`);
+      } catch (err) {
+        showToast(err.message, 'error');
+        return;
+      }
+
+      openModal({
+        title: `Adjust Credit Limit — ${escapeHtml(acc.customerName)}`,
+        bodyHtml: `
+          <div style="background: var(--bg-surface); padding: 12px; border-radius: 6px; margin-bottom: 14px; font-size: 13px;">
+            <div>Account Number: <strong>${escapeHtml(acc.accountNumber)}</strong></div>
+            <div>Current Credit Limit: <strong>${formatTenantMoney(acc.creditLimit, 'LKR')}</strong></div>
+            <div>Outstanding Balance: <strong>${formatTenantMoney(acc.currentBalance, 'LKR')}</strong></div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">New Credit Limit (LKR) *</label>
+            <input type="number" step="0.01" min="0" class="form-input" id="adjNewLimit" value="${parseFloat(acc.creditLimit).toFixed(2)}" required>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Adjustment Type *</label>
+            <select class="form-select" id="adjChangeType">
+              <option value="INCREASE">INCREASE (Permanent Credit Expansion)</option>
+              <option value="DECREASE">DECREASE (Risk Mitigation)</option>
+              <option value="TEMPORARY_OVERRIDE">TEMPORARY_OVERRIDE (Seasonal / Special Order)</option>
+              <option value="RESTORE">RESTORE (Post-Override Restoration)</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Audit Reason *</label>
+            <textarea class="form-input" id="adjReason" rows="2" placeholder="Justification for credit limit adjustment..." required></textarea>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Override Expiry Date (Optional)</label>
+            <input type="date" class="form-input" id="adjExpiryDate">
+          </div>
+        `,
+        footerHtml: `
+          <button class="btn btn-secondary" onclick="openCreditAccountDetailsModal('${accountId}')">Back</button>
+          <button class="btn btn-primary" id="btnSubmitLimitAdj" onclick="submitAdjustCreditLimit('${accountId}')">Confirm Limit Adjustment</button>
+        `,
+        maxWidth: '520px'
+      });
+    }
+
+    async function submitAdjustCreditLimit(accountId) {
+      const newLimitVal = parseFloat(document.getElementById('adjNewLimit')?.value || '0');
+      if (isNaN(newLimitVal) || newLimitVal < 0) {
+        showToast('Please enter a valid credit limit', 'error');
+        return;
+      }
+      const changeType = document.getElementById('adjChangeType')?.value || 'INCREASE';
+      const reason = document.getElementById('adjReason')?.value.trim();
+      if (!reason) {
+        showToast('Please provide an audit justification reason', 'error');
+        return;
+      }
+      const expiryDate = document.getElementById('adjExpiryDate')?.value || undefined;
+
+      const btn = document.getElementById('btnSubmitLimitAdj');
+      if (btn) { btn.disabled = true; btn.innerText = 'Adjusting...'; }
+
+      try {
+        await apiFetch(`/v1/credit/accounts/${accountId}/limit`, {
+          method: 'POST',
+          body: JSON.stringify({
+            newLimit: newLimitVal.toFixed(4),
+            changeType,
+            reason,
+            expiryDate
+          })
+        });
+        showToast('Credit limit updated successfully', 'success');
+        openCreditAccountDetailsModal(accountId, 'overview');
+      } catch (err) {
+        showToast(err.message, 'error');
+        if (btn) { btn.disabled = false; btn.innerText = 'Confirm Limit Adjustment'; }
+      }
+    }
+
+    async function openChangeCreditStatusModal(accountId) {
+      let acc = null;
+      try {
+        acc = await apiFetch(`/v1/credit/accounts/${accountId}`);
+      } catch (err) {
+        showToast(err.message, 'error');
+        return;
+      }
+
+      openModal({
+        title: `Account Status — ${escapeHtml(acc.customerName)}`,
+        bodyHtml: `
+          <div style="background: var(--bg-surface); padding: 12px; border-radius: 6px; margin-bottom: 14px; font-size: 13px;">
+            <div>Account: <strong>${escapeHtml(acc.accountNumber)}</strong></div>
+            <div>Current Status: <span class="badge ${acc.status === 'ACTIVE' ? 'badge-success' : 'badge-warning'}">${escapeHtml(acc.status)}</span></div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Target Status *</label>
+            <select class="form-select" id="statusTargetSelect">
+              <option value="ACTIVE" ${acc.status === 'ACTIVE' ? 'selected' : ''}>ACTIVE — Normal credit operation</option>
+              <option value="ON_HOLD" ${acc.status === 'ON_HOLD' ? 'selected' : ''}>ON_HOLD — Block new credit sales temporarily</option>
+              <option value="SUSPENDED" ${acc.status === 'SUSPENDED' ? 'selected' : ''}>SUSPENDED — Suspended for non-payment</option>
+              <option value="BLOCKED" ${acc.status === 'BLOCKED' ? 'selected' : ''}>BLOCKED — High risk or fraud lock</option>
+              <option value="CLOSED" ${acc.status === 'CLOSED' ? 'selected' : ''}>CLOSED — Terminate account (requires 0 balance)</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Reason *</label>
+            <textarea class="form-input" id="statusReasonInput" rows="2" placeholder="Audit reason for status transition..." required></textarea>
+          </div>
+        `,
+        footerHtml: `
+          <button class="btn btn-secondary" onclick="openCreditAccountDetailsModal('${accountId}')">Cancel</button>
+          <button class="btn btn-primary" id="btnSubmitStatusChange" onclick="submitChangeCreditStatus('${accountId}')">Apply Status Transition</button>
+        `,
+        maxWidth: '520px'
+      });
+    }
+
+    async function submitChangeCreditStatus(accountId) {
+      const status = document.getElementById('statusTargetSelect')?.value;
+      const reason = document.getElementById('statusReasonInput')?.value.trim();
+      if (!reason) {
+        showToast('Please enter reason for status transition', 'error');
+        return;
+      }
+
+      const btn = document.getElementById('btnSubmitStatusChange');
+      if (btn) { btn.disabled = true; btn.innerText = 'Updating...'; }
+
+      try {
+        await apiFetch(`/v1/credit/accounts/${accountId}/status`, {
+          method: 'PATCH',
+          body: JSON.stringify({ status, reason })
+        });
+        showToast('Credit account status updated', 'success');
+        openCreditAccountDetailsModal(accountId, 'overview');
+      } catch (err) {
+        showToast(err.message, 'error');
+        if (btn) { btn.disabled = false; btn.innerText = 'Apply Status Transition'; }
+      }
+    }
+
+    async function openManualCreditTransactionModal(accountId) {
+      openModal({
+        title: 'Record Manual Credit Ledger Transaction',
+        bodyHtml: `
+          <div class="form-group">
+            <label class="form-label">Transaction Type *</label>
+            <select class="form-select" id="manTxType">
+              <option value="CREDIT_SALE">CREDIT_SALE (Debit — increases customer debt)</option>
+              <option value="DEBIT_NOTE">DEBIT_NOTE (Debit adjustment — price correction, undercharge)</option>
+              <option value="CREDIT_NOTE">CREDIT_NOTE (Credit adjustment — return, dispute, credit credit)</option>
+            </select>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <div class="form-group">
+              <label class="form-label">Amount (LKR) *</label>
+              <input type="number" step="0.01" min="0.01" class="form-input" id="manTxAmount" placeholder="0.00" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Due Date (Optional for debits)</label>
+              <input type="date" class="form-input" id="manTxDueDate">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Description / Reason *</label>
+            <input type="text" class="form-input" id="manTxDesc" placeholder="e.g. Bulk order offline invoice #INV-8890" required>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Internal Notes (Optional)</label>
+            <textarea class="form-input" id="manTxNotes" rows="2" placeholder="Additional audit remarks..."></textarea>
+          </div>
+        `,
+        footerHtml: `
+          <button class="btn btn-secondary" onclick="openCreditAccountDetailsModal('${accountId}', 'ledger')">Cancel</button>
+          <button class="btn btn-primary" id="btnSubmitManualTx" onclick="submitManualCreditTransaction('${accountId}')">Post to Ledger</button>
+        `,
+        maxWidth: '540px'
+      });
+    }
+
+    async function submitManualCreditTransaction(accountId) {
+      const type = document.getElementById('manTxType')?.value || 'CREDIT_SALE';
+      const amountVal = parseFloat(document.getElementById('manTxAmount')?.value || '0');
+      if (isNaN(amountVal) || amountVal <= 0) {
+        showToast('Please enter a valid transaction amount', 'error');
+        return;
+      }
+      const description = document.getElementById('manTxDesc')?.value.trim();
+      if (!description) {
+        showToast('Please provide a description', 'error');
+        return;
+      }
+      const dueDate = document.getElementById('manTxDueDate')?.value || undefined;
+      const notes = document.getElementById('manTxNotes')?.value.trim() || undefined;
+
+      const isDebit = type === 'CREDIT_SALE' || type === 'DEBIT_NOTE';
+
+      const payload = {
+        accountId,
+        transactionType: type,
+        debitAmount: isDebit ? amountVal.toFixed(4) : undefined,
+        creditAmount: !isDebit ? amountVal.toFixed(4) : undefined,
+        description,
+        dueDate,
+        notes
+      };
+
+      const btn = document.getElementById('btnSubmitManualTx');
+      if (btn) { btn.disabled = true; btn.innerText = 'Posting...'; }
+
+      try {
+        await apiFetch('/v1/credit/transactions', {
+          method: 'POST',
+          body: JSON.stringify(payload)
+        });
+        showToast('Transaction posted to customer credit ledger', 'success');
+        openCreditAccountDetailsModal(accountId, 'ledger');
+      } catch (err) {
+        showToast(err.message, 'error');
+        if (btn) { btn.disabled = false; btn.innerText = 'Post to Ledger'; }
+      }
+    }
+
+    async function openRecordCreditPaymentModal(accountId) {
+      openModal({
+        title: 'Record Customer Credit Payment',
+        bodyHtml: '<div style="padding: 30px; text-align: center;"><div class="spinner-sm" style="display:inline-block;"></div><div>Loading unpaid customer invoices...</div></div>',
+        maxWidth: '640px'
+      });
+
+      try {
+        const [acc, txRes] = await Promise.all([
+          apiFetch(`/v1/credit/accounts/${accountId}`),
+          apiFetch(`/v1/credit/accounts/${accountId}/transactions?limit=50`).catch(() => ({ items: [] }))
+        ]);
+
+        // Filter unpaid/partially paid debit transactions
+        const debitTxs = (txRes?.items || []).filter(tx =>
+          (tx.transactionType === 'CREDIT_SALE' || tx.transactionType === 'OPENING_BALANCE' || tx.transactionType === 'DEBIT_NOTE')
+          && parseFloat(tx.debitAmount || 0) > 0
+        );
+
+        const bodyHtml = `
+          <div style="background: var(--bg-surface); padding: 12px; border-radius: 6px; margin-bottom: 14px; font-size: 13px;">
+            <div>Customer: <strong>${escapeHtml(acc.customerName)}</strong> (${escapeHtml(acc.accountNumber)})</div>
+            <div>Current Total Outstanding: <strong style="color: var(--status-danger); font-size: 15px;">${formatTenantMoney(acc.currentBalance, 'LKR')}</strong></div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <div class="form-group">
+              <label class="form-label">Payment Date *</label>
+              <input type="date" class="form-input" id="payDateInput" value="${new Date().toISOString().slice(0, 10)}" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Payment Method *</label>
+              <select class="form-select" id="payMethodInput">
+                <option value="CASH">Cash</option>
+                <option value="BANK_TRANSFER" selected>Bank Transfer</option>
+                <option value="CHEQUE">Cheque</option>
+                <option value="CARD">Debit / Credit Card</option>
+              </select>
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <div class="form-group">
+              <label class="form-label">Paid Amount (LKR) *</label>
+              <input type="number" step="0.01" min="0.01" class="form-input" id="payAmountInput" value="${parseFloat(acc.currentBalance) > 0 ? parseFloat(acc.currentBalance).toFixed(2) : '1000.00'}" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Payment / Bank Reference</label>
+              <input type="text" class="form-input" id="payRefInput" placeholder="e.g. SLT-TRF-90214">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Remarks / Notes</label>
+            <input type="text" class="form-input" id="payNotesInput" placeholder="Cheque number, depositor note, etc.">
+          </div>
+
+          <div style="margin-top: 14px;">
+            <div style="font-weight: 700; font-size: 13px; margin-bottom: 6px;">Invoice / Transaction Allocation (Optional)</div>
+            <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 8px;">
+              Leave blank to automatically apply FIFO allocation or hold as advance payment balance.
+            </div>
+            ${debitTxs.length === 0 ? `
+              <div style="font-size: 12px; color: var(--text-secondary); padding: 8px; background: var(--bg-surface); border-radius: 4px;">
+                No specific unpaid invoice records found. Payment will be credited directly to customer ledger.
+              </div>
+            ` : `
+              <div style="max-height: 140px; overflow-y: auto; border: 1px solid var(--border-subtle); border-radius: 4px;">
+                <table class="table" style="font-size: 11px; margin: 0;">
+                  <thead>
+                    <tr>
+                      <th>Ref</th>
+                      <th>Date</th>
+                      <th class="text-right">Debit Amount</th>
+                      <th class="text-right">Allocate (LKR)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${debitTxs.slice(0, 5).map(tx => `
+                      <tr>
+                        <td>${escapeHtml(tx.transactionReference)}</td>
+                        <td>${new Date(tx.createdAt).toLocaleDateString()}</td>
+                        <td class="text-right">${formatTenantMoney(tx.debitAmount, 'LKR')}</td>
+                        <td class="text-right">
+                          <input type="number" step="0.01" min="0" class="form-input alloc-input" data-txid="${tx.id}" style="width: 100px; padding: 2px 6px; font-size: 11px; text-align: right;" placeholder="0.00">
+                        </td>
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+              </div>
+            `}
+          </div>
+        `;
+
+        openModal({
+          title: 'Record Customer Credit Payment',
+          bodyHtml,
+          footerHtml: `
+            <button class="btn btn-secondary" onclick="openCreditAccountDetailsModal('${accountId}', 'payments')">Cancel</button>
+            <button class="btn btn-primary" id="btnSubmitPayment" onclick="submitRecordCreditPayment('${accountId}')">Record &amp; Post Payment</button>
+          `,
+          maxWidth: '640px'
+        });
+
+      } catch (err) {
+        showToast(err.message, 'error');
+        closeModal();
+      }
+    }
+
+    async function submitRecordCreditPayment(accountId) {
+      const amountVal = parseFloat(document.getElementById('payAmountInput')?.value || '0');
+      if (isNaN(amountVal) || amountVal <= 0) {
+        showToast('Please enter a valid payment amount', 'error');
+        return;
+      }
+      const paymentDate = document.getElementById('payDateInput')?.value || new Date().toISOString().slice(0, 10);
+      const paymentMethod = document.getElementById('payMethodInput')?.value || 'BANK_TRANSFER';
+      const paymentReference = document.getElementById('payRefInput')?.value.trim() || undefined;
+      const notes = document.getElementById('payNotesInput')?.value.trim() || undefined;
+
+      // Collect allocations
+      const allocations = [];
+      const allocInputs = document.querySelectorAll('.alloc-input');
+      allocInputs.forEach(input => {
+        const val = parseFloat(input.value || '0');
+        if (!isNaN(val) && val > 0) {
+          allocations.push({
+            transactionId: input.dataset.txid,
+            amount: val.toFixed(4)
+          });
+        }
+      });
+
+      const payload = {
+        accountId,
+        paymentDate,
+        paymentMethod,
+        amount: amountVal.toFixed(4),
+        paymentReference,
+        notes,
+        allocations: allocations.length > 0 ? allocations : undefined
+      };
+
+      const btn = document.getElementById('btnSubmitPayment');
+      if (btn) { btn.disabled = true; btn.innerText = 'Posting Payment...'; }
+
+      try {
+        const payRes = await apiFetch('/v1/credit/payments', {
+          method: 'POST',
+          body: JSON.stringify(payload)
+        });
+        showToast(`Payment recorded successfully! Ref: ${payRes.paymentReference}`, 'success');
+        openCreditAccountDetailsModal(accountId, 'payments');
+      } catch (err) {
+        showToast(err.message, 'error');
+        if (btn) { btn.disabled = false; btn.innerText = 'Record & Post Payment'; }
+      }
+    }
+
+    async function reverseCreditPayment(paymentId, accountId) {
+      const reason = prompt('Please enter an audit reason for reversing this payment:');
+      if (!reason || !reason.trim()) {
+        showToast('Payment reversal cancelled: Reason is mandatory', 'warning');
+        return;
+      }
+
+      try {
+        await apiFetch(`/v1/credit/payments/${paymentId}/reverse`, {
+          method: 'POST',
+          body: JSON.stringify({ reason: reason.trim() })
+        });
+        showToast('Payment reversed successfully and ledger reconciled', 'success');
+        openCreditAccountDetailsModal(accountId, 'payments');
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    }
+
+    async function openCollectionModal(accountId) {
+      openModal({
+        title: 'Log Customer Collection Follow-Up',
+        bodyHtml: `
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <div class="form-group">
+              <label class="form-label">Contact Date *</label>
+              <input type="date" class="form-input" id="colContactDate" value="${new Date().toISOString().slice(0, 10)}" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Action Taken *</label>
+              <select class="form-select" id="colActionTaken">
+                <option value="PHONE_CALL">Phone Call</option>
+                <option value="EMAIL">Email Follow-Up</option>
+                <option value="STATEMENT_SENT">Statement Sent</option>
+                <option value="DEMAND_LETTER">Formal Demand Letter</option>
+                <option value="SITE_VISIT">In-Person Site Visit</option>
+                <option value="LEGAL_NOTICE">Legal Notice</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Follow-Up Remarks &amp; Outcome *</label>
+            <textarea class="form-input" id="colNotes" rows="3" placeholder="Summary of conversation, contact person, outcome..." required></textarea>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <div class="form-group">
+              <label class="form-label">Promise to Pay Date (Optional)</label>
+              <input type="date" class="form-input" id="colPromisedDate">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Promised Amount (LKR)</label>
+              <input type="number" step="0.01" min="0" class="form-input" id="colPromisedAmount" placeholder="0.00">
+            </div>
+          </div>
+        `,
+        footerHtml: `
+          <button class="btn btn-secondary" onclick="openCreditAccountDetailsModal('${accountId}', 'collections')">Back</button>
+          <button class="btn btn-primary" id="btnSubmitCollection" onclick="submitCollectionModal('${accountId}')">Save Follow-Up</button>
+        `,
+        maxWidth: '540px'
+      });
+    }
+
+    async function submitCollectionModal(accountId) {
+      const contactDate = document.getElementById('colContactDate')?.value || new Date().toISOString().slice(0, 10);
+      const actionTaken = document.getElementById('colActionTaken')?.value || 'PHONE_CALL';
+      const notes = document.getElementById('colNotes')?.value.trim();
+      if (!notes) {
+        showToast('Please provide conversation remarks', 'error');
+        return;
+      }
+      const promisedPaymentDate = document.getElementById('colPromisedDate')?.value || undefined;
+      const promisedVal = parseFloat(document.getElementById('colPromisedAmount')?.value || '0');
+      const promisedAmount = !isNaN(promisedVal) && promisedVal > 0 ? promisedVal.toFixed(4) : undefined;
+
+      const btn = document.getElementById('btnSubmitCollection');
+      if (btn) { btn.disabled = true; btn.innerText = 'Saving...'; }
+
+      try {
+        await apiFetch('/v1/credit/collections', {
+          method: 'POST',
+          body: JSON.stringify({
+            accountId,
+            contactDate,
+            actionTaken,
+            notes,
+            promisedPaymentDate,
+            promisedAmount
+          })
+        });
+        showToast('Collection follow-up logged', 'success');
+        openCreditAccountDetailsModal(accountId, 'collections');
+      } catch (err) {
+        showToast(err.message, 'error');
+        if (btn) { btn.disabled = false; btn.innerText = 'Save Follow-Up'; }
+      }
+    }
+
+    async function openWriteoffModal(accountId) {
+      let acc = null;
+      try {
+        acc = await apiFetch(`/v1/credit/accounts/${accountId}`);
+      } catch (err) {
+        showToast(err.message, 'error');
+        return;
+      }
+
+      openModal({
+        title: 'Bad Debt Write-Off Process',
+        bodyHtml: `
+          <div style="background: rgba(239, 68, 68, 0.08); border: 1px solid var(--status-danger); padding: 12px; border-radius: 6px; margin-bottom: 14px; font-size: 13px;">
+            <div style="font-weight: 700; color: var(--status-danger);">⚠️ Irrevocable Financial Action</div>
+            <div>Writing off bad debt posts a credit adjustment to zero customer receivables and transfers the loss to bad debt expense.</div>
+            <div style="margin-top: 6px;">Outstanding Balance: <strong>${formatTenantMoney(acc.currentBalance, 'LKR')}</strong></div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Write-Off Amount (LKR) *</label>
+            <input type="number" step="0.01" min="0.01" max="${acc.currentBalance}" class="form-input" id="woffAmount" value="${parseFloat(acc.currentBalance).toFixed(2)}" required>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Write-Off Reason *</label>
+            <select class="form-select" id="woffReason">
+              <option value="BAD_DEBT">BAD_DEBT (Defaulted / Uncollectible)</option>
+              <option value="BANKRUPTCY">BANKRUPTCY (Customer Insolvency)</option>
+              <option value="DISPUTE">DISPUTE (Commercial Dispute Settlement)</option>
+              <option value="SETTLEMENT_DISCOUNT">SETTLEMENT_DISCOUNT (Agreed Final Haircut)</option>
+              <option value="SMALL_BALANCE_CLEANUP">SMALL_BALANCE_CLEANUP (Immaterial rounding cleanup)</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Executive Justification Notes *</label>
+            <textarea class="form-input" id="woffNotes" rows="3" placeholder="Provide audit trail documentation for write-off..." required></textarea>
+          </div>
+        `,
+        footerHtml: `
+          <button class="btn btn-secondary" onclick="openCreditAccountDetailsModal('${accountId}', 'collections')">Cancel</button>
+          <button class="btn btn-danger" id="btnSubmitWriteoff" onclick="submitWriteoffModal('${accountId}')">Approve &amp; Write Off Debt</button>
+        `,
+        maxWidth: '540px'
+      });
+    }
+
+    async function submitWriteoffModal(accountId) {
+      const amountVal = parseFloat(document.getElementById('woffAmount')?.value || '0');
+      if (isNaN(amountVal) || amountVal <= 0) {
+        showToast('Please enter a valid write-off amount', 'error');
+        return;
+      }
+      const reason = document.getElementById('woffReason')?.value || 'BAD_DEBT';
+      const notes = document.getElementById('woffNotes')?.value.trim();
+      if (!notes) {
+        showToast('Justification notes are required', 'error');
+        return;
+      }
+
+      if (!confirm(`Are you sure you want to approve writing off ${formatTenantMoney(amountVal, 'LKR')} as bad debt?`)) {
+        return;
+      }
+
+      const btn = document.getElementById('btnSubmitWriteoff');
+      if (btn) { btn.disabled = true; btn.innerText = 'Processing Write-off...'; }
+
+      try {
+        await apiFetch('/v1/credit/writeoffs', {
+          method: 'POST',
+          body: JSON.stringify({
+            accountId,
+            amount: amountVal.toFixed(4),
+            reason,
+            notes
+          })
+        });
+        showToast('Bad debt write-off posted successfully', 'success');
+        openCreditAccountDetailsModal(accountId, 'overview');
+      } catch (err) {
+        showToast(err.message, 'error');
+        if (btn) { btn.disabled = false; btn.innerText = 'Approve & Write Off Debt'; }
+      }
+    }
+
+    async function loadCustomerStatement(customerId) {
+      const container = document.getElementById('customerStatementContainer');
+      if (!container) return;
+      const start = document.getElementById('stmtStartDate')?.value;
+      const end = document.getElementById('stmtEndDate')?.value;
+
+      container.innerHTML = '<span class="spinner-sm"></span> Compiling statement...';
+
+      try {
+        let q = '';
+        if (start) q += `?startDate=${encodeURIComponent(start)}`;
+        if (end) q += `${q ? '&' : '?'}endDate=${encodeURIComponent(end)}`;
+
+        const stmt = await apiFetch(`/v1/credit/reports/statement/${customerId}${q}`);
+
+        container.innerHTML = `
+          <div style="background: var(--bg-surface); padding: 12px; border-radius: 6px; margin-bottom: 12px; font-size: 12px;">
+            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;">
+              <div>Opening Balance:<br><strong>${formatTenantMoney(stmt.openingBalance, 'LKR')}</strong></div>
+              <div>Debits (+):<br><strong style="color: var(--status-danger);">${formatTenantMoney(stmt.totalDebits, 'LKR')}</strong></div>
+              <div>Credits (-):<br><strong style="color: var(--status-success);">${formatTenantMoney(stmt.totalCredits, 'LKR')}</strong></div>
+              <div>Closing Balance:<br><strong style="font-size: 14px;">${formatTenantMoney(stmt.closingBalance, 'LKR')}</strong></div>
+            </div>
+          </div>
+
+          <table class="table" style="font-size: 11px; margin: 0;">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Reference</th>
+                <th>Description</th>
+                <th class="text-right">Debit</th>
+                <th class="text-right">Credit</th>
+                <th class="text-right">Balance</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${(stmt.transactions || []).map(tx => `
+                <tr>
+                  <td>${new Date(tx.createdAt).toLocaleDateString()}</td>
+                  <td>${escapeHtml(tx.transactionReference)}</td>
+                  <td>${escapeHtml(tx.description || tx.transactionType)}</td>
+                  <td class="text-right">${parseFloat(tx.debitAmount) > 0 ? formatTenantMoney(tx.debitAmount, 'LKR') : '—'}</td>
+                  <td class="text-right">${parseFloat(tx.creditAmount) > 0 ? formatTenantMoney(tx.creditAmount, 'LKR') : '—'}</td>
+                  <td class="text-right" style="font-weight: 700;">${formatTenantMoney(tx.runningBalance, 'LKR')}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        `;
+      } catch (err) {
+        container.innerHTML = `<div style="color: var(--status-danger); font-size: 12px;">${escapeHtml(err.message)}</div>`;
+      }
+    }
+
+    function printCustomerStatement(customerId) {
+      window.print();
+    }
+
+    async function printCreditPaymentReceipt(paymentId) {
+      try {
+        const receipt = await apiFetch(`/v1/credit/payments/${paymentId}/receipt`);
+        openModal({
+          title: 'Official Credit Payment Receipt',
+          bodyHtml: `
+            <div id="printableCreditReceipt" style="padding: 16px; font-family: monospace;">
+              <div style="text-align: center; border-bottom: 2px dashed var(--border-subtle); padding-bottom: 12px; margin-bottom: 12px;">
+                <h3 style="margin: 0; font-size: 16px;">${escapeHtml(state.tenantName || 'NEXSTOCK')}</h3>
+                <div style="font-size: 12px; color: var(--text-secondary);">OFFICIAL PAYMENT RECEIPT</div>
+                <div style="font-weight: 700; font-size: 14px; margin-top: 4px;">${escapeHtml(receipt.receiptNumber)}</div>
+              </div>
+
+              <div style="font-size: 12px; line-height: 1.6; margin-bottom: 12px;">
+                <div>Payment Ref: <strong>${escapeHtml(receipt.paymentReference)}</strong></div>
+                <div>Date: <strong>${receipt.paymentDate}</strong></div>
+                <div>Customer: <strong>${escapeHtml(receipt.customerName)}</strong></div>
+                <div>Account #: <strong>${escapeHtml(receipt.accountNumber)}</strong></div>
+                <div>Payment Method: <strong>${escapeHtml(receipt.paymentMethod)}</strong></div>
+              </div>
+
+              <div style="border-top: 1px solid var(--border-subtle); border-bottom: 1px solid var(--border-subtle); padding: 8px 0; margin-bottom: 12px;">
+                <div style="display: flex; justify-content: space-between; font-size: 14px; font-weight: 800;">
+                  <span>AMOUNT RECEIVED:</span>
+                  <span>${formatTenantMoney(receipt.amount, 'LKR')}</span>
+                </div>
+              </div>
+
+              <div style="font-size: 12px; line-height: 1.5; color: var(--text-secondary);">
+                <div>Unallocated Balance Carried Forward: <strong>${formatTenantMoney(receipt.unallocatedAmount, 'LKR')}</strong></div>
+                <div>Remaining Account Balance: <strong>${formatTenantMoney(receipt.remainingAccountBalance, 'LKR')}</strong></div>
+              </div>
+
+              <div style="text-align: center; margin-top: 20px; font-size: 11px; color: var(--text-secondary); border-top: 2px dashed var(--border-subtle); padding-top: 10px;">
+                Thank you for your prompt settlement!
+              </div>
+            </div>
+          `,
+          footerHtml: `
+            <button class="btn btn-secondary" onclick="closeModal()">Close</button>
+            <button class="btn btn-primary" onclick="window.print()">🖨️ Print Receipt</button>
+          `,
+          maxWidth: '460px'
+        });
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    }
+
+    async function openAgingReportModal() {
+      openModal({
+        title: 'Customer Accounts Receivable Aging Analysis',
+        bodyHtml: '<div style="padding: 30px; text-align: center;"><div class="spinner-sm" style="display:inline-block;"></div><div>Compiling detailed aging report...</div></div>',
+        maxWidth: '820px'
+      });
+
+      try {
+        const aging = await apiFetch('/v1/credit/reports/aging');
+        const buckets = aging?.buckets || { current: '0.00', days31To60: '0.00', days61To90: '0.00', days90Plus: '0.00', total: '0.00' };
+
+        const bodyHtml = `
+          <div style="margin-bottom: 16px;">
+            <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 12px;">
+              Report as of: <strong>${new Date().toLocaleDateString()}</strong> | Currency: <strong>LKR</strong>
+            </div>
+
+            <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-bottom: 16px;">
+              <div style="background: var(--bg-surface); padding: 10px; border-radius: 4px; text-align: center;">
+                <div style="font-size: 10px; color: var(--text-secondary);">Current (0–30)</div>
+                <div style="font-size: 14px; font-weight: 700; color: var(--status-success);">${formatTenantMoney(buckets.current, 'LKR')}</div>
+              </div>
+              <div style="background: var(--bg-surface); padding: 10px; border-radius: 4px; text-align: center;">
+                <div style="font-size: 10px; color: var(--text-secondary);">31–60 Days</div>
+                <div style="font-size: 14px; font-weight: 700; color: #eab308;">${formatTenantMoney(buckets.days31To60, 'LKR')}</div>
+              </div>
+              <div style="background: var(--bg-surface); padding: 10px; border-radius: 4px; text-align: center;">
+                <div style="font-size: 10px; color: var(--text-secondary);">61–90 Days</div>
+                <div style="font-size: 14px; font-weight: 700; color: #f97316;">${formatTenantMoney(buckets.days61To90, 'LKR')}</div>
+              </div>
+              <div style="background: var(--bg-surface); padding: 10px; border-radius: 4px; text-align: center;">
+                <div style="font-size: 10px; color: var(--text-secondary);">90+ Days</div>
+                <div style="font-size: 14px; font-weight: 700; color: var(--status-danger);">${formatTenantMoney(buckets.days90Plus, 'LKR')}</div>
+              </div>
+              <div style="background: var(--bg-surface); padding: 10px; border-radius: 4px; text-align: center;">
+                <div style="font-size: 10px; color: var(--text-secondary);">Total Receivables</div>
+                <div style="font-size: 14px; font-weight: 800; color: var(--text-primary);">${formatTenantMoney(buckets.total, 'LKR')}</div>
+              </div>
+            </div>
+          </div>
+        `;
+
+        openModal({
+          title: 'Customer Accounts Receivable Aging Analysis',
+          bodyHtml,
+          footerHtml: `
+            <button class="btn btn-secondary" onclick="closeModal()">Close</button>
+            <button class="btn btn-primary" onclick="window.print()">Print Aging Report</button>
+          `,
+          maxWidth: '820px'
         });
       } catch (err) {
         showToast(err.message, 'error');

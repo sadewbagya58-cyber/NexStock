@@ -195,11 +195,42 @@ export const ALL_SPA_VIEW_IDS = [
   'payroll',
   'payroll-reports',
   'expenses',
+  'credit-dashboard',
+  'customers',
+  'credit-accounts',
   'roles-permissions',
   'org-settings',
 ] as const;
 
 export type SpaViewId = (typeof ALL_SPA_VIEW_IDS)[number];
+
+export interface CreditNavItem {
+  readonly id: 'credit-dashboard' | 'customers' | 'credit-accounts';
+  readonly label: string;
+  readonly href: string;
+  readonly requiredPermission: string;
+}
+
+export const PHASE74_CREDIT_NAV_ITEMS: readonly CreditNavItem[] = [
+  {
+    id: 'credit-dashboard',
+    label: 'Credit Dashboard',
+    href: '/finance/credit-dashboard',
+    requiredPermission: 'crm:report:read',
+  },
+  {
+    id: 'customers',
+    label: 'Customers',
+    href: '/finance/customers',
+    requiredPermission: 'crm:customer:read',
+  },
+  {
+    id: 'credit-accounts',
+    label: 'Credit Accounts',
+    href: '/finance/credit-accounts',
+    requiredPermission: 'crm:credit:read',
+  },
+] as const;
 
 export interface ExpenseNavItem {
   readonly id: 'expenses';

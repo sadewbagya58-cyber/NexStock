@@ -2595,4 +2595,66 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       expect(html).toContain('mobile-only');
     });
   });
+
+  // ============================================================================
+  // PHASE 7.4: CUSTOMER CREDIT MANAGEMENT & RECEIVABLES LEDGER
+  // ============================================================================
+  describe('27. Phase 7.4 Customer Credit Management & Receivables Integration', () => {
+    it('verifies ALL_SPA_VIEW_IDS and PHASE74_CREDIT_NAV_ITEMS exports', async () => {
+      const { ALL_SPA_VIEW_IDS, PHASE74_CREDIT_NAV_ITEMS } = await import('../src/index.js');
+      expect(ALL_SPA_VIEW_IDS).toContain('credit-dashboard');
+      expect(ALL_SPA_VIEW_IDS).toContain('customers');
+      expect(ALL_SPA_VIEW_IDS).toContain('credit-accounts');
+      expect(PHASE74_CREDIT_NAV_ITEMS).toBeDefined();
+      expect(PHASE74_CREDIT_NAV_ITEMS.length).toBe(3);
+      expect(PHASE74_CREDIT_NAV_ITEMS.map(i => i.id)).toEqual(['credit-dashboard', 'customers', 'credit-accounts']);
+    });
+
+    it('verifies public/index.html contains full Phase 7.4 views, navigation, POS credit and modals', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // 1. Navigation links
+      expect(html).toContain('data-view="credit-dashboard"');
+      expect(html).toContain('data-view="customers"');
+      expect(html).toContain('data-view="credit-accounts"');
+
+      // 2. View switch routing
+      expect(html).toContain("case 'credit-dashboard': renderCreditDashboardView(); break;");
+      expect(html).toContain("case 'customers': renderCustomersView(); break;");
+      expect(html).toContain("case 'credit-accounts': renderCreditAccountsView(); break;");
+
+      // 3. Credit views & UI components
+      expect(html).toContain('async function renderCreditDashboardView()');
+      expect(html).toContain('async function renderCustomersView()');
+      expect(html).toContain('async function renderCreditAccountsView()');
+      expect(html).toContain('async function openCustomerModal(');
+      expect(html).toContain('async function submitSaveCustomer(');
+      expect(html).toContain('async function openCreateCreditAccountModal(');
+      expect(html).toContain('async function submitCreateCreditAccount(');
+      expect(html).toContain('async function openCreditAccountDetailsModal(');
+      expect(html).toContain('async function openAdjustCreditLimitModal(');
+      expect(html).toContain('async function submitAdjustCreditLimit(');
+      expect(html).toContain('async function openChangeCreditStatusModal(');
+      expect(html).toContain('async function submitChangeCreditStatus(');
+      expect(html).toContain('async function openManualCreditTransactionModal(');
+      expect(html).toContain('async function submitManualCreditTransaction(');
+      expect(html).toContain('async function openRecordCreditPaymentModal(');
+      expect(html).toContain('async function submitRecordCreditPayment(');
+      expect(html).toContain('async function reverseCreditPayment(');
+      expect(html).toContain('async function openCollectionModal(');
+      expect(html).toContain('async function submitCollectionModal(');
+      expect(html).toContain('async function openWriteoffModal(');
+      expect(html).toContain('async function submitWriteoffModal(');
+      expect(html).toContain('async function printCreditPaymentReceipt(');
+      expect(html).toContain('async function openAgingReportModal()');
+
+      // 4. POS Customer Credit checkout integration
+      expect(html).toContain('id="payCustomerSelect"');
+      expect(html).toContain('id="payCustomerCreditBadge"');
+      expect(html).toContain('id="creditPaymentFields"');
+      expect(html).toContain('<option value="CREDIT">Customer Credit Account (On Account)</option>');
+      expect(html).toContain('paymentMethod: \'CREDIT\'');
+    });
+  });
 });

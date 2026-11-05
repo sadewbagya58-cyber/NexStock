@@ -557,6 +557,13 @@ export function loadPhase73ExpensesManagementMigrationSql(): string {
   return sqlText;
 }
 
+export function loadPhase74CustomerCreditMigrationSql(): string {
+  const filename = '0019_phase74_customer_credit.sql';
+  const sqlText = readFileSync(resolve(migrationsDir, filename), 'utf-8');
+  assertPostgresMigrationSqlCompatible(sqlText, filename);
+  return sqlText;
+}
+
 export function getOrderedPostgresMigrations(): readonly PostgresMigrationSpec[] {
   return [
     {
@@ -684,6 +691,13 @@ export function getOrderedPostgresMigrations(): readonly PostgresMigrationSpec[]
       name: '0018_phase73_expenses_management',
       filename: '0018_phase73_expenses_management.sql',
       sql: loadPhase73ExpensesManagementMigrationSql(),
+    },
+    {
+      dialect: 'postgres',
+      version: 19,
+      name: '0019_phase74_customer_credit',
+      filename: '0019_phase74_customer_credit.sql',
+      sql: loadPhase74CustomerCreditMigrationSql(),
     },
   ];
 }

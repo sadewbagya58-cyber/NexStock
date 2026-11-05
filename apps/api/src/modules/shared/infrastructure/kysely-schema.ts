@@ -603,7 +603,7 @@ export interface SalesPaymentsTable {
   id: string;
   tenant_id: string;
   invoice_id: string;
-  payment_method: 'CASH' | 'CARD' | 'OTHER';
+  payment_method: 'CASH' | 'CARD' | 'OTHER' | 'CREDIT' | 'BANK_TRANSFER' | 'CHEQUE';
   amount: string;
   currency_code: string;
   status: Generated<'COMPLETED' | 'VOIDED'>;
@@ -1095,6 +1095,281 @@ export interface ExpenseAttachmentsTable {
   created_at: Generated<Date>;
 }
 
+export interface CustomersTable {
+  id: string;
+  tenant_id: string;
+  customer_number: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  address: string | null;
+  tax_id: string | null;
+  notes: string | null;
+  status: Generated<'ACTIVE' | 'INACTIVE' | 'ARCHIVED'>;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface CustomerCreditSettingsTable {
+  id: string;
+  tenant_id: string;
+  default_credit_limit: string | number;
+  default_credit_terms: Generated<'IMMEDIATE' | 'NET_7' | 'NET_14' | 'NET_30' | 'NET_60' | 'NET_90' | 'CUSTOM'>;
+  default_custom_days: number | null;
+  approval_policy: Generated<'AUTO_WITHIN_LIMIT' | 'ALWAYS_REQUIRE_APPROVAL' | 'THRESHOLD_REQUIRED' | 'OVERRIDE_ONLY'>;
+  approval_threshold_amount: string | number;
+  require_approval_for_overrides: Generated<boolean>;
+  require_approval_for_adjustments: Generated<boolean>;
+  interest_enabled: Generated<boolean>;
+  interest_calculation_mode: Generated<'DAILY' | 'MONTHLY' | 'ANNUAL' | 'FIXED'>;
+  interest_rate_percentage: string | number;
+  interest_grace_period_days: Generated<number>;
+  compounding_enabled: Generated<boolean>;
+  late_fee_enabled: Generated<boolean>;
+  late_fee_type: Generated<'FIXED' | 'PERCENTAGE' | 'PER_DAY'>;
+  late_fee_amount: string | number;
+  late_fee_percentage: string | number;
+  late_fee_grace_period_days: Generated<number>;
+  late_fee_max_amount: string | number;
+  auto_hold_enabled: Generated<boolean>;
+  auto_hold_max_overdue_days: Generated<number>;
+  auto_hold_max_overdue_amount: string | number;
+  auto_hold_utilization_threshold: string | number;
+  currency_code: Generated<string>;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface CustomerCreditAccountsTable {
+  id: string;
+  tenant_id: string;
+  customer_id: string;
+  account_number: string;
+  credit_limit: string | number;
+  current_balance: string | number;
+  available_credit: string | number;
+  total_credit_sales: string | number;
+  total_payments: string | number;
+  total_interest_charged: string | number;
+  total_late_fees: string | number;
+  total_written_off: string | number;
+  unallocated_payment_balance: string | number;
+  credit_terms: Generated<'IMMEDIATE' | 'NET_7' | 'NET_14' | 'NET_30' | 'NET_60' | 'NET_90' | 'CUSTOM'>;
+  custom_term_days: number | null;
+  status: Generated<'ACTIVE' | 'ON_HOLD' | 'SUSPENDED' | 'BLOCKED' | 'CLOSED'>;
+  hold_reason: string | null;
+  held_at: Date | string | null;
+  held_by_user_id: string | null;
+  risk_classification: Generated<'LOW_RISK' | 'MEDIUM_RISK' | 'HIGH_RISK' | 'CRITICAL_RISK'>;
+  branch_id: string | null;
+  currency_code: Generated<string>;
+  opened_at: Generated<Date>;
+  closed_at: Date | string | null;
+  closed_by_user_id: string | null;
+  created_by_user_id: string;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface CustomerCreditLimitHistoryTable {
+  id: string;
+  tenant_id: string;
+  account_id: string;
+  previous_limit: string | number;
+  new_limit: string | number;
+  change_type: 'INITIAL' | 'INCREASE' | 'DECREASE' | 'TEMPORARY_OVERRIDE' | 'RESTORE';
+  reason: string;
+  effective_date: Generated<string | Date>;
+  expiry_date: string | Date | null;
+  requested_by_user_id: string;
+  approved_by_user_id: string | null;
+  approval_status: Generated<'PENDING' | 'APPROVED' | 'REJECTED'>;
+  created_at: Generated<Date>;
+}
+
+export interface CustomerCreditTransactionsTable {
+  id: string;
+  tenant_id: string;
+  account_id: string;
+  customer_id: string;
+  branch_id: string | null;
+  transaction_reference: string;
+  transaction_type:
+    | 'OPENING_BALANCE'
+    | 'CREDIT_SALE'
+    | 'PAYMENT'
+    | 'SALES_RETURN'
+    | 'CREDIT_NOTE'
+    | 'DEBIT_NOTE'
+    | 'INTEREST_CHARGE'
+    | 'LATE_FEE'
+    | 'ADJUSTMENT_DEBIT'
+    | 'ADJUSTMENT_CREDIT'
+    | 'PAYMENT_REVERSAL'
+    | 'CREDIT_REVERSAL'
+    | 'WRITE_OFF'
+    | 'ADVANCE_PAYMENT';
+  entry_direction: 'DEBIT' | 'CREDIT';
+  amount: string | number;
+  currency_code: Generated<string>;
+  balance_after: string | number;
+  unpaid_amount: string | number;
+  transaction_date: string | Date;
+  posting_date: Generated<Date>;
+  due_date: string | Date | null;
+  source_reference_type: string;
+  source_reference_id: string | null;
+  source_reference_number: string | null;
+  description: string;
+  created_by_user_id: string;
+  approval_id: string | null;
+  reversal_of_transaction_id: string | null;
+  is_reversed: Generated<boolean>;
+  reversed_at: Date | string | null;
+  reversed_by_user_id: string | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface CustomerCreditPaymentsTable {
+  id: string;
+  tenant_id: string;
+  account_id: string;
+  customer_id: string;
+  payment_reference: string;
+  receipt_number: string;
+  amount: string | number;
+  allocated_amount: string | number;
+  unallocated_amount: string | number;
+  currency_code: Generated<string>;
+  payment_date: string | Date;
+  payment_method: 'CASH' | 'BANK_TRANSFER' | 'CARD' | 'CHEQUE' | 'OTHER';
+  external_reference: string | null;
+  branch_id: string | null;
+  received_by_user_id: string;
+  status: Generated<'COMPLETED' | 'REVERSED'>;
+  reversal_reason: string | null;
+  reversed_at: Date | string | null;
+  reversed_by_user_id: string | null;
+  notes: string | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface CustomerCreditAllocationsTable {
+  id: string;
+  tenant_id: string;
+  payment_id: string;
+  invoice_id: string | null;
+  transaction_id: string;
+  amount: string | number;
+  allocated_at: Generated<Date>;
+  allocated_by_user_id: string;
+  status: Generated<'ACTIVE' | 'REVERSED'>;
+  reversal_reason: string | null;
+  reversed_at: Date | string | null;
+  reversed_by_user_id: string | null;
+}
+
+export interface CustomerCreditApprovalsTable {
+  id: string;
+  tenant_id: string;
+  approval_type: 'CREDIT_SALE' | 'LIMIT_CHANGE' | 'LIMIT_OVERRIDE' | 'MANUAL_ADJUSTMENT' | 'INTEREST_WAIVER' | 'WRITE_OFF';
+  reference_id: string | null;
+  account_id: string;
+  requested_by_user_id: string;
+  approved_by_user_id: string | null;
+  status: Generated<'PENDING' | 'APPROVED' | 'REJECTED'>;
+  requested_amount: string | number | null;
+  reason: string;
+  rejection_reason: string | null;
+  decided_at: Date | string | null;
+  created_at: Generated<Date>;
+}
+
+export interface CustomerCreditInterestEntriesTable {
+  id: string;
+  tenant_id: string;
+  account_id: string;
+  transaction_id: string | null;
+  source_invoice_id: string | null;
+  calculation_period_start: string | Date;
+  calculation_period_end: string | Date;
+  eligible_principal: string | number;
+  rate_percentage: string | number;
+  calculation_mode: string;
+  calculated_amount: string | number;
+  status: Generated<'POSTED' | 'WAIVED' | 'REVERSED'>;
+  waiver_reason: string | null;
+  waived_by_user_id: string | null;
+  waived_at: Date | string | null;
+  created_at: Generated<Date>;
+}
+
+export interface CustomerCreditLateFeeEntriesTable {
+  id: string;
+  tenant_id: string;
+  account_id: string;
+  transaction_id: string | null;
+  source_invoice_id: string | null;
+  fee_type: string;
+  overdue_days: number;
+  fee_amount: string | number;
+  status: Generated<'POSTED' | 'WAIVED' | 'REVERSED'>;
+  waiver_reason: string | null;
+  waived_by_user_id: string | null;
+  waived_at: Date | string | null;
+  created_at: Generated<Date>;
+}
+
+export interface CustomerCreditCollectionsTable {
+  id: string;
+  tenant_id: string;
+  account_id: string;
+  customer_id: string;
+  follow_up_date: string | Date;
+  collector_user_id: string;
+  contact_method: 'PHONE' | 'VISIT' | 'EMAIL' | 'MESSAGE' | 'OTHER';
+  contact_person: string | null;
+  notes: string;
+  promise_to_pay_date: string | Date | null;
+  promise_amount: string | number | null;
+  outcome: 'PROMISED_TO_PAY' | 'DISPUTED' | 'UNREACHABLE' | 'REFUSED' | 'FOLLOW_UP_REQUIRED' | 'PAID' | 'OTHER';
+  next_follow_up_date: string | Date | null;
+  created_at: Generated<Date>;
+}
+
+export interface CustomerCreditWriteoffsTable {
+  id: string;
+  tenant_id: string;
+  account_id: string;
+  customer_id: string;
+  transaction_id: string;
+  original_outstanding: string | number;
+  writeoff_amount: string | number;
+  remaining_balance: string | number;
+  reason: string;
+  supporting_notes: string | null;
+  approved_by_user_id: string;
+  created_at: Generated<Date>;
+}
+
+export interface CustomerCreditNotesTable {
+  id: string;
+  tenant_id: string;
+  account_id: string;
+  customer_id: string;
+  transaction_id: string;
+  note_number: string;
+  note_type: 'CREDIT_NOTE' | 'DEBIT_NOTE' | 'ADJUSTMENT';
+  amount: string | number;
+  reason: string;
+  reference_invoice_id: string | null;
+  approved_by_user_id: string | null;
+  created_by_user_id: string;
+  created_at: Generated<Date>;
+}
+
 export interface NexStockDatabase {
   schema_migrations: SchemaMigrationsTable;
   idempotency_keys: IdempotencyKeysTable;
@@ -1162,4 +1437,17 @@ export interface NexStockDatabase {
   expense_categories: ExpenseCategoriesTable;
   expenses: ExpensesTable;
   expense_attachments: ExpenseAttachmentsTable;
+  customers: CustomersTable;
+  customer_credit_settings: CustomerCreditSettingsTable;
+  customer_credit_accounts: CustomerCreditAccountsTable;
+  customer_credit_limit_history: CustomerCreditLimitHistoryTable;
+  customer_credit_transactions: CustomerCreditTransactionsTable;
+  customer_credit_payments: CustomerCreditPaymentsTable;
+  customer_credit_allocations: CustomerCreditAllocationsTable;
+  customer_credit_approvals: CustomerCreditApprovalsTable;
+  customer_credit_interest_entries: CustomerCreditInterestEntriesTable;
+  customer_credit_late_fee_entries: CustomerCreditLateFeeEntriesTable;
+  customer_credit_collections: CustomerCreditCollectionsTable;
+  customer_credit_writeoffs: CustomerCreditWriteoffsTable;
+  customer_credit_notes: CustomerCreditNotesTable;
 }

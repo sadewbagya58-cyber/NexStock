@@ -175,6 +175,24 @@ export const ErrorCodeSchema = Type.Union([
   Type.Literal('EXP_ATTACHMENT_NOT_FOUND'),
   Type.Literal('EXP_ATTACHMENT_TOO_LARGE'),
   Type.Literal('EXP_INVALID_ATTACHMENT_TYPE'),
+  Type.Literal('CUST_NOT_FOUND'),
+  Type.Literal('CUST_DUPLICATE_NUMBER'),
+  Type.Literal('CREDIT_ACCOUNT_NOT_FOUND'),
+  Type.Literal('CREDIT_ACCOUNT_ALREADY_EXISTS'),
+  Type.Literal('CREDIT_ACCOUNT_NOT_ACTIVE'),
+  Type.Literal('CREDIT_LIMIT_EXCEEDED'),
+  Type.Literal('CREDIT_CANNOT_CLOSE_WITH_BALANCE'),
+  Type.Literal('CREDIT_TRANSACTION_NOT_FOUND'),
+  Type.Literal('CREDIT_PAYMENT_NOT_FOUND'),
+  Type.Literal('CREDIT_PAYMENT_ALREADY_REVERSED'),
+  Type.Literal('CREDIT_ALLOCATION_EXCEEDS_PAYMENT'),
+  Type.Literal('CREDIT_ALLOCATION_EXCEEDS_DUE'),
+  Type.Literal('CREDIT_APPROVAL_REQUIRED'),
+  Type.Literal('CREDIT_WRITEOFF_EXCEEDS_BALANCE'),
+  Type.Literal('CREDIT_INTEREST_DISABLED'),
+  Type.Literal('CREDIT_LATE_FEE_DISABLED'),
+  Type.Literal('CREDIT_INVALID_STATUS_TRANSITION'),
+  Type.Literal('CREDIT_CUSTOMER_REQUIRED_FOR_CREDIT_SALE'),
   Type.Literal('ERR_INTERNAL_SERVER_ERROR'),
 ]);
 export type ErrorCode = Static<typeof ErrorCodeSchema>;
@@ -1370,6 +1388,9 @@ export const CheckoutPaymentInputSchema = Type.Object(
       Type.Literal('CASH'),
       Type.Literal('CARD'),
       Type.Literal('OTHER'),
+      Type.Literal('CREDIT'),
+      Type.Literal('BANK_TRANSFER'),
+      Type.Literal('CHEQUE'),
     ]),
     amount: DecimalMoneyStringSchema,
     tenderedAmount: DecimalMoneyStringSchema,
@@ -1387,6 +1408,7 @@ export const CreatePosSaleRequestSchema = Type.Object(
   {
     registerId: UuidSchema,
     shiftId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
+    customerId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
     lines: Type.Array(CheckoutCartLineInputSchema, { minItems: 1 }),
     orderDiscountAmount: Type.Optional(DecimalMoneyStringSchema),
     payments: Type.Array(CheckoutPaymentInputSchema, { minItems: 1 }),
@@ -1433,6 +1455,9 @@ export const SalesPaymentResponseSchema = Type.Object({
     Type.Literal('CASH'),
     Type.Literal('CARD'),
     Type.Literal('OTHER'),
+    Type.Literal('CREDIT'),
+    Type.Literal('BANK_TRANSFER'),
+    Type.Literal('CHEQUE'),
   ]),
   amount: DecimalMoneyStringSchema,
   currencyCode: CurrencyCodeSchema,
@@ -1456,6 +1481,7 @@ export const SalesInvoiceResponseSchema = Type.Object({
   registerId: UuidSchema,
   shiftId: Type.Union([UuidSchema, Type.Null()]),
   cashierUserId: UuidSchema,
+  customerId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
   customerName: Type.Union([Type.String(), Type.Null()]),
   currencyCode: CurrencyCodeSchema,
   subtotalAmount: DecimalMoneyStringSchema,
@@ -3252,6 +3278,626 @@ export const ExpenseSummaryReportResponseSchema = Type.Object({
   byStatus: Type.Array(ExpenseSummaryByStatusSchema),
 });
 export type ExpenseSummaryReportResponse = Static<typeof ExpenseSummaryReportResponseSchema>;
+
+// ============================================================================
+// PHASE 7.4 CUSTOMER CREDIT MANAGEMENT SYSTEM CONTRACTS
+// ============================================================================
+
+export const CustomerStatusSchema = Type.Union([
+  Type.Literal('ACTIVE'),
+  Type.Literal('INACTIVE'),
+  Type.Literal('ARCHIVED'),
+]);
+export type CustomerStatus = Static<typeof CustomerStatusSchema>;
+
+export const CustomerResponseSchema = Type.Object({
+  id: UuidSchema,
+  customerNumber: Type.String(),
+  name: Type.String(),
+  email: Type.Union([Type.String(), Type.Null()]),
+  phone: Type.Union([Type.String(), Type.Null()]),
+  address: Type.Union([Type.String(), Type.Null()]),
+  taxId: Type.Union([Type.String(), Type.Null()]),
+  notes: Type.Union([Type.String(), Type.Null()]),
+  status: CustomerStatusSchema,
+  creditAccountId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
+  creditAccountNumber: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  creditLimit: Type.Optional(DecimalMoneyStringSchema),
+  currentBalance: Type.Optional(DecimalMoneyStringSchema),
+  availableCredit: Type.Optional(DecimalMoneyStringSchema),
+  creditStatus: Type.Optional(Type.String()),
+  createdAt: IsoTimestampSchema,
+  updatedAt: IsoTimestampSchema,
+});
+export type CustomerResponse = Static<typeof CustomerResponseSchema>;
+
+export const CreateCustomerRequestSchema = Type.Object(
+  {
+    name: Type.String({ minLength: 1, maxLength: 255 }),
+    email: Type.Optional(Type.Union([Type.String({ maxLength: 255 }), Type.Null()])),
+    phone: Type.Optional(Type.Union([Type.String({ maxLength: 50 }), Type.Null()])),
+    address: Type.Optional(Type.Union([Type.String({ maxLength: 500 }), Type.Null()])),
+    taxId: Type.Optional(Type.Union([Type.String({ maxLength: 100 }), Type.Null()])),
+    notes: Type.Optional(Type.Union([Type.String({ maxLength: 1000 }), Type.Null()])),
+  },
+  { additionalProperties: false },
+);
+export type CreateCustomerRequest = Static<typeof CreateCustomerRequestSchema>;
+
+export const UpdateCustomerRequestSchema = Type.Object(
+  {
+    name: Type.Optional(Type.String({ minLength: 1, maxLength: 255 })),
+    email: Type.Optional(Type.Union([Type.String({ maxLength: 255 }), Type.Null()])),
+    phone: Type.Optional(Type.Union([Type.String({ maxLength: 50 }), Type.Null()])),
+    address: Type.Optional(Type.Union([Type.String({ maxLength: 500 }), Type.Null()])),
+    taxId: Type.Optional(Type.Union([Type.String({ maxLength: 100 }), Type.Null()])),
+    notes: Type.Optional(Type.Union([Type.String({ maxLength: 1000 }), Type.Null()])),
+    status: Type.Optional(CustomerStatusSchema),
+  },
+  { additionalProperties: false },
+);
+export type UpdateCustomerRequest = Static<typeof UpdateCustomerRequestSchema>;
+
+export const ListCustomersQuerySchema = Type.Object({
+  search: Type.Optional(Type.String()),
+  status: Type.Optional(CustomerStatusSchema),
+  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100, default: 50 })),
+  offset: Type.Optional(Type.Integer({ minimum: 0, default: 0 })),
+});
+export type ListCustomersQuery = Static<typeof ListCustomersQuerySchema>;
+
+export const CustomerListResponseSchema = Type.Object({
+  items: Type.Array(CustomerResponseSchema),
+  total: Type.Integer(),
+});
+export type CustomerListResponse = Static<typeof CustomerListResponseSchema>;
+
+// Credit Enums
+export const CreditTermsSchema = Type.Union([
+  Type.Literal('IMMEDIATE'),
+  Type.Literal('NET_7'),
+  Type.Literal('NET_14'),
+  Type.Literal('NET_30'),
+  Type.Literal('NET_60'),
+  Type.Literal('NET_90'),
+  Type.Literal('CUSTOM'),
+]);
+export type CreditTerms = Static<typeof CreditTermsSchema>;
+
+export const CreditAccountStatusSchema = Type.Union([
+  Type.Literal('ACTIVE'),
+  Type.Literal('ON_HOLD'),
+  Type.Literal('SUSPENDED'),
+  Type.Literal('BLOCKED'),
+  Type.Literal('CLOSED'),
+]);
+export type CreditAccountStatus = Static<typeof CreditAccountStatusSchema>;
+
+export const CreditRiskClassificationSchema = Type.Union([
+  Type.Literal('LOW_RISK'),
+  Type.Literal('MEDIUM_RISK'),
+  Type.Literal('HIGH_RISK'),
+  Type.Literal('CRITICAL_RISK'),
+]);
+export type CreditRiskClassification = Static<typeof CreditRiskClassificationSchema>;
+
+export const CreditTransactionTypeSchema = Type.Union([
+  Type.Literal('OPENING_BALANCE'),
+  Type.Literal('CREDIT_SALE'),
+  Type.Literal('PAYMENT'),
+  Type.Literal('SALES_RETURN'),
+  Type.Literal('CREDIT_NOTE'),
+  Type.Literal('DEBIT_NOTE'),
+  Type.Literal('INTEREST_CHARGE'),
+  Type.Literal('LATE_FEE'),
+  Type.Literal('ADJUSTMENT_DEBIT'),
+  Type.Literal('ADJUSTMENT_CREDIT'),
+  Type.Literal('PAYMENT_REVERSAL'),
+  Type.Literal('CREDIT_REVERSAL'),
+  Type.Literal('WRITE_OFF'),
+  Type.Literal('ADVANCE_PAYMENT'),
+]);
+export type CreditTransactionType = Static<typeof CreditTransactionTypeSchema>;
+
+export const CreditPaymentMethodSchema = Type.Union([
+  Type.Literal('CASH'),
+  Type.Literal('BANK_TRANSFER'),
+  Type.Literal('CARD'),
+  Type.Literal('CHEQUE'),
+  Type.Literal('OTHER'),
+]);
+export type CreditPaymentMethod = Static<typeof CreditPaymentMethodSchema>;
+
+// Customer Credit Account Contracts
+export const CreateCustomerCreditAccountRequestSchema = Type.Object(
+  {
+    customerId: UuidSchema,
+    creditLimit: Type.Optional(DecimalMoneyStringSchema),
+    creditTerms: Type.Optional(CreditTermsSchema),
+    customTermDays: Type.Optional(Type.Integer({ minimum: 0, maximum: 365 })),
+    branchId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
+    openingBalance: Type.Optional(DecimalMoneyStringSchema),
+  },
+  { additionalProperties: false },
+);
+export type CreateCustomerCreditAccountRequest = Static<typeof CreateCustomerCreditAccountRequestSchema>;
+
+export const CustomerCreditAccountResponseSchema = Type.Object({
+  id: UuidSchema,
+  customerId: UuidSchema,
+  customerNumber: Type.String(),
+  customerName: Type.String(),
+  accountNumber: Type.String(),
+  creditLimit: DecimalMoneyStringSchema,
+  currentBalance: DecimalMoneyStringSchema,
+  availableCredit: DecimalMoneyStringSchema,
+  totalCreditSales: DecimalMoneyStringSchema,
+  totalPayments: DecimalMoneyStringSchema,
+  totalInterestCharged: DecimalMoneyStringSchema,
+  totalLateFees: DecimalMoneyStringSchema,
+  totalWrittenOff: DecimalMoneyStringSchema,
+  unallocatedPaymentBalance: DecimalMoneyStringSchema,
+  creditTerms: CreditTermsSchema,
+  customTermDays: Type.Union([Type.Integer(), Type.Null()]),
+  status: CreditAccountStatusSchema,
+  holdReason: Type.Union([Type.String(), Type.Null()]),
+  heldAt: Type.Union([IsoTimestampSchema, Type.Null()]),
+  riskClassification: CreditRiskClassificationSchema,
+  branchId: Type.Union([UuidSchema, Type.Null()]),
+  branchName: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  currencyCode: Type.String(),
+  openedAt: IsoTimestampSchema,
+  closedAt: Type.Union([IsoTimestampSchema, Type.Null()]),
+  createdAt: IsoTimestampSchema,
+  updatedAt: IsoTimestampSchema,
+});
+export type CustomerCreditAccountResponse = Static<typeof CustomerCreditAccountResponseSchema>;
+
+export const ListCreditAccountsQuerySchema = Type.Object({
+  search: Type.Optional(Type.String()),
+  status: Type.Optional(CreditAccountStatusSchema),
+  risk: Type.Optional(CreditRiskClassificationSchema),
+  branchId: Type.Optional(UuidSchema),
+  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100, default: 50 })),
+  offset: Type.Optional(Type.Integer({ minimum: 0, default: 0 })),
+});
+export type ListCreditAccountsQuery = Static<typeof ListCreditAccountsQuerySchema>;
+
+export const CustomerCreditAccountListResponseSchema = Type.Object({
+  items: Type.Array(CustomerCreditAccountResponseSchema),
+  total: Type.Integer(),
+});
+export type CustomerCreditAccountListResponse = Static<typeof CustomerCreditAccountListResponseSchema>;
+
+export const UpdateCreditAccountStatusRequestSchema = Type.Object(
+  {
+    status: CreditAccountStatusSchema,
+    reason: Type.Optional(Type.String({ minLength: 3, maxLength: 500 })),
+  },
+  { additionalProperties: false },
+);
+export type UpdateCreditAccountStatusRequest = Static<typeof UpdateCreditAccountStatusRequestSchema>;
+
+export const ManageCreditLimitRequestSchema = Type.Object(
+  {
+    newLimit: DecimalMoneyStringSchema,
+    changeType: Type.Union([
+      Type.Literal('INCREASE'),
+      Type.Literal('DECREASE'),
+      Type.Literal('TEMPORARY_OVERRIDE'),
+      Type.Literal('RESTORE'),
+    ]),
+    reason: Type.String({ minLength: 3, maxLength: 500 }),
+    expiryDate: Type.Optional(Type.Union([Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' }), Type.Null()])),
+  },
+  { additionalProperties: false },
+);
+export type ManageCreditLimitRequest = Static<typeof ManageCreditLimitRequestSchema>;
+
+export const CreditLimitHistoryResponseSchema = Type.Object({
+  id: UuidSchema,
+  accountId: UuidSchema,
+  previousLimit: DecimalMoneyStringSchema,
+  newLimit: DecimalMoneyStringSchema,
+  changeType: Type.String(),
+  reason: Type.String(),
+  effectiveDate: Type.String(),
+  expiryDate: Type.Union([Type.String(), Type.Null()]),
+  requestedByUserId: UuidSchema,
+  requestedByName: Type.Optional(Type.String()),
+  approvedByUserId: Type.Union([UuidSchema, Type.Null()]),
+  approvedByName: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  approvalStatus: Type.String(),
+  createdAt: IsoTimestampSchema,
+});
+export type CreditLimitHistoryResponse = Static<typeof CreditLimitHistoryResponseSchema>;
+
+// Ledger & Transaction Contracts
+export const CustomerCreditTransactionResponseSchema = Type.Object({
+  id: UuidSchema,
+  accountId: UuidSchema,
+  customerId: UuidSchema,
+  customerName: Type.Optional(Type.String()),
+  branchId: Type.Union([UuidSchema, Type.Null()]),
+  transactionReference: Type.String(),
+  transactionType: CreditTransactionTypeSchema,
+  entryDirection: Type.Union([Type.Literal('DEBIT'), Type.Literal('CREDIT')]),
+  amount: DecimalMoneyStringSchema,
+  currencyCode: Type.String(),
+  balanceAfter: DecimalMoneyStringSchema,
+  unpaidAmount: DecimalMoneyStringSchema,
+  transactionDate: Type.String(),
+  postingDate: IsoTimestampSchema,
+  dueDate: Type.Union([Type.String(), Type.Null()]),
+  sourceReferenceType: Type.String(),
+  sourceReferenceId: Type.Union([UuidSchema, Type.Null()]),
+  sourceReferenceNumber: Type.Union([Type.String(), Type.Null()]),
+  description: Type.String(),
+  isReversed: Type.Boolean(),
+  reversedAt: Type.Union([IsoTimestampSchema, Type.Null()]),
+  createdAt: IsoTimestampSchema,
+});
+export type CustomerCreditTransactionResponse = Static<typeof CustomerCreditTransactionResponseSchema>;
+
+export const ListCreditTransactionsQuerySchema = Type.Object({
+  accountId: Type.Optional(UuidSchema),
+  customerId: Type.Optional(UuidSchema),
+  transactionType: Type.Optional(CreditTransactionTypeSchema),
+  startDate: Type.Optional(Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' })),
+  endDate: Type.Optional(Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' })),
+  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100, default: 50 })),
+  offset: Type.Optional(Type.Integer({ minimum: 0, default: 0 })),
+});
+export type ListCreditTransactionsQuery = Static<typeof ListCreditTransactionsQuerySchema>;
+
+export const CustomerCreditTransactionListResponseSchema = Type.Object({
+  items: Type.Array(CustomerCreditTransactionResponseSchema),
+  total: Type.Integer(),
+});
+export type CustomerCreditTransactionListResponse = Static<typeof CustomerCreditTransactionListResponseSchema>;
+
+export const CreateManualCreditTransactionRequestSchema = Type.Object(
+  {
+    accountId: UuidSchema,
+    transactionType: Type.Union([
+      Type.Literal('OPENING_BALANCE'),
+      Type.Literal('DEBIT_NOTE'),
+      Type.Literal('CREDIT_NOTE'),
+      Type.Literal('ADJUSTMENT_DEBIT'),
+      Type.Literal('ADJUSTMENT_CREDIT'),
+    ]),
+    amount: DecimalMoneyStringSchema,
+    description: Type.String({ minLength: 3, maxLength: 500 }),
+    sourceReferenceType: Type.Optional(Type.String({ maxLength: 50 })),
+    sourceReferenceNumber: Type.Optional(Type.String({ maxLength: 100 })),
+    dueDate: Type.Optional(Type.Union([Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' }), Type.Null()])),
+  },
+  { additionalProperties: false },
+);
+export type CreateManualCreditTransactionRequest = Static<typeof CreateManualCreditTransactionRequestSchema>;
+
+// Payment & Allocation Contracts
+export const PaymentAllocationInputSchema = Type.Object(
+  {
+    transactionId: UuidSchema,
+    amount: DecimalMoneyStringSchema,
+  },
+  { additionalProperties: false },
+);
+export type PaymentAllocationInput = Static<typeof PaymentAllocationInputSchema>;
+
+export const RecordCustomerCreditPaymentRequestSchema = Type.Object(
+  {
+    accountId: UuidSchema,
+    amount: DecimalMoneyStringSchema,
+    paymentMethod: CreditPaymentMethodSchema,
+    paymentDate: Type.Optional(Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' })),
+    externalReference: Type.Optional(Type.Union([Type.String({ maxLength: 100 }), Type.Null()])),
+    branchId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
+    notes: Type.Optional(Type.Union([Type.String({ maxLength: 500 }), Type.Null()])),
+    allocations: Type.Optional(Type.Array(PaymentAllocationInputSchema)),
+  },
+  { additionalProperties: false },
+);
+export type RecordCustomerCreditPaymentRequest = Static<typeof RecordCustomerCreditPaymentRequestSchema>;
+
+export const CustomerCreditPaymentResponseSchema = Type.Object({
+  id: UuidSchema,
+  accountId: UuidSchema,
+  customerId: UuidSchema,
+  customerName: Type.Optional(Type.String()),
+  paymentReference: Type.String(),
+  receiptNumber: Type.String(),
+  amount: DecimalMoneyStringSchema,
+  allocatedAmount: DecimalMoneyStringSchema,
+  unallocatedAmount: DecimalMoneyStringSchema,
+  currencyCode: Type.String(),
+  paymentDate: Type.String(),
+  paymentMethod: CreditPaymentMethodSchema,
+  externalReference: Type.Union([Type.String(), Type.Null()]),
+  branchId: Type.Union([UuidSchema, Type.Null()]),
+  status: Type.Union([Type.Literal('COMPLETED'), Type.Literal('REVERSED')]),
+  reversalReason: Type.Union([Type.String(), Type.Null()]),
+  reversedAt: Type.Union([IsoTimestampSchema, Type.Null()]),
+  notes: Type.Union([Type.String(), Type.Null()]),
+  createdAt: IsoTimestampSchema,
+});
+export type CustomerCreditPaymentResponse = Static<typeof CustomerCreditPaymentResponseSchema>;
+
+export const ReverseCustomerCreditPaymentRequestSchema = Type.Object(
+  {
+    reason: Type.String({ minLength: 3, maxLength: 500 }),
+  },
+  { additionalProperties: false },
+);
+export type ReverseCustomerCreditPaymentRequest = Static<typeof ReverseCustomerCreditPaymentRequestSchema>;
+
+export const AllocateUnappliedPaymentRequestSchema = Type.Object(
+  {
+    paymentId: UuidSchema,
+    allocations: Type.Array(PaymentAllocationInputSchema, { minItems: 1 }),
+  },
+  { additionalProperties: false },
+);
+export type AllocateUnappliedPaymentRequest = Static<typeof AllocateUnappliedPaymentRequestSchema>;
+
+export const PaymentReceiptResponseSchema = Type.Object({
+  receiptNumber: Type.String(),
+  paymentReference: Type.String(),
+  paymentDate: Type.String(),
+  customerName: Type.String(),
+  customerNumber: Type.String(),
+  accountNumber: Type.String(),
+  paymentMethod: CreditPaymentMethodSchema,
+  amount: DecimalMoneyStringSchema,
+  allocatedAmount: DecimalMoneyStringSchema,
+  unallocatedAmount: DecimalMoneyStringSchema,
+  currentBalance: DecimalMoneyStringSchema,
+  availableCredit: DecimalMoneyStringSchema,
+  receivedByName: Type.String(),
+  notes: Type.Union([Type.String(), Type.Null()]),
+  allocations: Type.Array(
+    Type.Object({
+      transactionReference: Type.String(),
+      transactionDate: Type.String(),
+      allocatedAmount: DecimalMoneyStringSchema,
+    }),
+  ),
+});
+export type PaymentReceiptResponse = Static<typeof PaymentReceiptResponseSchema>;
+
+// Credit Settings Contracts
+export const CustomerCreditSettingsResponseSchema = Type.Object({
+  id: UuidSchema,
+  defaultCreditLimit: DecimalMoneyStringSchema,
+  defaultCreditTerms: CreditTermsSchema,
+  defaultCustomDays: Type.Union([Type.Integer(), Type.Null()]),
+  approvalPolicy: Type.Union([
+    Type.Literal('AUTO_WITHIN_LIMIT'),
+    Type.Literal('ALWAYS_REQUIRE_APPROVAL'),
+    Type.Literal('THRESHOLD_REQUIRED'),
+    Type.Literal('OVERRIDE_ONLY'),
+  ]),
+  approvalThresholdAmount: DecimalMoneyStringSchema,
+  requireApprovalForOverrides: Type.Boolean(),
+  requireApprovalForAdjustments: Type.Boolean(),
+  interestEnabled: Type.Boolean(),
+  interestCalculationMode: Type.Union([
+    Type.Literal('DAILY'),
+    Type.Literal('MONTHLY'),
+    Type.Literal('ANNUAL'),
+    Type.Literal('FIXED'),
+  ]),
+  interestRatePercentage: Type.String(),
+  interestGracePeriodDays: Type.Integer(),
+  compoundingEnabled: Type.Boolean(),
+  lateFeeEnabled: Type.Boolean(),
+  lateFeeType: Type.Union([
+    Type.Literal('FIXED'),
+    Type.Literal('PERCENTAGE'),
+    Type.Literal('PER_DAY'),
+  ]),
+  lateFeeAmount: DecimalMoneyStringSchema,
+  lateFeePercentage: Type.String(),
+  lateFeeGracePeriodDays: Type.Integer(),
+  lateFeeMaxAmount: DecimalMoneyStringSchema,
+  autoHoldEnabled: Type.Boolean(),
+  autoHoldMaxOverdueDays: Type.Integer(),
+  autoHoldMaxOverdueAmount: DecimalMoneyStringSchema,
+  autoHoldUtilizationThreshold: Type.String(),
+  currencyCode: Type.String(),
+  updatedAt: IsoTimestampSchema,
+});
+export type CustomerCreditSettingsResponse = Static<typeof CustomerCreditSettingsResponseSchema>;
+
+export const UpdateCustomerCreditSettingsRequestSchema = Type.Object(
+  {
+    defaultCreditLimit: Type.Optional(DecimalMoneyStringSchema),
+    defaultCreditTerms: Type.Optional(CreditTermsSchema),
+    defaultCustomDays: Type.Optional(Type.Union([Type.Integer({ minimum: 0, maximum: 365 }), Type.Null()])),
+    approvalPolicy: Type.Optional(
+      Type.Union([
+        Type.Literal('AUTO_WITHIN_LIMIT'),
+        Type.Literal('ALWAYS_REQUIRE_APPROVAL'),
+        Type.Literal('THRESHOLD_REQUIRED'),
+        Type.Literal('OVERRIDE_ONLY'),
+      ]),
+    ),
+    approvalThresholdAmount: Type.Optional(DecimalMoneyStringSchema),
+    requireApprovalForOverrides: Type.Optional(Type.Boolean()),
+    requireApprovalForAdjustments: Type.Optional(Type.Boolean()),
+    interestEnabled: Type.Optional(Type.Boolean()),
+    interestCalculationMode: Type.Optional(
+      Type.Union([
+        Type.Literal('DAILY'),
+        Type.Literal('MONTHLY'),
+        Type.Literal('ANNUAL'),
+        Type.Literal('FIXED'),
+      ]),
+    ),
+    interestRatePercentage: Type.Optional(Type.String()),
+    interestGracePeriodDays: Type.Optional(Type.Integer({ minimum: 0, maximum: 90 })),
+    compoundingEnabled: Type.Optional(Type.Boolean()),
+    lateFeeEnabled: Type.Optional(Type.Boolean()),
+    lateFeeType: Type.Optional(
+      Type.Union([
+        Type.Literal('FIXED'),
+        Type.Literal('PERCENTAGE'),
+        Type.Literal('PER_DAY'),
+      ]),
+    ),
+    lateFeeAmount: Type.Optional(DecimalMoneyStringSchema),
+    lateFeePercentage: Type.Optional(Type.String()),
+    lateFeeGracePeriodDays: Type.Optional(Type.Integer({ minimum: 0, maximum: 90 })),
+    lateFeeMaxAmount: Type.Optional(DecimalMoneyStringSchema),
+    autoHoldEnabled: Type.Optional(Type.Boolean()),
+    autoHoldMaxOverdueDays: Type.Optional(Type.Integer({ minimum: 0, maximum: 365 })),
+    autoHoldMaxOverdueAmount: Type.Optional(DecimalMoneyStringSchema),
+    autoHoldUtilizationThreshold: Type.Optional(Type.String()),
+  },
+  { additionalProperties: false },
+);
+export type UpdateCustomerCreditSettingsRequest = Static<typeof UpdateCustomerCreditSettingsRequestSchema>;
+
+// Collections & Follow-up Contracts
+export const RecordCollectionFollowUpRequestSchema = Type.Object(
+  {
+    accountId: UuidSchema,
+    followUpDate: Type.Optional(Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' })),
+    contactMethod: Type.Union([
+      Type.Literal('PHONE'),
+      Type.Literal('VISIT'),
+      Type.Literal('EMAIL'),
+      Type.Literal('MESSAGE'),
+      Type.Literal('OTHER'),
+    ]),
+    contactPerson: Type.Optional(Type.Union([Type.String({ maxLength: 255 }), Type.Null()])),
+    notes: Type.String({ minLength: 3, maxLength: 1000 }),
+    promiseToPayDate: Type.Optional(Type.Union([Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' }), Type.Null()])),
+    promiseAmount: Type.Optional(Type.Union([DecimalMoneyStringSchema, Type.Null()])),
+    outcome: Type.Union([
+      Type.Literal('PROMISED_TO_PAY'),
+      Type.Literal('DISPUTED'),
+      Type.Literal('UNREACHABLE'),
+      Type.Literal('REFUSED'),
+      Type.Literal('FOLLOW_UP_REQUIRED'),
+      Type.Literal('PAID'),
+      Type.Literal('OTHER'),
+    ]),
+    nextFollowUpDate: Type.Optional(Type.Union([Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' }), Type.Null()])),
+  },
+  { additionalProperties: false },
+);
+export type RecordCollectionFollowUpRequest = Static<typeof RecordCollectionFollowUpRequestSchema>;
+
+export const CollectionRecordResponseSchema = Type.Object({
+  id: UuidSchema,
+  accountId: UuidSchema,
+  customerId: UuidSchema,
+  customerName: Type.Optional(Type.String()),
+  followUpDate: Type.String(),
+  collectorName: Type.Optional(Type.String()),
+  contactMethod: Type.String(),
+  contactPerson: Type.Union([Type.String(), Type.Null()]),
+  notes: Type.String(),
+  promiseToPayDate: Type.Union([Type.String(), Type.Null()]),
+  promiseAmount: Type.Union([DecimalMoneyStringSchema, Type.Null()]),
+  outcome: Type.String(),
+  nextFollowUpDate: Type.Union([Type.String(), Type.Null()]),
+  createdAt: IsoTimestampSchema,
+});
+export type CollectionRecordResponse = Static<typeof CollectionRecordResponseSchema>;
+
+// Bad Debt Write-Off Contracts
+export const ProcessBadDebtWriteOffRequestSchema = Type.Object(
+  {
+    accountId: UuidSchema,
+    writeoffAmount: DecimalMoneyStringSchema,
+    reason: Type.String({ minLength: 3, maxLength: 500 }),
+    supportingNotes: Type.Optional(Type.Union([Type.String({ maxLength: 1000 }), Type.Null()])),
+  },
+  { additionalProperties: false },
+);
+export type ProcessBadDebtWriteOffRequest = Static<typeof ProcessBadDebtWriteOffRequestSchema>;
+
+// Reports & Statement Contracts
+export const AgingBucketSchema = Type.Object({
+  current: DecimalMoneyStringSchema,
+  days1To30: DecimalMoneyStringSchema,
+  days31To60: DecimalMoneyStringSchema,
+  days61To90: DecimalMoneyStringSchema,
+  days90Plus: DecimalMoneyStringSchema,
+  totalOverdue: DecimalMoneyStringSchema,
+  totalOutstanding: DecimalMoneyStringSchema,
+});
+export type AgingBucket = Static<typeof AgingBucketSchema>;
+
+export const CustomerAgingReportItemSchema = Type.Object({
+  accountId: UuidSchema,
+  customerId: UuidSchema,
+  customerName: Type.String(),
+  customerNumber: Type.String(),
+  accountNumber: Type.String(),
+  creditLimit: DecimalMoneyStringSchema,
+  status: CreditAccountStatusSchema,
+  riskClassification: CreditRiskClassificationSchema,
+  current: DecimalMoneyStringSchema,
+  days1To30: DecimalMoneyStringSchema,
+  days31To60: DecimalMoneyStringSchema,
+  days61To90: DecimalMoneyStringSchema,
+  days90Plus: DecimalMoneyStringSchema,
+  totalOverdue: DecimalMoneyStringSchema,
+  totalOutstanding: DecimalMoneyStringSchema,
+});
+export type CustomerAgingReportItem = Static<typeof CustomerAgingReportItemSchema>;
+
+export const CreditAgingReportResponseSchema = Type.Object({
+  asOfDate: Type.String(),
+  summary: AgingBucketSchema,
+  customers: Type.Array(CustomerAgingReportItemSchema),
+});
+export type CreditAgingReportResponse = Static<typeof CreditAgingReportResponseSchema>;
+
+export const CustomerStatementResponseSchema = Type.Object({
+  customerName: Type.String(),
+  customerNumber: Type.String(),
+  accountNumber: Type.String(),
+  creditLimit: DecimalMoneyStringSchema,
+  startDate: Type.String(),
+  endDate: Type.String(),
+  openingBalance: DecimalMoneyStringSchema,
+  totalDebits: DecimalMoneyStringSchema,
+  totalCredits: DecimalMoneyStringSchema,
+  closingBalance: DecimalMoneyStringSchema,
+  transactions: Type.Array(CustomerCreditTransactionResponseSchema),
+  unpaidInvoices: Type.Array(
+    Type.Object({
+      transactionReference: Type.String(),
+      transactionDate: Type.String(),
+      dueDate: Type.Union([Type.String(), Type.Null()]),
+      description: Type.String(),
+      originalAmount: DecimalMoneyStringSchema,
+      unpaidAmount: DecimalMoneyStringSchema,
+      daysOverdue: Type.Integer(),
+    }),
+  ),
+  aging: AgingBucketSchema,
+});
+export type CustomerStatementResponse = Static<typeof CustomerStatementResponseSchema>;
+
+export const CreditDashboardKpisResponseSchema = Type.Object({
+  totalOutstanding: DecimalMoneyStringSchema,
+  totalAvailableCredit: DecimalMoneyStringSchema,
+  totalOverdue: DecimalMoneyStringSchema,
+  activeCreditCustomers: Type.Integer(),
+  customersOnHold: Type.Integer(),
+  pendingApprovals: Type.Integer(),
+  todayCollections: DecimalMoneyStringSchema,
+  monthCreditSales: DecimalMoneyStringSchema,
+  totalUnallocatedPayments: DecimalMoneyStringSchema,
+});
+export type CreditDashboardKpisResponse = Static<typeof CreditDashboardKpisResponseSchema>;
+
 
 
 

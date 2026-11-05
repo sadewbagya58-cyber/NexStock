@@ -1323,6 +1323,98 @@ export async function checkoutSale(
     });
   }
 
+  // Pre-validate Customer Credit if paying by CREDIT
+  const creditPayment = input.payments.find((p) => p.paymentMethod === 'CREDIT');
+  let customerCreditAccount: {
+    id: string;
+    customer_id: string;
+    credit_limit: string | number;
+    current_balance: string | number;
+    available_credit: string | number;
+    status: string;
+    hold_reason: string | null;
+    credit_terms: string;
+    custom_term_days: number | null;
+  } | null = null;
+
+  if (creditPayment) {
+    if (!input.customerId) {
+      throw new AppError({
+        statusCode: 400,
+        errorCode: 'CREDIT_CUSTOMER_REQUIRED_FOR_CREDIT_SALE',
+        title: 'Customer Required for Credit Sale',
+        detail: 'Credit payment method requires selecting a customer with an active credit account.',
+      });
+    }
+
+    const creditAcc = await trx.db
+      .selectFrom('customer_credit_accounts')
+      .select([
+        'id',
+        'customer_id',
+        'credit_limit',
+        'current_balance',
+        'available_credit',
+        'status',
+        'hold_reason',
+        'credit_terms',
+        'custom_term_days',
+      ])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('customer_id', '=', input.customerId)
+      .forUpdate()
+      .executeTakeFirst();
+
+    if (!creditAcc) {
+      throw new AppError({
+        statusCode: 404,
+        errorCode: 'CREDIT_ACCOUNT_NOT_FOUND',
+        title: 'Credit Account Not Found',
+        detail: `No customer credit account found for customer "${input.customerId}".`,
+      });
+    }
+
+    if (creditAcc.status !== 'ACTIVE') {
+      throw new AppError({
+        statusCode: 409,
+        errorCode: 'CREDIT_ACCOUNT_NOT_ACTIVE',
+        title: 'Customer Credit Account Not Active',
+        detail: `Credit account is currently ${creditAcc.status}${creditAcc.hold_reason ? `: ${creditAcc.hold_reason}` : ''}.`,
+      });
+    }
+
+    const creditPayAmount = Money.fromDecimalString(creditPayment.amount, currencyCode);
+    const availableCreditMoney = Money.fromDecimalString(String(creditAcc.available_credit), currencyCode);
+
+    if (creditPayAmount.compare(availableCreditMoney) > 0) {
+      const userRoles = await trx.db
+        .selectFrom('member_role_assignments')
+        .innerJoin('roles', (j) =>
+          j.onRef('member_role_assignments.tenant_id', '=', 'roles.tenant_id')
+           .onRef('member_role_assignments.role_id', '=', 'roles.id'),
+        )
+        .select(['roles.code'])
+        .where('member_role_assignments.tenant_id', '=', trx.tenantId)
+        .where('member_role_assignments.membership_id', '=', trx.userId)
+        .execute();
+
+      const canOverride = userRoles.some(
+        (r) => r.code === 'OWNER' || r.code === 'ADMIN' || r.code === 'BRANCH_MANAGER',
+      );
+
+      if (!canOverride) {
+        throw new AppError({
+          statusCode: 409,
+          errorCode: 'CREDIT_LIMIT_EXCEEDED',
+          title: 'Credit Limit Exceeded',
+          detail: `Credit sale of LKR ${creditPayAmount.toDecimalString()} exceeds available credit of LKR ${availableCreditMoney.toDecimalString()}. Supervisor approval is required.`,
+        });
+      }
+    }
+
+    customerCreditAccount = creditAcc;
+  }
+
   let totalPaidMoney = Money.zero(currencyCode);
   let totalTenderedMoney = Money.zero(currencyCode);
   let totalChangeGivenMoney = Money.zero(currencyCode);
@@ -1430,7 +1522,7 @@ export async function checkoutSale(
       warehouse_id: register.warehouse_id,
       register_id: register.id,
       shift_id: assignedShiftId,
-      customer_id: null,
+      customer_id: input.customerId ?? null,
       cashier_user_id: trx.userId,
       invoice_number: invoiceNumber,
       status: 'COMPLETED',
@@ -1518,7 +1610,7 @@ export async function checkoutSale(
   // 8. INSERT PAYMENT RECORDS
   const paymentResponses: Array<{
     id: string;
-    paymentMethod: 'CASH' | 'CARD' | 'OTHER';
+    paymentMethod: 'CASH' | 'CARD' | 'OTHER' | 'CREDIT' | 'BANK_TRANSFER' | 'CHEQUE';
     amount: string;
     currencyCode: string;
     status: 'COMPLETED' | 'VOIDED';
@@ -1557,6 +1649,60 @@ export async function checkoutSale(
       })
       .returningAll()
       .executeTakeFirstOrThrow();
+
+    if (customerCreditAccount && pay.paymentMethod === 'CREDIT') {
+      let daysToAdd = 30;
+      if (customerCreditAccount.credit_terms === 'IMMEDIATE') daysToAdd = 0;
+      else if (customerCreditAccount.credit_terms === 'NET_7') daysToAdd = 7;
+      else if (customerCreditAccount.credit_terms === 'NET_14') daysToAdd = 14;
+      else if (customerCreditAccount.credit_terms === 'NET_30') daysToAdd = 30;
+      else if (customerCreditAccount.credit_terms === 'NET_60') daysToAdd = 60;
+      else if (customerCreditAccount.credit_terms === 'NET_90') daysToAdd = 90;
+      else if (customerCreditAccount.credit_terms === 'CUSTOM') daysToAdd = customerCreditAccount.custom_term_days ?? 30;
+
+      const dueDateObj = new Date();
+      dueDateObj.setDate(dueDateObj.getDate() + daysToAdd);
+      const dueDateStr = dueDateObj.toISOString().slice(0, 10);
+
+      const txRef = `CTX-${new Date().toISOString().slice(0, 7).replace('-', '')}-${generateUuidV7().slice(-5).toUpperCase()}`;
+      const prevBalMoney = Money.fromDecimalString(String(customerCreditAccount.current_balance), currencyCode);
+      const newBalMoney = prevBalMoney.add(payAmountMoney);
+      const creditLimitMoney = Money.fromDecimalString(String(customerCreditAccount.credit_limit), currencyCode);
+      const newAvailMoney = creditLimitMoney.compare(newBalMoney) > 0 ? creditLimitMoney.subtract(newBalMoney) : Money.zero(currencyCode);
+
+      await trx.db.insertInto('customer_credit_transactions').values({
+        id: generateUuidV7(),
+        tenant_id: trx.tenantId,
+        account_id: customerCreditAccount.id,
+        customer_id: customerCreditAccount.customer_id,
+        branch_id: register.branch_id,
+        transaction_reference: txRef,
+        transaction_type: 'CREDIT_SALE',
+        entry_direction: 'DEBIT',
+        amount: payAmountMoney.toDecimalString(),
+        currency_code: 'LKR',
+        balance_after: newBalMoney.toDecimalString(),
+        unpaid_amount: payAmountMoney.toDecimalString(),
+        transaction_date: sql<string>`CURRENT_DATE`,
+        due_date: dueDateStr,
+        source_reference_type: 'POS_SALE',
+        source_reference_id: saleId,
+        source_reference_number: invoiceNumber,
+        description: `POS Credit Sale - Invoice #${invoiceNumber}`,
+        created_by_user_id: trx.userId,
+      }).execute();
+
+      await trx.db.updateTable('customer_credit_accounts')
+        .set({
+          current_balance: newBalMoney.toDecimalString(),
+          available_credit: newAvailMoney.toDecimalString(),
+          total_credit_sales: sql`total_credit_sales + ${payAmountMoney.toDecimalString()}::numeric`,
+          updated_at: sql<Date>`clock_timestamp()`,
+        })
+        .where('tenant_id', '=', trx.tenantId)
+        .where('id', '=', customerCreditAccount.id)
+        .execute();
+    }
 
     paymentResponses.push({
       id: payRow.id,
@@ -1611,6 +1757,7 @@ export async function checkoutSale(
     registerId: invoiceRow.register_id,
     shiftId: invoiceRow.shift_id,
     cashierUserId: invoiceRow.cashier_user_id,
+    ...(invoiceRow.customer_id ? { customerId: invoiceRow.customer_id } : {}),
     customerName: invoiceRow.customer_name,
     currencyCode: invoiceRow.currency_code,
     subtotalAmount: Money.fromDecimalString(
