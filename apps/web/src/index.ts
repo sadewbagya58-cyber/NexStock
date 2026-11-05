@@ -194,11 +194,28 @@ export const ALL_SPA_VIEW_IDS = [
   'leaves',
   'payroll',
   'payroll-reports',
+  'expenses',
   'roles-permissions',
   'org-settings',
 ] as const;
 
 export type SpaViewId = (typeof ALL_SPA_VIEW_IDS)[number];
+
+export interface ExpenseNavItem {
+  readonly id: 'expenses';
+  readonly label: string;
+  readonly href: string;
+  readonly requiredPermission: string;
+}
+
+export const PHASE73_EXPENSE_NAV_ITEMS: readonly ExpenseNavItem[] = [
+  {
+    id: 'expenses',
+    label: 'Expenses Management',
+    href: '/finance/expenses',
+    requiredPermission: 'exp:expense:read',
+  },
+] as const;
 
 export interface HrmNavItem {
   readonly id: 'employees' | 'attendance' | 'leaves' | 'payroll' | 'payroll-reports';

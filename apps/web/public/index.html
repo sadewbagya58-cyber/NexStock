@@ -2100,6 +2100,12 @@
         Payroll Reports
       </a>
 
+      <div class="nav-section-title">Finance &amp; Expenses</div>
+      <a class="nav-link" data-view="expenses">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
+        Expenses
+      </a>
+
       <div class="nav-section-title">Organization</div>
       <a class="nav-link" data-view="roles-permissions">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
@@ -2297,6 +2303,7 @@
       'leaves',
       'payroll',
       'payroll-reports',
+      'expenses',
       'roles-permissions',
       'org-settings'
     ];
@@ -2346,7 +2353,10 @@
       cachedRegisters: [],
       cachedSales: [],
       isSubmittingCheckout: false,
-      activeCheckoutKey: null
+      activeCheckoutKey: null,
+      expenseFilters: { status: '', categoryId: '', branchId: '', search: '', startDate: '', endDate: '' },
+      cachedExpenses: [],
+      cachedExpenseCategories: []
     };
 
     // Synchronous Cache Restoration for Cold Start Elimination (BUG-030)
@@ -3124,6 +3134,7 @@
         case 'leaves': renderLeavesView(); break;
         case 'payroll': renderPayrollView(); break;
         case 'payroll-reports': renderPayrollReportsView(); break;
+        case 'expenses': renderExpensesView(); break;
         case 'roles-permissions': renderRolesPermissionsView(); break;
         case 'org-settings': renderOrgSettingsView(); break;
         default: renderDashboardView();
@@ -14675,6 +14686,1094 @@
       `;
 
       printHtmlDocument(printableHtml, printCss);
+    }
+
+    // ============================================================================
+    // --- PHASE 7.3: EXPENSES MANAGEMENT ---
+    // ============================================================================
+
+    function getExpenseStatusBadge(status) {
+      switch (status) {
+        case 'DRAFT':
+          return '<span class="badge" style="background: rgba(107, 114, 128, 0.15); color: #4b5563; border: 1px solid rgba(107, 114, 128, 0.3);">Draft</span>';
+        case 'PENDING_APPROVAL':
+          return '<span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #b45309; border: 1px solid rgba(245, 158, 11, 0.3);">Pending Approval</span>';
+        case 'APPROVED':
+          return '<span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #1d4ed8; border: 1px solid rgba(59, 130, 246, 0.3);">Approved</span>';
+        case 'REJECTED':
+          return '<span class="badge" style="background: rgba(239, 68, 68, 0.15); color: #b91c1c; border: 1px solid rgba(239, 68, 68, 0.3);">Rejected</span>';
+        case 'PAID':
+          return '<span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #047857; border: 1px solid rgba(16, 185, 129, 0.3);">Paid</span>';
+        default:
+          return `<span class="badge">${escapeHtml(status || '—')}</span>`;
+      }
+    }
+
+    async function renderExpensesView() {
+      const container = document.getElementById('mainContainer');
+      container.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-secondary);"><div class="spinner-sm" style="display:inline-block; margin-bottom: 8px;"></div><div>Loading expenses and financial summaries...</div></div>';
+
+      try {
+        // Fetch categories, summary, and expenses in parallel
+        let queryParams = '?limit=100';
+        if (state.expenseFilters.status) queryParams += `&status=${encodeURIComponent(state.expenseFilters.status)}`;
+        if (state.expenseFilters.categoryId) queryParams += `&categoryId=${encodeURIComponent(state.expenseFilters.categoryId)}`;
+        if (state.expenseFilters.startDate) queryParams += `&startDate=${encodeURIComponent(state.expenseFilters.startDate)}`;
+        if (state.expenseFilters.endDate) queryParams += `&endDate=${encodeURIComponent(state.expenseFilters.endDate)}`;
+        if (state.expenseFilters.search) queryParams += `&search=${encodeURIComponent(state.expenseFilters.search)}`;
+
+        const [categoriesRes, summaryRes, expensesRes] = await Promise.all([
+          apiFetch('/v1/expenses/categories').catch(() => ({ items: [] })),
+          apiFetch('/v1/expenses/summary').catch(() => null),
+          apiFetch(`/v1/expenses${queryParams}`).catch(() => ({ items: [], total: 0 })),
+        ]);
+
+        state.cachedExpenseCategories = categoriesRes?.items || [];
+        state.cachedExpenseSummary = summaryRes;
+        state.cachedExpenses = expensesRes?.items || [];
+
+        const currency = getTenantCurrency();
+        const totalExpenses = summaryRes?.totalExpenses || '0.0000';
+        const pendingAmount = summaryRes?.pendingApprovalAmount || '0.0000';
+        const pendingCount = summaryRes?.pendingApprovalCount || 0;
+        const approvedUnpaid = summaryRes?.approvedUnpaidAmount || '0.0000';
+        const approvedCount = summaryRes?.approvedUnpaidCount || 0;
+        const paidAmount = summaryRes?.paidAmount || '0.0000';
+        const paidCount = summaryRes?.paidCount || 0;
+
+        container.innerHTML = `
+          <div class="view-header">
+            <div>
+              <h1 class="view-title">Expenses Management</h1>
+              <div class="view-subtitle">Track, approve, and disburse operational expenses, vendor bills, and petty cash</div>
+            </div>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+              <button class="btn btn-secondary" id="btnOpenExpenseSummary" onclick="openExpenseSummaryReportModal()">Summary Report</button>
+              <button class="btn btn-secondary" id="btnOpenExpenseCategories" onclick="openExpenseCategoriesModal()">Categories</button>
+              <button class="btn btn-primary" id="btnOpenCreateExpense" onclick="openCreateExpenseModal()">+ New Expense</button>
+            </div>
+          </div>
+
+          <!-- KPI Summary Cards -->
+          <div class="kpi-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); margin-bottom: 16px;">
+            <div class="kpi-card">
+              <div class="kpi-label">Total Expenses</div>
+              <div class="kpi-value">${formatTenantMoney(totalExpenses, currency)}</div>
+              <div class="kpi-trend" style="color: var(--text-secondary);">${summaryRes?.totalCount || 0} total records</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Pending Approval</div>
+              <div class="kpi-value" style="color: var(--status-warning);">${formatTenantMoney(pendingAmount, currency)}</div>
+              <div class="kpi-trend" style="color: var(--status-warning);">${pendingCount} awaiting approval</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Approved &bull; Unpaid</div>
+              <div class="kpi-value" style="color: var(--accent-primary);">${formatTenantMoney(approvedUnpaid, currency)}</div>
+              <div class="kpi-trend" style="color: var(--accent-primary);">${approvedCount} ready for payment</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Paid Expenses</div>
+              <div class="kpi-value" style="color: var(--status-success);">${formatTenantMoney(paidAmount, currency)}</div>
+              <div class="kpi-trend" style="color: var(--status-success);">${paidCount} settled payouts</div>
+            </div>
+          </div>
+
+          <!-- Filter & Search Bar -->
+          <div class="card" style="margin-bottom: 16px; padding: 14px 18px;">
+            <div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between;">
+              <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; flex: 1;">
+                <input
+                  type="text"
+                  id="expenseSearchInput"
+                  class="input-sm"
+                  style="width: 200px;"
+                  placeholder="Search ref, title, payee..."
+                  value="${escapeHtml(state.expenseFilters.search || '')}"
+                  onkeydown="if(event.key==='Enter') applyExpenseFilters()"
+                />
+                <select id="expenseStatusFilter" class="input-sm" onchange="applyExpenseFilters()">
+                  <option value="">All Statuses</option>
+                  <option value="DRAFT" ${state.expenseFilters.status === 'DRAFT' ? 'selected' : ''}>Draft</option>
+                  <option value="PENDING_APPROVAL" ${state.expenseFilters.status === 'PENDING_APPROVAL' ? 'selected' : ''}>Pending Approval</option>
+                  <option value="APPROVED" ${state.expenseFilters.status === 'APPROVED' ? 'selected' : ''}>Approved</option>
+                  <option value="REJECTED" ${state.expenseFilters.status === 'REJECTED' ? 'selected' : ''}>Rejected</option>
+                  <option value="PAID" ${state.expenseFilters.status === 'PAID' ? 'selected' : ''}>Paid</option>
+                </select>
+                <select id="expenseCategoryFilter" class="input-sm" onchange="applyExpenseFilters()">
+                  <option value="">All Categories</option>
+                  ${state.cachedExpenseCategories.map(c => `
+                    <option value="${c.id}" ${state.expenseFilters.categoryId === c.id ? 'selected' : ''}>${escapeHtml(c.name)}</option>
+                  `).join('')}
+                </select>
+                <div style="display: flex; align-items: center; gap: 4px;">
+                  <span style="font-size: 11px; color: var(--text-secondary);">From:</span>
+                  <input type="date" id="expenseStartDate" class="input-sm" style="width: 125px;" value="${escapeHtml(state.expenseFilters.startDate || '')}" onchange="applyExpenseFilters()" />
+                  <span style="font-size: 11px; color: var(--text-secondary);">To:</span>
+                  <input type="date" id="expenseEndDate" class="input-sm" style="width: 125px;" value="${escapeHtml(state.expenseFilters.endDate || '')}" onchange="applyExpenseFilters()" />
+                </div>
+              </div>
+              <div style="display: flex; gap: 8px;">
+                <button class="btn btn-secondary btn-sm" onclick="clearExpenseFilters()">Clear Filters</button>
+                <button class="btn btn-primary btn-sm" onclick="applyExpenseFilters()">Search</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Expenses Table & Mobile Card View -->
+          <div class="card" style="padding: 0;">
+            ${state.cachedExpenses.length === 0 ? `
+              <div style="padding: 48px 24px; text-align: center; color: var(--text-secondary);">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 48px; height: 48px; margin: 0 auto 12px; color: var(--border-subtle); display: block;">
+                  <rect x="2" y="4" width="20" height="16" rx="2"></rect>
+                  <line x1="2" y1="10" x2="22" y2="10"></line>
+                </svg>
+                <div style="font-size: 15px; font-weight: 600; margin-bottom: 6px; color: var(--text-primary);">No Expenses Found</div>
+                <div style="font-size: 13px; max-width: 380px; margin: 0 auto 16px;">No expense records match your current filter criteria, or none have been created yet.</div>
+                <button class="btn btn-primary btn-sm" onclick="openCreateExpenseModal()">+ Create Expense</button>
+              </div>
+            ` : `
+              <!-- Desktop Table View -->
+              <div class="table-responsive desktop-only">
+                <table class="table" style="margin: 0;">
+                  <thead>
+                    <tr>
+                      <th>Ref Number</th>
+                      <th>Date</th>
+                      <th>Title &bull; Payee</th>
+                      <th>Category</th>
+                      <th>Branch</th>
+                      <th class="text-right">Amount</th>
+                      <th>Status</th>
+                      <th class="text-center">Receipts</th>
+                      <th class="text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${state.cachedExpenses.map(exp => `
+                      <tr>
+                        <td>
+                          <span style="font-family: monospace; font-weight: 600; color: var(--accent-primary); cursor: pointer;" onclick="openExpenseDetailsModal('${exp.id}')">
+                            ${escapeHtml(exp.referenceNumber)}
+                          </span>
+                        </td>
+                        <td>${escapeHtml(exp.expenseDate || '—')}</td>
+                        <td>
+                          <div style="font-weight: 500; color: var(--text-primary);">${escapeHtml(exp.title)}</div>
+                          ${exp.vendorPayee ? `<div style="font-size: 11px; color: var(--text-secondary);">${escapeHtml(exp.vendorPayee)}</div>` : ''}
+                        </td>
+                        <td>
+                          <span class="badge" style="background: var(--bg-primary);">${escapeHtml(exp.categoryName || 'General')}</span>
+                        </td>
+                        <td>${escapeHtml(exp.branchName || 'All Branches')}</td>
+                        <td class="text-right" style="font-weight: 600; font-variant-numeric: tabular-nums;">
+                          ${formatTenantMoney(exp.amount, exp.currencyCode || currency)}
+                        </td>
+                        <td>${getExpenseStatusBadge(exp.status)}</td>
+                        <td class="text-center">
+                          ${(exp.attachmentCount || 0) > 0 ? `
+                            <span class="badge" style="cursor: pointer;" onclick="openExpenseDetailsModal('${exp.id}')" title="${exp.attachmentCount} attached receipt(s)">
+                              📎 ${exp.attachmentCount}
+                            </span>
+                          ` : `<span style="color: var(--text-secondary); font-size: 11px;">—</span>`}
+                        </td>
+                        <td class="text-right">
+                          <div style="display: flex; gap: 4px; justify-content: flex-end; flex-wrap: wrap;">
+                            <button class="btn btn-secondary btn-sm" style="padding: 3px 8px; font-size: 11px;" onclick="openExpenseDetailsModal('${exp.id}')">View</button>
+                            ${exp.status === 'DRAFT' || exp.status === 'REJECTED' ? `
+                              <button class="btn btn-secondary btn-sm" style="padding: 3px 8px; font-size: 11px;" onclick="openCreateExpenseModal('${exp.id}')">Edit</button>
+                              <button class="btn btn-primary btn-sm" style="padding: 3px 8px; font-size: 11px;" onclick="submitExpenseFromUi('${exp.id}')">Submit</button>
+                            ` : ''}
+                            ${exp.status === 'PENDING_APPROVAL' ? `
+                              <button class="btn btn-primary btn-sm" style="padding: 3px 8px; font-size: 11px; background: var(--status-success); border-color: var(--status-success);" onclick="approveExpenseFromUi('${exp.id}')">Approve</button>
+                              <button class="btn btn-secondary btn-sm" style="padding: 3px 8px; font-size: 11px; color: var(--status-danger);" onclick="openRejectExpenseModal('${exp.id}')">Reject</button>
+                            ` : ''}
+                            ${exp.status === 'APPROVED' ? `
+                              <button class="btn btn-primary btn-sm" style="padding: 3px 8px; font-size: 11px;" onclick="openRecordPaymentModal('${exp.id}')">Pay</button>
+                            ` : ''}
+                            ${exp.status === 'DRAFT' ? `
+                              <button class="btn btn-secondary btn-sm" style="padding: 3px 8px; font-size: 11px; color: var(--status-danger);" onclick="deleteExpenseFromUi('${exp.id}')">Del</button>
+                            ` : ''}
+                          </div>
+                        </td>
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+              </div>
+
+              <!-- Mobile Card View -->
+              <div class="mobile-only" style="padding: 12px;">
+                ${state.cachedExpenses.map(exp => `
+                  <div class="card" style="margin-bottom: 10px; padding: 14px; border: 1px solid var(--border-subtle);">
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+                      <div>
+                        <span style="font-family: monospace; font-weight: 600; font-size: 13px; color: var(--accent-primary);" onclick="openExpenseDetailsModal('${exp.id}')">
+                          ${escapeHtml(exp.referenceNumber)}
+                        </span>
+                        <div style="font-size: 11px; color: var(--text-secondary);">${escapeHtml(exp.expenseDate || '')}</div>
+                      </div>
+                      ${getExpenseStatusBadge(exp.status)}
+                    </div>
+
+                    <div style="font-weight: 600; font-size: 14px; color: var(--text-primary); margin-bottom: 4px;">
+                      ${escapeHtml(exp.title)}
+                    </div>
+                    ${exp.vendorPayee ? `<div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 6px;">Payee: ${escapeHtml(exp.vendorPayee)}</div>` : ''}
+
+                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-top: 1px solid var(--border-subtle); margin-top: 6px;">
+                      <span class="badge" style="background: var(--bg-primary);">${escapeHtml(exp.categoryName || 'General')}</span>
+                      <div style="font-weight: 700; font-size: 15px; color: var(--text-primary); font-variant-numeric: tabular-nums;">
+                        ${formatTenantMoney(exp.amount, exp.currencyCode || currency)}
+                      </div>
+                    </div>
+
+                    <div style="display: flex; gap: 6px; justify-content: flex-end; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border-subtle); flex-wrap: wrap;">
+                      <button class="btn btn-secondary btn-sm" onclick="openExpenseDetailsModal('${exp.id}')">Details</button>
+                      ${exp.status === 'DRAFT' || exp.status === 'REJECTED' ? `
+                        <button class="btn btn-secondary btn-sm" onclick="openCreateExpenseModal('${exp.id}')">Edit</button>
+                        <button class="btn btn-primary btn-sm" onclick="submitExpenseFromUi('${exp.id}')">Submit</button>
+                      ` : ''}
+                      ${exp.status === 'PENDING_APPROVAL' ? `
+                        <button class="btn btn-primary btn-sm" style="background: var(--status-success); border-color: var(--status-success);" onclick="approveExpenseFromUi('${exp.id}')">Approve</button>
+                        <button class="btn btn-secondary btn-sm" style="color: var(--status-danger);" onclick="openRejectExpenseModal('${exp.id}')">Reject</button>
+                      ` : ''}
+                      ${exp.status === 'APPROVED' ? `
+                        <button class="btn btn-primary btn-sm" onclick="openRecordPaymentModal('${exp.id}')">Pay</button>
+                      ` : ''}
+                    </div>
+                  </div>
+                `).join('')}
+              </div>
+            `}
+          </div>
+        `;
+      } catch (err) {
+        container.innerHTML = `
+          <div style="padding: 40px; text-align: center; color: var(--status-danger);">
+            <div style="font-size: 16px; font-weight: 600; margin-bottom: 8px;">Access Denied or Failed to Load Expenses</div>
+            <div style="font-size: 13px; margin-bottom: 16px;">${escapeHtml(err.message)}</div>
+            <button class="btn btn-primary btn-sm" onclick="renderExpensesView()">Try Again</button>
+          </div>
+        `;
+      }
+    }
+
+    function applyExpenseFilters() {
+      const search = document.getElementById('expenseSearchInput')?.value?.trim() || '';
+      const status = document.getElementById('expenseStatusFilter')?.value || '';
+      const categoryId = document.getElementById('expenseCategoryFilter')?.value || '';
+      const startDate = document.getElementById('expenseStartDate')?.value || '';
+      const endDate = document.getElementById('expenseEndDate')?.value || '';
+
+      state.expenseFilters = { search, status, categoryId, startDate, endDate };
+      renderExpensesView();
+    }
+
+    function clearExpenseFilters() {
+      state.expenseFilters = { search: '', status: '', categoryId: '', startDate: '', endDate: '' };
+      renderExpensesView();
+    }
+
+    // --- Create / Edit Expense Modal ---
+    async function openCreateExpenseModal(expenseId = null) {
+      const existing = expenseId ? state.cachedExpenses.find(e => e.id === expenseId) : null;
+      const isEditing = Boolean(existing);
+      const currency = getTenantCurrency();
+
+      // Ensure categories are loaded
+      if (!state.cachedExpenseCategories || state.cachedExpenseCategories.length === 0) {
+        const catRes = await apiFetch('/v1/expenses/categories').catch(() => ({ items: [] }));
+        state.cachedExpenseCategories = catRes?.items || [];
+      }
+
+      // Fetch branches
+      const branchesRes = await apiFetch('/v1/org/branches').catch(() => ({ items: [] }));
+      const branches = branchesRes?.items || [];
+
+      const today = new Date().toISOString().substring(0, 10);
+      const defaultDate = existing ? existing.expenseDate : today;
+
+      const bodyHtml = `
+        <form id="expenseForm" onsubmit="event.preventDefault(); saveExpense(${isEditing}, '${existing ? existing.id : ''}');">
+          <div style="display: grid; grid-template-columns: 1fr; gap: 12px;">
+            <div>
+              <label class="form-label" style="font-weight: 600;">Title *</label>
+              <input type="text" id="expTitle" class="input" required maxlength="200" placeholder="e.g. November Store Lease / Office Supplies" value="${escapeHtml(existing?.title || '')}" />
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+              <div>
+                <label class="form-label" style="font-weight: 600;">Category *</label>
+                <select id="expCategory" class="input" required>
+                  <option value="">Select Category...</option>
+                  ${state.cachedExpenseCategories.filter(c => c.isActive || (existing && existing.categoryId === c.id)).map(c => `
+                    <option value="${c.id}" ${existing?.categoryId === c.id ? 'selected' : ''}>${escapeHtml(c.name)}</option>
+                  `).join('')}
+                </select>
+              </div>
+
+              <div>
+                <label class="form-label" style="font-weight: 600;">Branch Location</label>
+                <select id="expBranch" class="input">
+                  <option value="">All Branches / HQ</option>
+                  ${branches.map(b => `
+                    <option value="${b.id}" ${existing?.branchId === b.id ? 'selected' : ''}>${escapeHtml(b.name)}</option>
+                  `).join('')}
+                </select>
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1.5fr 1fr; gap: 10px;">
+              <div>
+                <label class="form-label" style="font-weight: 600;">Amount *</label>
+                <input type="number" step="0.0001" min="0.0001" id="expAmount" class="input" required placeholder="0.00" value="${existing?.amount ? parseFloat(existing.amount) : ''}" />
+              </div>
+              <div>
+                <label class="form-label" style="font-weight: 600;">Currency</label>
+                <input type="text" id="expCurrency" class="input" maxlength="3" uppercase value="${escapeHtml(existing?.currencyCode || currency)}" readonly style="background: var(--bg-primary);" />
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+              <div>
+                <label class="form-label" style="font-weight: 600;">Expense Date *</label>
+                <input type="date" id="expDate" class="input" required value="${defaultDate}" />
+              </div>
+              <div>
+                <label class="form-label" style="font-weight: 600;">Payment Method</label>
+                <select id="expPaymentMethod" class="input">
+                  <option value="CASH" ${existing?.paymentMethod === 'CASH' ? 'selected' : ''}>Cash / Petty Cash</option>
+                  <option value="BANK_TRANSFER" ${existing?.paymentMethod === 'BANK_TRANSFER' ? 'selected' : ''}>Bank Transfer</option>
+                  <option value="CARD" ${existing?.paymentMethod === 'CARD' ? 'selected' : ''}>Credit / Debit Card</option>
+                  <option value="CHEQUE" ${existing?.paymentMethod === 'CHEQUE' ? 'selected' : ''}>Cheque</option>
+                  <option value="OTHER" ${existing?.paymentMethod === 'OTHER' ? 'selected' : ''}>Other</option>
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label class="form-label" style="font-weight: 600;">Vendor / Payee</label>
+              <input type="text" id="expPayee" class="input" maxlength="200" placeholder="e.g. Electric Power Utility Corp" value="${escapeHtml(existing?.vendorPayee || '')}" />
+            </div>
+
+            <div>
+              <label class="form-label">Description &bull; Notes</label>
+              <textarea id="expDescription" class="input" rows="2" placeholder="Optional purpose, bill invoice numbers, or notes">${escapeHtml(existing?.description || existing?.notes || '')}</textarea>
+            </div>
+          </div>
+        </form>
+      `;
+
+      const footerHtml = `
+        <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-primary" id="btnSaveExpense" onclick="saveExpense(${isEditing}, '${existing ? existing.id : ''}')">
+          ${isEditing ? 'Save Changes' : 'Create Draft Expense'}
+        </button>
+      `;
+
+      openModal({
+        title: isEditing ? `Edit Expense: ${existing.referenceNumber}` : 'Record New Expense',
+        bodyHtml,
+        footerHtml,
+        maxWidth: '560px',
+      });
+    }
+
+    async function saveExpense(isEditing, expenseId) {
+      const title = document.getElementById('expTitle')?.value?.trim();
+      const categoryId = document.getElementById('expCategory')?.value;
+      const branchId = document.getElementById('expBranch')?.value || null;
+      const amountVal = parseFloat(document.getElementById('expAmount')?.value || '0');
+      const currencyCode = document.getElementById('expCurrency')?.value?.trim().toUpperCase() || 'USD';
+      const expenseDate = document.getElementById('expDate')?.value;
+      const paymentMethod = document.getElementById('expPaymentMethod')?.value || 'CASH';
+      const vendorPayee = document.getElementById('expPayee')?.value?.trim() || null;
+      const description = document.getElementById('expDescription')?.value?.trim() || null;
+
+      if (!title || !categoryId || !expenseDate || isNaN(amountVal) || amountVal <= 0) {
+        showToast('Please fill all required fields with a positive expense amount', 'error');
+        return;
+      }
+
+      const saveBtn = document.getElementById('btnSaveExpense');
+      if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.innerText = 'Saving...';
+      }
+
+      try {
+        const payload = {
+          title,
+          categoryId,
+          branchId,
+          amount: amountVal.toFixed(4),
+          currencyCode,
+          expenseDate,
+          paymentMethod,
+          vendorPayee,
+          description,
+        };
+
+        if (isEditing) {
+          await apiFetch(`/v1/expenses/${expenseId}`, {
+            method: 'PATCH',
+            body: JSON.stringify(payload),
+          });
+          showToast('Expense updated successfully', 'success');
+        } else {
+          await apiFetch('/v1/expenses', {
+            method: 'POST',
+            body: JSON.stringify(payload),
+          });
+          showToast('Expense created in DRAFT status', 'success');
+        }
+
+        closeModal();
+        renderExpensesView();
+      } catch (err) {
+        showToast(err.message, 'error');
+        if (saveBtn) {
+          saveBtn.disabled = false;
+          saveBtn.innerText = isEditing ? 'Save Changes' : 'Create Draft Expense';
+        }
+      }
+    }
+
+    // --- Expense Details & Timeline Modal ---
+    async function openExpenseDetailsModal(expenseId) {
+      openModal({
+        title: 'Expense Details',
+        bodyHtml: '<div style="padding: 30px; text-align: center;"><div class="spinner-sm" style="display:inline-block;"></div><div>Loading details...</div></div>',
+        maxWidth: '680px',
+      });
+
+      try {
+        const [exp, attachmentsRes] = await Promise.all([
+          apiFetch(`/v1/expenses/${expenseId}`),
+          apiFetch(`/v1/expenses/${expenseId}/attachments`).catch(() => ({ items: [] })),
+        ]);
+
+        const currency = exp.currencyCode || getTenantCurrency();
+        const attachments = attachmentsRes?.items || [];
+
+        const bodyHtml = `
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 12px;">
+            <div>
+              <div style="font-family: monospace; font-size: 14px; font-weight: 700; color: var(--accent-primary);">${escapeHtml(exp.referenceNumber)}</div>
+              <div style="font-size: 18px; font-weight: 700; color: var(--text-primary); margin-top: 2px;">${escapeHtml(exp.title)}</div>
+              <div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">Recorded on ${escapeHtml(exp.expenseDate)}</div>
+            </div>
+            <div style="text-align: right;">
+              <div>${getExpenseStatusBadge(exp.status)}</div>
+              <div style="font-size: 20px; font-weight: 800; color: var(--text-primary); margin-top: 6px; font-variant-numeric: tabular-nums;">
+                ${formatTenantMoney(exp.amount, currency)}
+              </div>
+            </div>
+          </div>
+
+          ${exp.rejectionReason ? `
+            <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 6px; padding: 12px; margin-bottom: 16px;">
+              <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: #b91c1c; margin-bottom: 2px;">Rejection Reason</div>
+              <div style="font-size: 13px; color: #7f1d1d;">${escapeHtml(exp.rejectionReason)}</div>
+            </div>
+          ` : ''}
+
+          <!-- Attributes Grid -->
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 13px; margin-bottom: 16px; background: var(--bg-primary); padding: 14px; border-radius: 8px;">
+            <div>
+              <span style="color: var(--text-secondary); font-size: 11px; text-transform: uppercase; font-weight: 600; display: block;">Category</span>
+              <strong style="color: var(--text-primary);">${escapeHtml(exp.categoryName || '—')}</strong>
+            </div>
+            <div>
+              <span style="color: var(--text-secondary); font-size: 11px; text-transform: uppercase; font-weight: 600; display: block;">Branch / Location</span>
+              <strong style="color: var(--text-primary);">${escapeHtml(exp.branchName || 'All Outlets / HQ')}</strong>
+            </div>
+            <div>
+              <span style="color: var(--text-secondary); font-size: 11px; text-transform: uppercase; font-weight: 600; display: block;">Vendor / Payee</span>
+              <span style="color: var(--text-primary);">${escapeHtml(exp.vendorPayee || '—')}</span>
+            </div>
+            <div>
+              <span style="color: var(--text-secondary); font-size: 11px; text-transform: uppercase; font-weight: 600; display: block;">Payment Method</span>
+              <span style="color: var(--text-primary);">${escapeHtml(exp.paymentMethod || 'CASH')}</span>
+            </div>
+            <div>
+              <span style="color: var(--text-secondary); font-size: 11px; text-transform: uppercase; font-weight: 600; display: block;">Created By</span>
+              <span style="color: var(--text-primary);">${escapeHtml(exp.createdByName || 'Authorized User')}</span>
+            </div>
+            <div>
+              <span style="color: var(--text-secondary); font-size: 11px; text-transform: uppercase; font-weight: 600; display: block;">Payment Reference</span>
+              <span style="color: var(--text-primary);">${escapeHtml(exp.paymentReference || '—')}</span>
+            </div>
+          </div>
+
+          ${exp.description ? `
+            <div style="margin-bottom: 16px;">
+              <div style="font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--text-secondary); margin-bottom: 4px;">Notes / Description</div>
+              <div style="font-size: 13px; color: var(--text-primary); background: var(--surface-card); border: 1px solid var(--border-subtle); padding: 8px 12px; border-radius: 6px;">
+                ${escapeHtml(exp.description)}
+              </div>
+            </div>
+          ` : ''}
+
+          <!-- Attachments Section -->
+          <div style="border-top: 1px solid var(--border-subtle); padding-top: 14px; margin-top: 14px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+              <h4 style="font-size: 13px; font-weight: 700; margin: 0; color: var(--text-primary);">
+                Receipt &amp; Invoice Attachments (${attachments.length})
+              </h4>
+              <label class="btn btn-secondary btn-sm" style="cursor: pointer; font-size: 11px;">
+                + Upload Receipt
+                <input type="file" id="expenseAttachmentInput" accept="image/png,image/jpeg,image/webp,application/pdf" style="display: none;" onchange="uploadExpenseAttachmentFromUi('${exp.id}')" />
+              </label>
+            </div>
+
+            ${attachments.length === 0 ? `
+              <div style="font-size: 12px; color: var(--text-secondary); padding: 12px; text-align: center; background: var(--bg-primary); border-radius: 6px;">
+                No receipt or invoice documents attached yet. Upload a PDF, PNG, or JPEG receipt above.
+              </div>
+            ` : `
+              <div style="display: flex; flex-direction: column; gap: 6px;">
+                ${attachments.map(att => `
+                  <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; background: var(--bg-primary); border-radius: 6px; font-size: 12px;">
+                    <div style="display: flex; align-items: center; gap: 8px; overflow: hidden;">
+                      <span>📄</span>
+                      <strong style="color: var(--text-primary);">${escapeHtml(att.fileName)}</strong>
+                      <span style="color: var(--text-secondary); font-size: 11px;">(${(att.fileSizeBytes / 1024).toFixed(1)} KB)</span>
+                    </div>
+                    <div style="display: flex; gap: 6px;">
+                      <button class="btn btn-secondary btn-sm" style="padding: 2px 8px; font-size: 11px;" onclick="downloadExpenseAttachment('${exp.id}', '${att.id}', '${escapeHtml(att.fileName)}', '${escapeHtml(att.mimeType)}')">Download</button>
+                      <button class="btn btn-secondary btn-sm" style="padding: 2px 8px; font-size: 11px; color: var(--status-danger);" onclick="deleteExpenseAttachmentFromUi('${exp.id}', '${att.id}')">Delete</button>
+                    </div>
+                  </div>
+                `).join('')}
+              </div>
+            `}
+          </div>
+        `;
+
+        const footerHtml = `
+          <div style="display: flex; justify-content: space-between; width: 100%; align-items: center;">
+            <div>
+              ${exp.status === 'DRAFT' ? `
+                <button class="btn btn-secondary btn-sm" style="color: var(--status-danger);" onclick="deleteExpenseFromUi('${exp.id}')">Delete Draft</button>
+              ` : ''}
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <button class="btn btn-secondary" onclick="closeModal()">Close</button>
+              ${exp.status === 'DRAFT' || exp.status === 'REJECTED' ? `
+                <button class="btn btn-secondary" onclick="closeModal(); openCreateExpenseModal('${exp.id}')">Edit</button>
+                <button class="btn btn-primary" onclick="submitExpenseFromUi('${exp.id}')">Submit for Approval</button>
+              ` : ''}
+              ${exp.status === 'PENDING_APPROVAL' ? `
+                <button class="btn btn-secondary" style="color: var(--status-danger);" onclick="openRejectExpenseModal('${exp.id}')">Reject</button>
+                <button class="btn btn-primary" style="background: var(--status-success); border-color: var(--status-success);" onclick="approveExpenseFromUi('${exp.id}')">Approve Expense</button>
+              ` : ''}
+              ${exp.status === 'APPROVED' ? `
+                <button class="btn btn-primary" onclick="openRecordPaymentModal('${exp.id}')">Record Payment</button>
+              ` : ''}
+            </div>
+          </div>
+        `;
+
+        openModal({
+          title: `Expense: ${exp.referenceNumber}`,
+          bodyHtml,
+          footerHtml,
+          maxWidth: '680px',
+        });
+      } catch (err) {
+        showToast(err.message, 'error');
+        closeModal();
+      }
+    }
+
+    // --- Action Handlers: Submit, Approve, Reject, Pay, Delete ---
+    async function submitExpenseFromUi(expenseId) {
+      try {
+        await apiFetch(`/v1/expenses/${expenseId}/submit`, {
+          method: 'POST',
+        });
+        showToast('Expense submitted for manager approval', 'success');
+        closeModal();
+        renderExpensesView();
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    }
+
+    async function approveExpenseFromUi(expenseId) {
+      try {
+        await apiFetch(`/v1/expenses/${expenseId}/approve`, {
+          method: 'POST',
+        });
+        showToast('Expense approved successfully', 'success');
+        closeModal();
+        renderExpensesView();
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    }
+
+    function openRejectExpenseModal(expenseId) {
+      const bodyHtml = `
+        <div style="margin-bottom: 12px; font-size: 13px; color: var(--text-secondary);">
+          Please state the reason for rejecting this expense. The creator will be notified and can edit and resubmit.
+        </div>
+        <textarea id="rejectionReasonInput" class="input" rows="3" placeholder="State reason for rejection (mandatory, min 3 characters)..." required></textarea>
+      `;
+
+      const footerHtml = `
+        <button class="btn btn-secondary" onclick="openExpenseDetailsModal('${expenseId}')">Back</button>
+        <button class="btn btn-primary" style="background: var(--status-danger); border-color: var(--status-danger);" onclick="confirmRejectExpense('${expenseId}')">Reject Expense</button>
+      `;
+
+      openModal({
+        title: 'Reject Expense Submission',
+        bodyHtml,
+        footerHtml,
+        maxWidth: '480px',
+      });
+    }
+
+    async function confirmRejectExpense(expenseId) {
+      const reason = document.getElementById('rejectionReasonInput')?.value?.trim();
+      if (!reason || reason.length < 3) {
+        showToast('Please provide a rejection reason of at least 3 characters', 'error');
+        return;
+      }
+
+      try {
+        await apiFetch(`/v1/expenses/${expenseId}/reject`, {
+          method: 'POST',
+          body: JSON.stringify({ rejectionReason: reason }),
+        });
+        showToast('Expense marked as rejected', 'success');
+        closeModal();
+        renderExpensesView();
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    }
+
+    function openRecordPaymentModal(expenseId) {
+      const exp = state.cachedExpenses.find(e => e.id === expenseId);
+      const today = new Date().toISOString().substring(0, 10);
+      const currency = exp?.currencyCode || getTenantCurrency();
+
+      const bodyHtml = `
+        <div style="margin-bottom: 14px; background: var(--bg-primary); padding: 12px; border-radius: 6px;">
+          <div style="font-size: 12px; color: var(--text-secondary);">Disbursing Payment For:</div>
+          <div style="font-weight: 700; font-size: 15px; color: var(--text-primary);">${escapeHtml(exp?.title || 'Expense')} (${escapeHtml(exp?.referenceNumber || '')})</div>
+          <div style="font-size: 18px; font-weight: 800; color: var(--status-success); margin-top: 4px;">${formatTenantMoney(exp?.amount || '0', currency)}</div>
+        </div>
+
+        <form id="expensePaymentForm" onsubmit="event.preventDefault(); confirmRecordPayment('${expenseId}');">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px;">
+            <div>
+              <label class="form-label" style="font-weight: 600;">Payment Date *</label>
+              <input type="date" id="expPayDate" class="input" required value="${today}" />
+            </div>
+            <div>
+              <label class="form-label" style="font-weight: 600;">Payment Method *</label>
+              <select id="expPayMethod" class="input" required>
+                <option value="BANK_TRANSFER">Bank Transfer / Wire</option>
+                <option value="CASH">Cash / Drawer Float</option>
+                <option value="CARD">Company Card</option>
+                <option value="CHEQUE">Cheque</option>
+                <option value="OTHER">Other Payout</option>
+              </select>
+            </div>
+          </div>
+
+          <div style="margin-bottom: 12px;">
+            <label class="form-label">Payment Reference</label>
+            <input type="text" id="expPayRef" class="input" placeholder="e.g. Wire confirmation #, cheque number, receipt reference" />
+          </div>
+
+          <div>
+            <label class="form-label">Disbursement Notes</label>
+            <textarea id="expPayNotes" class="input" rows="2" placeholder="Optional notes for financial audit"></textarea>
+          </div>
+        </form>
+      `;
+
+      const footerHtml = `
+        <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="confirmRecordPayment('${expenseId}')">Confirm Payment</button>
+      `;
+
+      openModal({
+        title: 'Record Expense Payment',
+        bodyHtml,
+        footerHtml,
+        maxWidth: '500px',
+      });
+    }
+
+    async function confirmRecordPayment(expenseId) {
+      const paymentDate = document.getElementById('expPayDate')?.value;
+      const paymentMethod = document.getElementById('expPayMethod')?.value;
+      const paymentReference = document.getElementById('expPayRef')?.value?.trim() || null;
+      const notes = document.getElementById('expPayNotes')?.value?.trim() || null;
+
+      if (!paymentDate || !paymentMethod) {
+        showToast('Please select payment date and method', 'error');
+        return;
+      }
+
+      try {
+        await apiFetch(`/v1/expenses/${expenseId}/pay`, {
+          method: 'POST',
+          body: JSON.stringify({
+            paymentDate,
+            paymentMethod,
+            paymentReference,
+            notes,
+          }),
+        });
+        showToast('Expense payment recorded successfully', 'success');
+        closeModal();
+        renderExpensesView();
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    }
+
+    async function deleteExpenseFromUi(expenseId) {
+      if (!confirm('Are you sure you want to delete this draft expense record? This action cannot be undone.')) {
+        return;
+      }
+
+      try {
+        await apiFetch(`/v1/expenses/${expenseId}`, {
+          method: 'DELETE',
+        });
+        showToast('Expense record deleted', 'success');
+        closeModal();
+        renderExpensesView();
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    }
+
+    // --- Attachments Handling ---
+    async function uploadExpenseAttachmentFromUi(expenseId) {
+      const fileInput = document.getElementById('expenseAttachmentInput');
+      if (!fileInput || !fileInput.files || fileInput.files.length === 0) return;
+
+      const file = fileInput.files[0];
+      if (file.size > 10 * 1024 * 1024) {
+        showToast('File exceeds maximum size of 10 MB', 'error');
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = async () => {
+        try {
+          const base64Data = String(reader.result).split(',')[1];
+          await apiFetch(`/v1/expenses/${expenseId}/attachments`, {
+            method: 'POST',
+            body: JSON.stringify({
+              fileName: file.name,
+              mimeType: file.type || 'application/pdf',
+              dataBase64: base64Data,
+            }),
+          });
+          showToast('Receipt attachment uploaded successfully', 'success');
+          openExpenseDetailsModal(expenseId);
+        } catch (err) {
+          showToast(err.message, 'error');
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+
+    async function downloadExpenseAttachment(expenseId, attachmentId, fileName, mimeType) {
+      try {
+        const res = await apiFetch(`/v1/expenses/${expenseId}/attachments/${attachmentId}/content`);
+        const byteCharacters = atob(res.dataBase64);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], { type: mimeType });
+        const blobUrl = URL.createObjectURL(blob);
+
+        const a = document.createElement('a');
+        a.href = blobUrl;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(blobUrl);
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    }
+
+    async function deleteExpenseAttachmentFromUi(expenseId, attachmentId) {
+      if (!confirm('Are you sure you want to delete this attached document?')) return;
+      try {
+        await apiFetch(`/v1/expenses/${expenseId}/attachments/${attachmentId}`, {
+          method: 'DELETE',
+        });
+        showToast('Attachment deleted', 'success');
+        openExpenseDetailsModal(expenseId);
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    }
+
+    // --- Expense Categories Modal ---
+    async function openExpenseCategoriesModal() {
+      openModal({
+        title: 'Expense Categories',
+        bodyHtml: '<div style="padding: 30px; text-align: center;"><div class="spinner-sm" style="display:inline-block;"></div><div>Loading categories...</div></div>',
+        maxWidth: '650px',
+      });
+
+      try {
+        const res = await apiFetch('/v1/expenses/categories');
+        state.cachedExpenseCategories = res?.items || [];
+
+        const bodyHtml = `
+          <div style="background: var(--bg-primary); padding: 14px; border-radius: 8px; margin-bottom: 16px;">
+            <div style="font-weight: 700; font-size: 13px; margin-bottom: 8px; color: var(--text-primary);">+ Add New Expense Category</div>
+            <div style="display: grid; grid-template-columns: 1fr 1.5fr; gap: 8px; margin-bottom: 8px;">
+              <input type="text" id="newCatCode" class="input-sm" placeholder="Code (e.g. SOFTWARE)" style="text-transform: uppercase;" />
+              <input type="text" id="newCatName" class="input-sm" placeholder="Category Name (e.g. Software & Subscriptions)" />
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <input type="text" id="newCatDesc" class="input-sm" placeholder="Optional description..." style="flex: 1;" />
+              <button class="btn btn-primary btn-sm" onclick="createExpenseCategoryFromUi()">Add Category</button>
+            </div>
+          </div>
+
+          <div style="max-height: 380px; overflow-y: auto;">
+            <table class="table" style="margin: 0; font-size: 12px;">
+              <thead>
+                <tr>
+                  <th>Code</th>
+                  <th>Name</th>
+                  <th>Status</th>
+                  <th class="text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${state.cachedExpenseCategories.map(cat => `
+                  <tr>
+                    <td><strong style="font-family: monospace;">${escapeHtml(cat.code)}</strong></td>
+                    <td>
+                      <div style="font-weight: 600;">${escapeHtml(cat.name)}</div>
+                      ${cat.description ? `<div style="font-size: 11px; color: var(--text-secondary);">${escapeHtml(cat.description)}</div>` : ''}
+                    </td>
+                    <td>
+                      ${cat.isActive ? `
+                        <span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #047857;">Active</span>
+                      ` : `
+                        <span class="badge" style="background: rgba(107, 114, 128, 0.15); color: #4b5563;">Inactive</span>
+                      `}
+                    </td>
+                    <td class="text-right">
+                      <div style="display: flex; gap: 4px; justify-content: flex-end;">
+                        <button class="btn btn-secondary btn-sm" style="padding: 2px 6px; font-size: 10px;" onclick="toggleExpenseCategoryActive('${cat.id}', ${cat.isActive})">
+                          ${cat.isActive ? 'Deactivate' : 'Activate'}
+                        </button>
+                        ${!cat.isSystemDefault ? `
+                          <button class="btn btn-secondary btn-sm" style="padding: 2px 6px; font-size: 10px; color: var(--status-danger);" onclick="deleteExpenseCategoryFromUi('${cat.id}')">Del</button>
+                        ` : ''}
+                      </div>
+                    </td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        `;
+
+        const footerHtml = `
+          <button class="btn btn-secondary" onclick="closeModal()">Close</button>
+        `;
+
+        openModal({
+          title: 'Manage Expense Categories',
+          bodyHtml,
+          footerHtml,
+          maxWidth: '650px',
+        });
+      } catch (err) {
+        showToast(err.message, 'error');
+        closeModal();
+      }
+    }
+
+    async function createExpenseCategoryFromUi() {
+      const code = document.getElementById('newCatCode')?.value?.trim().toUpperCase();
+      const name = document.getElementById('newCatName')?.value?.trim();
+      const description = document.getElementById('newCatDesc')?.value?.trim() || null;
+
+      if (!code || !name) {
+        showToast('Please provide both category code and name', 'error');
+        return;
+      }
+
+      try {
+        await apiFetch('/v1/expenses/categories', {
+          method: 'POST',
+          body: JSON.stringify({ code, name, description }),
+        });
+        showToast('Expense category added', 'success');
+        openExpenseCategoriesModal();
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    }
+
+    async function toggleExpenseCategoryActive(categoryId, currentActive) {
+      try {
+        await apiFetch(`/v1/expenses/categories/${categoryId}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ isActive: !currentActive }),
+        });
+        showToast(`Category ${!currentActive ? 'activated' : 'deactivated'}`, 'success');
+        openExpenseCategoriesModal();
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    }
+
+    async function deleteExpenseCategoryFromUi(categoryId) {
+      if (!confirm('Are you sure you want to delete this custom category? Deletion is blocked if any expenses reference it.')) return;
+      try {
+        await apiFetch(`/v1/expenses/categories/${categoryId}`, {
+          method: 'DELETE',
+        });
+        showToast('Category deleted', 'success');
+        openExpenseCategoriesModal();
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    }
+
+    // --- Expense Summary Report Modal & Printable View ---
+    async function openExpenseSummaryReportModal() {
+      openModal({
+        title: 'Expense Summary Report',
+        bodyHtml: '<div style="padding: 30px; text-align: center;"><div class="spinner-sm" style="display:inline-block;"></div><div>Compiling report metrics...</div></div>',
+        maxWidth: '720px',
+      });
+
+      try {
+        const report = await apiFetch('/v1/expenses/summary');
+        const currency = getTenantCurrency();
+
+        const bodyHtml = `
+          <div id="printableExpenseReport">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; border-bottom: 2px solid var(--border-subtle); padding-bottom: 12px;">
+              <div>
+                <h3 style="margin: 0; font-size: 18px; font-weight: 800; color: var(--text-primary);">Operational Expenses Summary</h3>
+                <div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">
+                  ${escapeHtml(state.tenantName || 'NexStock Business')} &bull; Financial Cost Allocation
+                </div>
+              </div>
+              <div style="text-align: right; font-size: 11px; color: var(--text-secondary);">
+                <div>Generated: ${new Date().toLocaleDateString()}</div>
+                <div style="font-weight: 700; color: var(--accent-primary);">NexStock ERP</div>
+              </div>
+            </div>
+
+            <!-- KPI Totals -->
+            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 20px;">
+              <div style="background: var(--bg-primary); padding: 10px 12px; border-radius: 6px; border: 1px solid var(--border-subtle);">
+                <div style="font-size: 10px; font-weight: 700; text-transform: uppercase; color: var(--text-secondary);">Total Expenses</div>
+                <div style="font-size: 16px; font-weight: 800; margin-top: 2px; color: var(--text-primary); font-variant-numeric: tabular-nums;">${formatTenantMoney(report.totalExpenses, currency)}</div>
+                <div style="font-size: 10px; color: var(--text-secondary);">${report.totalCount} transactions</div>
+              </div>
+              <div style="background: var(--bg-primary); padding: 10px 12px; border-radius: 6px; border: 1px solid var(--border-subtle);">
+                <div style="font-size: 10px; font-weight: 700; text-transform: uppercase; color: var(--status-warning);">Pending Approval</div>
+                <div style="font-size: 16px; font-weight: 800; margin-top: 2px; color: var(--status-warning); font-variant-numeric: tabular-nums;">${formatTenantMoney(report.pendingApprovalAmount, currency)}</div>
+                <div style="font-size: 10px; color: var(--status-warning);">${report.pendingApprovalCount} pending</div>
+              </div>
+              <div style="background: var(--bg-primary); padding: 10px 12px; border-radius: 6px; border: 1px solid var(--border-subtle);">
+                <div style="font-size: 10px; font-weight: 700; text-transform: uppercase; color: var(--accent-primary);">Approved Unpaid</div>
+                <div style="font-size: 16px; font-weight: 800; margin-top: 2px; color: var(--accent-primary); font-variant-numeric: tabular-nums;">${formatTenantMoney(report.approvedUnpaidAmount, currency)}</div>
+                <div style="font-size: 10px; color: var(--accent-primary);">${report.approvedUnpaidCount} unpaid</div>
+              </div>
+              <div style="background: var(--bg-primary); padding: 10px 12px; border-radius: 6px; border: 1px solid var(--border-subtle);">
+                <div style="font-size: 10px; font-weight: 700; text-transform: uppercase; color: var(--status-success);">Paid Settled</div>
+                <div style="font-size: 16px; font-weight: 800; margin-top: 2px; color: var(--status-success); font-variant-numeric: tabular-nums;">${formatTenantMoney(report.paidAmount, currency)}</div>
+                <div style="font-size: 10px; color: var(--status-success);">${report.paidCount} paid</div>
+              </div>
+            </div>
+
+            <!-- Category Breakdown Table -->
+            <div style="margin-bottom: 20px;">
+              <h4 style="font-size: 13px; font-weight: 700; text-transform: uppercase; margin: 0 0 8px; color: var(--text-primary); border-bottom: 1px solid var(--border-subtle); padding-bottom: 4px;">
+                Expenses by Category
+              </h4>
+              <table class="table" style="font-size: 12px; margin: 0;">
+                <thead>
+                  <tr>
+                    <th>Category</th>
+                    <th class="text-right">Transactions</th>
+                    <th class="text-right">Total Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${(report.byCategory || []).length === 0 ? '<tr><td colspan="3" style="text-align:center; padding: 12px; color: var(--text-secondary);">No category transactions recorded</td></tr>' : (report.byCategory || []).map(c => `
+                    <tr>
+                      <td><strong>${escapeHtml(c.categoryName)}</strong> <span style="font-family: monospace; font-size: 11px; color: var(--text-secondary);">(${escapeHtml(c.categoryCode)})</span></td>
+                      <td class="text-right">${c.count}</td>
+                      <td class="text-right" style="font-weight: 700; font-variant-numeric: tabular-nums;">${formatTenantMoney(c.totalAmount, currency)}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+
+            <!-- Branch Breakdown Table -->
+            <div>
+              <h4 style="font-size: 13px; font-weight: 700; text-transform: uppercase; margin: 0 0 8px; color: var(--text-primary); border-bottom: 1px solid var(--border-subtle); padding-bottom: 4px;">
+                Expenses by Branch Location
+              </h4>
+              <table class="table" style="font-size: 12px; margin: 0;">
+                <thead>
+                  <tr>
+                    <th>Branch</th>
+                    <th class="text-right">Transactions</th>
+                    <th class="text-right">Total Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${(report.byBranch || []).length === 0 ? '<tr><td colspan="3" style="text-align:center; padding: 12px; color: var(--text-secondary);">No location records found</td></tr>' : (report.byBranch || []).map(b => `
+                    <tr>
+                      <td><strong>${escapeHtml(b.branchName || 'All Outlets / HQ')}</strong></td>
+                      <td class="text-right">${b.count}</td>
+                      <td class="text-right" style="font-weight: 700; font-variant-numeric: tabular-nums;">${formatTenantMoney(b.totalAmount, currency)}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        `;
+
+        const footerHtml = `
+          <button class="btn btn-secondary" onclick="closeModal()">Close</button>
+          <button class="btn btn-primary" onclick="window.print()">Print Report</button>
+        `;
+
+        openModal({
+          title: 'Expenses Financial Summary',
+          bodyHtml,
+          footerHtml,
+          maxWidth: '720px',
+        });
+      } catch (err) {
+        showToast(err.message, 'error');
+        closeModal();
+      }
     }
 
     // ============================================================================

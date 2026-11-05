@@ -550,6 +550,13 @@ export function loadPhase71HrmAttendanceLeaveProrationMigrationSql(): string {
   return sqlText;
 }
 
+export function loadPhase73ExpensesManagementMigrationSql(): string {
+  const filename = '0018_phase73_expenses_management.sql';
+  const sqlText = readFileSync(resolve(migrationsDir, filename), 'utf-8');
+  assertPostgresMigrationSqlCompatible(sqlText, filename);
+  return sqlText;
+}
+
 export function getOrderedPostgresMigrations(): readonly PostgresMigrationSpec[] {
   return [
     {
@@ -670,6 +677,13 @@ export function getOrderedPostgresMigrations(): readonly PostgresMigrationSpec[]
       name: '0017_phase71_hrm_attendance_leave_proration',
       filename: '0017_phase71_hrm_attendance_leave_proration.sql',
       sql: loadPhase71HrmAttendanceLeaveProrationMigrationSql(),
+    },
+    {
+      dialect: 'postgres',
+      version: 18,
+      name: '0018_phase73_expenses_management',
+      filename: '0018_phase73_expenses_management.sql',
+      sql: loadPhase73ExpensesManagementMigrationSql(),
     },
   ];
 }

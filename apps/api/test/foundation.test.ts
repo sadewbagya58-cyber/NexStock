@@ -315,6 +315,16 @@ describe('@nexstock/api — Milestone 0 Foundation, RLS, Idempotency & Sync Inva
           name: '0016_phase7_advanced_permissions',
           filename: '0016_phase7_advanced_permissions.sql',
         },
+        {
+          version: 17,
+          name: '0017_phase71_hrm_attendance_leave_proration',
+          filename: '0017_phase71_hrm_attendance_leave_proration.sql',
+        },
+        {
+          version: 18,
+          name: '0018_phase73_expenses_management',
+          filename: '0018_phase73_expenses_management.sql',
+        },
       ]);
     });
 
@@ -389,6 +399,8 @@ describe('@nexstock/api — Milestone 0 Foundation, RLS, Idempotency & Sync Inva
         '0014_phase7_employees_and_payroll.sql',
         '0015_phase7_role_permissions_sync.sql',
         '0016_phase7_advanced_permissions.sql',
+        '0017_phase71_hrm_attendance_leave_proration.sql',
+        '0018_phase73_expenses_management.sql',
       ]);
 
       await expect(

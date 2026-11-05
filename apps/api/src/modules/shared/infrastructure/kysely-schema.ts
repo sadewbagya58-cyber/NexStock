@@ -1040,6 +1040,61 @@ export interface OrgPayrollSettingsTable {
   updated_at: Generated<Date>;
 }
 
+export interface ExpenseCategoriesTable {
+  id: string;
+  tenant_id: string;
+  code: string;
+  name: string;
+  description: string | null;
+  is_active: Generated<boolean>;
+  is_system_default: Generated<boolean>;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface ExpensesTable {
+  id: string;
+  tenant_id: string;
+  reference_number: string;
+  title: string;
+  description: string | null;
+  category_id: string;
+  amount: string | number;
+  currency_code: string;
+  expense_date: string | Date;
+  vendor_payee: string | null;
+  payment_method: Generated<'CASH' | 'BANK_TRANSFER' | 'CARD' | 'CHEQUE' | 'OTHER'>;
+  branch_id: string | null;
+  status: Generated<'DRAFT' | 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED' | 'PAID'>;
+  rejection_reason: string | null;
+  created_by_user_id: string;
+  submitted_at: Date | string | null;
+  submitted_by_user_id: string | null;
+  approved_at: Date | string | null;
+  approved_by_user_id: string | null;
+  rejected_at: Date | string | null;
+  rejected_by_user_id: string | null;
+  paid_at: Date | string | null;
+  paid_by_user_id: string | null;
+  payment_reference: string | null;
+  payment_notes: string | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface ExpenseAttachmentsTable {
+  id: string;
+  tenant_id: string;
+  expense_id: string;
+  file_name: string;
+  file_size_bytes: number;
+  mime_type: string;
+  storage_path: string;
+  data_base64: string;
+  uploaded_by_user_id: string;
+  created_at: Generated<Date>;
+}
+
 export interface NexStockDatabase {
   schema_migrations: SchemaMigrationsTable;
   idempotency_keys: IdempotencyKeysTable;
@@ -1104,4 +1159,7 @@ export interface NexStockDatabase {
   employee_leave_balances: EmployeeLeaveBalancesTable;
   org_holidays: OrgHolidaysTable;
   org_payroll_settings: OrgPayrollSettingsTable;
+  expense_categories: ExpenseCategoriesTable;
+  expenses: ExpensesTable;
+  expense_attachments: ExpenseAttachmentsTable;
 }

@@ -96,6 +96,14 @@ export type PermissionKey =
   | 'hrm:settings:read'
   | 'hrm:settings:manage'
   | 'exp:expense:read'
+  | 'exp:expense:create'
+  | 'exp:expense:edit'
+  | 'exp:expense:delete'
+  | 'exp:expense:submit'
+  | 'exp:expense:approve'
+  | 'exp:expense:pay'
+  | 'exp:category:manage'
+  | 'exp:report:view'
   | 'exp:expense:manage'
   | 'crm:credit:read'
   | 'crm:credit:manage'
@@ -190,6 +198,14 @@ export const PERMISSIONS_CATALOG: readonly PermissionItem[] = [
 
   // 17. Expenses
   { key: 'exp:expense:read', module: 'Expenses', action: 'View', name: 'View Expenses', description: 'Inspect operating expenses and vendor payout records.' },
+  { key: 'exp:expense:create', module: 'Expenses', action: 'Create', name: 'Create Expenses', description: 'Record draft operating expenses and receipts.' },
+  { key: 'exp:expense:edit', module: 'Expenses', action: 'Edit', name: 'Edit Expenses', description: 'Modify draft or rejected expense entries.' },
+  { key: 'exp:expense:delete', module: 'Expenses', action: 'Delete', name: 'Delete Expenses', description: 'Remove draft expense records.' },
+  { key: 'exp:expense:submit', module: 'Expenses', action: 'Edit', name: 'Submit Expenses', description: 'Submit draft expenses for manager approval.' },
+  { key: 'exp:expense:approve', module: 'Expenses', action: 'Approve', name: 'Approve Expenses', description: 'Approve or reject submitted expense requests.' },
+  { key: 'exp:expense:pay', module: 'Expenses', action: 'Manage', name: 'Disburse Expense Payments', description: 'Record payment disbursements for approved expenses.' },
+  { key: 'exp:category:manage', module: 'Expenses', action: 'Manage', name: 'Manage Expense Categories', description: 'Create, update, and deactivate expense categories.' },
+  { key: 'exp:report:view', module: 'Expenses', action: 'View', name: 'View Expense Reports', description: 'Access expense dashboard summaries and analytics.' },
   { key: 'exp:expense:manage', module: 'Expenses', action: 'Manage', name: 'Manage Expenses', description: 'Record and categorize store and warehouse operational expenses.' },
 
   // 18. Customer Credit
@@ -302,6 +318,12 @@ export const SYSTEM_ROLE_DEFINITIONS: Readonly<
       'hrm:holiday:read',
       'hrm:schedule:read',
       'exp:expense:read',
+      'exp:expense:create',
+      'exp:expense:edit',
+      'exp:expense:delete',
+      'exp:expense:submit',
+      'exp:expense:approve',
+      'exp:report:view',
       'exp:expense:manage',
       'crm:credit:read',
       'crm:credit:manage',
@@ -328,6 +350,9 @@ export const SYSTEM_ROLE_DEFINITIONS: Readonly<
       'crm:credit:read',
       'hrm:attendance:self',
       'hrm:leave:self',
+      'exp:expense:read',
+      'exp:expense:create',
+      'exp:expense:submit',
     ],
   },
   WAREHOUSE_CLERK: {
@@ -415,6 +440,14 @@ export const SYSTEM_ROLE_DEFINITIONS: Readonly<
       'hrm:payroll:approve',
       'hrm:payroll:pay',
       'exp:expense:read',
+      'exp:expense:create',
+      'exp:expense:edit',
+      'exp:expense:delete',
+      'exp:expense:submit',
+      'exp:expense:approve',
+      'exp:expense:pay',
+      'exp:category:manage',
+      'exp:report:view',
       'exp:expense:manage',
       'crm:credit:read',
       'crm:credit:manage',

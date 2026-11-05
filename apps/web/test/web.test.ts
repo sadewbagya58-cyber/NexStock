@@ -2531,4 +2531,68 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       expect(html).toContain('id="linkUserUuid"');
     });
   });
+
+  // ============================================================================
+  // PHASE 7.3: EXPENSES MANAGEMENT & APPROVAL WORKFLOWS
+  // ============================================================================
+  describe('18. Phase 7.3 Expenses Management & RBAC Integration', () => {
+    it('verifies ALL_SPA_VIEW_IDS and PHASE73_EXPENSE_NAV_ITEMS exports', async () => {
+      const { ALL_SPA_VIEW_IDS, PHASE73_EXPENSE_NAV_ITEMS } = await import('../src/index.js');
+      expect(ALL_SPA_VIEW_IDS).toContain('expenses');
+      expect(PHASE73_EXPENSE_NAV_ITEMS).toBeDefined();
+      expect(PHASE73_EXPENSE_NAV_ITEMS.length).toBeGreaterThan(0);
+      expect(PHASE73_EXPENSE_NAV_ITEMS[0].id).toBe('expenses');
+      expect(PHASE73_EXPENSE_NAV_ITEMS[0].requiredPermission).toBe('exp:expense:read');
+    });
+
+    it('verifies public/index.html contains complete Expenses view, navigation and workflows', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // 1. Navigation Link & Route registration
+      expect(html).toContain('data-view="expenses"');
+      expect(html).toContain("case 'expenses': renderExpensesView(); break;");
+      expect(html).toContain("'expenses'");
+
+      // 2. View Functions
+      expect(html).toContain('async function renderExpensesView()');
+      expect(html).toContain('function getExpenseStatusBadge(');
+      expect(html).toContain('async function openCreateExpenseModal(');
+      expect(html).toContain('async function saveExpense(');
+      expect(html).toContain('async function openExpenseDetailsModal(');
+      expect(html).toContain('async function submitExpenseFromUi(');
+      expect(html).toContain('async function approveExpenseFromUi(');
+      expect(html).toContain('function openRejectExpenseModal(');
+      expect(html).toContain('async function confirmRejectExpense(');
+      expect(html).toContain('function openRecordPaymentModal(');
+      expect(html).toContain('async function confirmRecordPayment(');
+      expect(html).toContain('async function deleteExpenseFromUi(');
+
+      // 3. Attachments & Categories Management
+      expect(html).toContain('async function uploadExpenseAttachmentFromUi(');
+      expect(html).toContain('async function downloadExpenseAttachment(');
+      expect(html).toContain('async function deleteExpenseAttachmentFromUi(');
+      expect(html).toContain('async function openExpenseCategoriesModal(');
+      expect(html).toContain('async function createExpenseCategoryFromUi()');
+      expect(html).toContain('async function toggleExpenseCategoryActive(');
+      expect(html).toContain('async function deleteExpenseCategoryFromUi(');
+
+      // 4. Summary & Reports
+      expect(html).toContain('async function openExpenseSummaryReportModal()');
+      expect(html).toContain('id="btnOpenExpenseSummary"');
+      expect(html).toContain('id="btnOpenExpenseCategories"');
+      expect(html).toContain('id="btnOpenCreateExpense"');
+      expect(html).toContain('id="expenseSearchInput"');
+      expect(html).toContain('id="expenseStatusFilter"');
+      expect(html).toContain('id="expenseCategoryFilter"');
+
+      // 5. Status Badges & Layouts
+      expect(html).toContain('>Pending Approval<');
+      expect(html).toContain('>Approved<');
+      expect(html).toContain('>Rejected<');
+      expect(html).toContain('>Paid<');
+      expect(html).toContain('desktop-only');
+      expect(html).toContain('mobile-only');
+    });
+  });
 });

@@ -150,6 +150,23 @@ import {
   OrgPayrollSettingsResponseSchema,
   UpdateOrgPayrollSettingsRequestSchema,
   PreCalculationValidationResponseSchema,
+  CreateExpenseCategoryRequestSchema,
+  CreateExpenseRequestSchema,
+  ExpenseAttachmentListResponseSchema,
+  ExpenseAttachmentResponseSchema,
+  ExpenseCategoryListResponseSchema,
+  ExpenseCategoryResponseSchema,
+  ExpenseListResponseSchema,
+  ExpenseResponseSchema,
+  ExpenseStatusSchema,
+  ExpenseSummaryReportResponseSchema,
+  RecordExpensePaymentRequestSchema,
+  RejectExpenseRequestSchema,
+  UpdateExpenseCategoryRequestSchema,
+  UpdateExpenseRequestSchema,
+  UploadExpenseAttachmentRequestSchema,
+  type ApproveExpenseRequest,
+  type SubmitExpenseRequest,
 } from '@nexstock/contracts';
 import { Type } from '@sinclair/typebox';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -315,6 +332,26 @@ import {
   updateOrgPayrollSettings,
   validatePrePayrollRun,
 } from './modules/hrm/index.js';
+import {
+  approveExpense,
+  createExpense,
+  createExpenseCategory,
+  deleteExpense,
+  deleteExpenseAttachment,
+  deleteExpenseCategory,
+  getExpenseAttachmentContent,
+  getExpenseById,
+  getExpenseSummaryReport,
+  listExpenseAttachments,
+  listExpenseCategories,
+  listExpenses,
+  recordExpensePayment,
+  rejectExpense,
+  submitExpenseForApproval,
+  updateExpense,
+  updateExpenseCategory,
+  uploadExpenseAttachment,
+} from './modules/expenses/index.js';
 import {
   AppError,
   type NexStockDatabase,
@@ -6134,6 +6171,678 @@ export async function buildApp(
         { tenantId, userId: principal.userId, traceId },
         (trx) => updateOrgPayrollSettings(trx, request.body),
       );
+    },
+  );
+
+  // ==========================================
+  // 33. Phase 7.3 Expenses Management Routes
+  // ==========================================
+
+  // --- Categories ---
+  app.get(
+    '/v1/expenses/categories',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        querystring: Type.Object({
+          includeInactive: Type.Optional(Type.Boolean()),
+        }),
+        response: {
+          200: ExpenseCategoryListResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => listExpenseCategories(trx, request.query.includeInactive !== false),
+      );
+    },
+  );
+
+  app.post(
+    '/v1/expenses/categories',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        body: CreateExpenseCategoryRequestSchema,
+        response: {
+          201: ExpenseCategoryResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      const created = await withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => createExpenseCategory(trx, request.body),
+      );
+      return reply.code(201).send(created);
+    },
+  );
+
+  app.patch(
+    '/v1/expenses/categories/:categoryId',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({
+          categoryId: UuidSchema,
+        }),
+        body: UpdateExpenseCategoryRequestSchema,
+        response: {
+          200: ExpenseCategoryResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          updateExpenseCategory(trx, request.params.categoryId, request.body),
+      );
+    },
+  );
+
+  app.delete(
+    '/v1/expenses/categories/:categoryId',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({
+          categoryId: UuidSchema,
+        }),
+        response: {
+          200: Type.Object({ success: Type.Boolean() }),
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      await withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => deleteExpenseCategory(trx, request.params.categoryId),
+      );
+      return { success: true };
+    },
+  );
+
+  // --- Expenses Summary Report ---
+  app.get(
+    '/v1/expenses/summary',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        querystring: Type.Object({
+          startDate: Type.Optional(Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' })),
+          endDate: Type.Optional(Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' })),
+          branchId: Type.Optional(UuidSchema),
+        }),
+        response: {
+          200: ExpenseSummaryReportResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => getExpenseSummaryReport(trx, request.query),
+      );
+    },
+  );
+
+  // --- Expense Records CRUD ---
+  app.post(
+    '/v1/expenses',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        body: CreateExpenseRequestSchema,
+        response: {
+          201: ExpenseResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      const created = await withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => createExpense(trx, request.body),
+      );
+      return reply.code(201).send(created);
+    },
+  );
+
+  app.get(
+    '/v1/expenses',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        querystring: Type.Object({
+          startDate: Type.Optional(Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' })),
+          endDate: Type.Optional(Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' })),
+          status: Type.Optional(ExpenseStatusSchema),
+          categoryId: Type.Optional(UuidSchema),
+          branchId: Type.Optional(UuidSchema),
+          search: Type.Optional(Type.String()),
+          limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 200 })),
+          offset: Type.Optional(Type.Integer({ minimum: 0 })),
+        }),
+        response: {
+          200: ExpenseListResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => listExpenses(trx, request.query),
+      );
+    },
+  );
+
+  app.get(
+    '/v1/expenses/:expenseId',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({
+          expenseId: UuidSchema,
+        }),
+        response: {
+          200: ExpenseResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => getExpenseById(trx, request.params.expenseId),
+      );
+    },
+  );
+
+  app.patch(
+    '/v1/expenses/:expenseId',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({
+          expenseId: UuidSchema,
+        }),
+        body: UpdateExpenseRequestSchema,
+        response: {
+          200: ExpenseResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => updateExpense(trx, request.params.expenseId, request.body),
+      );
+    },
+  );
+
+  app.delete(
+    '/v1/expenses/:expenseId',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({
+          expenseId: UuidSchema,
+        }),
+        response: {
+          200: Type.Object({ success: Type.Boolean() }),
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      await withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => deleteExpense(trx, request.params.expenseId),
+      );
+      return { success: true };
+    },
+  );
+
+  // --- Workflow Transitions ---
+  app.post(
+    '/v1/expenses/:expenseId/submit',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({
+          expenseId: UuidSchema,
+        }),
+        response: {
+          200: ExpenseResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          submitExpenseForApproval(
+            trx,
+            request.params.expenseId,
+            request.body as SubmitExpenseRequest | undefined,
+          ),
+      );
+    },
+  );
+
+  app.post(
+    '/v1/expenses/:expenseId/approve',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({
+          expenseId: UuidSchema,
+        }),
+        response: {
+          200: ExpenseResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          approveExpense(
+            trx,
+            request.params.expenseId,
+            request.body as ApproveExpenseRequest | undefined,
+          ),
+      );
+    },
+  );
+
+  app.post(
+    '/v1/expenses/:expenseId/reject',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({
+          expenseId: UuidSchema,
+        }),
+        body: RejectExpenseRequestSchema,
+        response: {
+          200: ExpenseResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => rejectExpense(trx, request.params.expenseId, request.body),
+      );
+    },
+  );
+
+  app.post(
+    '/v1/expenses/:expenseId/pay',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({
+          expenseId: UuidSchema,
+        }),
+        body: RecordExpensePaymentRequestSchema,
+        response: {
+          200: ExpenseResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          recordExpensePayment(trx, request.params.expenseId, request.body),
+      );
+    },
+  );
+
+  // --- Attachments ---
+  app.post(
+    '/v1/expenses/:expenseId/attachments',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({
+          expenseId: UuidSchema,
+        }),
+        body: UploadExpenseAttachmentRequestSchema,
+        response: {
+          201: ExpenseAttachmentResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          413: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      const created = await withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          uploadExpenseAttachment(
+            trx,
+            request.params.expenseId,
+            request.body,
+          ),
+      );
+      return reply.code(201).send(created);
+    },
+  );
+
+  app.get(
+    '/v1/expenses/:expenseId/attachments',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({
+          expenseId: UuidSchema,
+        }),
+        response: {
+          200: ExpenseAttachmentListResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => listExpenseAttachments(trx, request.params.expenseId),
+      );
+    },
+  );
+
+  app.get(
+    '/v1/expenses/:expenseId/attachments/:attachmentId/content',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({
+          expenseId: UuidSchema,
+          attachmentId: UuidSchema,
+        }),
+        response: {
+          200: Type.Object({
+            fileName: Type.String(),
+            mimeType: Type.String(),
+            dataBase64: Type.String(),
+          }),
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      const doc = await withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          getExpenseAttachmentContent(
+            trx,
+            request.params.expenseId,
+            request.params.attachmentId,
+          ),
+      );
+
+      return {
+        fileName: doc.file_name,
+        mimeType: doc.mime_type,
+        dataBase64: doc.data_base64,
+      };
+    },
+  );
+
+  app.delete(
+    '/v1/expenses/:expenseId/attachments/:attachmentId',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({
+          expenseId: UuidSchema,
+          attachmentId: UuidSchema,
+        }),
+        response: {
+          200: Type.Object({ success: Type.Boolean() }),
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      await withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          deleteExpenseAttachment(
+            trx,
+            request.params.expenseId,
+            request.params.attachmentId,
+          ),
+      );
+      return { success: true };
     },
   );
 

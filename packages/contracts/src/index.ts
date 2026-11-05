@@ -162,6 +162,19 @@ export const ErrorCodeSchema = Type.Union([
   Type.Literal('HRM_UNAUTHORIZED_EMPLOYEE_ACCESS'),
   Type.Literal('HRM_HOLIDAY_EXISTS'),
   Type.Literal('HRM_HOLIDAY_NOT_FOUND'),
+  Type.Literal('EXP_CATEGORY_NOT_FOUND'),
+  Type.Literal('EXP_DUPLICATE_CATEGORY_CODE'),
+  Type.Literal('EXP_CATEGORY_IN_USE'),
+  Type.Literal('EXP_EXPENSE_NOT_FOUND'),
+  Type.Literal('EXP_INVALID_STATUS_TRANSITION'),
+  Type.Literal('EXP_NOT_EDITABLE'),
+  Type.Literal('EXP_NOT_DELETABLE'),
+  Type.Literal('EXP_REJECTION_REASON_REQUIRED'),
+  Type.Literal('EXP_CANNOT_APPROVE_OWN_EXPENSE'),
+  Type.Literal('EXP_ALREADY_PAID'),
+  Type.Literal('EXP_ATTACHMENT_NOT_FOUND'),
+  Type.Literal('EXP_ATTACHMENT_TOO_LARGE'),
+  Type.Literal('EXP_INVALID_ATTACHMENT_TYPE'),
   Type.Literal('ERR_INTERNAL_SERVER_ERROR'),
 ]);
 export type ErrorCode = Static<typeof ErrorCodeSchema>;
@@ -3002,6 +3015,244 @@ export const PreCalculationValidationResponseSchema = Type.Object({
   issues: Type.Array(PreCalculationValidationItemSchema),
 });
 export type PreCalculationValidationResponse = Static<typeof PreCalculationValidationResponseSchema>;
+
+// ==========================================
+// Phase 7.3 — Expenses Management Schemas
+// ==========================================
+
+export const ExpenseStatusSchema = Type.Union([
+  Type.Literal('DRAFT'),
+  Type.Literal('PENDING_APPROVAL'),
+  Type.Literal('APPROVED'),
+  Type.Literal('REJECTED'),
+  Type.Literal('PAID'),
+]);
+export type ExpenseStatus = Static<typeof ExpenseStatusSchema>;
+
+export const ExpensePaymentMethodSchema = Type.Union([
+  Type.Literal('CASH'),
+  Type.Literal('BANK_TRANSFER'),
+  Type.Literal('CARD'),
+  Type.Literal('CHEQUE'),
+  Type.Literal('OTHER'),
+]);
+export type ExpensePaymentMethod = Static<typeof ExpensePaymentMethodSchema>;
+
+// Expense Categories
+export const CreateExpenseCategoryRequestSchema = Type.Object(
+  {
+    code: Type.String({ minLength: 1, maxLength: 50 }),
+    name: Type.String({ minLength: 1, maxLength: 100 }),
+    description: Type.Optional(Type.Union([Type.String({ maxLength: 500 }), Type.Null()])),
+  },
+  { additionalProperties: false },
+);
+export type CreateExpenseCategoryRequest = Static<typeof CreateExpenseCategoryRequestSchema>;
+
+export const UpdateExpenseCategoryRequestSchema = Type.Object(
+  {
+    name: Type.Optional(Type.String({ minLength: 1, maxLength: 100 })),
+    description: Type.Optional(Type.Union([Type.String({ maxLength: 500 }), Type.Null()])),
+    isActive: Type.Optional(Type.Boolean()),
+  },
+  { additionalProperties: false },
+);
+export type UpdateExpenseCategoryRequest = Static<typeof UpdateExpenseCategoryRequestSchema>;
+
+export const ExpenseCategoryResponseSchema = Type.Object({
+  id: UuidSchema,
+  tenantId: UuidSchema,
+  code: Type.String(),
+  name: Type.String(),
+  description: Type.Union([Type.String(), Type.Null()]),
+  isActive: Type.Boolean(),
+  isSystemDefault: Type.Boolean(),
+  expenseCount: Type.Optional(Type.Number()),
+  createdAt: IsoTimestampSchema,
+  updatedAt: IsoTimestampSchema,
+});
+export type ExpenseCategoryResponse = Static<typeof ExpenseCategoryResponseSchema>;
+
+export const ExpenseCategoryListResponseSchema = Type.Object({
+  items: Type.Array(ExpenseCategoryResponseSchema),
+});
+export type ExpenseCategoryListResponse = Static<typeof ExpenseCategoryListResponseSchema>;
+
+// Expense Records
+export const CreateExpenseRequestSchema = Type.Object(
+  {
+    title: Type.String({ minLength: 1, maxLength: 200 }),
+    description: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+    categoryId: UuidSchema,
+    amount: DecimalMoneyStringSchema,
+    currencyCode: CurrencyCodeSchema,
+    expenseDate: Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' }),
+    vendorPayee: Type.Optional(Type.Union([Type.String({ maxLength: 200 }), Type.Null()])),
+    paymentMethod: Type.Optional(Type.Union([ExpensePaymentMethodSchema, Type.Null()])),
+    branchId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
+    notes: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  },
+  { additionalProperties: false },
+);
+export type CreateExpenseRequest = Static<typeof CreateExpenseRequestSchema>;
+
+export const UpdateExpenseRequestSchema = Type.Object(
+  {
+    title: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
+    description: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+    categoryId: Type.Optional(UuidSchema),
+    amount: Type.Optional(DecimalMoneyStringSchema),
+    currencyCode: Type.Optional(CurrencyCodeSchema),
+    expenseDate: Type.Optional(Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' })),
+    vendorPayee: Type.Optional(Type.Union([Type.String({ maxLength: 200 }), Type.Null()])),
+    paymentMethod: Type.Optional(Type.Union([ExpensePaymentMethodSchema, Type.Null()])),
+    branchId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
+    notes: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  },
+  { additionalProperties: false },
+);
+export type UpdateExpenseRequest = Static<typeof UpdateExpenseRequestSchema>;
+
+export const SubmitExpenseRequestSchema = Type.Object(
+  {
+    notes: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  },
+  { additionalProperties: false },
+);
+export type SubmitExpenseRequest = Static<typeof SubmitExpenseRequestSchema>;
+
+export const ApproveExpenseRequestSchema = Type.Object(
+  {
+    notes: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  },
+  { additionalProperties: false },
+);
+export type ApproveExpenseRequest = Static<typeof ApproveExpenseRequestSchema>;
+
+export const RejectExpenseRequestSchema = Type.Object(
+  {
+    rejectionReason: Type.String({ minLength: 3, maxLength: 500 }),
+  },
+  { additionalProperties: false },
+);
+export type RejectExpenseRequest = Static<typeof RejectExpenseRequestSchema>;
+
+export const RecordExpensePaymentRequestSchema = Type.Object(
+  {
+    paymentDate: Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' }),
+    paymentMethod: ExpensePaymentMethodSchema,
+    paymentReference: Type.Optional(Type.Union([Type.String({ maxLength: 100 }), Type.Null()])),
+    notes: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  },
+  { additionalProperties: false },
+);
+export type RecordExpensePaymentRequest = Static<typeof RecordExpensePaymentRequestSchema>;
+
+// Expense Attachments
+export const ExpenseAttachmentResponseSchema = Type.Object({
+  id: UuidSchema,
+  tenantId: UuidSchema,
+  expenseId: UuidSchema,
+  fileName: Type.String(),
+  fileSizeBytes: Type.Integer(),
+  mimeType: Type.String(),
+  uploadedByUserId: Type.Union([UuidSchema, Type.Null()]),
+  createdAt: IsoTimestampSchema,
+});
+export type ExpenseAttachmentResponse = Static<typeof ExpenseAttachmentResponseSchema>;
+
+export const ExpenseAttachmentListResponseSchema = Type.Object({
+  items: Type.Array(ExpenseAttachmentResponseSchema),
+});
+export type ExpenseAttachmentListResponse = Static<typeof ExpenseAttachmentListResponseSchema>;
+
+export const UploadExpenseAttachmentRequestSchema = Type.Object(
+  {
+    fileName: Type.String({ minLength: 1, maxLength: 255 }),
+    mimeType: Type.String({ pattern: '^(image\\/(png|jpeg|webp)|application\\/pdf)$' }),
+    dataBase64: Type.String({ minLength: 1 }),
+  },
+  { additionalProperties: false },
+);
+export type UploadExpenseAttachmentRequest = Static<typeof UploadExpenseAttachmentRequestSchema>;
+
+// Expense Entity Responses & Summaries
+export const ExpenseResponseSchema = Type.Object({
+  id: UuidSchema,
+  tenantId: UuidSchema,
+  referenceNumber: Type.String(),
+  title: Type.String(),
+  description: Type.Union([Type.String(), Type.Null()]),
+  categoryId: UuidSchema,
+  categoryName: Type.Optional(Type.String()),
+  categoryCode: Type.Optional(Type.String()),
+  amount: DecimalMoneyStringSchema,
+  currencyCode: CurrencyCodeSchema,
+  expenseDate: Type.String(),
+  vendorPayee: Type.Union([Type.String(), Type.Null()]),
+  paymentMethod: Type.Union([ExpensePaymentMethodSchema, Type.Null()]),
+  branchId: Type.Union([UuidSchema, Type.Null()]),
+  branchName: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  status: ExpenseStatusSchema,
+  rejectionReason: Type.Union([Type.String(), Type.Null()]),
+  approvedByUserId: Type.Union([UuidSchema, Type.Null()]),
+  approvedAt: Type.Union([IsoTimestampSchema, Type.Null()]),
+  paidAt: Type.Union([IsoTimestampSchema, Type.Null()]),
+  paymentReference: Type.Union([Type.String(), Type.Null()]),
+  createdByUserId: Type.Union([UuidSchema, Type.Null()]),
+  createdByName: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  notes: Type.Union([Type.String(), Type.Null()]),
+  attachmentCount: Type.Optional(Type.Number()),
+  createdAt: IsoTimestampSchema,
+  updatedAt: IsoTimestampSchema,
+});
+export type ExpenseResponse = Static<typeof ExpenseResponseSchema>;
+
+export const ExpenseListResponseSchema = Type.Object({
+  items: Type.Array(ExpenseResponseSchema),
+  total: Type.Integer(),
+});
+export type ExpenseListResponse = Static<typeof ExpenseListResponseSchema>;
+
+export const ExpenseSummaryByCategorySchema = Type.Object({
+  categoryId: UuidSchema,
+  categoryName: Type.String(),
+  categoryCode: Type.String(),
+  totalAmount: DecimalMoneyStringSchema,
+  count: Type.Integer(),
+});
+export type ExpenseSummaryByCategory = Static<typeof ExpenseSummaryByCategorySchema>;
+
+export const ExpenseSummaryByBranchSchema = Type.Object({
+  branchId: Type.Union([UuidSchema, Type.Null()]),
+  branchName: Type.Union([Type.String(), Type.Null()]),
+  totalAmount: DecimalMoneyStringSchema,
+  count: Type.Integer(),
+});
+export type ExpenseSummaryByBranch = Static<typeof ExpenseSummaryByBranchSchema>;
+
+export const ExpenseSummaryByStatusSchema = Type.Object({
+  status: ExpenseStatusSchema,
+  totalAmount: DecimalMoneyStringSchema,
+  count: Type.Integer(),
+});
+export type ExpenseSummaryByStatus = Static<typeof ExpenseSummaryByStatusSchema>;
+
+export const ExpenseSummaryReportResponseSchema = Type.Object({
+  totalExpenses: DecimalMoneyStringSchema,
+  totalCount: Type.Integer(),
+  pendingApprovalAmount: DecimalMoneyStringSchema,
+  pendingApprovalCount: Type.Integer(),
+  approvedUnpaidAmount: DecimalMoneyStringSchema,
+  approvedUnpaidCount: Type.Integer(),
+  paidAmount: DecimalMoneyStringSchema,
+  paidCount: Type.Integer(),
+  byCategory: Type.Array(ExpenseSummaryByCategorySchema),
+  byBranch: Type.Array(ExpenseSummaryByBranchSchema),
+  byStatus: Type.Array(ExpenseSummaryByStatusSchema),
+});
+export type ExpenseSummaryReportResponse = Static<typeof ExpenseSummaryReportResponseSchema>;
+
 
 
 
