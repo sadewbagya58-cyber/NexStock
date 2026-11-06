@@ -2693,5 +2693,53 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       expect(html).toContain('TENANT_OWNER');
       expect(html).toContain('ORG_ADMIN');
     });
+
+    it('verifies 4-digit invitation code redesign on registration page and staff activation', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // 1. Registration Page "Already a Staff Member?" section
+      expect(html).toContain('Already a Staff Member?');
+      expect(html).toContain('Have an invitation code from your business administrator? Enter it below to join your team.');
+      expect(html).toContain('id="staffInviteCode"');
+      expect(html).toContain('id="btnJoinBusiness"');
+      expect(html).toContain('id="staffCodeAlert"');
+      expect(html).toContain('handleStaffCodeSubmit(event)');
+
+      // 2. Validate Code API integration
+      expect(html).toContain('/v1/auth/invitations/validate-code');
+      expect(html).toContain('async function handleStaffCodeSubmit(');
+
+      // 3. Team & Staff Accounts invitation table displays 4-digit code and Copy action
+      expect(html).toContain('Invitation Code');
+      expect(html).toContain('function copyInvitationCode(');
+      expect(html).toContain('copyInvitationCode(');
+      expect(html).toContain('4-Digit Staff Access Code');
+
+      // 4. Staff account activation view supports 4-digit code and required email confirmation
+      expect(html).toContain('id="inviteEmail"');
+      expect(html).toContain('id="btnSubmitAcceptInvite"');
+      expect(html).toContain('async function submitAcceptInvitation(');
+
+      // 5. Session token storage alignment
+      expect(html).toContain("localStorage.setItem('nexstock_session_token', sessionToken)");
+      expect(html).toContain("localStorage.setItem('nexstock_auth_token', sessionToken)");
+    });
+
+    it('verifies BUG-052 fix: preserves public routes and prevents premature Welcome page redirects', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // 1. Unauthenticated fast-path preserves target AUTH_VIEWS instead of unconditionally kicking to welcome
+      expect(html).toContain('const initialRoute = getRouteFromLocation();');
+      expect(html).toContain('if (initialRoute && AUTH_VIEWS.includes(initialRoute))');
+
+      // 2. Router synchronization does not strip query parameters from location hash
+      expect(html).toContain("const currentRoute = rawHash.split('?')[0].trim();");
+
+      // 3. Session restore does not unconditionally show 'Loading dashboard...' for auth/invitation routes
+      expect(html).toContain("!AUTH_VIEWS.includes(initialRoute)");
+      expect(html).toContain("!AUTH_VIEWS.includes(targetRoute)");
+    });
   });
 });

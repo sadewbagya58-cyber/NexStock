@@ -1377,6 +1377,9 @@ export interface TenantInvitationsTable {
   role_code: string;
   employee_id: string | null;
   token_hash: string;
+  code_encrypted: string | null;
+  failed_attempts: Generated<number>;
+  locked_until: ColumnType<Date | null, Date | string | null, Date | string | null>;
   status: 'PENDING' | 'ACCEPTED' | 'EXPIRED' | 'CANCELLED' | 'FAILED';
   invited_by_user_id: string;
   accepted_by_user_id: string | null;

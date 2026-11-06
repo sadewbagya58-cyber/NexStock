@@ -198,6 +198,10 @@ export const ErrorCodeSchema = Type.Union([
   Type.Literal('HRM_INVALID_STAFF_LINK'),
   Type.Literal('IAM_INVALID_INVITATION_ROLE'),
   Type.Literal('IAM_CANNOT_INVITE_OWNER'),
+  Type.Literal('IAM_INVITATION_CODE_INVALID'),
+  Type.Literal('IAM_INVITATION_EMAIL_MISMATCH'),
+  Type.Literal('IAM_INVITATION_LOCKED'),
+  Type.Literal('IAM_INVITATION_TOO_MANY_ATTEMPTS'),
   Type.Literal('IAM_USER_ALREADY_MEMBER'),
   Type.Literal('IAM_INVITATION_ALREADY_EXISTS'),
   Type.Literal('IAM_INVITATION_NOT_FOUND'),
@@ -2780,6 +2784,7 @@ export const StaffInvitationResponseSchema = Type.Object({
   cancelledAt: Type.Union([Type.String(), Type.Null()]),
   createdAt: Type.String(),
   updatedAt: Type.String(),
+  invitationCode: Type.Optional(Type.String()),
   token: Type.Optional(Type.String()),
   invitationToken: Type.Optional(Type.String()),
   invitationLink: Type.Optional(Type.String()),
@@ -2789,16 +2794,29 @@ export type StaffInvitationResponse = Static<typeof StaffInvitationResponseSchem
 export const ValidateInvitationResponseSchema = Type.Object({
   valid: Type.Boolean(),
   email: Type.String(),
+  maskedEmail: Type.Optional(Type.String()),
   roleCode: Type.String(),
   tenantId: UuidSchema,
   tenantName: Type.String(),
   employeeName: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  invitationCode: Type.Optional(Type.String()),
 });
 export type ValidateInvitationResponse = Static<typeof ValidateInvitationResponseSchema>;
 
+export const ValidateInvitationCodeRequestSchema = Type.Object(
+  {
+    code: Type.String({ minLength: 4, maxLength: 8 }),
+    email: Type.Optional(Type.String({ pattern: '^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$' })),
+  },
+  { additionalProperties: false },
+);
+export type ValidateInvitationCodeRequest = Static<typeof ValidateInvitationCodeRequestSchema>;
+
 export const AcceptInvitationRequestSchema = Type.Object(
   {
-    token: Type.String({ minLength: 10 }),
+    code: Type.Optional(Type.String({ minLength: 4, maxLength: 8 })),
+    email: Type.Optional(Type.String({ pattern: '^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$' })),
+    token: Type.Optional(Type.String()),
     password: Type.String({ minLength: 8, maxLength: 128 }),
     fullName: Type.Optional(Type.String({ minLength: 1, maxLength: 160 })),
   },

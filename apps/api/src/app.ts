@@ -131,6 +131,7 @@ import {
   UpsertLocalizationSettingsRequestSchema,
   UserMeResponseSchema,
   UuidSchema,
+  ValidateInvitationCodeRequestSchema,
   ValidateInvitationResponseSchema,
   VoidSaleRequestSchema,
   WarehouseResponseSchema,
@@ -265,6 +266,7 @@ import {
   updateMemberStatus,
   updateRole,
   validateStaffInvitation,
+  validateStaffInvitationCode,
   verifySupabaseJwt,
 } from './modules/iam/index.js';
 import {
@@ -946,28 +948,70 @@ export async function buildApp(
     },
   );
 
-  // Auth 7: Validate Staff Invitation Token (Public)
+  // Auth 7: Validate Staff Invitation Token / Code (Public)
   app.get(
     '/v1/auth/invitations/validate',
     {
       schema: {
         querystring: Type.Object({
-          token: Type.String({ minLength: 10 }),
+          token: Type.Optional(Type.String({ minLength: 4 })),
+          code: Type.Optional(Type.String({ minLength: 4, maxLength: 4 })),
         }),
         response: {
           200: ValidateInvitationResponseSchema,
           400: ProblemDetailsSchema,
           404: ProblemDetailsSchema,
           410: ProblemDetailsSchema,
+          423: ProblemDetailsSchema,
+          429: ProblemDetailsSchema,
         },
       },
     },
     async (request, reply) => {
       const traceId = String(request.id);
+      const identifier = (request.query.code || request.query.token || '').trim();
+      if (!identifier) {
+        throw new AppError({
+          statusCode: 400,
+          errorCode: 'IAM_INVITATION_CODE_INVALID',
+          title: 'Invitation Code Required',
+          detail: 'Either a valid 4-digit code or invitation token must be provided.',
+          extensions: { traceId },
+        });
+      }
       const result = await validateStaffInvitation(
         options.db,
-        request.query.token,
+        identifier,
         traceId,
+        request.ip,
+      );
+      return reply.send(result);
+    },
+  );
+
+  // Auth 7b: Validate Staff Invitation Code (Public - 4 Digit Code Redesign)
+  app.post(
+    '/v1/auth/invitations/validate-code',
+    {
+      schema: {
+        body: ValidateInvitationCodeRequestSchema,
+        response: {
+          200: ValidateInvitationResponseSchema,
+          400: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          410: ProblemDetailsSchema,
+          423: ProblemDetailsSchema,
+          429: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const traceId = String(request.id);
+      const result = await validateStaffInvitationCode(
+        options.db,
+        request.body,
+        traceId,
+        request.ip,
       );
       return reply.send(result);
     },
@@ -985,6 +1029,8 @@ export async function buildApp(
           404: ProblemDetailsSchema,
           409: ProblemDetailsSchema,
           410: ProblemDetailsSchema,
+          423: ProblemDetailsSchema,
+          429: ProblemDetailsSchema,
         },
       },
     },
@@ -995,6 +1041,7 @@ export async function buildApp(
         authConfig,
         request.body,
         traceId,
+        request.ip,
       );
       return reply.send(result);
     },

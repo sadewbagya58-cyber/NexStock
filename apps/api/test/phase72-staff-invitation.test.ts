@@ -1,5 +1,6 @@
 import { type KeyObject, generateKeyPairSync, sign } from 'node:crypto';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { sql } from 'kysely';
 import {
   DEFAULT_SUPABASE_JWT_AUDIENCE,
   DEFAULT_SUPABASE_JWT_ISSUER,
@@ -300,9 +301,11 @@ describe('@nexstock/api — Phase 7.2: Staff Invitation, Account Provisioning & 
       expect(typeof invitation.token).toBe('string');
       expect(invitation.expiresAt).toBeDefined();
 
-      // Check expiry is in the future (~48 hours)
+      // Check expiry is in the future (~24 hours per redesign)
       const expiry = new Date(invitation.expiresAt).getTime();
-      expect(expiry).toBeGreaterThan(Date.now() + 40 * 3600 * 1000);
+      expect(expiry).toBeGreaterThan(Date.now() + 20 * 3600 * 1000);
+      expect(invitation.invitationCode).toBeDefined();
+      expect(invitation.invitationCode).toMatch(/^\d{4}$/);
     });
 
     it('prevents duplicate pending invitations for the same email (409 IAM_INVITATION_ALREADY_EXISTS)', async () => {
@@ -639,6 +642,212 @@ describe('@nexstock/api — Phase 7.2: Staff Invitation, Account Provisioning & 
 
       expect(inviteAgainRes.statusCode).toBe(409);
       expect(inviteAgainRes.json().errorCode).toBe('IAM_USER_ALREADY_MEMBER');
+    });
+  });
+
+  describe('4b. 4-Digit Access Code System & Security Hardening (Phase 7.2 Redesign)', () => {
+    let codeStaffInvitation: { id: string; email: string; invitationCode: string };
+    let emp3Id: string;
+
+    it('generates a 4-digit numeric code with AES-256-GCM encryption on invitation creation', async () => {
+      // Create independent employee profile for 4b test suite
+      const empRes = await app.inject({
+        method: 'POST',
+        url: '/v1/employees',
+        headers: {
+          authorization: `Bearer ${ownerAToken}`,
+          'x-tenant-id': TENANT_A_ID,
+        },
+        payload: {
+          employeeCode: 'EMP-INV-003',
+          firstName: 'CodeStaff',
+          lastName: 'Test',
+          email: 'staff.fourdigit@nexstock.test',
+          designation: 'Staff',
+          department: 'Logistics',
+          joinedDate: '2026-03-01',
+        },
+      });
+      expect(empRes.statusCode).toBe(201);
+      emp3Id = empRes.json().id;
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/iam/invitations',
+        headers: {
+          authorization: `Bearer ${ownerAToken}`,
+          'x-tenant-id': TENANT_A_ID,
+        },
+        payload: {
+          email: 'staff.fourdigit@nexstock.test',
+          roleCode: 'STAFF',
+          employeeId: emp3Id,
+        },
+      });
+
+      expect(res.statusCode).toBe(201);
+      const data = res.json();
+      expect(data.invitationCode).toBeDefined();
+      expect(data.invitationCode).toMatch(/^\d{4}$/);
+      expect(data.email).toBe('staff.fourdigit@nexstock.test');
+      codeStaffInvitation = {
+        id: data.id,
+        email: data.email,
+        invitationCode: data.invitationCode,
+      };
+
+      // Verify in DB: code_encrypted is stored (not plaintext code) and token_hash is SHA-256
+      const dbRow = await harness.db
+        .selectFrom('tenant_invitations')
+        .select(['token_hash', 'code_encrypted', 'failed_attempts', 'locked_until'])
+        .where('id', '=', data.id)
+        .executeTakeFirst();
+
+      expect(dbRow).toBeDefined();
+      expect(dbRow!.token_hash).toHaveLength(64); // SHA-256 hex
+      expect(dbRow!.code_encrypted).not.toBe(data.invitationCode); // Encrypted ciphertext
+      expect(dbRow!.code_encrypted).toContain(':'); // IV : AuthTag : Ciphertext format
+      expect(dbRow!.failed_attempts).toBe(0);
+      expect(dbRow!.locked_until).toBeNull();
+    });
+
+    it('validates 4-digit code publicly via POST /v1/auth/invitations/validate-code', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/auth/invitations/validate-code',
+        payload: {
+          code: codeStaffInvitation.invitationCode,
+        },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const data = res.json();
+      expect(data.valid).toBe(true);
+      expect(data.maskedEmail).toMatch(/^st\*\*\*@nexstock\.test$/);
+      expect(data.roleCode).toBe('STAFF');
+      expect(data.tenantName).toBe('NexStock Alpha Corp');
+      expect(data.invitationCode).toBe(codeStaffInvitation.invitationCode);
+    });
+
+    it('rejects code validation when email mismatch is supplied in validate-code', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/auth/invitations/validate-code',
+        payload: {
+          code: codeStaffInvitation.invitationCode,
+          email: 'wrong-staff@nexstock.test',
+        },
+      });
+
+      expect(res.statusCode).toBe(400);
+      expect(res.json().errorCode).toBe('IAM_INVITATION_EMAIL_MISMATCH');
+    });
+
+    it('rejects invalid 4-digit code with 404 IAM_INVITATION_NOT_FOUND', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/auth/invitations/validate-code',
+        payload: {
+          code: '0000',
+        },
+      });
+
+      expect(res.statusCode).toBe(404);
+      expect(res.json().errorCode).toBe('IAM_INVITATION_NOT_FOUND');
+    });
+
+    it('rejects account activation when email does not match invited email (400 IAM_INVITATION_EMAIL_MISMATCH)', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/auth/invitations/accept',
+        payload: {
+          code: codeStaffInvitation.invitationCode,
+          email: 'attacker@nexstock.test',
+          password: 'SecurePassword123!',
+          fullName: 'Attacker Name',
+        },
+      });
+
+      expect(res.statusCode).toBe(400);
+      expect(res.json().errorCode).toBe('IAM_INVITATION_EMAIL_MISMATCH');
+    });
+
+    it('successfully accepts invitation with 4-digit code and matching email, unsetting encrypted code', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/auth/invitations/accept',
+        payload: {
+          code: codeStaffInvitation.invitationCode,
+          email: codeStaffInvitation.email,
+          password: 'ValidStaffPassword123!',
+          fullName: 'Staff Four Digit Member',
+        },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const data = res.json();
+      expect(data.token).toBeDefined();
+      expect(data.user.email).toBe(codeStaffInvitation.email);
+      expect(data.user.fullName).toBe('Staff Four Digit Member');
+
+      // Verify in DB that code_encrypted is cleared on acceptance
+      const dbRow = await harness.db
+        .selectFrom('tenant_invitations')
+        .select(['status', 'code_encrypted', 'accepted_by_user_id'])
+        .where('id', '=', codeStaffInvitation.id)
+        .executeTakeFirst();
+
+      expect(dbRow?.status).toBe('ACCEPTED');
+      expect(dbRow?.code_encrypted).toBeNull();
+      expect(dbRow?.accepted_by_user_id).toBe(data.user.id);
+    });
+
+    it('enforces brute-force lockout after 5 consecutive failed code attempts on an IP', async () => {
+      const testIp = '198.51.100.99';
+      // Attempt 5 incorrect attempts
+      for (let i = 0; i < 5; i++) {
+        const res = await app.inject({
+          method: 'POST',
+          url: '/v1/auth/invitations/validate-code',
+          headers: {
+            'x-forwarded-for': testIp,
+          },
+          remoteAddress: testIp,
+          payload: {
+            code: '9999',
+          },
+        });
+        expect([404, 429]).toContain(res.statusCode);
+      }
+
+      // 6th attempt from the same IP must be rejected with 429 IAM_INVITATION_TOO_MANY_ATTEMPTS
+      const blockedRes = await app.inject({
+        method: 'POST',
+        url: '/v1/auth/invitations/validate-code',
+        headers: {
+          'x-forwarded-for': testIp,
+        },
+        remoteAddress: testIp,
+        payload: {
+          code: '1234',
+        },
+      });
+
+      expect(blockedRes.statusCode).toBe(429);
+      expect(blockedRes.json().errorCode).toBe('IAM_INVITATION_TOO_MANY_ATTEMPTS');
+    });
+
+    it('strictly enforces PostgreSQL RLS on tenant_invitations with zero NULL-context bypass', async () => {
+      // Query as nexstock_app_user without app.current_tenant_id returns 0 rows due to strict RLS
+      const failClosedRows = await harness.db
+        .transaction()
+        .execute(async (trx) => {
+          await sql`SET LOCAL ROLE nexstock_app_user`.execute(trx);
+          await sql`SELECT set_config('app.current_tenant_id', '', true)`.execute(trx);
+          return await trx.selectFrom('tenant_invitations').selectAll().execute();
+        });
+
+      expect(failClosedRows).toHaveLength(0);
     });
   });
 

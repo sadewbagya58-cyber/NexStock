@@ -571,6 +571,13 @@ export function loadPhase72StaffInvitationsMigrationSql(): string {
   return sqlText;
 }
 
+export function loadPhase72StaffInvitationCodeRedesignMigrationSql(): string {
+  const filename = '0021_phase72_staff_invitation_code_redesign.sql';
+  const sqlText = readFileSync(resolve(migrationsDir, filename), 'utf-8');
+  assertPostgresMigrationSqlCompatible(sqlText, filename);
+  return sqlText;
+}
+
 export function getOrderedPostgresMigrations(): readonly PostgresMigrationSpec[] {
   return [
     {
@@ -712,6 +719,13 @@ export function getOrderedPostgresMigrations(): readonly PostgresMigrationSpec[]
       name: '0020_phase72_staff_invitations',
       filename: '0020_phase72_staff_invitations.sql',
       sql: loadPhase72StaffInvitationsMigrationSql(),
+    },
+    {
+      dialect: 'postgres',
+      version: 21,
+      name: '0021_phase72_staff_invitation_code_redesign',
+      filename: '0021_phase72_staff_invitation_code_redesign.sql',
+      sql: loadPhase72StaffInvitationCodeRedesignMigrationSql(),
     },
   ];
 }

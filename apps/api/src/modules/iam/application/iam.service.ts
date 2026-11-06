@@ -13,9 +13,10 @@ import type {
   StaffInvitationResponse,
   UpdateMemberLocationScopesRequest,
   UpdateRoleRequest,
+  ValidateInvitationCodeRequest,
   ValidateInvitationResponse,
 } from '@nexstock/contracts';
-import type { Kysely } from 'kysely';
+import { type Kysely, sql } from 'kysely';
 import {
   AppError,
   type NexStockDatabase,
@@ -1982,6 +1983,100 @@ export async function updateMemberLocationScopes(
 }
 
 // ============================================================================
+// Phase 7.2 Staff 4-Digit Access Code, Symmetric Encryption & Rate Limiting Helpers
+// ============================================================================
+
+function getInvitationEncryptionKey(): Buffer {
+  const secret =
+    process.env['INVITATION_ENCRYPTION_KEY'] ??
+    process.env['JWT_SECRET'] ??
+    process.env['SUPABASE_SERVICE_ROLE_KEY'] ??
+    'nexstock-default-invitation-symmetric-key-2026';
+  return crypto.createHash('sha256').update(secret).digest();
+}
+
+export function encryptInvitationCode(code: string): string {
+  const key = getInvitationEncryptionKey();
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  let encrypted = cipher.update(code, 'utf8', 'hex');
+  encrypted += cipher.final('hex');
+  const authTag = cipher.getAuthTag().toString('hex');
+  return `${iv.toString('hex')}:${authTag}:${encrypted}`;
+}
+
+export function decryptInvitationCode(encryptedStr: string | null | undefined): string | null {
+  if (!encryptedStr) return null;
+  try {
+    const [ivHex, authTagHex, cipherHex] = encryptedStr.split(':');
+    if (!ivHex || !authTagHex || !cipherHex) return null;
+    const key = getInvitationEncryptionKey();
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(ivHex, 'hex'));
+    decipher.setAuthTag(Buffer.from(authTagHex, 'hex'));
+    let decrypted = decipher.update(cipherHex, 'hex', 'utf8');
+    decrypted += decipher.final('utf8');
+    return decrypted;
+  } catch {
+    return null;
+  }
+}
+
+export function generateRandom4DigitCode(): string {
+  return crypto.randomInt(1000, 10000).toString();
+}
+
+export function maskEmail(email: string): string {
+  const parts = email.split('@');
+  if (parts.length !== 2 || !parts[0] || !parts[1]) return email;
+  const local = parts[0];
+  const domain = parts[1];
+  const visible = local.length > 2 ? local.slice(0, 2) : local.slice(0, 1);
+  return `${visible}***@${domain}`;
+}
+
+interface RateLimitEntry {
+  failedAttempts: number;
+  firstAttemptAt: number;
+  blockedUntil?: number;
+}
+const ipRateLimitStore = new Map<string, RateLimitEntry>();
+
+export function checkInvitationRateLimit(clientIp: string): void {
+  const now = Date.now();
+  const entry = ipRateLimitStore.get(clientIp);
+  if (entry && entry.blockedUntil && entry.blockedUntil > now) {
+    const retryAfterSeconds = Math.ceil((entry.blockedUntil - now) / 1000);
+    throw new AppError({
+      statusCode: 429,
+      errorCode: 'IAM_INVITATION_TOO_MANY_ATTEMPTS',
+      title: 'Too Many Attempts',
+      detail: `Too many failed invitation attempts from this network. Please try again in ${retryAfterSeconds} seconds.`,
+    });
+  }
+}
+
+export function recordFailedInvitationAttempt(clientIp: string): void {
+  const now = Date.now();
+  const windowMs = 15 * 60 * 1000;
+  const entry = ipRateLimitStore.get(clientIp);
+  if (!entry || now - entry.firstAttemptAt > windowMs) {
+    ipRateLimitStore.set(clientIp, {
+      failedAttempts: 1,
+      firstAttemptAt: now,
+    });
+  } else {
+    entry.failedAttempts += 1;
+    if (entry.failedAttempts >= 5) {
+      entry.blockedUntil = now + 15 * 60 * 1000;
+    }
+  }
+}
+
+export function resetInvitationRateLimit(clientIp: string): void {
+  ipRateLimitStore.delete(clientIp);
+}
+
+// ============================================================================
 // Phase 7.2 Staff Invitation & Account Provisioning Engine
 // ============================================================================
 
@@ -2142,10 +2237,25 @@ export async function createStaffInvitation(
     employeeName = employee.display_name;
   }
 
-  // 8. Generate secure token & hash
-  const rawToken = crypto.randomBytes(32).toString('hex');
-  const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
-  const expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000);
+  // 8. Generate unique 4-digit code, secure hash, and symmetric ciphertext
+  let rawCode = generateRandom4DigitCode();
+  let tokenHash = crypto.createHash('sha256').update(rawCode).digest('hex');
+  let genTries = 0;
+  while (genTries < 5) {
+    const existingWithHash = await trx.db
+      .selectFrom('tenant_invitations')
+      .select(['id'])
+      .where('token_hash', '=', tokenHash)
+      .where('status', '=', 'PENDING')
+      .executeTakeFirst();
+    if (!existingWithHash) break;
+    rawCode = generateRandom4DigitCode();
+    tokenHash = crypto.createHash('sha256').update(rawCode).digest('hex');
+    genTries++;
+  }
+
+  const codeEncrypted = encryptInvitationCode(rawCode);
+  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24-hour expiration (Part 2 E)
   const invitationId = generateUuidV7();
   const now = new Date();
 
@@ -2158,6 +2268,9 @@ export async function createStaffInvitation(
       role_code: roleCode,
       employee_id: input.employeeId ?? null,
       token_hash: tokenHash,
+      code_encrypted: codeEncrypted,
+      failed_attempts: 0,
+      locked_until: null,
       status: 'PENDING',
       invited_by_user_id: trx.userId,
       accepted_by_user_id: null,
@@ -2178,6 +2291,7 @@ export async function createStaffInvitation(
       roleCode,
       employeeId: input.employeeId ?? null,
       expiresAt: expiresAt.toISOString(),
+      codeLength: rawCode.length,
     },
   });
 
@@ -2205,9 +2319,10 @@ export async function createStaffInvitation(
     cancelledAt: null,
     createdAt: now.toISOString(),
     updatedAt: now.toISOString(),
-    token: rawToken,
-    invitationToken: rawToken,
-    invitationLink: `/accept-invitation?token=${rawToken}`,
+    invitationCode: rawCode,
+    token: rawCode,
+    invitationToken: rawCode,
+    invitationLink: `/accept-invitation?code=${rawCode}`,
   };
 }
 
@@ -2248,6 +2363,7 @@ export async function listStaffInvitations(
       'tenant_invitations.cancelled_at',
       'tenant_invitations.created_at',
       'tenant_invitations.updated_at',
+      'tenant_invitations.code_encrypted',
     ])
     .where('tenant_invitations.tenant_id', '=', trx.tenantId)
     .orderBy('tenant_invitations.created_at', 'desc');
@@ -2258,25 +2374,33 @@ export async function listStaffInvitations(
 
   const rows = await query.execute();
 
-  return rows.map((r) => ({
-    id: r.id,
-    tenantId: r.tenant_id,
-    email: r.email,
-    roleCode: r.role_code,
-    employeeId: r.employee_id,
-    employeeCode: r.employee_code ?? null,
-    employeeName: r.employee_name ?? null,
-    status: r.status as StaffInvitationResponse['status'],
-    invitedByUserId: r.invited_by_user_id,
-    invitedByEmail: r.invited_by_email ?? null,
-    invitedByName: r.invited_by_name ?? null,
-    acceptedByUserId: r.accepted_by_user_id,
-    expiresAt: r.expires_at.toISOString(),
-    acceptedAt: r.accepted_at ? r.accepted_at.toISOString() : null,
-    cancelledAt: r.cancelled_at ? r.cancelled_at.toISOString() : null,
-    createdAt: r.created_at.toISOString(),
-    updatedAt: r.updated_at.toISOString(),
-  }));
+  return rows.map((r) => {
+    let decryptedCode: string | null = null;
+    if (r.status === 'PENDING' && r.code_encrypted) {
+      decryptedCode = decryptInvitationCode(r.code_encrypted);
+    }
+
+    return {
+      id: r.id,
+      tenantId: r.tenant_id,
+      email: r.email,
+      roleCode: r.role_code,
+      employeeId: r.employee_id,
+      employeeCode: r.employee_code ?? null,
+      employeeName: r.employee_name ?? null,
+      status: r.status as StaffInvitationResponse['status'],
+      invitedByUserId: r.invited_by_user_id,
+      invitedByEmail: r.invited_by_email ?? null,
+      invitedByName: r.invited_by_name ?? null,
+      acceptedByUserId: r.accepted_by_user_id,
+      expiresAt: r.expires_at.toISOString(),
+      acceptedAt: r.accepted_at ? r.accepted_at.toISOString() : null,
+      cancelledAt: r.cancelled_at ? r.cancelled_at.toISOString() : null,
+      createdAt: r.created_at.toISOString(),
+      updatedAt: r.updated_at.toISOString(),
+      ...(decryptedCode ? { invitationCode: decryptedCode } : {}),
+    };
+  });
 }
 
 export async function resendStaffInvitation(
@@ -2330,15 +2454,19 @@ export async function resendStaffInvitation(
     });
   }
 
-  const rawToken = crypto.randomBytes(32).toString('hex');
-  const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
-  const expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000);
+  const rawCode = generateRandom4DigitCode();
+  const tokenHash = crypto.createHash('sha256').update(rawCode).digest('hex');
+  const codeEncrypted = encryptInvitationCode(rawCode);
+  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24-hour expiration
   const now = new Date();
 
   await trx.db
     .updateTable('tenant_invitations')
     .set({
       token_hash: tokenHash,
+      code_encrypted: codeEncrypted,
+      failed_attempts: 0,
+      locked_until: null,
       status: 'PENDING',
       expires_at: expiresAt,
       cancelled_at: null,
@@ -2355,6 +2483,7 @@ export async function resendStaffInvitation(
     metadata: {
       email: existing.email,
       expiresAt: expiresAt.toISOString(),
+      codeLength: rawCode.length,
     },
   });
 
@@ -2376,9 +2505,10 @@ export async function resendStaffInvitation(
     cancelledAt: null,
     createdAt: existing.created_at.toISOString(),
     updatedAt: now.toISOString(),
-    token: rawToken,
-    invitationToken: rawToken,
-    invitationLink: `/accept-invitation?token=${rawToken}`,
+    invitationCode: rawCode,
+    token: rawCode,
+    invitationToken: rawCode,
+    invitationLink: `/accept-invitation?code=${rawCode}`,
   };
 }
 
@@ -2438,6 +2568,7 @@ export async function cancelStaffInvitation(
     .updateTable('tenant_invitations')
     .set({
       status: 'CANCELLED',
+      code_encrypted: null,
       cancelled_at: now,
       updated_at: now,
     })
@@ -2477,25 +2608,59 @@ export async function cancelStaffInvitation(
 
 export async function validateStaffInvitation(
   db: Kysely<NexStockDatabase>,
-  token: string,
+  codeOrToken: string,
   traceId?: string,
+  clientIp?: string,
+  emailCheck?: string,
 ): Promise<ValidateInvitationResponse> {
-  const tokenHash = crypto.createHash('sha256').update(token.trim()).digest('hex');
+  const cleanCode = codeOrToken.trim();
+  if (!cleanCode) {
+    throw new AppError({
+      statusCode: 400,
+      errorCode: 'IAM_INVITATION_CODE_INVALID',
+      title: 'Invalid Code',
+      detail: 'Please enter a valid 4-digit invitation code.',
+    });
+  }
 
-  const invitation = await withAppUserTransaction(db, { traceId }, async (trx) => {
-    return trx
-      .selectFrom('tenant_invitations')
-      .selectAll()
-      .where('token_hash', '=', tokenHash)
-      .executeTakeFirst();
-  });
+  if (clientIp) {
+    checkInvitationRateLimit(clientIp);
+  }
+
+  const tokenHash = crypto.createHash('sha256').update(cleanCode).digest('hex');
+
+  const rows = await sql<{
+    id: string;
+    tenant_id: string;
+    email: string;
+    role_code: string;
+    employee_id: string | null;
+    status: string;
+    expires_at: Date;
+    failed_attempts: number;
+    locked_until: Date | null;
+    tenant_name: string;
+    employee_name: string | null;
+  }>`SELECT * FROM public.lookup_invitation_by_code_hash(${tokenHash})`.execute(db);
+
+  const invitation = rows.rows[0];
 
   if (!invitation) {
+    if (clientIp) recordFailedInvitationAttempt(clientIp);
     throw new AppError({
       statusCode: 404,
       errorCode: 'IAM_INVITATION_NOT_FOUND',
       title: 'Invitation Not Found',
       detail: 'The invitation token is invalid or does not exist.',
+    });
+  }
+
+  if (invitation.locked_until && new Date(invitation.locked_until) > new Date()) {
+    throw new AppError({
+      statusCode: 423,
+      errorCode: 'IAM_INVITATION_LOCKED',
+      title: 'Invitation Temporarily Locked',
+      detail: 'This invitation has been temporarily locked due to multiple failed attempts. Please try again later or contact your administrator.',
     });
   }
 
@@ -2508,6 +2673,24 @@ export async function validateStaffInvitation(
     });
   }
 
+  if (invitation.status === 'CANCELLED') {
+    throw new AppError({
+      statusCode: 400,
+      errorCode: 'IAM_INVITATION_INACTIVE',
+      title: 'Invitation Inactive',
+      detail: 'This invitation is no longer active (status: CANCELLED).',
+    });
+  }
+
+  if (invitation.status === 'EXPIRED' || new Date(invitation.expires_at) < new Date()) {
+    throw new AppError({
+      statusCode: 410,
+      errorCode: 'IAM_INVITATION_EXPIRED',
+      title: 'Invitation Expired',
+      detail: 'This invitation link has expired. Please contact your organization administrator to receive a new invitation.',
+    });
+  }
+
   if (invitation.status !== 'PENDING') {
     throw new AppError({
       statusCode: 400,
@@ -2517,54 +2700,38 @@ export async function validateStaffInvitation(
     });
   }
 
-  if (new Date(invitation.expires_at) < new Date()) {
-    await withAppUserTransaction(db, { traceId }, async (trx) => {
-      await trx
-        .updateTable('tenant_invitations')
-        .set({ status: 'EXPIRED', updated_at: new Date() })
-        .where('id', '=', invitation.id)
-        .execute();
-    });
-
-    throw new AppError({
-      statusCode: 410,
-      errorCode: 'IAM_INVITATION_EXPIRED',
-      title: 'Invitation Expired',
-      detail: 'This invitation link has expired. Please contact your organization administrator to receive a new invitation.',
-    });
+  if (emailCheck) {
+    if (invitation.email.toLowerCase().trim() !== emailCheck.toLowerCase().trim()) {
+      if (clientIp) recordFailedInvitationAttempt(clientIp);
+      await sql`SELECT public.record_invitation_failed_attempt(${invitation.id}::uuid)`.execute(db);
+      throw new AppError({
+        statusCode: 400,
+        errorCode: 'IAM_INVITATION_EMAIL_MISMATCH',
+        title: 'Email Address Mismatch',
+        detail: 'The email address provided does not match the invitation record.',
+      });
+    }
   }
 
-  const effectiveTraceId = traceId ?? generateUuidV7();
-  return withTenantTransaction(
-    db,
-    { tenantId: invitation.tenant_id, userId: invitation.invited_by_user_id, traceId: effectiveTraceId },
-    async (trx) => {
-      const tenant = await trx.db
-        .selectFrom('tenants')
-        .select(['legal_name'])
-        .where('id', '=', invitation.tenant_id)
-        .executeTakeFirst();
+  return {
+    valid: true,
+    email: invitation.email,
+    maskedEmail: maskEmail(invitation.email),
+    roleCode: invitation.role_code,
+    tenantId: invitation.tenant_id,
+    tenantName: invitation.tenant_name,
+    employeeName: invitation.employee_name,
+    ...(cleanCode.length === 4 ? { invitationCode: cleanCode } : {}),
+  };
+}
 
-      let employeeName: string | null = null;
-      if (invitation.employee_id) {
-        const emp = await trx.db
-          .selectFrom('employees')
-          .select(['display_name'])
-          .where('id', '=', invitation.employee_id)
-          .executeTakeFirst();
-        employeeName = emp?.display_name ?? null;
-      }
-
-      return {
-        valid: true,
-        email: invitation.email,
-        roleCode: invitation.role_code,
-        tenantId: invitation.tenant_id,
-        tenantName: tenant?.legal_name ?? 'NexStock Organization',
-        employeeName,
-      };
-    },
-  );
+export async function validateStaffInvitationCode(
+  db: Kysely<NexStockDatabase>,
+  input: ValidateInvitationCodeRequest,
+  traceId?: string,
+  clientIp?: string,
+): Promise<ValidateInvitationResponse> {
+  return validateStaffInvitation(db, input.code, traceId, clientIp, input.email);
 }
 
 export async function acceptStaffInvitation(
@@ -2572,9 +2739,25 @@ export async function acceptStaffInvitation(
   config: AuthServiceConfig,
   input: AcceptInvitationRequest,
   traceId?: string,
+  clientIp?: string,
 ): Promise<LoginResponse> {
   const currentTraceId = traceId ?? `inv_acc_${generateUuidV7()}`;
-  const tokenHash = crypto.createHash('sha256').update(input.token.trim()).digest('hex');
+  const codeToVerify = (input.code || input.token || '').trim();
+
+  if (!codeToVerify) {
+    throw new AppError({
+      statusCode: 400,
+      errorCode: 'IAM_INVITATION_CODE_INVALID',
+      title: 'Invitation Code Required',
+      detail: 'A valid 4-digit invitation code or token is required to activate an account.',
+    });
+  }
+
+  if (clientIp) {
+    checkInvitationRateLimit(clientIp);
+  }
+
+  const tokenHash = crypto.createHash('sha256').update(codeToVerify).digest('hex');
 
   if (input.password.length < 8) {
     throw new AppError({
@@ -2585,21 +2768,39 @@ export async function acceptStaffInvitation(
     });
   }
 
-  // 1. Look up invitation using app user transaction
-  const invitation = await withAppUserTransaction(db, { traceId: currentTraceId }, async (trx) => {
-    return trx
-      .selectFrom('tenant_invitations')
-      .selectAll()
-      .where('token_hash', '=', tokenHash)
-      .executeTakeFirst();
-  });
+  // 1. Look up invitation using security definer function
+  const rows = await sql<{
+    id: string;
+    tenant_id: string;
+    email: string;
+    role_code: string;
+    employee_id: string | null;
+    status: string;
+    expires_at: Date;
+    failed_attempts: number;
+    locked_until: Date | null;
+    tenant_name: string;
+    employee_name: string | null;
+  }>`SELECT * FROM public.lookup_invitation_by_code_hash(${tokenHash})`.execute(db);
+
+  const invitation = rows.rows[0];
 
   if (!invitation) {
+    if (clientIp) recordFailedInvitationAttempt(clientIp);
     throw new AppError({
       statusCode: 404,
       errorCode: 'IAM_INVITATION_NOT_FOUND',
       title: 'Invitation Not Found',
       detail: 'The invitation token is invalid or does not exist.',
+    });
+  }
+
+  if (invitation.locked_until && new Date(invitation.locked_until) > new Date()) {
+    throw new AppError({
+      statusCode: 423,
+      errorCode: 'IAM_INVITATION_LOCKED',
+      title: 'Invitation Temporarily Locked',
+      detail: 'This invitation has been temporarily locked due to multiple failed attempts. Please try again later.',
     });
   }
 
@@ -2613,16 +2814,6 @@ export async function acceptStaffInvitation(
   }
 
   if (invitation.status === 'EXPIRED' || new Date(invitation.expires_at) < new Date()) {
-    if (invitation.status !== 'EXPIRED') {
-      await withAppUserTransaction(db, { traceId: currentTraceId }, async (trx) => {
-        await trx
-          .updateTable('tenant_invitations')
-          .set({ status: 'EXPIRED', updated_at: new Date() })
-          .where('id', '=', invitation.id)
-          .execute();
-      });
-    }
-
     throw new AppError({
       statusCode: 410,
       errorCode: 'IAM_INVITATION_EXPIRED',
@@ -2640,8 +2831,22 @@ export async function acceptStaffInvitation(
     });
   }
 
+  // Verify supplied email if provided
+  if (input.email) {
+    if (input.email.trim().toLowerCase() !== invitation.email.trim().toLowerCase()) {
+      if (clientIp) recordFailedInvitationAttempt(clientIp);
+      await sql`SELECT public.record_invitation_failed_attempt(${invitation.id}::uuid)`.execute(db);
+      throw new AppError({
+        statusCode: 400,
+        errorCode: 'IAM_INVITATION_EMAIL_MISMATCH',
+        title: 'Email Address Mismatch',
+        detail: 'The email address provided does not match the invitation record.',
+      });
+    }
+  }
+
   const normalizedEmail = invitation.email.toLowerCase().trim();
-  const fullName = input.fullName?.trim() || normalizedEmail.split('@')[0] || 'Staff Member';
+  const fullName = input.fullName?.trim() || invitation.employee_name || normalizedEmail.split('@')[0] || 'Staff Member';
 
   // 2. Ensure User Account exists in auth provider / users table
   let userId: string;
@@ -2810,7 +3015,7 @@ export async function acceptStaffInvitation(
           .execute();
       }
 
-      // E. Mark invitation ACCEPTED
+      // E. Mark invitation ACCEPTED and clear encrypted code
       const now = new Date();
       await trx.db
         .updateTable('tenant_invitations')
@@ -2818,6 +3023,9 @@ export async function acceptStaffInvitation(
           status: 'ACCEPTED',
           accepted_by_user_id: userId,
           accepted_at: now,
+          code_encrypted: null,
+          failed_attempts: 0,
+          locked_until: null,
           updated_at: now,
         })
         .where('tenant_id', '=', trx.tenantId)
@@ -2836,6 +3044,10 @@ export async function acceptStaffInvitation(
       });
     },
   );
+
+  if (clientIp) {
+    resetInvitationRateLimit(clientIp);
+  }
 
   // 4. Generate login session for staff member
   const token = signDevJwt({
