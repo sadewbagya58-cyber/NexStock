@@ -29,7 +29,7 @@ export interface AuthServiceConfig {
   readonly isDevOrTestMode?: boolean | undefined;
 }
 
-function isProductionEnvironment(config: AuthServiceConfig): boolean {
+export function isProductionEnvironment(config: AuthServiceConfig): boolean {
   if (config.isDevOrTestMode === false) return true;
   if (config.isDevOrTestMode === true) return false;
   return Boolean(process.env['APP_DATABASE_URL']);
@@ -119,13 +119,42 @@ export async function ensureUserRecordDirect(
             .execute();
         }
       } else if (existing.email === normalizedEmail && existing.id !== input.userId) {
-        // Collision: email already registered under a different user identifier
-        throw new AppError({
-          statusCode: 409,
-          errorCode: 'AUTH_EMAIL_ALREADY_EXISTS',
-          title: 'Email Already Registered',
-          detail: 'An account with this email address already exists. Please log in instead.',
-        });
+        // Collision or orphan: check if existing user has active memberships
+        const activeMemberships = await trx
+          .selectFrom('tenant_memberships')
+          .select('id')
+          .where('user_id', '=', existing.id)
+          .execute();
+
+        if (activeMemberships.length === 0) {
+          // Orphan user row without active memberships: safe to heal and point to real userId
+          await trx
+            .updateTable('employees')
+            .set({ linked_user_id: input.userId })
+            .where('linked_user_id', '=', existing.id)
+            .execute();
+          await trx
+            .deleteFrom('users')
+            .where('id', '=', existing.id)
+            .execute();
+          await trx
+            .insertInto('users')
+            .values({
+              id: input.userId,
+              email: normalizedEmail,
+              full_name: trimmedName,
+              is_platform_admin: false,
+            })
+            .execute();
+        } else {
+          // Collision: email already registered under a different active user
+          throw new AppError({
+            statusCode: 409,
+            errorCode: 'AUTH_EMAIL_ALREADY_EXISTS',
+            title: 'Email Already Registered',
+            detail: 'An account with this email address already exists. Please log in instead.',
+          });
+        }
       }
     },
   );

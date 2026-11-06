@@ -23,6 +23,7 @@ import {
   type TenantTransactionContext,
   appendAuditLog,
   generateUuidV7,
+  sanitizeLogMessage,
   withAppUserTransaction,
   withTenantTransaction,
 } from '../../shared/index.js';
@@ -2849,25 +2850,80 @@ export async function acceptStaffInvitation(
   const fullName = input.fullName?.trim() || invitation.employee_name || normalizedEmail.split('@')[0] || 'Staff Member';
 
   // 2. Ensure User Account exists in auth provider / users table
-  let userId: string;
-  const existingUser = await withAppUserTransaction(db, { traceId: currentTraceId }, async (trx) => {
-    return trx
-      .selectFrom('users')
-      .select(['id', 'email', 'full_name'])
-      .where('email', '=', normalizedEmail)
-      .executeTakeFirst();
-  });
+  let userId = '';
+  let sessionToken = '';
+  let sessionRefreshToken: string | undefined;
+  let sessionExpiresIn: number | undefined;
 
-  if (existingUser) {
-    userId = existingUser.id;
-  } else {
-    // Register user via Supabase or dev fallback
-    const supabaseUrl = config.supabaseUrl ?? process.env['SUPABASE_URL'] ?? DEFAULT_SUPABASE_URL;
-    const anonKey = config.supabaseAnonKey ?? process.env['SUPABASE_ANON_KEY'] ?? process.env['SUPABASE_PUBLISHABLE_KEY'];
+  const supabaseUrl = config.supabaseUrl ?? process.env['SUPABASE_URL'] ?? DEFAULT_SUPABASE_URL;
+  const anonKey = config.supabaseAnonKey ?? process.env['SUPABASE_ANON_KEY'] ?? process.env['SUPABASE_PUBLISHABLE_KEY'];
 
-    if (anonKey && anonKey !== 'SET_IN_LOCAL_ENV') {
-      try {
-        const resp = await fetch(`${supabaseUrl}/auth/v1/signup`, {
+  if (anonKey && anonKey !== 'SET_IN_LOCAL_ENV') {
+    // Live Supabase Auth integration (Production / Live Supabase Mode)
+    let signupResp: Response;
+    try {
+      signupResp = await fetch(`${supabaseUrl}/auth/v1/signup`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: anonKey,
+          Authorization: `Bearer ${anonKey}`,
+        },
+        body: JSON.stringify({
+          email: normalizedEmail,
+          password: input.password,
+          data: {
+            full_name: fullName,
+          },
+        }),
+      });
+    } catch (err) {
+      if (err instanceof AppError) throw err;
+      const safeDetail = sanitizeLogMessage(err instanceof Error ? err.message : String(err));
+      console.error('[NexStock Invitation Supabase Auth Provider Failure]', {
+        traceId: currentTraceId,
+        operation: 'signup',
+        detail: safeDetail,
+      });
+      throw new AppError({
+        statusCode: 502,
+        errorCode: 'ERR_INTERNAL_SERVER_ERROR',
+        title: 'Authentication Service Unavailable',
+        detail: `Failed to communicate with authentication provider: ${safeDetail}`,
+      });
+    }
+
+    const signupData = (await signupResp.json()) as {
+      access_token?: string;
+      refresh_token?: string;
+      expires_in?: number;
+      user?: { id?: string };
+      id?: string;
+      msg?: string;
+      message?: string;
+      error_description?: string;
+      error?: string;
+      code?: string | number;
+    };
+
+    if (signupResp.ok) {
+      const foundUserId = signupData.user?.id ?? signupData.id;
+      if (!foundUserId) {
+        throw new AppError({
+          statusCode: 500,
+          errorCode: 'ERR_INTERNAL_SERVER_ERROR',
+          title: 'Registration Failed',
+          detail: 'Identity provider did not return a user identifier.',
+        });
+      }
+      userId = foundUserId;
+      sessionToken = signupData.access_token ?? '';
+      sessionRefreshToken = signupData.refresh_token;
+      sessionExpiresIn = signupData.expires_in;
+
+      // If access_token was not returned in signup response, sign in via password to acquire session
+      if (!sessionToken) {
+        const loginResp = await fetch(`${supabaseUrl}/auth/v1/token?grant_type=password`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -2877,34 +2933,210 @@ export async function acceptStaffInvitation(
           body: JSON.stringify({
             email: normalizedEmail,
             password: input.password,
-            data: { full_name: fullName },
           }),
         });
-
-        const data = (await resp.json()) as { user?: { id?: string }; id?: string };
-        const foundUserId = data.user?.id ?? data.id;
-        if (resp.ok && foundUserId) {
-          userId = foundUserId;
-        } else {
-          userId = generateUuidV7();
+        if (loginResp.ok) {
+          const loginData = (await loginResp.json()) as {
+            access_token?: string;
+            refresh_token?: string;
+            expires_in?: number;
+            user?: { id?: string };
+          };
+          if (loginData.access_token) {
+            sessionToken = loginData.access_token;
+            sessionRefreshToken = loginData.refresh_token;
+            sessionExpiresIn = loginData.expires_in;
+            if (loginData.user?.id) userId = loginData.user.id;
+          }
         }
-      } catch {
-        userId = generateUuidV7();
       }
     } else {
-      userId = generateUuidV7();
+      const errorMsg =
+        signupData.msg ??
+        signupData.message ??
+        signupData.error_description ??
+        signupData.error ??
+        'Registration failed.';
+      const isAlreadyRegistered =
+        signupResp.status === 422 ||
+        errorMsg.toLowerCase().includes('already') ||
+        errorMsg.toLowerCase().includes('registered');
+
+      if (isAlreadyRegistered) {
+        // User already registered in Supabase. Attempt password login
+        let loginResp: Response;
+        try {
+          loginResp = await fetch(`${supabaseUrl}/auth/v1/token?grant_type=password`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              apikey: anonKey,
+              Authorization: `Bearer ${anonKey}`,
+            },
+            body: JSON.stringify({
+              email: normalizedEmail,
+              password: input.password,
+            }),
+          });
+        } catch (err) {
+          if (err instanceof AppError) throw err;
+          const safeDetail = sanitizeLogMessage(err instanceof Error ? err.message : String(err));
+          throw new AppError({
+            statusCode: 502,
+            errorCode: 'ERR_INTERNAL_SERVER_ERROR',
+            title: 'Authentication Service Unavailable',
+            detail: `Failed to communicate with authentication provider: ${safeDetail}`,
+          });
+        }
+
+        if (loginResp.ok) {
+          const loginData = (await loginResp.json()) as {
+            access_token?: string;
+            refresh_token?: string;
+            expires_in?: number;
+            user?: { id: string };
+          };
+          if (!loginData.access_token || !loginData.user?.id) {
+            throw new AppError({
+              statusCode: 401,
+              errorCode: 'AUTH_INVALID_CREDENTIALS',
+              title: 'Authentication Failed',
+              detail: 'Invalid credentials or inactive session.',
+            });
+          }
+          userId = loginData.user.id;
+          sessionToken = loginData.access_token;
+          sessionRefreshToken = loginData.refresh_token;
+          sessionExpiresIn = loginData.expires_in;
+        } else {
+          // Password did not match existing account. Check if SUPABASE_SERVICE_ROLE_KEY is present
+          const serviceRoleKey = process.env['SUPABASE_SERVICE_ROLE_KEY'];
+          let updatedViaAdmin = false;
+
+          if (serviceRoleKey && serviceRoleKey !== 'SET_IN_LOCAL_ENV') {
+            try {
+              const adminUsersResp = await fetch(`${supabaseUrl}/auth/v1/admin/users`, {
+                headers: {
+                  apikey: serviceRoleKey,
+                  Authorization: `Bearer ${serviceRoleKey}`,
+                },
+              });
+              if (adminUsersResp.ok) {
+                const adminData = (await adminUsersResp.json()) as { users?: Array<{ id: string; email?: string }> };
+                const target = (adminData.users ?? []).find(u => u.email?.toLowerCase() === normalizedEmail);
+                if (target) {
+                  const updateResp = await fetch(`${supabaseUrl}/auth/v1/admin/users/${target.id}`, {
+                    method: 'PUT',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      apikey: serviceRoleKey,
+                      Authorization: `Bearer ${serviceRoleKey}`,
+                    },
+                    body: JSON.stringify({
+                      password: input.password,
+                      email_confirm: true,
+                      user_metadata: { full_name: fullName },
+                    }),
+                  });
+                  if (updateResp.ok) {
+                    const reloginResp = await fetch(`${supabaseUrl}/auth/v1/token?grant_type=password`, {
+                      method: 'POST',
+                      headers: {
+                        'Content-Type': 'application/json',
+                        apikey: anonKey,
+                        Authorization: `Bearer ${anonKey}`,
+                      },
+                      body: JSON.stringify({
+                        email: normalizedEmail,
+                        password: input.password,
+                      }),
+                    });
+                    if (reloginResp.ok) {
+                      const reloginData = (await reloginResp.json()) as {
+                        access_token?: string;
+                        refresh_token?: string;
+                        expires_in?: number;
+                        user?: { id: string };
+                      };
+                      if (reloginData.access_token && reloginData.user?.id) {
+                        userId = reloginData.user.id;
+                        sessionToken = reloginData.access_token;
+                        sessionRefreshToken = reloginData.refresh_token;
+                        sessionExpiresIn = reloginData.expires_in;
+                        updatedViaAdmin = true;
+                      }
+                    }
+                  }
+                }
+              }
+            } catch (adminErr) {
+              console.warn('[Supabase Admin User Password Update Failed]', adminErr);
+            }
+          }
+
+          if (!updatedViaAdmin) {
+            throw new AppError({
+              statusCode: 409,
+              errorCode: 'AUTH_EMAIL_ALREADY_EXISTS',
+              title: 'Account Already Exists',
+              detail: 'An account with this email address already exists. Please enter your existing account password to join this organization.',
+            });
+          }
+        }
+      } else if (signupResp.status === 400 && errorMsg.toLowerCase().includes('password')) {
+        throw new AppError({
+          statusCode: 400,
+          errorCode: 'AUTH_WEAK_PASSWORD',
+          title: 'Weak Password',
+          detail: errorMsg,
+        });
+      } else {
+        throw new AppError({
+          statusCode: signupResp.status >= 400 && signupResp.status < 500 ? signupResp.status : 400,
+          errorCode: 'ERR_VALIDATION_FAILED',
+          title: 'Account Provisioning Failed',
+          detail: errorMsg,
+        });
+      }
     }
 
-    await ensureUserRecordDirect(
-      db,
-      {
-        userId,
-        email: normalizedEmail,
-        fullName,
-      },
-      currentTraceId,
-    );
+    if (!sessionToken || !userId) {
+      throw new AppError({
+        statusCode: 500,
+        errorCode: 'ERR_INTERNAL_SERVER_ERROR',
+        title: 'Session Creation Failed',
+        detail: 'Failed to establish an authenticated session with identity provider.',
+      });
+    }
+  } else {
+    // Local Development / Test Fallback
+    const existingUser = await withAppUserTransaction(db, { traceId: currentTraceId }, async (trx) => {
+      return trx
+        .selectFrom('users')
+        .select(['id', 'email', 'full_name'])
+        .where('email', '=', normalizedEmail)
+        .executeTakeFirst();
+    });
+
+    userId = existingUser?.id ?? generateUuidV7();
+    sessionToken = signDevJwt({
+      userId,
+      email: normalizedEmail,
+      userMetadata: { full_name: fullName },
+    });
+    sessionRefreshToken = `dev_refresh_${generateUuidV7()}`;
+    sessionExpiresIn = 86400 * 7;
   }
+
+  await ensureUserRecordDirect(
+    db,
+    {
+      userId,
+      email: normalizedEmail,
+      fullName,
+    },
+    currentTraceId,
+  );
 
   // 3. Atomically activate membership, assign role, link employee, and mark invitation accepted
   await withTenantTransaction(
@@ -3049,19 +3281,13 @@ export async function acceptStaffInvitation(
     resetInvitationRateLimit(clientIp);
   }
 
-  // 4. Generate login session for staff member
-  const token = signDevJwt({
-    userId,
-    email: normalizedEmail,
-    userMetadata: { full_name: fullName },
-  });
-
+  // 4. Return authenticated session & user profile for staff member
   const profile = await getUserProfileAndMemberships(db, userId, currentTraceId);
 
   return {
-    token,
-    refreshToken: `dev_refresh_${generateUuidV7()}`,
-    expiresIn: 86400 * 7,
+    token: sessionToken,
+    ...(sessionRefreshToken ? { refreshToken: sessionRefreshToken } : {}),
+    ...(sessionExpiresIn ? { expiresIn: sessionExpiresIn } : {}),
     user: profile.user,
     memberships: profile.memberships,
   };

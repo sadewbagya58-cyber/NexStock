@@ -18481,6 +18481,12 @@
         const sessionToken = res.token || res.accessToken;
         if (sessionToken) {
           state.token = sessionToken;
+          if (res.expiresIn) {
+            state.tokenExpiresAt = Date.now() + (res.expiresIn * 1000);
+          } else {
+            const exp = getTokenExpiry(sessionToken);
+            if (exp) state.tokenExpiresAt = exp;
+          }
           if (typeof localStorage !== 'undefined') {
             localStorage.setItem('nexstock_session_token', sessionToken);
             localStorage.setItem('nexstock_auth_token', sessionToken);
@@ -18504,8 +18510,11 @@
           await selectActiveTenant(res.memberships[0]);
         }
 
+        state.isInitializing = false;
+        setAppInitPhase(APP_INIT_STATES.READY);
         updateTopbarContext();
         showToast('Your staff account has been activated! Welcome to NexStock.', 'success');
+        window.location.hash = '#dashboard';
         renderView('dashboard');
       } catch (err) {
         if (alertEl) {
