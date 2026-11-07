@@ -499,37 +499,67 @@ export async function closePosShift(
 
 export async function getActivePosShift(
   trx: TenantTransactionContext,
-  registerId: string,
+  registerId?: string,
 ): Promise<PosShiftResponse | null> {
-  const register = await trx.db
-    .selectFrom('pos_registers')
-    .select(['id', 'branch_id', 'warehouse_id', 'code'])
-    .where('tenant_id', '=', trx.tenantId)
-    .where('id', '=', registerId)
-    .executeTakeFirst();
+  let shiftRow;
 
-  if (!register) {
-    throw new AppError({
-      statusCode: 404,
-      errorCode: 'POS_REGISTER_NOT_FOUND',
-      title: 'POS Register Not Found',
-      detail: `POS Register "${registerId}" was not found.`,
+  if (registerId) {
+    const register = await trx.db
+      .selectFrom('pos_registers')
+      .select(['id', 'branch_id', 'warehouse_id', 'code'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('id', '=', registerId)
+      .executeTakeFirst();
+
+    if (!register) {
+      throw new AppError({
+        statusCode: 404,
+        errorCode: 'POS_REGISTER_NOT_FOUND',
+        title: 'POS Register Not Found',
+        detail: `POS Register "${registerId}" was not found.`,
+      });
+    }
+
+    await assertAuthorized(trx, {
+      permission: 'pos:register:read',
+      branchId: register.branch_id,
+      warehouseId: register.warehouse_id,
     });
+
+    shiftRow = await trx.db
+      .selectFrom('pos_shifts')
+      .selectAll()
+      .where('tenant_id', '=', trx.tenantId)
+      .where('register_id', '=', registerId)
+      .where('status', '=', 'OPEN')
+      .executeTakeFirst();
+  } else {
+    // If no registerId provided, lookup the calling cashier's active shift
+    shiftRow = await trx.db
+      .selectFrom('pos_shifts')
+      .selectAll()
+      .where('tenant_id', '=', trx.tenantId)
+      .where('opened_by_user_id', '=', trx.userId)
+      .where('status', '=', 'OPEN')
+      .executeTakeFirst();
+
+    if (shiftRow) {
+      const register = await trx.db
+        .selectFrom('pos_registers')
+        .select(['id', 'branch_id', 'warehouse_id', 'code'])
+        .where('tenant_id', '=', trx.tenantId)
+        .where('id', '=', shiftRow.register_id)
+        .executeTakeFirst();
+
+      if (register) {
+        await assertAuthorized(trx, {
+          permission: 'pos:register:read',
+          branchId: register.branch_id,
+          warehouseId: register.warehouse_id,
+        });
+      }
+    }
   }
-
-  await assertAuthorized(trx, {
-    permission: 'pos:register:read',
-    branchId: register.branch_id,
-    warehouseId: register.warehouse_id,
-  });
-
-  const shiftRow = await trx.db
-    .selectFrom('pos_shifts')
-    .selectAll()
-    .where('tenant_id', '=', trx.tenantId)
-    .where('register_id', '=', registerId)
-    .where('status', '=', 'OPEN')
-    .executeTakeFirst();
 
   if (!shiftRow) {
     return null;

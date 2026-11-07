@@ -1343,7 +1343,7 @@ export type PosShiftResponse = Static<typeof PosShiftResponseSchema>;
 
 export const GetActivePosShiftQuerySchema = Type.Object(
   {
-    registerId: UuidSchema,
+    registerId: Type.Optional(UuidSchema),
   },
   { additionalProperties: false },
 );
@@ -3100,7 +3100,8 @@ export type HolidayType = Static<typeof HolidayTypeSchema>;
 export const CreateOrgHolidayRequestSchema = Type.Object(
   {
     holidayDate: Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' }),
-    name: Type.String({ minLength: 1, maxLength: 100 }),
+    name: Type.Optional(Type.String({ minLength: 1, maxLength: 100 })),
+    holidayName: Type.Optional(Type.String({ minLength: 1, maxLength: 100 })),
     holidayType: Type.Optional(HolidayTypeSchema),
     isRecurring: Type.Optional(Type.Boolean()),
     notes: Type.Optional(Type.Union([Type.String(), Type.Null()])),
@@ -3130,6 +3131,7 @@ export type OrgHolidayListResponse = Static<typeof OrgHolidayListResponseSchema>
 export const ProrationMethodSchema = Type.Union([
   Type.Literal('CALENDAR_DAYS'),
   Type.Literal('WORKING_DAYS'),
+  Type.Literal('SCHEDULED_WORKING_DAYS'),
   Type.Literal('FIXED_30_DAYS'),
 ]);
 export type ProrationMethod = Static<typeof ProrationMethodSchema>;
@@ -3137,6 +3139,8 @@ export type ProrationMethod = Static<typeof ProrationMethodSchema>;
 export const AllowanceProrationPolicySchema = Type.Union([
   Type.Literal('PRORATE'),
   Type.Literal('FULL'),
+  Type.Literal('PRORATE_ALL'),
+  Type.Literal('BASIC_ONLY'),
 ]);
 export type AllowanceProrationPolicy = Static<typeof AllowanceProrationPolicySchema>;
 
@@ -3155,8 +3159,10 @@ export type OrgPayrollSettingsResponse = Static<typeof OrgPayrollSettingsRespons
 export const UpdateOrgPayrollSettingsRequestSchema = Type.Object(
   {
     prorationMethod: Type.Optional(ProrationMethodSchema),
+    defaultProrationRule: Type.Optional(Type.String()),
     gpsAttendanceEnabled: Type.Optional(Type.Boolean()),
     allowanceProrationPolicy: Type.Optional(AllowanceProrationPolicySchema),
+    overtimeHourlyMultiplier: Type.Optional(Type.Union([Type.String(), Type.Number()])),
     workplaceLatitude: Type.Optional(Type.Union([Type.Number(), Type.Null()])),
     workplaceLongitude: Type.Optional(Type.Union([Type.Number(), Type.Null()])),
     geofenceRadiusMeters: Type.Optional(Type.Integer({ minimum: 10, maximum: 50000 })),

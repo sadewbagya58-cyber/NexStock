@@ -2741,5 +2741,42 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       expect(html).toContain("!AUTH_VIEWS.includes(initialRoute)");
       expect(html).toContain("!AUTH_VIEWS.includes(targetRoute)");
     });
+
+    it('verifies Phase 7 QA Remediation: BUG-058, BUG-053, BUG-054, BUG-055, BUG-056, BUG-057', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // BUG-058: Holiday creation payload sends name & holidayName; modal safely unpacks { items: [...] }
+      expect(html).toContain('name: holidayName, holidayName');
+      expect(html).toContain('Array.isArray(holidaysRes) ? holidaysRes : (holidaysRes?.items || [])');
+      expect(html).toContain('${escapeHtml(h.name || h.holidayName || \'\')}');
+
+      // BUG-053: Mobile attendance records render with mobile-cards-container and responsive card badges
+      expect(html).toContain('class="mobile-cards-container"');
+      expect(html).toContain('empList.length === 0');
+      expect(html).toContain('r.checkInTime ? new Date(r.checkInTime)');
+
+      // BUG-054: GPS Geofencing Settings & Geolocation Error Handling
+      expect(html).toContain('prorationMethod');
+      expect(html).toContain('allowanceProrationPolicy');
+      expect(html).toContain('Location permission denied. Please allow location access in your browser to verify check-in.');
+      expect(html).toContain('Location unavailable. Please ensure GPS is enabled on your device.');
+
+      // BUG-055: Intermittent POS Cashier Shift Status & Resilient Status Recovery
+      expect(html).toContain('state.shiftStatusError');
+      expect(html).toContain('Unable to verify shift status');
+      expect(html).toContain('onclick="renderPosCheckoutView()"');
+      expect(html).toContain("apiFetch('/v1/pos/shifts/active'");
+
+      // BUG-056: Expenses Responsive Layout Classes
+      expect(html).toContain('expense-filter-bar');
+      expect(html).toContain('expense-kpi-grid-4');
+      expect(html).toContain('form-row-2col');
+
+      // BUG-057: Modal responsiveness and safe array unpacking for employee and customer modals
+      expect(html).toContain('z-index: 1000 !important;');
+      expect(html).toContain('Array.isArray(res) ? res : (res?.items || [])');
+      expect(html).toContain('const targetCustId = (typeof preselectedCustomerId === \'string\' && preselectedCustomerId) ? preselectedCustomerId : null;');
+    });
   });
 });

@@ -48,6 +48,16 @@ export async function createOrgHoliday(
 ): Promise<OrgHolidayResponse> {
   await assertAuthorized(trx, { permission: 'hrm:holiday:manage' });
 
+  const holidayName = (input.name || input.holidayName || '').trim();
+  if (!holidayName) {
+    throw new AppError({
+      statusCode: 400,
+      errorCode: 'ERR_VALIDATION_FAILED',
+      title: 'Validation Error',
+      detail: 'Holiday name is required and cannot be blank.',
+    });
+  }
+
   const existing = await trx.db
     .selectFrom('org_holidays')
     .select(['id'])
@@ -71,7 +81,7 @@ export async function createOrgHoliday(
       id: holidayId,
       tenant_id: trx.tenantId,
       holiday_date: input.holidayDate,
-      name: input.name.trim(),
+      name: holidayName,
       holiday_type: input.holidayType ?? 'PUBLIC',
       is_recurring: input.isRecurring ?? false,
       notes: input.notes?.trim() || null,
@@ -84,7 +94,7 @@ export async function createOrgHoliday(
     resourceId: holidayId,
     metadata: {
       holidayDate: input.holidayDate,
-      name: input.name,
+      name: holidayName,
       holidayType: input.holidayType ?? 'PUBLIC',
     },
   });
@@ -113,9 +123,15 @@ export async function listOrgHolidays(
   if (query?.year) {
     const yStart = `${query.year}-01-01`;
     const yEnd = `${query.year}-12-31`;
-    dbQuery = dbQuery
-      .where('holiday_date', '>=', yStart)
-      .where('holiday_date', '<=', yEnd);
+    dbQuery = dbQuery.where((eb) =>
+      eb.or([
+        eb.and([
+          eb('holiday_date', '>=', yStart),
+          eb('holiday_date', '<=', yEnd),
+        ]),
+        eb('is_recurring', '=', true),
+      ]),
+    );
   }
 
   const rows = await dbQuery.orderBy('holiday_date', 'asc').execute();

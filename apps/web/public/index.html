@@ -417,13 +417,18 @@
       inset: 0;
       background: rgba(0, 0, 0, 0.5);
       backdrop-filter: blur(2px);
-      z-index: 50;
+      z-index: 1000 !important;
       align-items: center;
       justify-content: center;
       padding: 20px;
     }
     .modal-backdrop.active {
       display: flex;
+    }
+    .form-row-2col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
     }
     .modal-box {
       background: var(--surface-card);
@@ -1730,10 +1735,49 @@
         max-width: 95vw !important;
         margin: 12px !important;
       }
+
+      .form-row-2col {
+        grid-template-columns: 1fr !important;
+      }
+
+      .expense-kpi-grid-4 {
+        grid-template-columns: repeat(2, 1fr) !important;
+        gap: 8px !important;
+      }
+
+      .expense-filter-bar {
+        flex-direction: column !important;
+        align-items: stretch !important;
+        gap: 10px !important;
+      }
+
+      .expense-filter-bar input,
+      .expense-filter-bar select {
+        width: 100% !important;
+        min-width: 0 !important;
+      }
+
+      .view-header .btn {
+        touch-action: manipulation;
+        min-height: 38px;
+      }
+
+      .modal-footer {
+        padding: 12px 16px !important;
+        flex-wrap: wrap !important;
+        gap: 8px !important;
+      }
+
+      .modal-footer .btn {
+        flex: 1 1 auto;
+      }
     }
 
     /* Small Mobile Screen Media Query */
     @media (max-width: 480px) {
+      .expense-kpi-grid-4 {
+        grid-template-columns: 1fr !important;
+      }
       .auth-card {
         padding: 24px 16px;
       }
@@ -2786,7 +2830,10 @@
           `;
         }
       }
-      if (containerEl) containerEl.classList.add('active');
+      if (containerEl) {
+        containerEl.classList.add('active');
+        containerEl.style.display = 'flex';
+      }
     }
 
     function closeModal() {
@@ -2794,7 +2841,11 @@
       state.activeCheckoutKey = null;
       const modalBox = document.querySelector('.modal-box');
       if (modalBox) modalBox.style.maxWidth = '540px';
-      document.getElementById('modalContainer').classList.remove('active');
+      const containerEl = document.getElementById('modalContainer');
+      if (containerEl) {
+        containerEl.classList.remove('active');
+        containerEl.style.display = 'none';
+      }
     }
 
     function formatQty(val, decimals = 0) {
@@ -6223,30 +6274,72 @@
       const container = document.getElementById('mainContainer');
       const renderSeq = state.viewRenderSeq;
       try {
-        // Fetch active shift and POS catalog products in parallel (BUG-048)
-        const [activeShiftRes, productsRes] = await Promise.all([
+        // Ensure registers are loaded if not yet cached
+        let registers = state.cachedRegisters || [];
+        if ((!registers || registers.length === 0) && state.branchId) {
+          try {
+            const regRes = await apiFetch(`/v1/pos/registers?branchId=${encodeURIComponent(state.branchId)}`, { silent: true });
+            registers = Array.isArray(regRes) ? regRes : (regRes?.data || []);
+            state.cachedRegisters = registers;
+          } catch {}
+        }
+        if (!state.registerId && registers.length > 0) {
+          state.registerId = registers[0].id;
+          state.registerCode = registers[0].code || 'REG-01';
+        }
+
+        // Authoritative Active Shift Fetching in parallel with Products
+        let shiftStatusError = false;
+        const shiftPromise = (
           state.registerId
-            ? apiFetch(`/v1/pos/shifts/active?registerId=${encodeURIComponent(state.registerId)}`, { silent: true }).catch(() => null)
-            : Promise.resolve(null),
-          state.warehouseId
-            ? apiFetch(`/v1/pos/products/search?warehouseId=${encodeURIComponent(state.warehouseId)}&limit=100`, { silent: true }).catch(() => [])
-            : Promise.resolve([])
+            ? apiFetch(`/v1/pos/shifts/active?registerId=${encodeURIComponent(state.registerId)}`, { silent: true })
+            : apiFetch('/v1/pos/shifts/active', { silent: true })
+        ).catch((err) => {
+          if (err?.status === 404 || err?.statusCode === 404 || err?.errorCode === 'POS_NO_ACTIVE_SHIFT') {
+            return null;
+          }
+          shiftStatusError = true;
+          return null;
+        });
+
+        const productsPromise = state.warehouseId
+          ? apiFetch(`/v1/pos/products/search?warehouseId=${encodeURIComponent(state.warehouseId)}&limit=100`, { silent: true }).catch(() => [])
+          : Promise.resolve([]);
+
+        const [shiftRes, productsRes] = await Promise.all([
+          shiftPromise,
+          productsPromise
         ]);
 
-        state.activeShift = activeShiftRes || null;
+        let activeShift = shiftRes;
 
-        let products = [];
+        // Fallback: If current register has no open shift, check if cashier has active shift on another register
+        if (!activeShift && !shiftStatusError) {
+          try {
+            const userActiveShift = await apiFetch('/v1/pos/shifts/active', { silent: true });
+            if (userActiveShift && userActiveShift.id) {
+              activeShift = userActiveShift;
+              state.registerId = userActiveShift.registerId;
+              const matchedReg = registers.find(r => r.id === userActiveShift.registerId);
+              if (matchedReg) state.registerCode = matchedReg.code;
+            }
+          } catch {
+            // No active user shift
+          }
+        }
+
+        state.activeShift = activeShift;
+        state.shiftStatusError = shiftStatusError;
+
+        let products = productsRes || [];
         state.posProductsMap = new Map();
-        if (state.warehouseId) {
-          products = productsRes || [];
-          for (const p of products) {
-            if (p.id) state.posProductsMap.set(p.id, p);
-            if (p.sku) state.posProductsMap.set(p.sku.toLowerCase(), p);
-            if (p.primaryBarcode) state.posProductsMap.set(p.primaryBarcode.toLowerCase(), p);
-            if (Array.isArray(p.barcodes)) {
-              for (const b of p.barcodes) {
-                if (b.barcode) state.posProductsMap.set(b.barcode.toLowerCase(), p);
-              }
+        for (const p of products) {
+          if (p.id) state.posProductsMap.set(p.id, p);
+          if (p.sku) state.posProductsMap.set(p.sku.toLowerCase(), p);
+          if (p.primaryBarcode) state.posProductsMap.set(p.primaryBarcode.toLowerCase(), p);
+          if (Array.isArray(p.barcodes)) {
+            for (const b of p.barcodes) {
+              if (b.barcode) state.posProductsMap.set(b.barcode.toLowerCase(), p);
             }
           }
         }
@@ -6260,7 +6353,10 @@
               <div class="view-subtitle">${escapeHtml(state.branchName || 'Main Store')} &bull; Register ${escapeHtml(state.registerCode || 'POS-01')}</div>
             </div>
             <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
-              ${state.activeShift ? (
+              ${state.shiftStatusError ? `
+                <div class="badge-pill badge-yellow">⚠️ Unable to verify shift status</div>
+                <button class="btn btn-secondary btn-sm" onclick="renderPosCheckoutView()">Retry Verification</button>
+              ` : state.activeShift ? (
                 state.activeShift.openedByOtherCashier ? `
                   <div class="badge-pill badge-yellow">● Register Occupied by Another Staff</div>
                   ${hasAnyPermission(['org:branch:manage', 'iam:member:manage']) ? `
@@ -8636,6 +8732,17 @@
             activeShift = await apiFetch(`/v1/pos/shifts/active?registerId=${encodeURIComponent(state.registerId)}`, { silent: true });
           } catch (e) {}
         }
+        if (!activeShift) {
+          try {
+            const userActiveShift = await apiFetch('/v1/pos/shifts/active', { silent: true });
+            if (userActiveShift && userActiveShift.id) {
+              activeShift = userActiveShift;
+              state.registerId = userActiveShift.registerId;
+              const matchedReg = registers.find(r => r.id === userActiveShift.registerId);
+              if (matchedReg) state.registerCode = matchedReg.code;
+            }
+          } catch (e) {}
+        }
         state.activeShift = activeShift;
 
         const isManagerOrAdmin = hasAnyPermission(['org:branch:manage', 'iam:member:manage']);
@@ -9586,9 +9693,9 @@
                 <div class="form-group">
                   <label class="form-label">Default Proration Mode *</label>
                   <select class="form-select" id="settingProrationMode">
-                    <option value="CALENDAR_DAYS" ${payrollSettings?.defaultProrationRule === 'CALENDAR_DAYS' ? 'selected' : ''}>Calendar Days Based (Standard)</option>
-                    <option value="SCHEDULED_WORKING_DAYS" ${payrollSettings?.defaultProrationRule === 'SCHEDULED_WORKING_DAYS' ? 'selected' : ''}>Scheduled Working Days (Shift-based)</option>
-                    <option value="FIXED_30_DAYS" ${payrollSettings?.defaultProrationRule === 'FIXED_30_DAYS' ? 'selected' : ''}>Fixed 30-Day Commercial Month</option>
+                    <option value="CALENDAR_DAYS" ${(payrollSettings?.prorationMethod === 'CALENDAR_DAYS' || payrollSettings?.defaultProrationRule === 'CALENDAR_DAYS') ? 'selected' : ''}>Calendar Days Based (Standard)</option>
+                    <option value="WORKING_DAYS" ${(payrollSettings?.prorationMethod === 'WORKING_DAYS' || payrollSettings?.prorationMethod === 'SCHEDULED_WORKING_DAYS' || payrollSettings?.defaultProrationRule === 'SCHEDULED_WORKING_DAYS') ? 'selected' : ''}>Scheduled Working Days (Shift-based)</option>
+                    <option value="FIXED_30_DAYS" ${(payrollSettings?.prorationMethod === 'FIXED_30_DAYS' || payrollSettings?.defaultProrationRule === 'FIXED_30_DAYS') ? 'selected' : ''}>Fixed 30-Day Commercial Month</option>
                   </select>
                   <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">
                     Determines divisor and multiplier when employees join mid-cycle or take unpaid leave.
@@ -9598,8 +9705,8 @@
                 <div class="form-group">
                   <label class="form-label">Allowance Proration Policy *</label>
                   <select class="form-select" id="settingAllowancePolicy">
-                    <option value="PRORATE_ALL" ${payrollSettings?.allowanceProrationPolicy === 'PRORATE_ALL' ? 'selected' : ''}>Prorate All Eligible Allowances</option>
-                    <option value="BASIC_ONLY" ${payrollSettings?.allowanceProrationPolicy === 'BASIC_ONLY' ? 'selected' : ''}>Prorate Basic Salary Only (Allowances Full)</option>
+                    <option value="PRORATE" ${(payrollSettings?.allowanceProrationPolicy === 'PRORATE' || payrollSettings?.allowanceProrationPolicy === 'PRORATE_ALL') ? 'selected' : ''}>Prorate All Eligible Allowances</option>
+                    <option value="FULL" ${(payrollSettings?.allowanceProrationPolicy === 'FULL' || payrollSettings?.allowanceProrationPolicy === 'BASIC_ONLY') ? 'selected' : ''}>Prorate Basic Salary Only (Allowances Full)</option>
                   </select>
                 </div>
 
@@ -9811,12 +9918,16 @@
       const workplaceLongitude = lonVal ? parseFloat(lonVal) : null;
       const geofenceRadiusMeters = radiusVal ? parseInt(radiusVal, 10) : 200;
 
+      const prorationMethod = prorationRule === 'SCHEDULED_WORKING_DAYS' ? 'WORKING_DAYS' : (prorationRule || 'CALENDAR_DAYS');
+      const normalizedAllowance = (allowancePolicy === 'PRORATE_ALL' || allowancePolicy === 'PRORATE') ? 'PRORATE' : 'FULL';
+
       try {
         await apiFetch('/v1/org/payroll-settings', {
           method: 'PATCH',
           body: JSON.stringify({
-            defaultProrationRule: prorationRule,
-            allowanceProrationPolicy: allowancePolicy,
+            prorationMethod,
+            defaultProrationRule: prorationMethod,
+            allowanceProrationPolicy: normalizedAllowance,
             overtimeHourlyMultiplier: otMultiplier,
             gpsAttendanceEnabled: gpsEnabled,
             workplaceLatitude,
@@ -13127,8 +13238,9 @@
 
         const records = Array.isArray(recordsRes) ? recordsRes : (recordsRes.items || []);
         state.cachedAttendanceRecords = records;
-        if (Array.isArray(employeesRes) && employeesRes.length > 0) {
-          state.cachedEmployees = employeesRes;
+        const empList = Array.isArray(employeesRes) ? employeesRes : (employeesRes?.items || []);
+        if (empList.length > 0) {
+          state.cachedEmployees = empList;
         }
 
         const presentCount = records.filter(r => ['PRESENT', 'HALF_DAY', 'LATE'].includes(r.status)).length;
@@ -13260,6 +13372,57 @@
                   </table>
                 </div>
               </div>
+
+              <!-- Mobile Attendance Records (BUG-053) -->
+              <div class="mobile-cards-container">
+                ${records.map(r => {
+                  const checkInStr = r.checkInTime ? new Date(r.checkInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—';
+                  const checkOutStr = r.checkOutTime ? new Date(r.checkOutTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—';
+                  const hours = r.totalHoursWorked ? `${parseFloat(r.totalHoursWorked).toFixed(1)} hrs` : '—';
+
+                  let statusBadge = '<span class="badge-pill badge-green">Present</span>';
+                  if (r.status === 'LATE') statusBadge = '<span class="badge-pill badge-yellow">Late</span>';
+                  else if (r.status === 'HALF_DAY') statusBadge = '<span class="badge-pill badge-blue">Half Day</span>';
+                  else if (r.status === 'ON_LEAVE') statusBadge = '<span class="badge-pill badge-secondary">On Leave</span>';
+                  else if (r.status === 'ABSENT') statusBadge = '<span class="badge-pill badge-red">Absent</span>';
+
+                  return `
+                    <div class="entity-card" style="padding: 14px; border: 1px solid var(--border-subtle); border-radius: var(--radius); margin-bottom: 10px; background: var(--surface-card);">
+                      <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-bottom: 8px;">
+                        <div>
+                          <div style="font-weight: 600; font-size: 15px; color: var(--text-primary);">${escapeHtml(r.employeeName || 'Staff')}</div>
+                          <div style="font-size: 11px; color: var(--text-secondary); font-family: monospace;">${escapeHtml(r.employeeCode || '')} &bull; ${escapeHtml(r.attendanceDate)}</div>
+                        </div>
+                        <div>${statusBadge}</div>
+                      </div>
+
+                      <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; padding: 10px 0; border-top: 1px solid var(--border-subtle); border-bottom: 1px solid var(--border-subtle); margin-bottom: 10px; font-size: 12px;">
+                        <div>
+                          <div style="color: var(--text-secondary); font-size: 11px;">Check-In</div>
+                          <div style="font-weight: 600; font-size: 13px; color: var(--text-primary);">${checkInStr}</div>
+                        </div>
+                        <div>
+                          <div style="color: var(--text-secondary); font-size: 11px;">Check-Out</div>
+                          <div style="font-weight: 600; font-size: 13px; color: var(--text-primary);">${checkOutStr}</div>
+                        </div>
+                        <div>
+                          <div style="color: var(--text-secondary); font-size: 11px;">Hours</div>
+                          <div style="font-weight: 600; font-size: 13px; color: var(--text-primary);">${hours}</div>
+                        </div>
+                      </div>
+
+                      <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+                        <div style="display: flex; gap: 4px; flex-wrap: wrap;">
+                          ${r.gpsVerified ? '<span class="badge-pill badge-green" style="font-size: 10px;">GPS Verified</span>' : ''}
+                          ${r.isManualEntry ? '<span class="badge-pill badge-yellow" style="font-size: 10px;">Manual</span>' : ''}
+                          ${!r.gpsVerified && !r.isManualEntry ? '<span class="badge-pill badge-secondary" style="font-size: 10px;">Standard</span>' : ''}
+                        </div>
+                        <button class="btn btn-secondary btn-sm" onclick="openManualAttendanceModal('${r.id}')">Adjust</button>
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
             `}
           </div>
         `;
@@ -13295,8 +13458,17 @@
       if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(
           pos => doCheckIn(pos.coords),
-          _err => doCheckIn(null),
-          { timeout: 5000, enableHighAccuracy: true }
+          err => {
+            if (err.code === 1) {
+              showToast('Location permission denied. Please allow location access in your browser to verify check-in.', 'error');
+            } else if (err.code === 2) {
+              showToast('Location unavailable. Please ensure GPS is enabled on your device.', 'error');
+            } else if (err.code === 3) {
+              showToast('Location request timed out. Please try again.', 'error');
+            }
+            doCheckIn(null);
+          },
+          { timeout: 7000, enableHighAccuracy: true }
         );
       } else {
         doCheckIn(null);
@@ -13320,30 +13492,42 @@
     }
 
     async function openManualAttendanceModal(existingRecordId = null) {
-      if (!state.cachedEmployees || state.cachedEmployees.length === 0) {
-        state.cachedEmployees = await apiFetch('/v1/employees?limit=100').catch(() => []);
-      }
-      const existing = existingRecordId
-        ? (state.cachedAttendanceRecords || []).find(r => r.id === existingRecordId)
-        : null;
+      try {
+        let empList = state.cachedEmployees;
+        if (!Array.isArray(empList) || empList.length === 0) {
+          const res = await apiFetch('/v1/employees?limit=100').catch(() => []);
+          empList = Array.isArray(res) ? res : (res?.items || []);
+          state.cachedEmployees = empList;
+        }
+        let employees = Array.isArray(empList) ? [...empList] : [];
+        if (employees.length === 0 && state.linkedEmployee) {
+          employees.push({
+            id: state.linkedEmployee.id,
+            displayName: state.linkedEmployee.displayName || state.linkedEmployee.firstName || 'My Profile',
+            employeeCode: state.linkedEmployee.employeeCode || 'EMP-ME',
+          });
+        }
 
-      const employees = state.cachedEmployees || [];
-      const todayStr = state._attendanceSelectedDate || new Date().toISOString().substring(0, 10);
+        const existing = (existingRecordId && typeof existingRecordId === 'string')
+          ? (state.cachedAttendanceRecords || []).find(r => r.id === existingRecordId)
+          : null;
 
-      openModal({
-        title: existing ? 'Adjust Attendance Entry' : 'Record Manual Attendance',
-        maxWidth: '540px',
-        bodyHtml: `
-          <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 14px;">
-            ${existing ? 'Modify attendance times and record the administrative justification.' : 'Add a manual attendance entry for an employee.'}
-          </div>
+        const todayStr = state._attendanceSelectedDate || new Date().toISOString().substring(0, 10);
 
-          <div class="form-group">
-            <label class="form-label">Employee *</label>
-            <select class="form-select" id="manualEmpId" ${existing ? 'disabled' : ''}>
-              ${employees.map(e => `<option value="${e.id}" ${existing && existing.employeeId === e.id ? 'selected' : ''}>${escapeHtml(e.displayName)} (${escapeHtml(e.employeeCode)})</option>`).join('')}
-            </select>
-          </div>
+        openModal({
+          title: existing ? 'Adjust Attendance Entry' : 'Record Manual Attendance',
+          maxWidth: '540px',
+          bodyHtml: `
+            <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 14px;">
+              ${existing ? 'Modify attendance times and record the administrative justification.' : 'Add a manual attendance entry for an employee.'}
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Employee *</label>
+              <select class="form-select" id="manualEmpId" ${existing ? 'disabled' : ''}>
+                ${employees.map(e => `<option value="${e.id}" ${existing && existing.employeeId === e.id ? 'selected' : ''}>${escapeHtml(e.displayName || e.firstName || 'Employee')} (${escapeHtml(e.employeeCode || '')})</option>`).join('')}
+              </select>
+            </div>
 
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
             <div class="form-group">
@@ -13383,6 +13567,9 @@
           <button class="btn btn-primary" id="btnSubmitManualAttend" onclick="submitManualAttendance('${existingRecordId || ''}')">Save Attendance</button>
         `
       });
+      } catch (err) {
+        showToast(err.message || 'Failed to open attendance modal', 'error');
+      }
     }
 
     async function submitManualAttendance(existingRecordId = null) {
@@ -13556,6 +13743,42 @@
                   </table>
                 </div>
               </div>
+
+              <!-- Mobile Leave Cards -->
+              <div class="mobile-cards-container">
+                ${requests.map(req => {
+                  let statusBadge = '<span class="badge-pill badge-yellow">Pending</span>';
+                  if (req.status === 'APPROVED') statusBadge = '<span class="badge-pill badge-green">Approved</span>';
+                  else if (req.status === 'REJECTED') statusBadge = '<span class="badge-pill badge-red">Rejected</span>';
+                  else if (req.status === 'CANCELLED') statusBadge = '<span class="badge-pill badge-secondary">Cancelled</span>';
+
+                  const isPending = req.status === 'PENDING';
+
+                  return `
+                    <div class="entity-card" style="padding: 14px; border: 1px solid var(--border-subtle); border-radius: var(--radius); margin-bottom: 10px; background: var(--surface-card);">
+                      <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-bottom: 8px;">
+                        <div>
+                          <div style="font-weight: 600; font-size: 15px; color: var(--text-primary);">${escapeHtml(req.employeeName || 'Staff')}</div>
+                          <div style="font-size: 11px; color: var(--text-secondary); font-family: monospace;">${escapeHtml(req.employeeCode || '')} &bull; ${escapeHtml(req.leaveType)}</div>
+                        </div>
+                        <div>${statusBadge}</div>
+                      </div>
+
+                      <div style="padding: 8px 0; border-top: 1px solid var(--border-subtle); border-bottom: 1px solid var(--border-subtle); margin-bottom: 8px; font-size: 12px;">
+                        <div style="color: var(--text-primary); margin-bottom: 4px;"><strong>Dates:</strong> ${escapeHtml(req.startDate)} to ${escapeHtml(req.endDate)} (${req.daysCount} days ${req.isHalfDay ? '(Half Day)' : ''})</div>
+                        <div style="color: var(--text-secondary);"><strong>Reason:</strong> ${escapeHtml(req.reason)}</div>
+                      </div>
+
+                      ${isPending ? `
+                        <div style="display: flex; gap: 6px; justify-content: flex-end;">
+                          <button class="btn btn-primary btn-sm" onclick="reviewLeaveAction('${req.id}', 'APPROVED')">Approve</button>
+                          <button class="btn btn-secondary btn-sm" style="color: var(--status-danger);" onclick="reviewLeaveAction('${req.id}', 'REJECTED')">Reject</button>
+                        </div>
+                      ` : ''}
+                    </div>
+                  `;
+                }).join('')}
+              </div>
             `}
           </div>
         `;
@@ -13570,70 +13793,84 @@
     }
 
     async function openCreateLeaveModal() {
-      if (!state.cachedEmployees || state.cachedEmployees.length === 0) {
-        state.cachedEmployees = await apiFetch('/v1/employees?limit=100').catch(() => []);
-      }
-      const employees = state.cachedEmployees || [];
-      const todayStr = new Date().toISOString().substring(0, 10);
+      try {
+        let empList = state.cachedEmployees;
+        if (!Array.isArray(empList) || empList.length === 0) {
+          const res = await apiFetch('/v1/employees?limit=100').catch(() => []);
+          empList = Array.isArray(res) ? res : (res?.items || []);
+          state.cachedEmployees = empList;
+        }
+        let employees = Array.isArray(empList) ? [...empList] : [];
+        if (employees.length === 0 && state.linkedEmployee) {
+          employees.push({
+            id: state.linkedEmployee.id,
+            displayName: state.linkedEmployee.displayName || state.linkedEmployee.firstName || 'My Profile',
+            employeeCode: state.linkedEmployee.employeeCode || 'EMP-ME',
+          });
+        }
+        const todayStr = new Date().toISOString().substring(0, 10);
 
-      openModal({
-        title: 'Apply for Leave',
-        maxWidth: '540px',
-        bodyHtml: `
-          <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 14px;">
-            Submit an employee leave request. Leaves deduct from entitlement balances or calculate as no-pay.
-          </div>
+        openModal({
+          title: 'Apply for Leave',
+          maxWidth: '540px',
+          bodyHtml: `
+            <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 14px;">
+              Submit an employee leave request. Leaves deduct from entitlement balances or calculate as no-pay.
+            </div>
 
-          <div class="form-group">
-            <label class="form-label">Employee *</label>
-            <select class="form-select" id="newLeaveEmpId">
-              ${employees.map(e => `<option value="${e.id}">${escapeHtml(e.displayName)} (${escapeHtml(e.employeeCode)})</option>`).join('')}
-            </select>
-          </div>
-
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
             <div class="form-group">
-              <label class="form-label">Leave Type *</label>
-              <select class="form-select" id="newLeaveType">
-                <option value="ANNUAL">Annual Leave</option>
-                <option value="CASUAL">Casual Leave</option>
-                <option value="SICK">Sick Leave</option>
-                <option value="NO_PAY">No-Pay Leave (Unpaid)</option>
+              <label class="form-label">Employee *</label>
+              <select class="form-select" id="newLeaveEmpId">
+                ${employees.map(e => `<option value="${e.id}">${escapeHtml(e.displayName || e.firstName || 'Employee')} (${escapeHtml(e.employeeCode || '')})</option>`).join('')}
               </select>
             </div>
-            <div class="form-group">
-              <label class="form-label">Days Count *</label>
-              <input type="number" class="form-input" id="newLeaveDays" value="1" step="0.5" min="0.5" max="365" required>
-            </div>
-          </div>
 
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
-            <div class="form-group">
-              <label class="form-label">Start Date *</label>
-              <input type="date" class="form-input" id="newLeaveStart" value="${todayStr}" required>
+            <div class="form-row-2col" style="margin-bottom: 14px;">
+              <div class="form-group">
+                <label class="form-label">Leave Type *</label>
+                <select class="form-select" id="newLeaveType">
+                  <option value="ANNUAL">Annual Leave</option>
+                  <option value="CASUAL">Casual Leave</option>
+                  <option value="SICK">Sick Leave</option>
+                  <option value="NO_PAY">No-Pay Leave (Unpaid)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Days Count *</label>
+                <input type="number" class="form-input" id="newLeaveDays" value="1" step="0.5" min="0.5" max="365" required>
+              </div>
             </div>
-            <div class="form-group">
-              <label class="form-label">End Date *</label>
-              <input type="date" class="form-input" id="newLeaveEnd" value="${todayStr}" required>
+
+            <div class="form-row-2col" style="margin-bottom: 14px;">
+              <div class="form-group">
+                <label class="form-label">Start Date *</label>
+                <input type="date" class="form-input" id="newLeaveStart" value="${todayStr}" required>
+              </div>
+              <div class="form-group">
+                <label class="form-label">End Date *</label>
+                <input type="date" class="form-input" id="newLeaveEnd" value="${todayStr}" required>
+              </div>
             </div>
-          </div>
 
-          <div class="form-group">
-            <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
-              <input type="checkbox" id="newLeaveIsHalfDay"> Half-Day Leave
-            </label>
-          </div>
+            <div class="form-group">
+              <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+                <input type="checkbox" id="newLeaveIsHalfDay"> Half-Day Leave
+              </label>
+            </div>
 
-          <div class="form-group">
-            <label class="form-label">Reason *</label>
-            <textarea class="form-textarea" id="newLeaveReason" placeholder="State reason for leave request..." rows="2" required></textarea>
-          </div>
-        `,
-        footerHtml: `
-          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-          <button class="btn btn-primary" id="btnSubmitLeave" onclick="submitCreateLeave()">Submit Request</button>
-        `
-      });
+            <div class="form-group">
+              <label class="form-label">Reason *</label>
+              <textarea class="form-textarea" id="newLeaveReason" placeholder="State reason for leave request..." rows="2" required></textarea>
+            </div>
+          `,
+          footerHtml: `
+            <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+            <button class="btn btn-primary" id="btnSubmitLeave" onclick="submitCreateLeave()">Submit Request</button>
+          `
+        });
+      } catch (err) {
+        showToast(err.message || 'Failed to open leave modal', 'error');
+      }
     }
 
     async function submitCreateLeave() {
@@ -13707,8 +13944,8 @@
       });
 
       try {
-        const holidaysRes = await apiFetch('/v1/org/holidays').catch(() => []);
-        const holidays = Array.isArray(holidaysRes) ? holidaysRes : [];
+        const holidaysRes = await apiFetch('/v1/org/holidays').catch(() => ({ items: [] }));
+        const holidays = Array.isArray(holidaysRes) ? holidaysRes : (holidaysRes?.items || []);
         const todayStr = new Date().toISOString().substring(0, 10);
 
         openModal({
@@ -13722,11 +13959,11 @@
             <!-- Add Holiday Form -->
             <div class="card" style="padding: 12px; margin-bottom: 14px; background: var(--bg-primary);">
               <div style="font-weight: 600; font-size: 13px; margin-bottom: 8px;">+ Add New Holiday</div>
-              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 8px;">
+              <div class="form-row-2col" style="margin-bottom: 8px;">
                 <input type="date" class="form-input form-input-sm" id="newHolidayDate" value="${todayStr}">
                 <input type="text" class="form-input form-input-sm" id="newHolidayName" placeholder="Holiday Name (e.g. New Year)">
               </div>
-              <div style="display: flex; justify-content: space-between; align-items: center;">
+              <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
                 <label style="display: flex; align-items: center; gap: 6px; font-size: 12px;">
                   <input type="checkbox" id="newHolidayRecurring"> Annual Recurring
                 </label>
@@ -13739,28 +13976,30 @@
               ${holidays.length === 0 ? `
                 <div style="text-align: center; padding: 20px; color: var(--text-secondary); font-size: 13px;">No holidays configured for this organization.</div>
               ` : `
-                <table class="data-table">
-                  <thead>
-                    <tr>
-                      <th>Date</th>
-                      <th>Name</th>
-                      <th>Recurring</th>
-                      <th style="text-align: right;">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    ${holidays.map(h => `
+                <div class="table-responsive">
+                  <table class="data-table">
+                    <thead>
                       <tr>
-                        <td><strong>${escapeHtml(h.holidayDate)}</strong></td>
-                        <td>${escapeHtml(h.holidayName)}</td>
-                        <td>${h.isRecurring ? '<span class="badge-pill badge-blue" style="font-size: 10px;">Yes</span>' : 'No'}</td>
-                        <td style="text-align: right;">
-                          <button class="btn btn-secondary btn-sm" style="color: var(--status-danger);" onclick="deleteHolidayAction('${h.id}')">Delete</button>
-                        </td>
+                        <th>Date</th>
+                        <th>Name</th>
+                        <th>Recurring</th>
+                        <th style="text-align: right;">Action</th>
                       </tr>
-                    `).join('')}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      ${holidays.map(h => `
+                        <tr>
+                          <td><strong>${escapeHtml(h.holidayDate)}</strong></td>
+                          <td>${escapeHtml(h.name || h.holidayName || '')}</td>
+                          <td>${h.isRecurring ? '<span class="badge-pill badge-blue" style="font-size: 10px;">Yes</span>' : 'No'}</td>
+                          <td style="text-align: right;">
+                            <button class="btn btn-secondary btn-sm" style="color: var(--status-danger);" onclick="deleteHolidayAction('${h.id}')">Delete</button>
+                          </td>
+                        </tr>
+                      `).join('')}
+                    </tbody>
+                  </table>
+                </div>
               `}
             </div>
           `,
@@ -13773,7 +14012,7 @@
 
     async function submitCreateHoliday() {
       const holidayDate = document.getElementById('newHolidayDate')?.value;
-      const holidayName = document.getElementById('newHolidayName')?.value.trim();
+      const holidayName = document.getElementById('newHolidayName')?.value?.trim();
       const isRecurring = document.getElementById('newHolidayRecurring')?.checked ?? false;
 
       if (!holidayDate || !holidayName) {
@@ -13783,7 +14022,7 @@
       try {
         await apiFetch('/v1/org/holidays', {
           method: 'POST',
-          body: JSON.stringify({ holidayDate, holidayName, isRecurring })
+          body: JSON.stringify({ holidayDate, name: holidayName, holidayName, isRecurring })
         });
         showToast('Holiday added', 'success');
         openOrgHolidaysModal();
@@ -15610,17 +15849,17 @@
           <!-- Filter & Search Bar -->
           <div class="card" style="margin-bottom: 16px; padding: 14px 18px;">
             <div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between;">
-              <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; flex: 1;">
+              <div class="expense-filter-bar" style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; flex: 1; min-width: 0;">
                 <input
                   type="text"
                   id="expenseSearchInput"
                   class="input-sm"
-                  style="width: 200px;"
+                  style="min-width: 150px; flex: 1 1 auto;"
                   placeholder="Search ref, title, payee..."
                   value="${escapeHtml(state.expenseFilters.search || '')}"
                   onkeydown="if(event.key==='Enter') applyExpenseFilters()"
                 />
-                <select id="expenseStatusFilter" class="input-sm" onchange="applyExpenseFilters()">
+                <select id="expenseStatusFilter" class="input-sm" style="flex: 1 1 auto;" onchange="applyExpenseFilters()">
                   <option value="">All Statuses</option>
                   <option value="DRAFT" ${state.expenseFilters.status === 'DRAFT' ? 'selected' : ''}>Draft</option>
                   <option value="PENDING_APPROVAL" ${state.expenseFilters.status === 'PENDING_APPROVAL' ? 'selected' : ''}>Pending Approval</option>
@@ -15628,20 +15867,20 @@
                   <option value="REJECTED" ${state.expenseFilters.status === 'REJECTED' ? 'selected' : ''}>Rejected</option>
                   <option value="PAID" ${state.expenseFilters.status === 'PAID' ? 'selected' : ''}>Paid</option>
                 </select>
-                <select id="expenseCategoryFilter" class="input-sm" onchange="applyExpenseFilters()">
+                <select id="expenseCategoryFilter" class="input-sm" style="flex: 1 1 auto;" onchange="applyExpenseFilters()">
                   <option value="">All Categories</option>
                   ${state.cachedExpenseCategories.map(c => `
                     <option value="${c.id}" ${state.expenseFilters.categoryId === c.id ? 'selected' : ''}>${escapeHtml(c.name)}</option>
                   `).join('')}
                 </select>
-                <div style="display: flex; align-items: center; gap: 4px;">
+                <div style="display: flex; align-items: center; gap: 4px; flex-wrap: wrap;">
                   <span style="font-size: 11px; color: var(--text-secondary);">From:</span>
-                  <input type="date" id="expenseStartDate" class="input-sm" style="width: 125px;" value="${escapeHtml(state.expenseFilters.startDate || '')}" onchange="applyExpenseFilters()" />
+                  <input type="date" id="expenseStartDate" class="input-sm" style="min-width: 120px;" value="${escapeHtml(state.expenseFilters.startDate || '')}" onchange="applyExpenseFilters()" />
                   <span style="font-size: 11px; color: var(--text-secondary);">To:</span>
-                  <input type="date" id="expenseEndDate" class="input-sm" style="width: 125px;" value="${escapeHtml(state.expenseFilters.endDate || '')}" onchange="applyExpenseFilters()" />
+                  <input type="date" id="expenseEndDate" class="input-sm" style="min-width: 120px;" value="${escapeHtml(state.expenseFilters.endDate || '')}" onchange="applyExpenseFilters()" />
                 </div>
               </div>
-              <div style="display: flex; gap: 8px;">
+              <div style="display: flex; gap: 8px; flex-wrap: wrap;">
                 <button class="btn btn-secondary btn-sm" onclick="clearExpenseFilters()">Clear Filters</button>
                 <button class="btn btn-primary btn-sm" onclick="applyExpenseFilters()">Search</button>
               </div>
@@ -15830,7 +16069,7 @@
               <input type="text" id="expTitle" class="input" required maxlength="200" placeholder="e.g. November Store Lease / Office Supplies" value="${escapeHtml(existing?.title || '')}" />
             </div>
 
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+            <div class="form-row-2col">
               <div>
                 <label class="form-label" style="font-weight: 600;">Category *</label>
                 <select id="expCategory" class="input" required>
@@ -15852,7 +16091,7 @@
               </div>
             </div>
 
-            <div style="display: grid; grid-template-columns: 1.5fr 1fr; gap: 10px;">
+            <div class="form-row-2col">
               <div>
                 <label class="form-label" style="font-weight: 600;">Amount *</label>
                 <input type="number" step="0.0001" min="0.0001" id="expAmount" class="input" required placeholder="0.00" value="${existing?.amount ? parseFloat(existing.amount) : ''}" />
@@ -15863,7 +16102,7 @@
               </div>
             </div>
 
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+            <div class="form-row-2col">
               <div>
                 <label class="form-label" style="font-weight: 600;">Expense Date *</label>
                 <input type="date" id="expDate" class="input" required value="${defaultDate}" />
@@ -16369,55 +16608,57 @@
         const bodyHtml = `
           <div style="background: var(--bg-primary); padding: 14px; border-radius: 8px; margin-bottom: 16px;">
             <div style="font-weight: 700; font-size: 13px; margin-bottom: 8px; color: var(--text-primary);">+ Add New Expense Category</div>
-            <div style="display: grid; grid-template-columns: 1fr 1.5fr; gap: 8px; margin-bottom: 8px;">
+            <div class="form-row-2col" style="margin-bottom: 8px;">
               <input type="text" id="newCatCode" class="input-sm" placeholder="Code (e.g. SOFTWARE)" style="text-transform: uppercase;" />
               <input type="text" id="newCatName" class="input-sm" placeholder="Category Name (e.g. Software & Subscriptions)" />
             </div>
-            <div style="display: flex; gap: 8px;">
-              <input type="text" id="newCatDesc" class="input-sm" placeholder="Optional description..." style="flex: 1;" />
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+              <input type="text" id="newCatDesc" class="input-sm" placeholder="Optional description..." style="flex: 1; min-width: 140px;" />
               <button class="btn btn-primary btn-sm" onclick="createExpenseCategoryFromUi()">Add Category</button>
             </div>
           </div>
 
           <div style="max-height: 380px; overflow-y: auto;">
-            <table class="table" style="margin: 0; font-size: 12px;">
-              <thead>
-                <tr>
-                  <th>Code</th>
-                  <th>Name</th>
-                  <th>Status</th>
-                  <th class="text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${state.cachedExpenseCategories.map(cat => `
+            <div class="table-responsive">
+              <table class="table" style="margin: 0; font-size: 12px;">
+                <thead>
                   <tr>
-                    <td><strong style="font-family: monospace;">${escapeHtml(cat.code)}</strong></td>
-                    <td>
-                      <div style="font-weight: 600;">${escapeHtml(cat.name)}</div>
-                      ${cat.description ? `<div style="font-size: 11px; color: var(--text-secondary);">${escapeHtml(cat.description)}</div>` : ''}
-                    </td>
-                    <td>
-                      ${cat.isActive ? `
-                        <span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #047857;">Active</span>
-                      ` : `
-                        <span class="badge" style="background: rgba(107, 114, 128, 0.15); color: #4b5563;">Inactive</span>
-                      `}
-                    </td>
-                    <td class="text-right">
-                      <div style="display: flex; gap: 4px; justify-content: flex-end;">
-                        <button class="btn btn-secondary btn-sm" style="padding: 2px 6px; font-size: 10px;" onclick="toggleExpenseCategoryActive('${cat.id}', ${cat.isActive})">
-                          ${cat.isActive ? 'Deactivate' : 'Activate'}
-                        </button>
-                        ${!cat.isSystemDefault ? `
-                          <button class="btn btn-secondary btn-sm" style="padding: 2px 6px; font-size: 10px; color: var(--status-danger);" onclick="deleteExpenseCategoryFromUi('${cat.id}')">Del</button>
-                        ` : ''}
-                      </div>
-                    </td>
+                    <th>Code</th>
+                    <th>Name</th>
+                    <th>Status</th>
+                    <th class="text-right">Actions</th>
                   </tr>
-                `).join('')}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  ${state.cachedExpenseCategories.map(cat => `
+                    <tr>
+                      <td><strong style="font-family: monospace;">${escapeHtml(cat.code)}</strong></td>
+                      <td>
+                        <div style="font-weight: 600;">${escapeHtml(cat.name)}</div>
+                        ${cat.description ? `<div style="font-size: 11px; color: var(--text-secondary);">${escapeHtml(cat.description)}</div>` : ''}
+                      </td>
+                      <td>
+                        ${cat.isActive ? `
+                          <span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #047857;">Active</span>
+                        ` : `
+                          <span class="badge" style="background: rgba(107, 114, 128, 0.15); color: #4b5563;">Inactive</span>
+                        `}
+                      </td>
+                      <td class="text-right">
+                        <div style="display: flex; gap: 4px; justify-content: flex-end; flex-wrap: wrap;">
+                          <button class="btn btn-secondary btn-sm" style="padding: 2px 6px; font-size: 10px;" onclick="toggleExpenseCategoryActive('${cat.id}', ${cat.isActive})">
+                            ${cat.isActive ? 'Deactivate' : 'Activate'}
+                          </button>
+                          ${!cat.isSystemDefault ? `
+                            <button class="btn btn-secondary btn-sm" style="padding: 2px 6px; font-size: 10px; color: var(--status-danger);" onclick="deleteExpenseCategoryFromUi('${cat.id}')">Del</button>
+                          ` : ''}
+                        </div>
+                      </td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
           </div>
         `;
 
@@ -16513,7 +16754,7 @@
             </div>
 
             <!-- KPI Totals -->
-            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 20px;">
+            <div class="expense-kpi-grid-4">
               <div style="background: var(--bg-primary); padding: 10px 12px; border-radius: 6px; border: 1px solid var(--border-subtle);">
                 <div style="font-size: 10px; font-weight: 700; text-transform: uppercase; color: var(--text-secondary);">Total Expenses</div>
                 <div style="font-size: 16px; font-weight: 800; margin-top: 2px; color: var(--text-primary); font-variant-numeric: tabular-nums;">${formatTenantMoney(report.totalExpenses, currency)}</div>
@@ -16541,24 +16782,26 @@
               <h4 style="font-size: 13px; font-weight: 700; text-transform: uppercase; margin: 0 0 8px; color: var(--text-primary); border-bottom: 1px solid var(--border-subtle); padding-bottom: 4px;">
                 Expenses by Category
               </h4>
-              <table class="table" style="font-size: 12px; margin: 0;">
-                <thead>
-                  <tr>
-                    <th>Category</th>
-                    <th class="text-right">Transactions</th>
-                    <th class="text-right">Total Amount</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${(report.byCategory || []).length === 0 ? '<tr><td colspan="3" style="text-align:center; padding: 12px; color: var(--text-secondary);">No category transactions recorded</td></tr>' : (report.byCategory || []).map(c => `
+              <div class="table-responsive">
+                <table class="table" style="font-size: 12px; margin: 0;">
+                  <thead>
                     <tr>
-                      <td><strong>${escapeHtml(c.categoryName)}</strong> <span style="font-family: monospace; font-size: 11px; color: var(--text-secondary);">(${escapeHtml(c.categoryCode)})</span></td>
-                      <td class="text-right">${c.count}</td>
-                      <td class="text-right" style="font-weight: 700; font-variant-numeric: tabular-nums;">${formatTenantMoney(c.totalAmount, currency)}</td>
+                      <th>Category</th>
+                      <th class="text-right">Transactions</th>
+                      <th class="text-right">Total Amount</th>
                     </tr>
-                  `).join('')}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    ${(report.byCategory || []).length === 0 ? '<tr><td colspan="3" style="text-align:center; padding: 12px; color: var(--text-secondary);">No category transactions recorded</td></tr>' : (report.byCategory || []).map(c => `
+                      <tr>
+                        <td><strong>${escapeHtml(c.categoryName)}</strong> <span style="font-family: monospace; font-size: 11px; color: var(--text-secondary);">(${escapeHtml(c.categoryCode)})</span></td>
+                        <td class="text-right">${c.count}</td>
+                        <td class="text-right" style="font-weight: 700; font-variant-numeric: tabular-nums;">${formatTenantMoney(c.totalAmount, currency)}</td>
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+              </div>
             </div>
 
             <!-- Branch Breakdown Table -->
@@ -16566,24 +16809,26 @@
               <h4 style="font-size: 13px; font-weight: 700; text-transform: uppercase; margin: 0 0 8px; color: var(--text-primary); border-bottom: 1px solid var(--border-subtle); padding-bottom: 4px;">
                 Expenses by Branch Location
               </h4>
-              <table class="table" style="font-size: 12px; margin: 0;">
-                <thead>
-                  <tr>
-                    <th>Branch</th>
-                    <th class="text-right">Transactions</th>
-                    <th class="text-right">Total Amount</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${(report.byBranch || []).length === 0 ? '<tr><td colspan="3" style="text-align:center; padding: 12px; color: var(--text-secondary);">No location records found</td></tr>' : (report.byBranch || []).map(b => `
+              <div class="table-responsive">
+                <table class="table" style="font-size: 12px; margin: 0;">
+                  <thead>
                     <tr>
-                      <td><strong>${escapeHtml(b.branchName || 'All Outlets / HQ')}</strong></td>
-                      <td class="text-right">${b.count}</td>
-                      <td class="text-right" style="font-weight: 700; font-variant-numeric: tabular-nums;">${formatTenantMoney(b.totalAmount, currency)}</td>
+                      <th>Branch</th>
+                      <th class="text-right">Transactions</th>
+                      <th class="text-right">Total Amount</th>
                     </tr>
-                  `).join('')}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    ${(report.byBranch || []).length === 0 ? '<tr><td colspan="3" style="text-align:center; padding: 12px; color: var(--text-secondary);">No location records found</td></tr>' : (report.byBranch || []).map(b => `
+                      <tr>
+                        <td><strong>${escapeHtml(b.branchName || 'All Outlets / HQ')}</strong></td>
+                        <td class="text-right">${b.count}</td>
+                        <td class="text-right" style="font-weight: 700; font-variant-numeric: tabular-nums;">${formatTenantMoney(b.totalAmount, currency)}</td>
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         `;
@@ -17194,64 +17439,71 @@
     }
 
     async function openCreateCreditAccountModal(preselectedCustomerId = null) {
-      let customers = state.cachedCustomers || [];
-      if (customers.length === 0) {
-        try {
-          const res = await apiFetch('/v1/customers?limit=100');
-          customers = res?.items || [];
-          state.cachedCustomers = customers;
-        } catch { customers = []; }
-      }
+      const targetCustId = (typeof preselectedCustomerId === 'string' && preselectedCustomerId) ? preselectedCustomerId : null;
+      const currency = getTenantCurrency();
 
-      openModal({
-        title: 'Open Customer Credit Account',
-        bodyHtml: `
-          <div class="form-group">
-            <label class="form-label">Customer *</label>
-            <select class="form-select" id="newAccCustomerId" ${preselectedCustomerId ? 'disabled' : ''}>
-              <option value="">-- Select Customer --</option>
-              ${customers.map(c => `
-                <option value="${c.id}" ${c.id === preselectedCustomerId ? 'selected' : ''}>
-                  ${escapeHtml(c.customerNumber)} — ${escapeHtml(c.name)} ${c.companyName ? `(${escapeHtml(c.companyName)})` : ''}
-                </option>
-              `).join('')}
-            </select>
-          </div>
+      try {
+        let customers = state.cachedCustomers || [];
+        if (!Array.isArray(customers) || customers.length === 0) {
+          try {
+            const res = await apiFetch('/v1/customers?limit=100');
+            customers = Array.isArray(res) ? res : (res?.items || []);
+            state.cachedCustomers = customers;
+          } catch { customers = []; }
+        }
 
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+        openModal({
+          title: 'Open Customer Credit Account',
+          bodyHtml: `
             <div class="form-group">
-              <label class="form-label">Approved Credit Limit (LKR) *</label>
-              <input type="number" step="0.01" min="0" class="form-input" id="newAccLimit" value="50000.00" required>
-            </div>
-            <div class="form-group">
-              <label class="form-label">Payment Terms *</label>
-              <select class="form-select" id="newAccTerms" onchange="document.getElementById('newAccCustomDaysGroup').style.display = this.value === 'CUSTOM' ? 'block' : 'none';">
-                <option value="NET_30" selected>NET 30 (30 Days)</option>
-                <option value="NET_15">NET 15 (15 Days)</option>
-                <option value="NET_60">NET 60 (60 Days)</option>
-                <option value="DUE_ON_RECEIPT">Due on Receipt</option>
-                <option value="CUSTOM">Custom Days</option>
+              <label class="form-label">Customer *</label>
+              <select class="form-select" id="newAccCustomerId" ${targetCustId ? 'disabled' : ''}>
+                <option value="">-- Select Customer --</option>
+                ${customers.map(c => `
+                  <option value="${c.id}" ${c.id === targetCustId ? 'selected' : ''}>
+                    ${escapeHtml(c.customerNumber)} — ${escapeHtml(c.name)} ${c.companyName ? `(${escapeHtml(c.companyName)})` : ''}
+                  </option>
+                `).join('')}
               </select>
             </div>
-          </div>
 
-          <div class="form-group" id="newAccCustomDaysGroup" style="display: none;">
-            <label class="form-label">Custom Term Days</label>
-            <input type="number" min="1" max="365" class="form-input" id="newAccCustomDays" value="45">
-          </div>
+            <div class="form-row-2col">
+              <div class="form-group">
+                <label class="form-label">Approved Credit Limit (${currency}) *</label>
+                <input type="number" step="0.01" min="0" class="form-input" id="newAccLimit" value="50000.00" required>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Payment Terms *</label>
+                <select class="form-select" id="newAccTerms" onchange="document.getElementById('newAccCustomDaysGroup').style.display = this.value === 'CUSTOM' ? 'block' : 'none';">
+                  <option value="NET_30" selected>NET 30 (30 Days)</option>
+                  <option value="NET_15">NET 15 (15 Days)</option>
+                  <option value="NET_60">NET 60 (60 Days)</option>
+                  <option value="DUE_ON_RECEIPT">Due on Receipt</option>
+                  <option value="CUSTOM">Custom Days</option>
+                </select>
+              </div>
+            </div>
 
-          <div class="form-group">
-            <label class="form-label">Opening Debit Balance (LKR, Optional)</label>
-            <input type="number" step="0.01" min="0" class="form-input" id="newAccOpeningBalance" value="0.00" placeholder="0.00">
-            <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">Initial outstanding balance carried over from legacy receivables ledger.</div>
-          </div>
-        `,
-        footerHtml: `
-          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-          <button class="btn btn-primary" id="btnSubmitCreateAccount" onclick="submitCreateCreditAccount('${preselectedCustomerId || ''}')">Approve &amp; Open Account</button>
-        `,
-        maxWidth: '560px'
-      });
+            <div class="form-group" id="newAccCustomDaysGroup" style="display: none;">
+              <label class="form-label">Custom Term Days</label>
+              <input type="number" min="1" max="365" class="form-input" id="newAccCustomDays" value="45">
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Opening Debit Balance (${currency}, Optional)</label>
+              <input type="number" step="0.01" min="0" class="form-input" id="newAccOpeningBalance" value="0.00" placeholder="0.00">
+              <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">Initial outstanding balance carried over from legacy receivables ledger.</div>
+            </div>
+          `,
+          footerHtml: `
+            <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+            <button class="btn btn-primary" id="btnSubmitCreateAccount" onclick="submitCreateCreditAccount('${targetCustId || ''}')">Approve &amp; Open Account</button>
+          `,
+          maxWidth: '560px'
+        });
+      } catch (err) {
+        showToast(err.message || 'Failed to open credit account modal', 'error');
+      }
     }
 
     async function submitCreateCreditAccount(preselectedCustomerId) {

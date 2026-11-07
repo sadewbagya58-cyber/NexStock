@@ -49,6 +49,29 @@ export async function updateOrgPayrollSettings(
 ): Promise<OrgPayrollSettingsResponse> {
   await assertAuthorized(trx, { permission: 'hrm:settings:manage' });
 
+  // Normalize proration method
+  let prorationMethod: 'CALENDAR_DAYS' | 'WORKING_DAYS' | 'FIXED_30_DAYS' | undefined;
+  const rawProration = input.prorationMethod ?? (input as { defaultProrationRule?: string }).defaultProrationRule;
+  if (rawProration) {
+    if (rawProration === 'SCHEDULED_WORKING_DAYS' || rawProration === 'WORKING_DAYS') {
+      prorationMethod = 'WORKING_DAYS';
+    } else if (rawProration === 'FIXED_30_DAYS') {
+      prorationMethod = 'FIXED_30_DAYS';
+    } else {
+      prorationMethod = 'CALENDAR_DAYS';
+    }
+  }
+
+  // Normalize allowance proration policy
+  let allowancePolicy: 'PRORATE' | 'FULL' | undefined;
+  if (input.allowanceProrationPolicy) {
+    if (input.allowanceProrationPolicy === 'BASIC_ONLY' || input.allowanceProrationPolicy === 'FULL') {
+      allowancePolicy = 'FULL';
+    } else {
+      allowancePolicy = 'PRORATE';
+    }
+  }
+
   const existing = await trx.db
     .selectFrom('org_payroll_settings')
     .selectAll()
@@ -61,9 +84,9 @@ export async function updateOrgPayrollSettings(
     await trx.db
       .updateTable('org_payroll_settings')
       .set({
-        proration_method: input.prorationMethod ?? existing.proration_method,
+        proration_method: prorationMethod ?? existing.proration_method,
         gps_attendance_enabled: input.gpsAttendanceEnabled ?? existing.gps_attendance_enabled,
-        allowance_proration_policy: input.allowanceProrationPolicy ?? existing.allowance_proration_policy,
+        allowance_proration_policy: allowancePolicy ?? existing.allowance_proration_policy,
         workplace_latitude: input.workplaceLatitude !== undefined ? (input.workplaceLatitude != null ? String(input.workplaceLatitude) : null) : existing.workplace_latitude,
         workplace_longitude: input.workplaceLongitude !== undefined ? (input.workplaceLongitude != null ? String(input.workplaceLongitude) : null) : existing.workplace_longitude,
         geofence_radius_meters: input.geofenceRadiusMeters ?? existing.geofence_radius_meters,
@@ -76,9 +99,9 @@ export async function updateOrgPayrollSettings(
       .insertInto('org_payroll_settings')
       .values({
         tenant_id: trx.tenantId,
-        proration_method: input.prorationMethod ?? 'CALENDAR_DAYS',
+        proration_method: prorationMethod ?? 'CALENDAR_DAYS',
         gps_attendance_enabled: input.gpsAttendanceEnabled ?? false,
-        allowance_proration_policy: input.allowanceProrationPolicy ?? 'PRORATE',
+        allowance_proration_policy: allowancePolicy ?? 'PRORATE',
         workplace_latitude: input.workplaceLatitude != null ? String(input.workplaceLatitude) : null,
         workplace_longitude: input.workplaceLongitude != null ? String(input.workplaceLongitude) : null,
         geofence_radius_meters: input.geofenceRadiusMeters ?? 500,

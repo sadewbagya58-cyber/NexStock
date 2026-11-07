@@ -344,22 +344,43 @@ export async function createPayrollRun(
   const prorationMethod = orgSettings?.proration_method || 'CALENDAR_DAYS';
   const allowancePolicy = orgSettings?.allowance_proration_policy || 'PRORATE';
 
-  // Load organization holidays in the period
+  // Load organization holidays in the period or recurring holidays
   const holidays = await trx.db
     .selectFrom('org_holidays')
     .selectAll()
     .where('tenant_id', '=', trx.tenantId)
-    .where('holiday_date', '>=', input.periodStart)
-    .where('holiday_date', '<=', input.periodEnd)
+    .where((eb) =>
+      eb.or([
+        eb.and([
+          eb('holiday_date', '>=', input.periodStart),
+          eb('holiday_date', '<=', input.periodEnd),
+        ]),
+        eb('is_recurring', '=', true),
+      ]),
+    )
     .execute();
 
-  const holidayDates = new Set(
-    holidays.map((h) =>
+  const holidayDates = new Set<string>();
+  for (const h of holidays) {
+    const hDateStr =
       typeof h.holiday_date === 'string'
         ? h.holiday_date.substring(0, 10)
-        : h.holiday_date.toISOString().substring(0, 10),
-    ),
-  );
+        : h.holiday_date.toISOString().substring(0, 10);
+    if (hDateStr >= input.periodStart && hDateStr <= input.periodEnd) {
+      holidayDates.add(hDateStr);
+    }
+    if (h.is_recurring) {
+      const startYear = parseInt(input.periodStart.substring(0, 4), 10);
+      const endYear = parseInt(input.periodEnd.substring(0, 4), 10);
+      const mmdd = hDateStr.substring(5, 10);
+      for (let y = startYear; y <= endYear; y++) {
+        const projectedDate = `${y}-${mmdd}`;
+        if (projectedDate >= input.periodStart && projectedDate <= input.periodEnd) {
+          holidayDates.add(projectedDate);
+        }
+      }
+    }
+  }
 
   // Load active work schedules for eligible employees
   const workSchedules =
