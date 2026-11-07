@@ -188,6 +188,34 @@ export async function getActiveWorkSchedule(
 ): Promise<WorkScheduleResponse | null> {
   await assertAuthorized(trx, { permission: 'hrm:schedule:read' });
 
+  const hasEmployeeRead = await (async () => {
+    try {
+      await assertAuthorized(trx, { permission: 'hrm:employee:read' });
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+
+  if (!hasEmployeeRead) {
+    const linked = await trx.db
+      .selectFrom('employees')
+      .select(['id'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('id', '=', employeeId)
+      .where('linked_user_id', '=', trx.userId)
+      .executeTakeFirst();
+
+    if (!linked) {
+      throw new AppError({
+        statusCode: 403,
+        errorCode: 'HRM_UNAUTHORIZED_EMPLOYEE_ACCESS',
+        title: 'Access Denied',
+        detail: 'You are only authorized to view your own work schedule.',
+      });
+    }
+  }
+
   const queryDate = forDate || new Date().toISOString().substring(0, 10);
 
   const row = await trx.db
@@ -217,6 +245,34 @@ export async function listWorkSchedules(
   employeeId: string,
 ): Promise<WorkScheduleResponse[]> {
   await assertAuthorized(trx, { permission: 'hrm:schedule:read' });
+
+  const hasEmployeeRead = await (async () => {
+    try {
+      await assertAuthorized(trx, { permission: 'hrm:employee:read' });
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+
+  if (!hasEmployeeRead) {
+    const linked = await trx.db
+      .selectFrom('employees')
+      .select(['id'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('id', '=', employeeId)
+      .where('linked_user_id', '=', trx.userId)
+      .executeTakeFirst();
+
+    if (!linked) {
+      throw new AppError({
+        statusCode: 403,
+        errorCode: 'HRM_UNAUTHORIZED_EMPLOYEE_ACCESS',
+        title: 'Access Denied',
+        detail: 'You are only authorized to view your own work schedule.',
+      });
+    }
+  }
 
   const rows = await trx.db
     .selectFrom('employee_work_schedules')

@@ -2778,5 +2778,76 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       expect(html).toContain('Array.isArray(res) ? res : (res?.items || [])');
       expect(html).toContain('const targetCustId = (typeof preselectedCustomerId === \'string\' && preselectedCustomerId) ? preselectedCustomerId : null;');
     });
+
+    it('verifies BUG-059: Staff Self-Service Profile Resolution, Scoped Access & Leave Employee Pre-Selection', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // 1. Linked employee state & resolution helper
+      expect(html).toContain('linkedEmployee: null,');
+      expect(html).toContain('linkedEmployeeId: null,');
+      expect(html).toContain('isStaffUnlinked: false');
+      expect(html).toContain('async function resolveLinkedEmployee(');
+      expect(html).toContain("apiFetch('/v1/employees/me'");
+      expect(html).toContain('HRM_STAFF_ACCOUNT_NOT_LINKED');
+
+      // 2. Clear tenant view cache resets linkedEmployee
+      expect(html).toContain('state.linkedEmployee = null;');
+      expect(html).toContain('state.isStaffUnlinked = false;');
+
+      // 3. Leave Management view scopes data and displays balances
+      expect(html).toContain('const isManager = hasPermission(\'hrm:leave:manage\') || hasPermission(\'hrm:employee:read\');');
+      expect(html).toContain('const canApprove = hasPermission(\'hrm:leave:approve\');');
+      expect(html).toContain('Staff Account Linking Required');
+      expect(html).toContain('My Leave Balances');
+      expect(html).toContain('${canApprove ?');
+
+      // 4. Leave creation modal automatically resolves and locks own employee identity for Staff
+      expect(html).toContain('const canManageAll = hasPermission(\'hrm:leave:manage\');');
+      expect(html).toContain('Employee Profile Required');
+      expect(html).toContain('<input type="hidden" id="newLeaveEmpId" value="${escapeHtml(state.linkedEmployee.id)}" />');
+      expect(html).toContain('Self-Service');
+
+      // 5. Submit leave request defaults to own employee for staff
+      expect(html).toContain('if (!canManageAll && state.linkedEmployee) {');
+      expect(html).toContain('employeeId = state.linkedEmployee.id;');
+
+      // 6. View My Profile modal accessible from topbar user name
+      expect(html).toContain('async function openMyProfileModal()');
+      expect(html).toContain('onclick="openMyProfileModal()"');
+      expect(html).toContain('/v1/employees/${emp.id}/work-schedules/active');
+
+      // 7. Staff dedicated self-service portal prevents store manager 403 calls
+      expect(html).toContain('async function renderStaffDashboardView(');
+      expect(html).toContain('isStaffRole && !isManagerOrAdmin');
+      expect(html).toContain('Welcome back, ${escapeHtml(employeeName)}!');
+    });
+
+    it('verifies BUG-056: Expenses Responsive Forms, Category Cards & Isolated Print Engine', () => {
+      const indexPath = resolve(WEB_ROOT, 'public/index.html');
+      const html = readFileSync(indexPath, 'utf8');
+
+      // 1. New expense modal uses standard form-group, form-input, form-select, and form-textarea
+      expect(html).toContain('id="expTitle" class="form-input"');
+      expect(html).toContain('id="expCategory" class="form-select"');
+      expect(html).toContain('id="expBranch" class="form-select"');
+      expect(html).toContain('id="expAmount" class="form-input"');
+      expect(html).toContain('id="expDate" class="form-input"');
+      expect(html).toContain('id="expPaymentMethod" class="form-select"');
+      expect(html).toContain('id="expDescription" class="form-textarea"');
+
+      // 2. Expense categories modal renders desktop table and mobile card container
+      expect(html).toContain('openExpenseCategoriesModal()');
+      expect(html).toContain('class="desktop-table-container"');
+      expect(html).toContain('class="mobile-cards-container"');
+      expect(html).toContain('toggleExpenseCategoryActive(');
+
+      // 3. Print engine & isolated report printing
+      expect(html).toContain('function printExpenseSummaryReport()');
+      expect(html).toContain('printExpenseSummaryReport()');
+      expect(html).toContain('#printableExpenseReport');
+      expect(html).toContain('size: auto;');
+      expect(html).toContain('margin: 12mm;');
+    });
   });
 });

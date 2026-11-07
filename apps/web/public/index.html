@@ -382,8 +382,9 @@
       color: var(--text-primary);
       margin-bottom: 6px;
     }
-    .form-input, .form-select, .form-textarea {
+    .form-input, .form-select, .form-textarea, .input {
       width: 100%;
+      box-sizing: border-box;
       padding: 8px 12px;
       border-radius: var(--radius);
       border: 1px solid var(--border-subtle);
@@ -392,7 +393,17 @@
       font-size: 14px;
       font-family: inherit;
     }
-    .form-input:focus, .form-select:focus, .form-textarea:focus {
+    .form-input-sm, .form-select-sm, .input-sm {
+      padding: 6px 10px;
+      font-size: 13px;
+      border-radius: var(--radius);
+      border: 1px solid var(--border-subtle);
+      background: var(--surface-card);
+      color: var(--text-primary);
+      font-family: inherit;
+      box-sizing: border-box;
+    }
+    .form-input:focus, .form-select:focus, .form-textarea:focus, .input:focus, .form-input-sm:focus, .form-select-sm:focus, .input-sm:focus {
       outline: none;
       border-color: var(--accent-primary);
       box-shadow: 0 0 0 3px var(--accent-light);
@@ -824,6 +835,10 @@
     }
 
     /* Print Styles (BUG-043: Enhanced Report & Receipt Printing) */
+    @page {
+      size: auto;
+      margin: 12mm;
+    }
     @media print {
       body, html {
         margin: 0 !important;
@@ -860,7 +875,7 @@
         border: 1px solid #e5e7eb !important;
         color: #111827 !important;
       }
-      #printableReceipt, #printableBarcodeLabel, #payrollReportPrintArea, #payslipPrintArea {
+      #printableReceipt, #printableBarcodeLabel, #payrollReportPrintArea, #payslipPrintArea, #printableExpenseReport {
         page-break-inside: avoid !important;
         page-break-after: avoid !important;
       }
@@ -2016,7 +2031,7 @@
 
       <div class="topbar-actions">
         <div id="topbarAuthActions" style="display: flex; align-items: center; gap: 8px;">
-          <span id="topbarUserName" style="font-size: 13px; font-weight: 500; color: var(--text-secondary);"></span>
+          <span id="topbarUserName" onclick="openMyProfileModal()" style="font-size: 13px; font-weight: 500; color: var(--text-secondary); cursor: pointer;" title="View My Profile"></span>
           <button class="btn btn-secondary btn-sm" id="btnSignOut" title="Sign out of your account">
             Sign Out
           </button>
@@ -2441,7 +2456,10 @@
       cachedCreditAccounts: [],
       cachedCreditDashboard: null,
       selectedCheckoutCustomerId: null,
-      selectedCustomerCreditAccount: null
+      selectedCustomerCreditAccount: null,
+      linkedEmployee: null,
+      linkedEmployeeId: null,
+      isStaffUnlinked: false
     };
 
     // Synchronous Cache Restoration for Cold Start Elimination (BUG-030)
@@ -2640,6 +2658,46 @@
     function clearTenantViewCache() {
       tenantViewCache.clear();
       inFlightGetRequests.clear();
+      state.linkedEmployee = null;
+      state.linkedEmployeeId = null;
+      state.isStaffUnlinked = false;
+    }
+
+    // Resolve Linked Employee Profile for Self-Service (BUG-059)
+    let inFlightResolveEmployeePromise = null;
+    async function resolveLinkedEmployee(forceRefresh = false) {
+      if (!forceRefresh && state.linkedEmployee) {
+        return state.linkedEmployee;
+      }
+      if (inFlightResolveEmployeePromise) {
+        return inFlightResolveEmployeePromise;
+      }
+      if (!state.token || !state.tenantId) return null;
+
+      inFlightResolveEmployeePromise = (async () => {
+        try {
+          const emp = await apiFetch('/v1/employees/me', { silent: true });
+          if (emp && emp.id) {
+            state.linkedEmployee = emp;
+            state.linkedEmployeeId = emp.id;
+            state.isStaffUnlinked = false;
+            return emp;
+          }
+        } catch (err) {
+          const status = err?.status || err?.statusCode;
+          const code = err?.code || err?.errorCode || err?.data?.errorCode;
+          if (status === 404 || code === 'HRM_STAFF_ACCOUNT_NOT_LINKED' || (err?.message && String(err.message).toLowerCase().includes('not linked'))) {
+            state.linkedEmployee = null;
+            state.linkedEmployeeId = null;
+            state.isStaffUnlinked = true;
+          }
+        } finally {
+          inFlightResolveEmployeePromise = null;
+        }
+        return null;
+      })();
+
+      return inFlightResolveEmployeePromise;
     }
 
     function isCurrentViewRender(viewName, renderSeq) {
@@ -2856,6 +2914,124 @@
 
     document.getElementById('modalCloseBtn').onclick = closeModal;
 
+    // View My Profile & Linked Employee Information Modal (BUG-059)
+    async function openMyProfileModal() {
+      if (!state.token || !state.tenantId) return;
+
+      openModal({
+        title: 'My Profile & Account',
+        maxWidth: '560px',
+        bodyHtml: '<div style="padding: 30px; text-align: center;"><div class="spinner-sm" style="display:inline-block; margin-bottom: 8px;"></div><div>Loading profile details...</div></div>',
+      });
+
+      try {
+        const emp = await resolveLinkedEmployee(true);
+        if (!emp) {
+          openModal({
+            title: 'My Account & Identity',
+            maxWidth: '500px',
+            bodyHtml: `
+              <div style="padding: 20px 10px; text-align: center;">
+                <div style="width: 56px; height: 56px; border-radius: 50%; background: var(--accent-light, #e0f2fe); color: var(--accent-primary, #0284c7); font-weight: 700; font-size: 20px; display: flex; align-items: center; justify-content: center; margin: 0 auto 14px;">
+                  ${escapeHtml((state.fullName || state.userEmail || 'U').substring(0, 2).toUpperCase())}
+                </div>
+                <h3 style="font-size: 17px; font-weight: 700; margin-bottom: 4px; color: var(--text-primary);">${escapeHtml(state.fullName || 'User Profile')}</h3>
+                <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 12px;">${escapeHtml(state.userEmail || '')}</div>
+                <div style="display: inline-block; padding: 4px 10px; background: rgba(59, 130, 246, 0.12); color: #2563eb; border-radius: 12px; font-size: 12px; font-weight: 600; margin-bottom: 16px;">
+                  Role: ${escapeHtml(state.userRole || 'Member')}
+                </div>
+                <div class="alert alert-info" style="text-align: left; padding: 12px 14px; border-radius: 8px; background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.2); font-size: 12px; line-height: 1.5; color: var(--text-secondary);">
+                  💡 <strong>Employee Profile:</strong> This login account is not linked to an employee staff profile. System administrators can link this account in <strong>Settings &rarr; Team &amp; Staff Accounts</strong> to enable personal attendance and leave self-service.
+                </div>
+              </div>
+            `,
+            footerHtml: `
+              <button class="btn btn-secondary" onclick="closeModal()">Close</button>
+            `
+          });
+          return;
+        }
+
+        // Fetch active schedule
+        const schedule = await apiFetch(`/v1/employees/${emp.id}/work-schedules/active`).catch(() => null);
+
+        const bodyHtml = `
+          <div style="padding: 10px 0;">
+            <div style="display: flex; align-items: center; gap: 16px; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid var(--border-subtle);">
+              <div style="width: 56px; height: 56px; border-radius: 50%; background: var(--accent-light, #e0f2fe); color: var(--accent-primary, #0284c7); font-weight: 700; font-size: 20px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                ${escapeHtml((emp.displayName || emp.firstName || 'E').substring(0, 2).toUpperCase())}
+              </div>
+              <div style="flex: 1; min-width: 0;">
+                <div style="font-size: 18px; font-weight: 700; color: var(--text-primary); line-height: 1.2;">
+                  ${escapeHtml(emp.displayName || `${emp.firstName || ''} ${emp.lastName || ''}`.trim())}
+                </div>
+                <div style="font-size: 12px; color: var(--text-secondary); margin-top: 3px; font-family: monospace;">
+                  ${escapeHtml(emp.employeeCode || '')} &bull; <span class="badge-pill badge-blue" style="font-size: 11px;">${escapeHtml(emp.designation || 'Staff')}</span>
+                </div>
+              </div>
+              <div>
+                <span class="badge-pill ${emp.employmentStatus === 'ACTIVE' ? 'badge-green' : 'badge-yellow'}">
+                  ${escapeHtml(emp.employmentStatus || 'Active')}
+                </span>
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-bottom: 16px;">
+              <div style="background: var(--bg-primary); padding: 10px 14px; border-radius: 6px; border: 1px solid var(--border-subtle);">
+                <div style="font-size: 11px; text-transform: uppercase; font-weight: 700; color: var(--text-secondary);">Department</div>
+                <div style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-top: 2px;">${escapeHtml(emp.department || 'General')}</div>
+              </div>
+              <div style="background: var(--bg-primary); padding: 10px 14px; border-radius: 6px; border: 1px solid var(--border-subtle);">
+                <div style="font-size: 11px; text-transform: uppercase; font-weight: 700; color: var(--text-secondary);">Primary Branch</div>
+                <div style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-top: 2px;">${escapeHtml(emp.primaryBranchName || state.branchName || 'Headquarters')}</div>
+              </div>
+              <div style="background: var(--bg-primary); padding: 10px 14px; border-radius: 6px; border: 1px solid var(--border-subtle);">
+                <div style="font-size: 11px; text-transform: uppercase; font-weight: 700; color: var(--text-secondary);">Email &bull; Contact</div>
+                <div style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-top: 2px;">${escapeHtml(emp.email || state.userEmail || '—')}</div>
+                ${emp.phone ? `<div style="font-size: 11px; color: var(--text-secondary);">${escapeHtml(emp.phone)}</div>` : ''}
+              </div>
+              <div style="background: var(--bg-primary); padding: 10px 14px; border-radius: 6px; border: 1px solid var(--border-subtle);">
+                <div style="font-size: 11px; text-transform: uppercase; font-weight: 700; color: var(--text-secondary);">Date Joined</div>
+                <div style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-top: 2px;">${escapeHtml(emp.joinedDate || '—')}</div>
+              </div>
+            </div>
+
+            <!-- Work Schedule Details -->
+            <div style="background: var(--bg-primary); padding: 12px 14px; border-radius: 6px; border: 1px solid var(--border-subtle); margin-bottom: 12px;">
+              <div style="font-size: 11px; text-transform: uppercase; font-weight: 700; color: var(--text-secondary); margin-bottom: 4px;">Assigned Work Schedule</div>
+              <div style="font-size: 13px; font-weight: 600; color: var(--text-primary);">
+                ${schedule ? `${escapeHtml(schedule.scheduleName || 'Work Schedule')} (${escapeHtml(schedule.defaultShiftStart || '09:00')} - ${escapeHtml(schedule.defaultShiftEnd || '18:00')})` : 'Standard 8-Hour Schedule (09:00 - 18:00)'}
+              </div>
+              <div style="font-size: 11px; color: var(--text-secondary); margin-top: 2px;">
+                ${schedule?.workingDays ? `Working days: ${schedule.workingDays.join(', ')}` : 'Monday to Friday'}
+              </div>
+            </div>
+
+            ${emp.emergencyContactName ? `
+              <div style="background: var(--bg-primary); padding: 12px 14px; border-radius: 6px; border: 1px solid var(--border-subtle);">
+                <div style="font-size: 11px; text-transform: uppercase; font-weight: 700; color: var(--text-secondary); margin-bottom: 4px;">Emergency Contact</div>
+                <div style="font-size: 13px; font-weight: 600; color: var(--text-primary);">
+                  ${escapeHtml(emp.emergencyContactName)} ${emp.emergencyContactPhone ? `&bull; <span style="font-weight: 400; color: var(--text-secondary);">${escapeHtml(emp.emergencyContactPhone)}</span>` : ''}
+                </div>
+              </div>
+            ` : ''}
+          </div>
+        `;
+
+        openModal({
+          title: 'My Employee Profile',
+          maxWidth: '560px',
+          bodyHtml,
+          footerHtml: `
+            <button class="btn btn-secondary" onclick="closeModal()">Close</button>
+          `
+        });
+      } catch (err) {
+        showToast(err.message || 'Failed to load profile', 'error');
+        closeModal();
+      }
+    }
+
     // Theme Management
     function toggleTheme() {
       state.theme = state.theme === 'light' ? 'dark' : 'light';
@@ -2982,6 +3158,9 @@
 
       // Resolve fallback branch/warehouse and POS register asynchronously without blocking view render (BUG-048)
       hydrateTenantLocationContext(membership.tenantId);
+
+      // Resolve linked employee profile asynchronously for self-service portal (BUG-059)
+      resolveLinkedEmployee();
     }
 
     // Sign Out Handler
@@ -3590,7 +3769,7 @@
           if (topbarAuthActions) {
             topbarAuthActions.style.display = 'flex';
             topbarAuthActions.innerHTML = `
-              <span id="topbarUserName" style="font-size: 13px; font-weight: 500; color: var(--text-secondary);">${escapeHtml(state.fullName || '')}</span>
+              <span id="topbarUserName" onclick="openMyProfileModal()" style="font-size: 13px; font-weight: 500; color: var(--text-secondary); cursor: pointer;" title="View My Profile">${escapeHtml(state.fullName || '')}</span>
               <button class="btn btn-secondary btn-sm" id="btnSignOut" onclick="handleSignOut()" title="Sign out of your account">Sign Out</button>
             `;
           }
@@ -3611,7 +3790,7 @@
         if (topbarAuthActions) {
           topbarAuthActions.style.display = 'flex';
           topbarAuthActions.innerHTML = `
-            <span id="topbarUserName" style="font-size: 13px; font-weight: 500; color: var(--text-secondary);">${escapeHtml(state.fullName || '')}</span>
+            <span id="topbarUserName" onclick="openMyProfileModal()" style="font-size: 13px; font-weight: 500; color: var(--text-secondary); cursor: pointer;" title="View My Profile">${escapeHtml(state.fullName || '')}</span>
             <button class="btn btn-secondary btn-sm" id="btnSignOut" onclick="handleSignOut()" title="Sign out of your account">Sign Out</button>
           `;
         }
@@ -4749,9 +4928,231 @@
       `;
     }
 
+    // Dedicated Staff Role Self-Service Dashboard (BUG-059)
+    async function renderStaffDashboardView(container, renderSeq) {
+      container.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-secondary);"><div class="spinner-sm" style="display:inline-block; margin-bottom: 8px;"></div><div>Loading staff self-service portal...</div></div>';
+
+      try {
+        const todayStr = new Date().toISOString().substring(0, 10);
+        const emp = await resolveLinkedEmployee();
+
+        const [attendanceRes, holidaysRes, balancesRes, requestsRes, scheduleRes] = await Promise.all([
+          apiFetch(`/v1/attendance/records?date=${encodeURIComponent(todayStr)}&limit=10`, { silent: true }).catch(() => ({ items: [] })),
+          apiFetch('/v1/org/holidays?limit=5', { silent: true }).catch(() => ({ items: [] })),
+          emp ? apiFetch(`/v1/leaves/balances/${emp.id}`, { silent: true }).catch(() => ({ items: [] })) : Promise.resolve({ items: [] }),
+          apiFetch('/v1/leaves/requests?limit=5', { silent: true }).catch(() => ({ items: [] })),
+          emp ? apiFetch(`/v1/employees/${emp.id}/work-schedules/active`, { silent: true }).catch(() => null) : Promise.resolve(null),
+        ]);
+
+        if (!isCurrentViewRender('dashboard', renderSeq) || !container) return;
+
+        const attendanceList = attendanceRes?.items || (Array.isArray(attendanceRes) ? attendanceRes : []);
+        const myAttendance = emp ? attendanceList.find(a => a.employeeId === emp.id) : attendanceList[0];
+        const holidays = holidaysRes?.items || (Array.isArray(holidaysRes) ? holidaysRes : []);
+        const balances = balancesRes?.items || (Array.isArray(balancesRes) ? balancesRes : []);
+        const leaveRequests = requestsRes?.items || (Array.isArray(requestsRes) ? requestsRes : []);
+
+        const annualBal = balances.find(b => b.leaveType === 'ANNUAL')?.remainingDays ?? '—';
+        const casualBal = balances.find(b => b.leaveType === 'CASUAL')?.remainingDays ?? '—';
+        const sickBal = balances.find(b => b.leaveType === 'SICK')?.remainingDays ?? '—';
+
+        let checkInTimeDisplay = 'Not Checked In';
+        let checkInBadgeClass = 'badge-secondary';
+        if (myAttendance?.checkInTime) {
+          try {
+            checkInTimeDisplay = new Date(myAttendance.checkInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            checkInBadgeClass = 'badge-green';
+          } catch {
+            checkInTimeDisplay = 'Checked In';
+            checkInBadgeClass = 'badge-green';
+          }
+        }
+
+        const employeeName = emp ? (emp.displayName || `${emp.firstName || ''} ${emp.lastName || ''}`.trim()) : (state.fullName || 'Staff Member');
+        const designation = emp?.designation || 'Staff Employee';
+        const branchName = emp?.primaryBranchName || state.branchName || 'Main Branch';
+
+        container.innerHTML = `
+          <div class="view-header">
+            <div>
+              <h1 class="view-title">Welcome back, ${escapeHtml(employeeName)}!</h1>
+              <div class="view-subtitle">${escapeHtml(designation)} &bull; ${escapeHtml(branchName)} &bull; Staff Self-Service Portal</div>
+            </div>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+              <button class="btn btn-secondary" onclick="openMyProfileModal()">My Profile</button>
+              <button class="btn btn-secondary" onclick="openOrgHolidaysModal()">Holidays</button>
+              <button class="btn btn-primary" onclick="openCreateLeaveModal()">+ Apply for Leave</button>
+            </div>
+          </div>
+
+          ${state.isStaffUnlinked ? `
+            <div class="card" style="margin-bottom: 20px; border-left: 4px solid var(--status-warning, #f59e0b); padding: 16px 20px;">
+              <div style="display: flex; gap: 14px; align-items: flex-start;">
+                <span style="font-size: 26px; line-height: 1;">⚠️</span>
+                <div>
+                  <div style="font-weight: 700; font-size: 15px; color: var(--text-primary); margin-bottom: 4px;">Staff Account Linking Pending</div>
+                  <div style="font-size: 13px; color: var(--text-secondary); line-height: 1.5; margin-bottom: 8px;">
+                    Your user account is not yet associated with an employee profile in <strong>${escapeHtml(state.tenantName || 'this organization')}</strong>.
+                    An administrator or manager must connect your user account under <strong>Settings &rarr; Team &amp; Staff Accounts</strong> to activate your personal attendance, schedule tracking, and leave entitlement records.
+                  </div>
+                </div>
+              </div>
+            </div>
+          ` : ''}
+
+          <!-- Self-Service KPI Strip -->
+          <div class="kpi-grid" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); margin-bottom: 16px;">
+            <div class="kpi-card">
+              <div class="kpi-label">Today's Attendance</div>
+              <div class="kpi-value" style="font-size: 20px;">
+                <span class="badge-pill ${checkInBadgeClass}" style="font-size: 13px;">${checkInTimeDisplay}</span>
+              </div>
+              <div class="kpi-trend">${myAttendance?.checkOutTime ? 'Checked out' : myAttendance?.checkInTime ? 'Active shift' : 'No punch recorded'}</div>
+            </div>
+
+            <div class="kpi-card">
+              <div class="kpi-label">Work Schedule</div>
+              <div class="kpi-value" style="font-size: 16px; font-weight: 700;">
+                ${scheduleRes ? `${escapeHtml(scheduleRes.defaultShiftStart || '09:00')} - ${escapeHtml(scheduleRes.defaultShiftEnd || '18:00')}` : '09:00 - 18:00'}
+              </div>
+              <div class="kpi-trend">${scheduleRes?.workingDays ? scheduleRes.workingDays.slice(0, 3).join(', ') + '...' : 'Standard Shift'}</div>
+            </div>
+
+            <div class="kpi-card">
+              <div class="kpi-label">Annual Leave Remaining</div>
+              <div class="kpi-value" style="color: var(--accent-primary);">${annualBal} <span style="font-size: 13px; font-weight: 500;">Days</span></div>
+              <div class="kpi-trend">Annual Entitlement</div>
+            </div>
+
+            <div class="kpi-card">
+              <div class="kpi-label">Casual &amp; Sick Balances</div>
+              <div class="kpi-value" style="color: var(--status-success); font-size: 18px;">
+                ${casualBal} <span style="font-size: 12px; font-weight: 400; color: var(--text-secondary);">Casual</span> &bull; ${sickBal} <span style="font-size: 12px; font-weight: 400; color: var(--text-secondary);">Sick</span>
+              </div>
+              <div class="kpi-trend">Available Days Off</div>
+            </div>
+          </div>
+
+          <!-- Quick Actions & Summaries Grid -->
+          <div class="dashboard-split-grid">
+            <!-- Left: Quick Clock In / Attendance Card -->
+            <div class="card" style="margin: 0;">
+              <div class="card-title">
+                <span>Attendance Quick Punch</span>
+                <button class="btn btn-secondary btn-sm" onclick="renderView('attendance')">View Attendance</button>
+              </div>
+              <div style="padding: 10px 0;">
+                <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 12px;">
+                  Record your shift punch for today (${todayStr}).
+                </div>
+                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                  <button class="btn btn-primary" id="btnStaffDashClockIn" onclick="clockInSelf(this)" ${myAttendance?.checkInTime ? 'disabled' : ''}>
+                    ${myAttendance?.checkInTime ? 'Checked In' : 'Check In Now'}
+                  </button>
+                  <button class="btn btn-secondary" id="btnStaffDashClockOut" onclick="clockOutSelf(this)" ${!myAttendance?.checkInTime || myAttendance?.checkOutTime ? 'disabled' : ''}>
+                    ${myAttendance?.checkOutTime ? 'Checked Out' : 'Check Out Now'}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Right: Upcoming Holidays -->
+            <div class="card" style="margin: 0;">
+              <div class="card-title">
+                <span>Upcoming Organization Holidays</span>
+                <button class="btn btn-secondary btn-sm" onclick="openOrgHolidaysModal()">Calendar</button>
+              </div>
+              ${holidays.length === 0 ? `
+                <div class="empty-state" style="padding: 20px 0;">
+                  <div style="font-size: 13px; color: var(--text-secondary);">No upcoming holidays scheduled.</div>
+                </div>
+              ` : `
+                <div class="table-responsive">
+                  <table class="data-table" style="font-size: 12px;">
+                    <thead>
+                      <tr>
+                        <th>Holiday</th>
+                        <th>Date</th>
+                        <th>Type</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${holidays.slice(0, 4).map(h => `
+                        <tr>
+                          <td><strong>${escapeHtml(h.name)}</strong></td>
+                          <td>${escapeHtml(h.holidayDate)}</td>
+                          <td>${h.isRecurringAnnual ? '<span class="badge-pill badge-blue" style="font-size: 10px;">Annual</span>' : '<span class="badge-pill badge-secondary" style="font-size: 10px;">One-Time</span>'}</td>
+                        </tr>
+                      `).join('')}
+                    </tbody>
+                  </table>
+                </div>
+              `}
+            </div>
+          </div>
+
+          <!-- Bottom: Recent Leave Requests -->
+          <div class="card" style="margin-top: 16px;">
+            <div class="card-title">
+              <span>My Recent Leave Applications</span>
+              <button class="btn btn-secondary btn-sm" onclick="renderView('leaves')">Manage Leaves</button>
+            </div>
+            ${leaveRequests.length === 0 ? `
+              <div class="empty-state" style="padding: 24px 0; text-align: center;">
+                <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 12px;">You haven't submitted any leave applications yet.</p>
+                <button class="btn btn-primary btn-sm" onclick="openCreateLeaveModal()">+ Apply for Leave</button>
+              </div>
+            ` : `
+              <div class="table-responsive">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>Leave Type</th>
+                      <th>Dates</th>
+                      <th>Days</th>
+                      <th>Reason</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${leaveRequests.slice(0, 5).map(req => {
+                      let badge = '<span class="badge-pill badge-yellow">Pending</span>';
+                      if (req.status === 'APPROVED') badge = '<span class="badge-pill badge-green">Approved</span>';
+                      else if (req.status === 'REJECTED') badge = '<span class="badge-pill badge-red">Rejected</span>';
+                      return `
+                        <tr>
+                          <td><span class="badge-pill badge-blue">${escapeHtml(req.leaveType)}</span></td>
+                          <td>${escapeHtml(req.startDate)} to ${escapeHtml(req.endDate)}</td>
+                          <td><strong>${req.daysCount}</strong> ${req.isHalfDay ? '(Half Day)' : ''}</td>
+                          <td style="max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(req.reason)}</td>
+                          <td>${badge}</td>
+                        </tr>
+                      `;
+                    }).join('')}
+                  </tbody>
+                </table>
+              </div>
+            `}
+          </div>
+        `;
+      } catch (err) {
+        if (!isCurrentViewRender('dashboard', renderSeq) || !container) return;
+        container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load staff dashboard: ${err.message} <button class="btn btn-secondary btn-sm" style="margin-left: 8px;" onclick="renderDashboardView()">Retry</button></div>`;
+      }
+    }
+
     async function renderDashboardView() {
       const container = document.getElementById('mainContainer');
       const renderSeq = state.viewRenderSeq;
+
+      // Dedicated Staff self-service portal (BUG-059 remediation)
+      const isStaffRole = state.userRole === 'STAFF' || (state.roles && state.roles.includes('STAFF'));
+      const isManagerOrAdmin = hasPermission('cat:product:read') || hasPermission('pos:sale:read') || hasPermission('inv:balance:read');
+      if (isStaffRole && !isManagerOrAdmin) {
+        await renderStaffDashboardView(container, renderSeq);
+        return;
+      }
+
       try {
         const cached = getViewCache('dashboard');
         if (cached && cached.data && container) {
@@ -13255,7 +13656,9 @@
             </div>
             <div style="display: flex; gap: 8px; flex-wrap: wrap;">
               <button class="btn btn-secondary" onclick="openOrgHolidaysModal()">Holiday Calendar</button>
-              <button class="btn btn-secondary" onclick="openManualAttendanceModal()">+ Record Manual Entry</button>
+              ${hasPermission('hrm:attendance:manage') ? `
+                <button class="btn btn-secondary" onclick="openManualAttendanceModal()">+ Record Manual Entry</button>
+              ` : ''}
             </div>
           </div>
 
@@ -13437,6 +13840,10 @@
     }
 
     async function clockInSelf(btn) {
+      if (state.isStaffUnlinked) {
+        showToast('Your account is not linked to an employee profile. Please contact an administrator to link your account.', 'warning');
+        return;
+      }
       if (btn) { btn.disabled = true; btn.innerText = 'Checking in...'; }
 
       const doCheckIn = async (coords = null) => {
@@ -13476,6 +13883,10 @@
     }
 
     async function clockOutSelf(btn) {
+      if (state.isStaffUnlinked) {
+        showToast('Your account is not linked to an employee profile. Please contact an administrator to link your account.', 'warning');
+        return;
+      }
       if (btn) { btn.disabled = true; btn.innerText = 'Checking out...'; }
       try {
         await apiFetch('/v1/attendance/check-out', {
@@ -13621,13 +14032,24 @@
       container.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-secondary);"><div class="spinner-sm" style="display:inline-block; margin-bottom: 8px;"></div><div>Loading leave requests...</div></div>';
 
       try {
+        const isManager = hasPermission('hrm:leave:manage') || hasPermission('hrm:employee:read');
+        const canApprove = hasPermission('hrm:leave:approve');
         const filterStatus = state._leavesSelectedStatus || '';
         let queryUrl = '/v1/leaves/requests?limit=100';
         if (filterStatus) queryUrl += `&status=${encodeURIComponent(filterStatus)}`;
 
-        const [requestsRes, employeesRes] = await Promise.all([
+        if (!isManager && !state.linkedEmployee && !state.isStaffUnlinked) {
+          await resolveLinkedEmployee();
+        }
+
+        const [requestsRes, employeesRes, balancesRes] = await Promise.all([
           apiFetch(queryUrl).catch(() => ({ items: [] })),
-          state.cachedEmployees?.length ? Promise.resolve(state.cachedEmployees) : apiFetch('/v1/employees?limit=100').catch(() => [])
+          isManager
+            ? (state.cachedEmployees?.length ? Promise.resolve(state.cachedEmployees) : apiFetch('/v1/employees?limit=100').catch(() => []))
+            : Promise.resolve([]),
+          state.linkedEmployee
+            ? apiFetch(`/v1/leaves/balances/${state.linkedEmployee.id}`).catch(() => ({ items: [] }))
+            : Promise.resolve({ items: [] }),
         ]);
 
         const requests = Array.isArray(requestsRes) ? requestsRes : (requestsRes.items || []);
@@ -13640,23 +14062,59 @@
         const approvedCount = requests.filter(r => r.status === 'APPROVED').length;
         const rejectedCount = requests.filter(r => r.status === 'REJECTED').length;
 
+        const balanceItems = balancesRes?.items || (Array.isArray(balancesRes) ? balancesRes : []);
+
         container.innerHTML = `
           <div class="view-header">
             <div>
               <h1 class="view-title">Leave Management</h1>
-              <div class="view-subtitle">Apply for leave, track balances, and approve time-off applications</div>
+              <div class="view-subtitle">${isManager ? 'Apply for leave, track balances, and approve time-off applications' : 'View your leave balances and submit time-off applications'}</div>
             </div>
             <div style="display: flex; gap: 8px;">
               <button class="btn btn-primary" onclick="openCreateLeaveModal()">+ Apply for Leave</button>
             </div>
           </div>
 
+          ${state.isStaffUnlinked ? `
+            <div class="card" style="margin-bottom: 16px; border-left: 4px solid var(--status-warning, #f59e0b); padding: 16px 20px;">
+              <div style="display: flex; gap: 14px; align-items: flex-start;">
+                <span style="font-size: 26px; line-height: 1;">⚠️</span>
+                <div>
+                  <div style="font-weight: 700; font-size: 15px; color: var(--text-primary); margin-bottom: 4px;">Staff Account Linking Required</div>
+                  <div style="font-size: 13px; color: var(--text-secondary); line-height: 1.5;">
+                    Your login account is not currently associated with an active employee profile in this organization.
+                    An administrator or manager must connect your user account under <strong>Settings &rarr; Team &amp; Staff Accounts</strong> before you can submit leave requests or view your leave balance.
+                  </div>
+                </div>
+              </div>
+            </div>
+          ` : ''}
+
+          ${balanceItems.length > 0 ? `
+            <div style="margin-bottom: 16px;">
+              <div style="font-size: 13px; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; margin-bottom: 8px; letter-spacing: 0.5px;">
+                My Leave Balances (${new Date().getFullYear()})
+              </div>
+              <div class="kpi-grid" style="grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); margin-bottom: 0;">
+                ${balanceItems.map(b => `
+                  <div class="kpi-card" style="padding: 12px 14px;">
+                    <div class="kpi-label">${escapeHtml(b.leaveType)}</div>
+                    <div class="kpi-value" style="color: var(--accent-primary); font-size: 20px;">
+                      ${b.remainingDays} <span style="font-size: 12px; font-weight: 400; color: var(--text-secondary);">/ ${b.annualEntitlement} left</span>
+                    </div>
+                    <div class="kpi-trend">${b.usedDays} used &bull; ${b.pendingDays} pending</div>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          ` : ''}
+
           <!-- KPI Cards -->
           <div class="kpi-grid" style="grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); margin-bottom: 16px;">
             <div class="kpi-card">
               <div class="kpi-label">Pending Approval</div>
               <div class="kpi-value" style="color: var(--accent-primary);">${pendingCount}</div>
-              <div class="kpi-trend">Requires manager review</div>
+              <div class="kpi-trend">${isManager ? 'Requires manager review' : 'Awaiting review'}</div>
             </div>
             <div class="kpi-card">
               <div class="kpi-label">Approved Applications</div>
@@ -13702,7 +14160,7 @@
                         <th>Reason</th>
                         <th>Status</th>
                         <th>Reviewer Info</th>
-                        <th style="text-align: right;">Actions</th>
+                        ${canApprove ? '<th style="text-align: right;">Actions</th>' : ''}
                       </tr>
                     </thead>
                     <tbody>
@@ -13728,14 +14186,16 @@
                             <td>
                               ${req.reviewerNotes ? `<div style="font-size: 11px; color: var(--text-secondary);">${escapeHtml(req.reviewerNotes)}</div>` : '—'}
                             </td>
-                            <td style="text-align: right;">
-                              <div style="display: inline-flex; gap: 4px;">
-                                ${isPending ? `
-                                  <button class="btn btn-primary btn-sm" onclick="reviewLeaveAction('${req.id}', 'APPROVED')">Approve</button>
-                                  <button class="btn btn-secondary btn-sm" style="color: var(--status-danger);" onclick="reviewLeaveAction('${req.id}', 'REJECTED')">Reject</button>
-                                ` : ''}
-                              </div>
-                            </td>
+                            ${canApprove ? `
+                              <td style="text-align: right;">
+                                <div style="display: inline-flex; gap: 4px;">
+                                  ${isPending ? `
+                                    <button class="btn btn-primary btn-sm" onclick="reviewLeaveAction('${req.id}', 'APPROVED')">Approve</button>
+                                    <button class="btn btn-secondary btn-sm" style="color: var(--status-danger);" onclick="reviewLeaveAction('${req.id}', 'REJECTED')">Reject</button>
+                                  ` : ''}
+                                </div>
+                              </td>
+                            ` : ''}
                           </tr>
                         `;
                       }).join('')}
@@ -13769,7 +14229,7 @@
                         <div style="color: var(--text-secondary);"><strong>Reason:</strong> ${escapeHtml(req.reason)}</div>
                       </div>
 
-                      ${isPending ? `
+                      ${isPending && canApprove ? `
                         <div style="display: flex; gap: 6px; justify-content: flex-end;">
                           <button class="btn btn-primary btn-sm" onclick="reviewLeaveAction('${req.id}', 'APPROVED')">Approve</button>
                           <button class="btn btn-secondary btn-sm" style="color: var(--status-danger);" onclick="reviewLeaveAction('${req.id}', 'REJECTED')">Reject</button>
@@ -13794,21 +14254,72 @@
 
     async function openCreateLeaveModal() {
       try {
-        let empList = state.cachedEmployees;
-        if (!Array.isArray(empList) || empList.length === 0) {
-          const res = await apiFetch('/v1/employees?limit=100').catch(() => []);
-          empList = Array.isArray(res) ? res : (res?.items || []);
-          state.cachedEmployees = empList;
+        const canManageAll = hasPermission('hrm:leave:manage');
+
+        if (!canManageAll) {
+          if (!state.linkedEmployee && !state.isStaffUnlinked) {
+            await resolveLinkedEmployee();
+          }
+
+          if (state.isStaffUnlinked || !state.linkedEmployee) {
+            openModal({
+              title: 'Account Not Linked',
+              maxWidth: '500px',
+              bodyHtml: `
+                <div style="text-align: center; padding: 24px 12px;">
+                  <div style="font-size: 48px; margin-bottom: 12px;">⚠️</div>
+                  <h3 style="font-size: 17px; font-weight: 700; color: var(--text-primary); margin-bottom: 8px;">Employee Profile Required</h3>
+                  <p style="font-size: 13px; color: var(--text-secondary); line-height: 1.5; margin-bottom: 20px;">
+                    Your user login is not currently linked to an active employee profile. An administrator must link your user account under <strong>Settings &rarr; Team &amp; Staff Accounts</strong> before you can submit leave applications.
+                  </p>
+                  <button class="btn btn-primary" onclick="closeModal()">Understood</button>
+                </div>
+              `,
+              footerHtml: ''
+            });
+            return;
+          }
         }
-        let employees = Array.isArray(empList) ? [...empList] : [];
-        if (employees.length === 0 && state.linkedEmployee) {
-          employees.push({
-            id: state.linkedEmployee.id,
-            displayName: state.linkedEmployee.displayName || state.linkedEmployee.firstName || 'My Profile',
-            employeeCode: state.linkedEmployee.employeeCode || 'EMP-ME',
-          });
+
+        let employees = [];
+        if (canManageAll) {
+          let empList = state.cachedEmployees;
+          if (!Array.isArray(empList) || empList.length === 0) {
+            const res = await apiFetch('/v1/employees?limit=100').catch(() => []);
+            empList = Array.isArray(res) ? res : (res?.items || []);
+            state.cachedEmployees = empList;
+          }
+          employees = Array.isArray(empList) ? [...empList] : [];
         }
+
         const todayStr = new Date().toISOString().substring(0, 10);
+
+        const employeeFieldHtml = canManageAll
+          ? `
+            <div class="form-group" style="margin-bottom: 14px;">
+              <label class="form-label">Employee *</label>
+              <select class="form-select" id="newLeaveEmpId" required>
+                ${employees.map(e => `<option value="${e.id}">${escapeHtml(e.displayName || e.firstName || 'Employee')} (${escapeHtml(e.employeeCode || '')})</option>`).join('')}
+              </select>
+            </div>
+          `
+          : `
+            <div class="form-group" style="margin-bottom: 14px;">
+              <label class="form-label">Employee Profile</label>
+              <div style="display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; background: var(--bg-primary); border: 1px solid var(--border-subtle); border-radius: var(--radius);">
+                <div>
+                  <div style="font-weight: 700; color: var(--text-primary); font-size: 14px;">
+                    ${escapeHtml(state.linkedEmployee.displayName || state.linkedEmployee.firstName || 'My Profile')}
+                  </div>
+                  <div style="font-size: 12px; color: var(--text-secondary); font-family: monospace;">
+                    ${escapeHtml(state.linkedEmployee.employeeCode || '')} &bull; ${escapeHtml(state.linkedEmployee.designation || 'Staff')}
+                  </div>
+                </div>
+                <span class="badge-pill badge-blue" style="font-size: 11px;">Self-Service</span>
+              </div>
+              <input type="hidden" id="newLeaveEmpId" value="${escapeHtml(state.linkedEmployee.id)}" />
+            </div>
+          `;
 
         openModal({
           title: 'Apply for Leave',
@@ -13818,12 +14329,7 @@
               Submit an employee leave request. Leaves deduct from entitlement balances or calculate as no-pay.
             </div>
 
-            <div class="form-group">
-              <label class="form-label">Employee *</label>
-              <select class="form-select" id="newLeaveEmpId">
-                ${employees.map(e => `<option value="${e.id}">${escapeHtml(e.displayName || e.firstName || 'Employee')} (${escapeHtml(e.employeeCode || '')})</option>`).join('')}
-              </select>
-            </div>
+            ${employeeFieldHtml}
 
             <div class="form-row-2col" style="margin-bottom: 14px;">
               <div class="form-group">
@@ -13875,7 +14381,13 @@
 
     async function submitCreateLeave() {
       const btn = document.getElementById('btnSubmitLeave');
-      const employeeId = document.getElementById('newLeaveEmpId')?.value;
+      let employeeId = document.getElementById('newLeaveEmpId')?.value;
+      const canManageAll = hasPermission('hrm:leave:manage');
+
+      if (!canManageAll && state.linkedEmployee) {
+        employeeId = state.linkedEmployee.id;
+      }
+
       const leaveType = document.getElementById('newLeaveType')?.value;
       const daysCount = parseFloat(document.getElementById('newLeaveDays')?.value || '1');
       const startDate = document.getElementById('newLeaveStart')?.value;
@@ -16063,16 +16575,16 @@
 
       const bodyHtml = `
         <form id="expenseForm" onsubmit="event.preventDefault(); saveExpense(${isEditing}, '${existing ? existing.id : ''}');">
-          <div style="display: grid; grid-template-columns: 1fr; gap: 12px;">
-            <div>
+          <div style="display: flex; flex-direction: column; gap: 14px;">
+            <div class="form-group">
               <label class="form-label" style="font-weight: 600;">Title *</label>
-              <input type="text" id="expTitle" class="input" required maxlength="200" placeholder="e.g. November Store Lease / Office Supplies" value="${escapeHtml(existing?.title || '')}" />
+              <input type="text" id="expTitle" class="form-input" required maxlength="200" placeholder="e.g. November Store Lease / Office Supplies" value="${escapeHtml(existing?.title || '')}" />
             </div>
 
             <div class="form-row-2col">
-              <div>
+              <div class="form-group">
                 <label class="form-label" style="font-weight: 600;">Category *</label>
-                <select id="expCategory" class="input" required>
+                <select id="expCategory" class="form-select" required>
                   <option value="">Select Category...</option>
                   ${state.cachedExpenseCategories.filter(c => c.isActive || (existing && existing.categoryId === c.id)).map(c => `
                     <option value="${c.id}" ${existing?.categoryId === c.id ? 'selected' : ''}>${escapeHtml(c.name)}</option>
@@ -16080,9 +16592,9 @@
                 </select>
               </div>
 
-              <div>
+              <div class="form-group">
                 <label class="form-label" style="font-weight: 600;">Branch Location</label>
-                <select id="expBranch" class="input">
+                <select id="expBranch" class="form-select">
                   <option value="">All Branches / HQ</option>
                   ${branches.map(b => `
                     <option value="${b.id}" ${existing?.branchId === b.id ? 'selected' : ''}>${escapeHtml(b.name)}</option>
@@ -16092,24 +16604,24 @@
             </div>
 
             <div class="form-row-2col">
-              <div>
+              <div class="form-group">
                 <label class="form-label" style="font-weight: 600;">Amount *</label>
-                <input type="number" step="0.0001" min="0.0001" id="expAmount" class="input" required placeholder="0.00" value="${existing?.amount ? parseFloat(existing.amount) : ''}" />
+                <input type="number" step="0.0001" min="0.0001" id="expAmount" class="form-input" required placeholder="0.00" value="${existing?.amount ? parseFloat(existing.amount) : ''}" />
               </div>
-              <div>
+              <div class="form-group">
                 <label class="form-label" style="font-weight: 600;">Currency</label>
-                <input type="text" id="expCurrency" class="input" maxlength="3" uppercase value="${escapeHtml(existing?.currencyCode || currency)}" readonly style="background: var(--bg-primary);" />
+                <input type="text" id="expCurrency" class="form-input" maxlength="3" uppercase value="${escapeHtml(existing?.currencyCode || currency)}" readonly style="background: var(--bg-primary); font-family: monospace;" />
               </div>
             </div>
 
             <div class="form-row-2col">
-              <div>
+              <div class="form-group">
                 <label class="form-label" style="font-weight: 600;">Expense Date *</label>
-                <input type="date" id="expDate" class="input" required value="${defaultDate}" />
+                <input type="date" id="expDate" class="form-input" required value="${defaultDate}" />
               </div>
-              <div>
+              <div class="form-group">
                 <label class="form-label" style="font-weight: 600;">Payment Method</label>
-                <select id="expPaymentMethod" class="input">
+                <select id="expPaymentMethod" class="form-select">
                   <option value="CASH" ${existing?.paymentMethod === 'CASH' ? 'selected' : ''}>Cash / Petty Cash</option>
                   <option value="BANK_TRANSFER" ${existing?.paymentMethod === 'BANK_TRANSFER' ? 'selected' : ''}>Bank Transfer</option>
                   <option value="CARD" ${existing?.paymentMethod === 'CARD' ? 'selected' : ''}>Credit / Debit Card</option>
@@ -16119,24 +16631,26 @@
               </div>
             </div>
 
-            <div>
+            <div class="form-group">
               <label class="form-label" style="font-weight: 600;">Vendor / Payee</label>
-              <input type="text" id="expPayee" class="input" maxlength="200" placeholder="e.g. Electric Power Utility Corp" value="${escapeHtml(existing?.vendorPayee || '')}" />
+              <input type="text" id="expPayee" class="form-input" maxlength="200" placeholder="e.g. Electric Power Utility Corp" value="${escapeHtml(existing?.vendorPayee || '')}" />
             </div>
 
-            <div>
-              <label class="form-label">Description &bull; Notes</label>
-              <textarea id="expDescription" class="input" rows="2" placeholder="Optional purpose, bill invoice numbers, or notes">${escapeHtml(existing?.description || existing?.notes || '')}</textarea>
+            <div class="form-group">
+              <label class="form-label" style="font-weight: 600;">Description &bull; Notes</label>
+              <textarea id="expDescription" class="form-textarea" rows="2" placeholder="Optional purpose, bill invoice numbers, or notes">${escapeHtml(existing?.description || existing?.notes || '')}</textarea>
             </div>
           </div>
         </form>
       `;
 
       const footerHtml = `
-        <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-        <button class="btn btn-primary" id="btnSaveExpense" onclick="saveExpense(${isEditing}, '${existing ? existing.id : ''}')">
-          ${isEditing ? 'Save Changes' : 'Create Draft Expense'}
-        </button>
+        <div style="display: flex; gap: 8px; justify-content: flex-end; width: 100%; flex-wrap: wrap;">
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-primary" id="btnSaveExpense" onclick="saveExpense(${isEditing}, '${existing ? existing.id : ''}')">
+            ${isEditing ? 'Save Changes' : 'Create Draft Expense'}
+          </button>
+        </div>
       `;
 
       openModal({
@@ -16596,61 +17110,64 @@
     // --- Expense Categories Modal ---
     async function openExpenseCategoriesModal() {
       openModal({
-        title: 'Expense Categories',
-        bodyHtml: '<div style="padding: 30px; text-align: center;"><div class="spinner-sm" style="display:inline-block;"></div><div>Loading categories...</div></div>',
-        maxWidth: '650px',
+        title: 'Manage Expense Categories',
+        bodyHtml: '<div style="padding: 30px; text-align: center;"><div class="spinner-sm" style="display:inline-block; margin-bottom: 8px;"></div><div>Loading categories...</div></div>',
+        maxWidth: '680px',
       });
 
       try {
         const res = await apiFetch('/v1/expenses/categories');
         state.cachedExpenseCategories = res?.items || [];
+        const categories = state.cachedExpenseCategories;
 
         const bodyHtml = `
-          <div style="background: var(--bg-primary); padding: 14px; border-radius: 8px; margin-bottom: 16px;">
-            <div style="font-weight: 700; font-size: 13px; margin-bottom: 8px; color: var(--text-primary);">+ Add New Expense Category</div>
+          <!-- Add Category Form -->
+          <div style="background: var(--bg-primary); padding: 14px 16px; border-radius: 8px; margin-bottom: 16px; border: 1px solid var(--border-subtle);">
+            <div style="font-weight: 700; font-size: 13px; margin-bottom: 10px; color: var(--text-primary); text-transform: uppercase; letter-spacing: 0.5px;">+ Add New Category</div>
             <div class="form-row-2col" style="margin-bottom: 8px;">
-              <input type="text" id="newCatCode" class="input-sm" placeholder="Code (e.g. SOFTWARE)" style="text-transform: uppercase;" />
-              <input type="text" id="newCatName" class="input-sm" placeholder="Category Name (e.g. Software & Subscriptions)" />
+              <input type="text" id="newCatCode" class="form-input form-input-sm" placeholder="Code (e.g. SOFTWARE)" style="text-transform: uppercase; font-family: monospace;" />
+              <input type="text" id="newCatName" class="form-input form-input-sm" placeholder="Category Name (e.g. Software & Subscriptions)" />
             </div>
             <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-              <input type="text" id="newCatDesc" class="input-sm" placeholder="Optional description..." style="flex: 1; min-width: 140px;" />
+              <input type="text" id="newCatDesc" class="form-input form-input-sm" placeholder="Optional description..." style="flex: 1; min-width: 140px;" />
               <button class="btn btn-primary btn-sm" onclick="createExpenseCategoryFromUi()">Add Category</button>
             </div>
           </div>
 
-          <div style="max-height: 380px; overflow-y: auto;">
+          <!-- Desktop Categories Table -->
+          <div class="desktop-table-container" style="max-height: 380px; overflow-y: auto;">
             <div class="table-responsive">
-              <table class="table" style="margin: 0; font-size: 12px;">
+              <table class="table" style="margin: 0; font-size: 12px; width: 100%;">
                 <thead>
                   <tr>
-                    <th>Code</th>
-                    <th>Name</th>
-                    <th>Status</th>
-                    <th class="text-right">Actions</th>
+                    <th style="width: 120px;">Code</th>
+                    <th style="min-width: 180px;">Category Name</th>
+                    <th style="width: 100px; text-align: center;">Status</th>
+                    <th class="text-right" style="width: 140px;">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  ${state.cachedExpenseCategories.map(cat => `
+                  ${categories.map(cat => `
                     <tr>
                       <td><strong style="font-family: monospace;">${escapeHtml(cat.code)}</strong></td>
                       <td>
-                        <div style="font-weight: 600;">${escapeHtml(cat.name)}</div>
-                        ${cat.description ? `<div style="font-size: 11px; color: var(--text-secondary);">${escapeHtml(cat.description)}</div>` : ''}
+                        <div style="font-weight: 600; color: var(--text-primary);">${escapeHtml(cat.name)}</div>
+                        ${cat.description ? `<div style="font-size: 11px; color: var(--text-secondary); word-break: break-word; margin-top: 2px;">${escapeHtml(cat.description)}</div>` : ''}
                       </td>
-                      <td>
+                      <td style="text-align: center;">
                         ${cat.isActive ? `
-                          <span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #047857;">Active</span>
+                          <span class="badge-pill badge-green" style="font-size: 11px;">Active</span>
                         ` : `
-                          <span class="badge" style="background: rgba(107, 114, 128, 0.15); color: #4b5563;">Inactive</span>
+                          <span class="badge-pill badge-secondary" style="font-size: 11px;">Inactive</span>
                         `}
                       </td>
                       <td class="text-right">
                         <div style="display: flex; gap: 4px; justify-content: flex-end; flex-wrap: wrap;">
-                          <button class="btn btn-secondary btn-sm" style="padding: 2px 6px; font-size: 10px;" onclick="toggleExpenseCategoryActive('${cat.id}', ${cat.isActive})">
+                          <button class="btn btn-secondary btn-sm" style="padding: 2px 8px; font-size: 11px;" onclick="toggleExpenseCategoryActive('${cat.id}', ${cat.isActive})">
                             ${cat.isActive ? 'Deactivate' : 'Activate'}
                           </button>
                           ${!cat.isSystemDefault ? `
-                            <button class="btn btn-secondary btn-sm" style="padding: 2px 6px; font-size: 10px; color: var(--status-danger);" onclick="deleteExpenseCategoryFromUi('${cat.id}')">Del</button>
+                            <button class="btn btn-secondary btn-sm" style="padding: 2px 8px; font-size: 11px; color: var(--status-danger);" onclick="deleteExpenseCategoryFromUi('${cat.id}')">Delete</button>
                           ` : ''}
                         </div>
                       </td>
@@ -16659,6 +17176,40 @@
                 </tbody>
               </table>
             </div>
+          </div>
+
+          <!-- Mobile Categories Cards -->
+          <div class="mobile-cards-container" style="max-height: 380px; overflow-y: auto;">
+            ${categories.map(cat => `
+              <div class="entity-card" style="padding: 12px; border: 1px solid var(--border-subtle); border-radius: var(--radius); margin-bottom: 8px; background: var(--surface-card);">
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-bottom: 6px;">
+                  <div>
+                    <div style="font-weight: 700; font-size: 14px; color: var(--text-primary);">${escapeHtml(cat.name)}</div>
+                    <div style="font-size: 11px; color: var(--text-secondary); font-family: monospace;">${escapeHtml(cat.code)}</div>
+                  </div>
+                  <div>
+                    ${cat.isActive ? `
+                      <span class="badge-pill badge-green" style="font-size: 11px;">Active</span>
+                    ` : `
+                      <span class="badge-pill badge-secondary" style="font-size: 11px;">Inactive</span>
+                    `}
+                  </div>
+                </div>
+                ${cat.description ? `
+                  <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 10px; word-break: break-word; line-height: 1.4;">
+                    ${escapeHtml(cat.description)}
+                  </div>
+                ` : ''}
+                <div style="display: flex; gap: 8px; justify-content: flex-end; padding-top: 6px; border-top: 1px solid var(--border-subtle);">
+                  <button class="btn btn-secondary btn-sm" onclick="toggleExpenseCategoryActive('${cat.id}', ${cat.isActive})">
+                    ${cat.isActive ? 'Deactivate' : 'Activate'}
+                  </button>
+                  ${!cat.isSystemDefault ? `
+                    <button class="btn btn-secondary btn-sm" style="color: var(--status-danger);" onclick="deleteExpenseCategoryFromUi('${cat.id}')">Delete</button>
+                  ` : ''}
+                </div>
+              </div>
+            `).join('')}
           </div>
         `;
 
@@ -16670,7 +17221,7 @@
           title: 'Manage Expense Categories',
           bodyHtml,
           footerHtml,
-          maxWidth: '650px',
+          maxWidth: '680px',
         });
       } catch (err) {
         showToast(err.message, 'error');
@@ -16724,6 +17275,29 @@
       } catch (err) {
         showToast(err.message, 'error');
       }
+    }
+
+    // Isolated Expense Summary Report Printer (BUG-056)
+    function printExpenseSummaryReport() {
+      const reportEl = document.getElementById('printableExpenseReport');
+      if (!reportEl) {
+        window.print();
+        return;
+      }
+      const pageStyles = `
+        @page { size: A4 portrait; margin: 12mm; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #111; font-size: 12px; line-height: 1.4; padding: 0; margin: 0; }
+        #printableExpenseReport { page-break-after: avoid !important; page-break-inside: avoid !important; width: 100%; max-width: 100%; }
+        .expense-kpi-grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 20px; }
+        .table { width: 100%; border-collapse: collapse; margin-bottom: 16px; font-size: 11px; }
+        .table th { border-bottom: 2px solid #333; text-align: left; padding: 6px 4px; font-weight: 700; }
+        .table td { border-bottom: 1px solid #ddd; padding: 6px 4px; }
+        .text-right { text-align: right; }
+        thead { display: table-header-group; }
+        tr { page-break-inside: avoid; }
+        * { box-sizing: border-box; }
+      `;
+      printHtmlDocument(reportEl.outerHTML, pageStyles);
     }
 
     // --- Expense Summary Report Modal & Printable View ---
@@ -16835,7 +17409,7 @@
 
         const footerHtml = `
           <button class="btn btn-secondary" onclick="closeModal()">Close</button>
-          <button class="btn btn-primary" onclick="window.print()">Print Report</button>
+          <button class="btn btn-primary" onclick="printExpenseSummaryReport()">Print Report</button>
         `;
 
         openModal({

@@ -1091,15 +1091,59 @@ export async function getEmployeeProfile(
   trx: TenantTransactionContext,
   employeeId: string,
 ): Promise<EmployeeProfileResponse> {
-  await assertAuthorized(trx, { permission: 'hrm:employee:read' });
+  const hasEmployeeRead = await (async () => {
+    try {
+      await assertAuthorized(trx, { permission: 'hrm:employee:read' });
+      return true;
+    } catch {
+      return false;
+    }
+  })();
 
-  const [employee, activeSalaryStructure, documents, recentActivity] =
-    await Promise.all([
-      getEmployeeById(trx, employeeId),
-      getActiveSalaryStructure(trx, employeeId),
-      listEmployeeDocuments(trx, employeeId),
-      getEmployeeActivity(trx, employeeId),
-    ]);
+  if (!hasEmployeeRead) {
+    const linked = await trx.db
+      .selectFrom('employees')
+      .select(['id'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('id', '=', employeeId)
+      .where('linked_user_id', '=', trx.userId)
+      .executeTakeFirst();
+
+    if (!linked) {
+      throw new AppError({
+        statusCode: 403,
+        errorCode: 'HRM_UNAUTHORIZED_EMPLOYEE_ACCESS',
+        title: 'Access Denied',
+        detail: 'You are only authorized to view your own employee profile.',
+      });
+    }
+  }
+
+  const employee = await getEmployeeById(trx, employeeId);
+
+  const activeSalaryStructure = await (async () => {
+    try {
+      return await getActiveSalaryStructure(trx, employeeId);
+    } catch {
+      return null;
+    }
+  })();
+
+  const documents = await (async () => {
+    try {
+      return await listEmployeeDocuments(trx, employeeId);
+    } catch {
+      return [];
+    }
+  })();
+
+  const recentActivity = await (async () => {
+    try {
+      return await getEmployeeActivity(trx, employeeId);
+    } catch {
+      return [];
+    }
+  })();
 
   return {
     employee,
