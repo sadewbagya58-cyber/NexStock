@@ -2014,6 +2014,7 @@
         </div>
         <button class="btn-icon btn-sm" id="sidebarCloseBtn" aria-label="Close menu">&times;</button>
       </div>
+      <div id="sidebarNavContent">
       <div class="nav-section-title">Overview</div>
       <a class="nav-link active" data-view="dashboard">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
@@ -2131,6 +2132,7 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
         Settings &amp; Quotas
       </a>
+      </div>
     </aside>
 
     <!-- Main Content Container -->
@@ -2364,7 +2366,13 @@
       registerId: '',
       registerCode: '',
       userRole: '',
+      roles: [],
+      permissions: new Set(),
+      allLocationsAccess: true,
+      allowedBranchIds: [],
+      allowedWarehouseIds: [],
       userEmail: '',
+      userId: '',
       fullName: '',
       memberships: [],
       activeView: 'welcome',
@@ -2402,6 +2410,11 @@
           state.tenantName = cachedM.businessName || cachedM.tenantName || 'My Business';
           state.currency = cachedM.baseCurrency || cachedM.currency || state.currency;
           state.userRole = cachedM.role || cachedM.roleName || 'MEMBER';
+          state.roles = cachedM.roles || (cachedM.role ? [cachedM.role] : ['MEMBER']);
+          state.permissions = new Set(cachedM.permissions || []);
+          state.allLocationsAccess = cachedM.allLocationsAccess !== false;
+          state.allowedBranchIds = cachedM.allowedBranchIds || [];
+          state.allowedWarehouseIds = cachedM.allowedWarehouseIds || [];
           state.plan = cachedM.status || cachedM.plan || 'TRIAL';
           state.timezone = cachedM.timezone || state.timezone;
           state.countryCode = cachedM.countryCode || cachedM.country || 'US';
@@ -2418,6 +2431,7 @@
         const cachedUser = JSON.parse(cachedUserStr);
         if (cachedUser) {
           state.user = cachedUser;
+          state.userId = cachedUser.id || '';
           state.fullName = cachedUser.fullName || cachedUser.email || '';
           state.userEmail = cachedUser.email || '';
         }
@@ -2590,6 +2604,35 @@
       return true;
     }
 
+    // Centralized User-Facing Error Message Sanitizer
+    function formatUserFacingErrorMessage(err) {
+      if (!err) return 'An unexpected error occurred. Please try again.';
+      const raw = typeof err === 'string' ? err : (err.message || String(err));
+
+      // Strip technical UUID hashes
+      const cleanMsg = raw
+        .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '')
+        .replace(/\s{2,}/g, ' ')
+        .trim();
+
+      if (cleanMsg.includes('IAM_PERMISSION_DENIED') || cleanMsg.includes('lacks required permission')) {
+        return 'You do not have permission to perform this action. Contact your administrator.';
+      }
+      if (cleanMsg.includes('POS_SHIFT_CLOSE_UNAUTHORIZED')) {
+        return 'Only the cashier who opened this shift or an authorized manager may close it.';
+      }
+      if (cleanMsg.includes('POS_CASHIER_SHIFT_ALREADY_OPEN')) {
+        return cleanMsg;
+      }
+      if (cleanMsg.includes('IAM_LOCATION_SCOPE_DENIED')) {
+        return 'You do not have access to this store branch. Contact your administrator.';
+      }
+      if (cleanMsg.includes('IAM_TENANT_MEMBERSHIP_REQUIRED')) {
+        return 'Active organization membership required.';
+      }
+      return cleanMsg || 'An error occurred while processing your request.';
+    }
+
     // API Client with automatic auth, token refresh, tenant header, timeout, and GET deduplication
     async function apiFetch(endpoint, options = {}) {
       const requestEpoch = state.sessionEpoch || 0;
@@ -2703,7 +2746,7 @@
             throw timeoutErr;
           }
           if (!options.silent) {
-            showToast(err.message, 'error');
+            showToast(formatUserFacingErrorMessage(err), 'error');
           }
           throw err;
         } finally {
@@ -2853,6 +2896,11 @@
       localStorage.setItem('nexstock_active_timezone', state.timezone);
       state.plan = membership.status || membership.plan || 'TRIAL';
       state.userRole = membership.role || membership.roleName || 'MEMBER';
+      state.roles = membership.roles || (membership.role ? [membership.role] : ['MEMBER']);
+      state.permissions = new Set(membership.permissions || []);
+      state.allLocationsAccess = membership.allLocationsAccess !== false;
+      state.allowedBranchIds = membership.allowedBranchIds || [];
+      state.allowedWarehouseIds = membership.allowedWarehouseIds || [];
       localStorage.setItem('nexstock_active_tenant_id', membership.tenantId);
       try {
         localStorage.setItem('nexstock_active_membership', JSON.stringify(membership));
@@ -2874,6 +2922,12 @@
 
       // Synchronize Topbar context immediately
       updateTopbarContext();
+
+      // Render role-aware sidebar navigation immediately based on cached/active permissions
+      renderSidebarNav();
+
+      // Refresh permissions from server in background
+      refreshMemberPermissions();
 
       // Resolve fallback branch/warehouse and POS register asynchronously without blocking view render (BUG-048)
       hydrateTenantLocationContext(membership.tenantId);
@@ -3052,6 +3106,385 @@
       `;
     }
 
+    // Permission Evaluation Helpers (Phase 7.2 RBAC Remediation)
+    function hasPermission(permissionKey) {
+      if (!permissionKey) return true;
+      if (state.userRole === 'TENANT_OWNER' || (state.roles && state.roles.includes('TENANT_OWNER'))) {
+        return true;
+      }
+      if (!state.permissions) return false;
+      return state.permissions.has(permissionKey);
+    }
+
+    function hasAnyPermission(permissionKeys) {
+      if (!permissionKeys || (Array.isArray(permissionKeys) && permissionKeys.length === 0)) return true;
+      if (state.userRole === 'TENANT_OWNER' || (state.roles && state.roles.includes('TENANT_OWNER'))) {
+        return true;
+      }
+      if (!Array.isArray(permissionKeys)) {
+        return hasPermission(permissionKeys);
+      }
+      return permissionKeys.some(key => hasPermission(key));
+    }
+
+    const VIEW_PERMISSION_MAP = {
+      'dashboard': 'dash:view',
+      'pos-checkout': ['pos:sale:create', 'pos:payment:create'],
+      'pos-registers': ['pos:register:read', 'org:register:read', 'org:register:manage'],
+      'pos-shifts': ['pos:shift:open', 'pos:shift:close'],
+      'pos-sales': ['pos:sale:read', 'pos:sale:void'],
+      'products': ['cat:product:manage', 'cat:product:read'],
+      'categories': ['cat:category:manage', 'cat:category:read'],
+      'suppliers': ['pur:supplier:read', 'pur:supplier:manage'],
+      'movements': ['inv:movement:read', 'inv:movement:post', 'inv:movement:reverse'],
+      'balances': 'inv:balance:read',
+      'batches': ['inv:batch:read', 'inv:batch:manage'],
+      'serials': ['inv:serial:read', 'inv:serial:manage'],
+      'valuation': 'inv:costing:read',
+      'stocktakes': ['inv:count:read', 'inv:count:create', 'inv:count:submit', 'inv:count:approve', 'inv:count:post'],
+      'attendance': ['hrm:attendance:read', 'hrm:attendance:manage', 'hrm:attendance:self'],
+      'leaves': ['hrm:leave:read', 'hrm:leave:manage', 'hrm:leave:approve', 'hrm:leave:self'],
+      'employees': ['hrm:employee:read', 'hrm:employee:manage'],
+      'payroll': ['hrm:payroll:read', 'hrm:payroll:process', 'hrm:payroll:approve', 'hrm:payroll:pay'],
+      'payroll-reports': ['hrm:payroll:read', 'hrm:salary:read'],
+      'expenses': ['exp:expense:read', 'exp:expense:create', 'exp:expense:manage', 'exp:report:view'],
+      'customers': ['crm:customer:read', 'crm:customer:manage'],
+      'credit-accounts': ['crm:credit:read', 'crm:credit:manage'],
+      'credit-dashboard': ['crm:credit:read', 'crm:report:read'],
+      'team-staff': ['iam:member:read', 'iam:member:manage'],
+      'roles-permissions': 'iam:role:manage',
+      'org-settings': ['org:tenant:manage', 'org:branch:manage', 'org:warehouse:manage', 'sub:subscription:read', 'sub:subscription:manage', 'i18n:settings:read', 'i18n:settings:manage'],
+    };
+
+    function canAccessView(viewName) {
+      if (AUTH_VIEWS.includes(viewName)) return true;
+      if (state.userRole === 'TENANT_OWNER' || (state.roles && state.roles.includes('TENANT_OWNER'))) return true;
+      if (state.userRole === 'CASHIER' || (state.roles && state.roles.includes('CASHIER'))) {
+        const cashierAllowed = ['dashboard', 'pos-checkout', 'pos-shifts', 'pos-sales', 'attendance', 'leaves'];
+        if (cashierAllowed.includes(viewName)) return true;
+      }
+      if (state.userRole === 'STAFF' || (state.roles && state.roles.includes('STAFF'))) {
+        const staffAllowed = ['dashboard', 'attendance', 'leaves'];
+        if (staffAllowed.includes(viewName)) return true;
+      }
+      const req = VIEW_PERMISSION_MAP[viewName];
+      if (!req) return true;
+      return hasAnyPermission(req);
+    }
+
+    function formatViewTitle(viewName) {
+      const titles = {
+        'dashboard': 'Dashboard',
+        'products': 'Products',
+        'categories': 'Categories',
+        'suppliers': 'Suppliers',
+        'movements': 'Stock Movements',
+        'balances': 'Inventory Balances',
+        'batches': 'Batches & Expiry',
+        'serials': 'Serial Registry',
+        'valuation': 'Costing & Valuation',
+        'stocktakes': 'Stock Counts & Stocktake',
+        'pos-checkout': 'POS Checkout',
+        'pos-registers': 'Registers',
+        'pos-shifts': 'Cashier Shifts',
+        'pos-sales': 'Sales History',
+        'employees': 'Employees',
+        'attendance': 'Attendance',
+        'leaves': 'Leaves',
+        'payroll': 'Payroll Runs',
+        'payroll-reports': 'Payroll Reports',
+        'expenses': 'Expenses',
+        'credit-dashboard': 'Credit Dashboard',
+        'customers': 'Customers',
+        'credit-accounts': 'Credit Accounts',
+        'team-staff': 'Team & Staff Accounts',
+        'roles-permissions': 'Roles & Permissions',
+        'org-settings': 'Settings & Quotas'
+      };
+      return titles[viewName] || viewName;
+    }
+
+    function renderAccessDeniedView(viewName) {
+      const container = document.getElementById('mainContainer');
+      if (!container) return;
+      const title = formatViewTitle(viewName);
+      container.innerHTML = `
+        <div class="card p-4" style="max-width: 560px; margin: 40px auto; text-align: center;">
+          <div style="font-size: 48px; margin-bottom: 12px;">🔒</div>
+          <h2 style="font-size: 20px; font-weight: 700; margin-bottom: 8px;">Access Restricted</h2>
+          <p style="color: var(--text-secondary); margin-bottom: 24px; line-height: 1.5; font-size: 14px;">
+            You do not have permission to access the <strong>${escapeHtml(title)}</strong> module.
+            If your responsibilities require this module, please contact your organization administrator.
+          </p>
+          <div style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;">
+            <button class="btn btn-primary" onclick="renderView('dashboard')">Back to Dashboard</button>
+            ${hasPermission('pos:sale:create') ? `<button class="btn btn-secondary" onclick="renderView('pos-checkout')">Open POS Checkout</button>` : ''}
+          </div>
+        </div>
+      `;
+    }
+
+    const NAV_DEFINITIONS = [
+      {
+        category: 'Overview',
+        items: [
+          {
+            view: 'dashboard',
+            label: 'Dashboard',
+            icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>`,
+            permission: 'dash:view'
+          }
+        ]
+      },
+      {
+        category: 'Point of Sale',
+        items: [
+          {
+            view: 'pos-checkout',
+            label: 'POS Checkout',
+            icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="21" r="1"></circle><circle cx="20" cy="21" r="1"></circle><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path></svg>`,
+            permission: ['pos:sale:create', 'pos:payment:create']
+          },
+          {
+            view: 'pos-shifts',
+            label: 'Cashier Shifts',
+            icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>`,
+            permission: ['pos:shift:open', 'pos:shift:close']
+          },
+          {
+            view: 'pos-sales',
+            label: 'Sales History',
+            icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>`,
+            permission: 'pos:sale:read'
+          },
+          {
+            view: 'pos-registers',
+            label: 'Registers',
+            icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>`,
+            permission: ['org:register:manage', 'org:register:read']
+          }
+        ]
+      },
+      {
+        category: 'HR & Self-Service',
+        items: [
+          {
+            view: 'attendance',
+            label: 'Attendance',
+            icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>`,
+            permission: ['hrm:attendance:read', 'hrm:attendance:manage', 'hrm:attendance:self']
+          },
+          {
+            view: 'leaves',
+            label: 'Leaves',
+            icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>`,
+            permission: ['hrm:leave:read', 'hrm:leave:manage', 'hrm:leave:approve', 'hrm:leave:self']
+          },
+          {
+            view: 'employees',
+            label: 'Employees',
+            icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>`,
+            permission: ['hrm:employee:read', 'hrm:employee:manage']
+          },
+          {
+            view: 'payroll',
+            label: 'Payroll Runs',
+            icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"></rect><line x1="2" y1="10" x2="22" y2="10"></line><line x1="7" y1="15" x2="7.01" y2="15"></line><line x1="12" y1="15" x2="17" y2="15"></line></svg>`,
+            permission: ['hrm:payroll:read', 'hrm:payroll:process', 'hrm:payroll:approve', 'hrm:payroll:pay']
+          },
+          {
+            view: 'payroll-reports',
+            label: 'Payroll Reports',
+            icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>`,
+            permission: ['hrm:payroll:read', 'hrm:salary:read']
+          }
+        ]
+      },
+      {
+        category: 'Inventory',
+        items: [
+          {
+            view: 'products',
+            label: 'Products',
+            icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path><line x1="3" y1="6" x2="21" y2="6"></line><path d="M16 10a4 4 0 0 1-8 0"></path></svg>`,
+            permission: ['cat:product:manage']
+          },
+          {
+            view: 'categories',
+            label: 'Categories',
+            icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path><line x1="7" y1="7" x2="7.01" y2="7"></line></svg>`,
+            permission: ['cat:category:manage']
+          },
+          {
+            view: 'suppliers',
+            label: 'Suppliers',
+            icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"></rect><polygon points="16 8 20 8 23 11 23 16 16 16 8"></polygon><circle cx="5.5" cy="18.5" r="2.5"></circle><circle cx="18.5" cy="18.5" r="2.5"></circle></svg>`,
+            permission: ['pur:supplier:read', 'pur:supplier:manage']
+          },
+          {
+            view: 'movements',
+            label: 'Stock Movements',
+            icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"></polyline><path d="M3 11V9a4 4 0 0 1 4-4h14"></path><polyline points="7 23 3 19 7 15"></polyline><path d="M21 13v2a4 4 0 0 1-4 4H3"></path></svg>`,
+            permission: ['inv:movement:read', 'inv:movement:post', 'inv:movement:reverse']
+          },
+          {
+            view: 'balances',
+            label: 'Inventory Balances',
+            icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path></svg>`,
+            permission: 'inv:balance:read'
+          }
+        ]
+      },
+      {
+        category: 'Advanced Inventory',
+        items: [
+          {
+            view: 'batches',
+            label: 'Batches &amp; Expiry',
+            icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>`,
+            permission: ['inv:batch:read', 'inv:batch:manage']
+          },
+          {
+            view: 'serials',
+            label: 'Serial Registry',
+            icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="9" x2="20" y2="9"></line><line x1="4" y1="15" x2="20" y2="15"></line><line x1="10" y1="3" x2="8" y2="21"></line><line x1="16" y1="3" x2="14" y2="21"></line></svg>`,
+            permission: ['inv:serial:read', 'inv:serial:manage']
+          },
+          {
+            view: 'valuation',
+            label: 'Costing &amp; Valuation',
+            icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>`,
+            permission: 'inv:costing:read'
+          },
+          {
+            view: 'stocktakes',
+            label: 'Stock Counts &amp; Stocktake',
+            icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>`,
+            permission: ['inv:count:read', 'inv:count:create', 'inv:count:submit', 'inv:count:approve', 'inv:count:post']
+          }
+        ]
+      },
+      {
+        category: 'Finance & Credit',
+        items: [
+          {
+            view: 'credit-dashboard',
+            label: 'Credit Dashboard',
+            icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>`,
+            permission: ['crm:credit:read', 'crm:report:read']
+          },
+          {
+            view: 'customers',
+            label: 'Customers',
+            icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>`,
+            permission: ['crm:customer:manage', 'crm:customer:read']
+          },
+          {
+            view: 'credit-accounts',
+            label: 'Credit Accounts',
+            icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"></rect><line x1="1" y1="10" x2="23" y2="10"></line></svg>`,
+            permission: ['crm:credit:read', 'crm:credit:manage']
+          },
+          {
+            view: 'expenses',
+            label: 'Expenses',
+            icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>`,
+            permission: ['exp:expense:read', 'exp:expense:create', 'exp:expense:manage', 'exp:report:view']
+          }
+        ]
+      },
+      {
+        category: 'Organization',
+        items: [
+          {
+            view: 'team-staff',
+            label: 'Team &amp; Staff Accounts',
+            icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>`,
+            permission: ['iam:member:read', 'iam:member:manage']
+          },
+          {
+            view: 'roles-permissions',
+            label: 'Roles &amp; Permissions',
+            icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>`,
+            permission: 'iam:role:manage'
+          },
+          {
+            view: 'org-settings',
+            label: 'Settings &amp; Quotas',
+            icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>`,
+            permission: ['org:tenant:manage', 'org:branch:manage', 'org:warehouse:manage', 'sub:subscription:read', 'sub:subscription:manage', 'i18n:settings:read', 'i18n:settings:manage']
+          }
+        ]
+      }
+    ];
+
+    function renderSidebarNav() {
+      const container = document.getElementById('sidebarNavContent');
+      if (!container) return;
+
+      let html = '';
+      for (const section of NAV_DEFINITIONS) {
+        const permittedItems = section.items.filter(item => {
+          if (state.userRole === 'CASHIER' || (state.roles && state.roles.includes('CASHIER'))) {
+            return ['dashboard', 'pos-checkout', 'pos-shifts', 'pos-sales', 'attendance', 'leaves'].includes(item.view);
+          }
+          if (state.userRole === 'STAFF' || (state.roles && state.roles.includes('STAFF'))) {
+            return ['dashboard', 'attendance', 'leaves'].includes(item.view);
+          }
+          return hasAnyPermission(item.permission);
+        });
+
+        if (permittedItems.length === 0) continue;
+
+        html += `<div class="nav-section-title">${escapeHtml(section.category)}</div>`;
+        for (const item of permittedItems) {
+          const isActive = state.activeView === item.view;
+          html += `
+            <a class="nav-link ${isActive ? 'active' : ''}" data-view="${escapeHtml(item.view)}">
+              ${item.icon}
+              ${escapeHtml(item.label)}
+            </a>
+          `;
+        }
+      }
+
+      container.innerHTML = html;
+
+      // Re-bind navigation click handlers
+      container.querySelectorAll('.nav-link').forEach(el => {
+        el.onclick = (e) => {
+          e.preventDefault();
+          const sidebar = document.getElementById('appSidebar');
+          if (sidebar) sidebar.classList.remove('open');
+          const overlay = document.getElementById('sidebarOverlay');
+          if (overlay) overlay.classList.remove('active');
+
+          const view = el.getAttribute('data-view');
+          if (!view) return;
+          renderView(view);
+        };
+      });
+    }
+
+    async function refreshMemberPermissions() {
+      if (!state.token || !state.tenantId) return null;
+      try {
+        const res = await apiFetch('/v1/iam/members/me', { silent: true });
+        if (res && res.permissions) {
+          state.permissions = new Set(res.permissions || []);
+          state.roles = res.roles || [];
+          state.allLocationsAccess = res.allLocationsAccess !== false;
+          state.allowedBranchIds = res.allowedBranchIds || [];
+          state.allowedWarehouseIds = res.allowedWarehouseIds || [];
+          renderSidebarNav();
+          return res;
+        }
+      } catch {
+        // Non-critical background refresh
+      }
+      return null;
+    }
+
     // View Navigation Router
     function renderView(viewName) {
       if (!VALID_VIEWS.includes(viewName)) {
@@ -3138,6 +3571,10 @@
       });
 
       const container = document.getElementById('mainContainer');
+      if (!isAuthView && !canAccessView(viewName)) {
+        renderAccessDeniedView(viewName);
+        return;
+      }
       if (container && !getViewCache(viewName)) {
         container.innerHTML = renderViewSkeleton(viewName);
       }
@@ -4305,7 +4742,9 @@
               <h1 class="view-title">Product Catalog</h1>
               <div class="view-subtitle">Manage SKUs, prices, unit conversions, and barcodes</div>
             </div>
-            <button class="btn btn-primary" onclick="openCreateProductModal()">+ Add Product</button>
+            ${hasPermission('cat:product:manage') ? `
+              <button class="btn btn-primary" onclick="openCreateProductModal()">+ Add Product</button>
+            ` : ''}
           </div>
 
           <div class="card">
@@ -4318,7 +4757,9 @@
                 <svg class="empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
                 <div class="empty-state-title">No products found</div>
                 <p class="empty-state-desc">No products found. Click "+ Add Product" to create your first SKU.</p>
-                <button class="btn btn-primary" onclick="openCreateProductModal()">+ Add Product</button>
+                ${hasPermission('cat:product:manage') ? `
+                  <button class="btn btn-primary" onclick="openCreateProductModal()">+ Add Product</button>
+                ` : ''}
               </div>
             ` : `
               <div class="desktop-table-container">
@@ -4375,13 +4816,17 @@
                             </td>
                             <td><span class="badge-pill ${isActive ? 'badge-green' : 'badge-red'}">${isActive ? 'ACTIVE' : 'ARCHIVED'}</span></td>
                             <td>
-                              <div style="display: flex; gap: 6px;">
-                                <button class="btn btn-secondary btn-sm" onclick="openEditProductModal('${p.id}')">Edit</button>
-                                <button class="btn btn-secondary btn-sm" title="Manage Barcodes &amp; Print Label" onclick="openBarcodeLabelModal('${p.id}')">🏷️ Barcode</button>
-                                ${isActive ? `
-                                  <button class="btn btn-secondary btn-sm" onclick="archiveProduct('${p.id}', '${sku}')">Archive</button>
-                                ` : ''}
-                              </div>
+                              ${hasPermission('cat:product:manage') ? `
+                                <div style="display: flex; gap: 6px;">
+                                  <button class="btn btn-secondary btn-sm" onclick="openEditProductModal('${p.id}')">Edit</button>
+                                  <button class="btn btn-secondary btn-sm" title="Manage Barcodes &amp; Print Label" onclick="openBarcodeLabelModal('${p.id}')">🏷️ Barcode</button>
+                                  ${isActive ? `
+                                    <button class="btn btn-secondary btn-sm" onclick="archiveProduct('${p.id}', '${sku}')">Archive</button>
+                                  ` : ''}
+                                </div>
+                              ` : `
+                                <span style="font-size: 12px; color: var(--text-secondary);">View only</span>
+                              `}
                             </td>
                           </tr>
                         `;
@@ -4445,11 +4890,15 @@
                         </div>
                       </div>
                       <div class="entity-card-footer" style="display: flex; gap: 6px;">
-                        <button class="btn btn-secondary btn-sm" style="flex: 1;" onclick="openEditProductModal('${p.id}')">Edit</button>
-                        <button class="btn btn-secondary btn-sm" style="flex: 1;" onclick="openBarcodeLabelModal('${p.id}')">🏷️ Barcode</button>
-                        ${isActive ? `
-                          <button class="btn btn-secondary btn-sm" style="flex: 1;" onclick="archiveProduct('${p.id}', '${sku}')">Archive</button>
-                        ` : ''}
+                        ${hasPermission('cat:product:manage') ? `
+                          <button class="btn btn-secondary btn-sm" style="flex: 1;" onclick="openEditProductModal('${p.id}')">Edit</button>
+                          <button class="btn btn-secondary btn-sm" style="flex: 1;" onclick="openBarcodeLabelModal('${p.id}')">🏷️ Barcode</button>
+                          ${isActive ? `
+                            <button class="btn btn-secondary btn-sm" style="flex: 1;" onclick="archiveProduct('${p.id}', '${sku}')">Archive</button>
+                          ` : ''}
+                        ` : `
+                          <span style="font-size: 12px; color: var(--text-secondary); padding: 4px;">Read-only SKU</span>
+                        `}
                       </div>
                     </div>
                   `;
@@ -5811,12 +6260,23 @@
               <div class="view-subtitle">${escapeHtml(state.branchName || 'Main Store')} &bull; Register ${escapeHtml(state.registerCode || 'POS-01')}</div>
             </div>
             <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
-              ${state.activeShift ? `
-                <div class="badge-pill badge-green">● Shift Open (Opened: ${formatTenantMoney(state.activeShift.openingCashFloat)})</div>
-                <button class="btn btn-secondary btn-sm" onclick="openCloseShiftModal('${state.activeShift.id}')">Close Shift</button>
-              ` : `
+              ${state.activeShift ? (
+                state.activeShift.openedByOtherCashier ? `
+                  <div class="badge-pill badge-yellow">● Register Occupied by Another Staff</div>
+                  ${hasAnyPermission(['org:branch:manage', 'iam:member:manage']) ? `
+                    <button class="btn btn-secondary btn-sm" onclick="openCloseShiftModal('${state.activeShift.id}')">Manager: Close Shift</button>
+                  ` : `
+                    <button class="btn btn-secondary btn-sm" onclick="renderView('pos-shifts')">Switch Register</button>
+                  `}
+                ` : `
+                  <div class="badge-pill badge-green">● Shift Open (Opened: ${formatTenantMoney(state.activeShift.openingCashFloat)})</div>
+                  <button class="btn btn-secondary btn-sm" onclick="openCloseShiftModal('${state.activeShift.id}')">Close Shift</button>
+                `
+              ) : `
                 <div class="badge-pill badge-yellow">Shift Closed</div>
-                <button class="btn btn-primary btn-sm" onclick="openShiftModal()">Open Shift to Sell</button>
+                ${hasPermission('pos:shift:open') ? `
+                  <button class="btn btn-primary btn-sm" onclick="openShiftModal()">Open Shift to Sell</button>
+                ` : ''}
               `}
             </div>
           </div>
@@ -5933,9 +6393,16 @@
                   <span id="cartGrandTotalText" style="color: var(--accent-primary);">${formatTenantMoney(calculateCartGrandTotal())}</span>
                 </div>
 
-                <button id="posCheckoutBtn" class="btn btn-primary" style="width: 100%; margin-top: 14px; justify-content: center; font-size: 16px; padding: 12px;" onclick="openPaymentDrawer()" ${state.cart.length === 0 ? 'disabled' : ''}>
-                  Checkout &amp; Pay (${formatTenantMoney(calculateCartGrandTotal())})
-                </button>
+                ${state.activeShift && state.activeShift.openedByOtherCashier && !hasAnyPermission(['org:branch:manage', 'iam:member:manage']) ? `
+                  <div style="margin-top: 14px; padding: 10px; background: rgba(245, 158, 11, 0.1); border: 1px solid var(--status-warning); border-radius: 6px; font-size: 12px; color: var(--status-warning); text-align: center;">
+                    ⚠️ Register is currently in use by another cashier. Checkout is locked to prevent drawer collisions.
+                  </div>
+                  <button class="btn btn-secondary" style="width: 100%; margin-top: 8px; justify-content: center;" onclick="renderView('pos-shifts')">Switch to Your Register</button>
+                ` : `
+                  <button id="posCheckoutBtn" class="btn btn-primary" style="width: 100%; margin-top: 14px; justify-content: center; font-size: 16px; padding: 12px;" onclick="openPaymentDrawer()" ${state.cart.length === 0 ? 'disabled' : ''}>
+                    Checkout &amp; Pay (${formatTenantMoney(calculateCartGrandTotal())})
+                  </button>
+                `}
               </div>
             </div>
           </div>
@@ -8140,9 +8607,29 @@
       }
     }
 
+    function changePosShiftRegister(regId) {
+      state.registerId = regId;
+      const reg = (state.cachedRegisters || []).find(r => r.id === regId);
+      if (reg) state.registerCode = reg.code;
+      renderPosShiftsView();
+    }
+
     async function renderPosShiftsView() {
       const container = document.getElementById('mainContainer');
       try {
+        let registers = state.cachedRegisters || [];
+        if ((!registers || registers.length === 0) && state.branchId) {
+          try {
+            const regRes = await apiFetch(`/v1/pos/registers?branchId=${encodeURIComponent(state.branchId)}`, { silent: true });
+            registers = Array.isArray(regRes) ? regRes : (regRes?.data || []);
+            state.cachedRegisters = registers;
+          } catch (e) {}
+        }
+        if (!state.registerId && registers.length > 0) {
+          state.registerId = registers[0].id;
+          state.registerCode = registers[0].code || 'REG-01';
+        }
+
         let activeShift = null;
         if (state.registerId) {
           try {
@@ -8151,24 +8638,59 @@
         }
         state.activeShift = activeShift;
 
+        const isManagerOrAdmin = hasAnyPermission(['org:branch:manage', 'iam:member:manage']);
+        const canOpenShift = hasPermission('pos:shift:open');
+        const isOccupiedByOther = activeShift && (activeShift.openedByOtherCashier === true || (activeShift.isOwnShift === false && !isManagerOrAdmin));
+
         container.innerHTML = `
           <div class="view-header">
             <div>
               <h1 class="view-title">Cashier Shifts &amp; Floats</h1>
               <div class="view-subtitle">Cash register float accountability and end-of-shift reconciliation</div>
             </div>
-            <div style="display: flex; gap: 8px;">
+            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+              ${registers.length > 1 ? `
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <span style="font-size: 13px; font-weight: 600; color: var(--text-secondary);">Register:</span>
+                  <select class="form-select" style="min-width: 140px; padding: 5px 8px; font-size: 13px;" onchange="changePosShiftRegister(this.value)">
+                    ${registers.map(r => `<option value="${escapeHtml(r.id)}" ${r.id === state.registerId ? 'selected' : ''}>${escapeHtml(r.code)} (${escapeHtml(r.name || 'Main')})</option>`).join('')}
+                  </select>
+                </div>
+              ` : ''}
               ${activeShift ? `
-                <button class="btn btn-secondary" onclick="openCashAdjustmentModal('${activeShift.id}')">+ Cash Adjustment</button>
-                <button class="btn btn-danger" onclick="openCloseShiftModal('${activeShift.id}')">Close Active Shift</button>
+                ${isOccupiedByOther ? `
+                  ${isManagerOrAdmin ? `
+                    <button class="btn btn-danger" onclick="openCloseShiftModal('${activeShift.id}')">Manager Override: Close Shift</button>
+                  ` : `
+                    <span class="badge-pill badge-yellow" title="Register occupied by another cashier">In Use by Another Cashier</span>
+                  `}
+                ` : `
+                  <button class="btn btn-secondary" onclick="openCashAdjustmentModal('${activeShift.id}')">+ Cash Adjustment</button>
+                  <button class="btn btn-danger" onclick="openCloseShiftModal('${activeShift.id}')">Close Active Shift</button>
+                `}
               ` : `
-                <button class="btn btn-primary" onclick="openShiftModal()">+ Open Shift</button>
+                ${canOpenShift ? `
+                  <button class="btn btn-primary" onclick="openShiftModal()">+ Open Shift</button>
+                ` : `
+                  <span class="badge-pill" style="opacity: 0.7;">Shift Opening Not Permitted</span>
+                `}
               `}
             </div>
           </div>
 
           <div class="card">
             <div class="card-title">Active Shift Overview &amp; Reconciliation</div>
+
+            ${isOccupiedByOther ? `
+              <div style="display: flex; align-items: flex-start; gap: 12px; margin-bottom: 20px; padding: 14px 18px; background: rgba(245, 158, 11, 0.1); border: 1px solid var(--status-warning); border-radius: 8px; color: var(--text-primary);">
+                <div style="font-size: 22px; line-height: 1;">⚠️</div>
+                <div>
+                  <div style="font-weight: 700; color: var(--status-warning); margin-bottom: 4px;">Register Currently In Use by Another Staff Member</div>
+                  <div style="font-size: 13px; color: var(--text-secondary); line-height: 1.5;">This shift was opened by another cashier. Real-time cash float balances and expected drawer counts are concealed to protect financial privacy and maintain shift drawer integrity.</div>
+                </div>
+              </div>
+            ` : ''}
+
             ${activeShift ? `
               <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 20px;">
                 <div style="padding: 12px; background: var(--bg-primary); border-radius: 8px; border: 1px solid var(--border-color);">
@@ -8181,43 +8703,63 @@
                 </div>
                 <div style="padding: 12px; background: var(--bg-primary); border-radius: 8px; border: 1px solid var(--border-color);">
                   <div class="kpi-label">Opening Float</div>
-                  <div style="font-weight: 700; color: var(--accent-primary); margin-top: 4px; font-size: 16px;">${formatTenantMoney(activeShift.openingCashFloat)}</div>
+                  <div style="font-weight: 700; color: var(--accent-primary); margin-top: 4px; font-size: 16px;">
+                    ${isOccupiedByOther ? '<span style="color: var(--text-secondary); font-style: italic;">Protected</span>' : formatTenantMoney(activeShift.openingCashFloat)}
+                  </div>
                 </div>
                 <div style="padding: 12px; background: var(--bg-primary); border-radius: 8px; border: 1px solid var(--border-color);">
                   <div class="kpi-label">Cash Sales (+)</div>
-                  <div style="font-weight: 700; color: var(--status-success); margin-top: 4px; font-size: 16px;">+${formatTenantMoney(activeShift.cashSales || '0.0000')}</div>
+                  <div style="font-weight: 700; color: var(--status-success); margin-top: 4px; font-size: 16px;">
+                    ${isOccupiedByOther ? '<span style="color: var(--text-secondary); font-style: italic;">Protected</span>' : `+${formatTenantMoney(activeShift.cashSales || '0.0000')}`}
+                  </div>
                 </div>
                 <div style="padding: 12px; background: var(--bg-primary); border-radius: 8px; border: 1px solid var(--border-color);">
                   <div class="kpi-label">Cash In (+)</div>
-                  <div style="font-weight: 700; color: var(--status-success); margin-top: 4px; font-size: 16px;">+${formatTenantMoney(activeShift.cashIn || '0.0000')}</div>
+                  <div style="font-weight: 700; color: var(--status-success); margin-top: 4px; font-size: 16px;">
+                    ${isOccupiedByOther ? '<span style="color: var(--text-secondary); font-style: italic;">Protected</span>' : `+${formatTenantMoney(activeShift.cashIn || '0.0000')}`}
+                  </div>
                 </div>
                 <div style="padding: 12px; background: var(--bg-primary); border-radius: 8px; border: 1px solid var(--border-color);">
                   <div class="kpi-label">Cash Out (-)</div>
-                  <div style="font-weight: 700; color: var(--status-danger); margin-top: 4px; font-size: 16px;">-${formatTenantMoney(activeShift.cashOut || '0.0000')}</div>
+                  <div style="font-weight: 700; color: var(--status-danger); margin-top: 4px; font-size: 16px;">
+                    ${isOccupiedByOther ? '<span style="color: var(--text-secondary); font-style: italic;">Protected</span>' : `-${formatTenantMoney(activeShift.cashOut || '0.0000')}`}
+                  </div>
                 </div>
                 <div style="padding: 12px; background: var(--bg-primary); border-radius: 8px; border: 1px solid var(--border-color);">
                   <div class="kpi-label">Cash Refunds (-)</div>
-                  <div style="font-weight: 700; color: var(--status-danger); margin-top: 4px; font-size: 16px;">-${formatTenantMoney(activeShift.cashRefunds || '0.0000')}</div>
+                  <div style="font-weight: 700; color: var(--status-danger); margin-top: 4px; font-size: 16px;">
+                    ${isOccupiedByOther ? '<span style="color: var(--text-secondary); font-style: italic;">Protected</span>' : `-${formatTenantMoney(activeShift.cashRefunds || '0.0000')}`}
+                  </div>
                 </div>
                 <div style="padding: 12px; background: var(--bg-primary); border-radius: 8px; border: 2px solid var(--accent-primary);">
                   <div class="kpi-label" style="font-weight: 700; color: var(--accent-primary);">Expected Drawer Cash</div>
-                  <div style="font-weight: 800; color: var(--text-primary); margin-top: 4px; font-size: 18px;">${formatTenantMoney(activeShift.expectedClosingCash)}</div>
+                  <div style="font-weight: 800; color: var(--text-primary); margin-top: 4px; font-size: 18px;">
+                    ${isOccupiedByOther ? '<span style="color: var(--text-secondary); font-size: 14px; font-style: italic;">Concealed</span>' : formatTenantMoney(activeShift.expectedClosingCash)}
+                  </div>
                 </div>
               </div>
               <div style="font-size: 12px; color: var(--text-secondary); background: var(--bg-secondary); padding: 10px 14px; border-radius: 6px;">
-                <strong>Reconciliation Formula:</strong> Expected Drawer Cash = Opening Float (${formatTenantMoney(activeShift.openingCashFloat)}) + Cash Sales (${formatTenantMoney(activeShift.cashSales || '0.0000')}) + Cash In (${formatTenantMoney(activeShift.cashIn || '0.0000')}) - Cash Out (${formatTenantMoney(activeShift.cashOut || '0.0000')}) - Cash Refunds (${formatTenantMoney(activeShift.cashRefunds || '0.0000')})
+                ${isOccupiedByOther ? `
+                  <strong>Shift Protection Mode:</strong> Real-time reconciliation details are restricted to the opening cashier or authorized managers.
+                ` : `
+                  <strong>Reconciliation Formula:</strong> Expected Drawer Cash = Opening Float (${formatTenantMoney(activeShift.openingCashFloat)}) + Cash Sales (${formatTenantMoney(activeShift.cashSales || '0.0000')}) + Cash In (${formatTenantMoney(activeShift.cashIn || '0.0000')}) - Cash Out (${formatTenantMoney(activeShift.cashOut || '0.0000')}) - Cash Refunds (${formatTenantMoney(activeShift.cashRefunds || '0.0000')})
+                `}
               </div>
             ` : `
               <div class="empty-state">
-                <div class="empty-state-title">No active shift on register REG-01</div>
+                <div class="empty-state-title">No active shift on register ${escapeHtml(state.registerCode || 'REG-01')}</div>
                 <div style="font-size: 13px; margin-bottom: 16px;">Start a cashier session with an opening cash float to begin checkout.</div>
-                <button class="btn btn-primary" onclick="openShiftModal()">Open Shift</button>
+                ${canOpenShift ? `
+                  <button class="btn btn-primary" onclick="openShiftModal()">Open Shift</button>
+                ` : `
+                  <div style="font-size: 13px; color: var(--text-secondary);">Your current account permissions do not permit opening cash registers.</div>
+                `}
               </div>
             `}
           </div>
         `;
       } catch (err) {
-        container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load shifts: ${err.message}</div>`;
+        container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load shifts: ${escapeHtml(err.message)}</div>`;
       }
     }
 
@@ -8330,26 +8872,33 @@
     }
 
     function openCloseShiftModal(shiftId) {
-      const expectedCash = state.activeShift ? parseFloat(state.activeShift.expectedClosingCash || '0') : 0;
+      const isOccupiedByOther = state.activeShift && state.activeShift.openedByOtherCashier;
+      const expectedCash = (state.activeShift && !isOccupiedByOther) ? parseFloat(state.activeShift.expectedClosingCash || '0') : 0;
       const expectedFormatted = formatTenantMoney(expectedCash);
 
       openModal({
-        title: 'Close Cashier Shift &amp; Reconcile Cash',
+        title: isOccupiedByOther ? 'Manager Override: Close Cashier Shift' : 'Close Cashier Shift &amp; Reconcile Cash',
         bodyHtml: `
-          <div style="background: var(--bg-secondary); padding: 12px 16px; border-radius: 8px; margin-bottom: 16px;">
-            <div style="font-size: 12px; color: var(--text-secondary); text-transform: uppercase; font-weight: 600;">System Expected Drawer Cash</div>
-            <div style="font-size: 20px; font-weight: 800; color: var(--text-primary); margin-top: 4px;">${expectedFormatted}</div>
-          </div>
+          ${isOccupiedByOther ? `
+            <div style="background: rgba(245, 158, 11, 0.1); border: 1px solid var(--status-warning); padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; font-size: 13px;">
+              <strong>Manager Override Notice:</strong> You are closing a shift opened by another cashier. Drawer totals and variance will be calculated and audited by the server upon finalization.
+            </div>
+          ` : `
+            <div style="background: var(--bg-secondary); padding: 12px 16px; border-radius: 8px; margin-bottom: 16px;">
+              <div style="font-size: 12px; color: var(--text-secondary); text-transform: uppercase; font-weight: 600;">System Expected Drawer Cash</div>
+              <div style="font-size: 20px; font-weight: 800; color: var(--text-primary); margin-top: 4px;">${expectedFormatted}</div>
+            </div>
+          `}
           <div class="form-group">
             <label class="form-label">Counted Drawer Cash (${escapeHtml(getTenantCurrency())}) *</label>
-            <input type="number" step="${getCurrencyInputStep()}" class="form-input" id="closeCountedInput" placeholder="Enter counted cash in drawer..." required oninput="updateCloseVariancePreview(${expectedCash})">
+            <input type="number" step="${getCurrencyInputStep()}" class="form-input" id="closeCountedInput" placeholder="Enter counted cash in drawer..." required oninput="updateCloseVariancePreview(${expectedCash}, ${isOccupiedByOther ? 'true' : 'false'})">
           </div>
           <div id="closeVarianceBox" style="display: none; padding: 10px 14px; border-radius: 6px; margin-bottom: 16px; font-size: 13px; font-weight: 600;">
             <span id="closeVarianceLabel">Cash Variance:</span> <span id="closeVarianceValue">0.00</span>
           </div>
           <div class="form-group">
             <label class="form-label">Closing Notes</label>
-            <textarea class="form-textarea" id="closeShiftNotes" rows="2" placeholder="Variance explanation or end of shift notes..."></textarea>
+            <textarea class="form-textarea" id="closeShiftNotes" rows="2" placeholder="${isOccupiedByOther ? 'Reason for manager override / end of day closing notes...' : 'Variance explanation or end of shift notes...'}"></textarea>
           </div>
         `,
         footerHtml: `
@@ -8359,7 +8908,7 @@
       });
     }
 
-    function updateCloseVariancePreview(expectedCash) {
+    function updateCloseVariancePreview(expectedCash, isOccupiedByOther) {
       const inputEl = document.getElementById('closeCountedInput');
       const box = document.getElementById('closeVarianceBox');
       const valEl = document.getElementById('closeVarianceValue');
@@ -8371,6 +8920,17 @@
         box.style.display = 'none';
         return;
       }
+
+      if (isOccupiedByOther) {
+        box.style.display = 'block';
+        box.style.background = 'var(--bg-secondary)';
+        box.style.border = '1px solid var(--border-subtle)';
+        box.style.color = 'var(--text-secondary)';
+        lblEl.textContent = 'Counted Amount:';
+        valEl.textContent = `${formatTenantMoney(parseFloat(rawVal || '0'))} (Reconciliation computed on submit)`;
+        return;
+      }
+
       const counted = parseFloat(rawVal || '0');
       const variance = counted - expectedCash;
       box.style.display = 'block';
@@ -8516,7 +9076,7 @@
                                 ${isReceiptLoading ? '<span class="spinner-sm"></span> Loading...' : 'Receipt'}
                               </button>
                               ${isCompleted ? `
-                                <button class="btn btn-danger btn-sm" id="btnVoid-${s.id}" onclick="openVoidModal('${s.id}', '${inv}')" ${isVoiding ? 'disabled' : ''} ${state.userRole === 'CASHIER' ? 'disabled title="Cashiers cannot void sales. Requires Owner/Admin."' : ''}>
+                                <button class="btn btn-danger btn-sm" id="btnVoid-${s.id}" onclick="openVoidModal('${s.id}', '${inv}')" ${isVoiding ? 'disabled' : ''} ${!hasPermission('pos:sale:void') ? 'disabled title="You do not have permission to void sales. Requires Owner/Admin or authorized role."' : ''}>
                                   ${isVoiding ? '<span class="spinner-sm"></span> Voiding...' : 'Void'}
                                 </button>
                               ` : ''}
@@ -8575,7 +9135,7 @@
                           ${isReceiptLoading ? '<span class="spinner-sm"></span> Loading...' : 'Receipt'}
                         </button>
                         ${isCompleted ? `
-                          <button class="btn btn-danger btn-sm" id="btnVoidMobile-${s.id}" onclick="openVoidModal('${s.id}', '${inv}')" ${isVoiding ? 'disabled' : ''} ${state.userRole === 'CASHIER' ? 'disabled title="Cashiers cannot void sales. Requires Owner/Admin."' : ''}>
+                          <button class="btn btn-danger btn-sm" id="btnVoidMobile-${s.id}" onclick="openVoidModal('${s.id}', '${inv}')" ${isVoiding ? 'disabled' : ''} ${!hasPermission('pos:sale:void') ? 'disabled title="You do not have permission to void sales. Requires Owner/Admin or authorized role."' : ''}>
                             ${isVoiding ? '<span class="spinner-sm"></span> Voiding...' : 'Void Sale'}
                           </button>
                         ` : ''}
@@ -10612,9 +11172,11 @@
               <h1 class="view-title">Employee Directory</h1>
               <div class="view-subtitle">Manage staff profiles, department structures, documents, and branch assignments</div>
             </div>
-            <div style="display: flex; gap: 8px;">
-              <button class="btn btn-primary" id="btnOpenCreateEmployee" onclick="openCreateEmployeeModal(this)">+ Add Employee</button>
-            </div>
+            ${hasPermission('hrm:employee:manage') ? `
+              <div style="display: flex; gap: 8px;">
+                <button class="btn btn-primary" id="btnOpenCreateEmployee" onclick="openCreateEmployeeModal(this)">+ Add Employee</button>
+              </div>
+            ` : ''}
           </div>
 
           <!-- KPI Metric Cards -->
@@ -10683,7 +11245,9 @@
                     ? 'No staff members match the selected filters. Try clearing your search parameters.'
                     : 'Start building your team by registering your first employee profile.'}
                 </p>
-                <button class="btn btn-primary" onclick="openCreateEmployeeModal(this)">+ Add First Employee</button>
+                ${hasPermission('hrm:employee:manage') ? `
+                  <button class="btn btn-primary" onclick="openCreateEmployeeModal(this)">+ Add First Employee</button>
+                ` : ''}
               </div>
             ` : `
               <div class="desktop-table-container">
@@ -10738,10 +11302,12 @@
                             <td style="text-align: right; white-space: nowrap;">
                               <div style="display: inline-flex; gap: 6px;">
                                 <button class="btn btn-secondary btn-sm" onclick="openEmployeeProfileModal('${emp.id}')" title="View Full Profile">Profile</button>
-                                <button class="btn btn-secondary btn-sm" onclick="openEditEmployeeModal('${emp.id}')" title="Edit Employee Details">Edit</button>
-                                <button class="btn btn-secondary btn-sm" onclick="openEmployeeSalaryModal('${emp.id}')" title="Manage Salary Structure">Salary</button>
-                                <button class="btn btn-secondary btn-sm" onclick="openEmployeeDocumentsModal('${emp.id}')" title="Manage Employee Documents">Docs</button>
-                                <button class="btn btn-secondary btn-sm" onclick="openUpdateEmployeeStatusModal('${emp.id}')" title="Change Employment Status">Status</button>
+                                ${hasPermission('hrm:employee:manage') ? `
+                                  <button class="btn btn-secondary btn-sm" onclick="openEditEmployeeModal('${emp.id}')" title="Edit Employee Details">Edit</button>
+                                  <button class="btn btn-secondary btn-sm" onclick="openEmployeeSalaryModal('${emp.id}')" title="Manage Salary Structure">Salary</button>
+                                  <button class="btn btn-secondary btn-sm" onclick="openEmployeeDocumentsModal('${emp.id}')" title="Manage Employee Documents">Docs</button>
+                                  <button class="btn btn-secondary btn-sm" onclick="openUpdateEmployeeStatusModal('${emp.id}')" title="Change Employment Status">Status</button>
+                                ` : ''}
                               </div>
                             </td>
                           </tr>
@@ -10798,10 +11364,12 @@
 
                       <div style="display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; border-top: 1px solid var(--border-subtle); padding-top: 10px;">
                         <button class="btn btn-secondary btn-sm" onclick="openEmployeeProfileModal('${emp.id}')" style="flex: 1; min-width: 65px; height: 36px;">Profile</button>
-                        <button class="btn btn-secondary btn-sm" onclick="openEditEmployeeModal('${emp.id}')" style="flex: 1; min-width: 60px; height: 36px;">Edit</button>
-                        <button class="btn btn-secondary btn-sm" onclick="openEmployeeSalaryModal('${emp.id}')" style="flex: 1; min-width: 65px; height: 36px;">Salary</button>
-                        <button class="btn btn-secondary btn-sm" onclick="openEmployeeDocumentsModal('${emp.id}')" style="flex: 1; min-width: 60px; height: 36px;">Docs</button>
-                        <button class="btn btn-secondary btn-sm" onclick="openUpdateEmployeeStatusModal('${emp.id}')" style="flex: 1; min-width: 65px; height: 36px;">Status</button>
+                        ${hasPermission('hrm:employee:manage') ? `
+                          <button class="btn btn-secondary btn-sm" onclick="openEditEmployeeModal('${emp.id}')" style="flex: 1; min-width: 60px; height: 36px;">Edit</button>
+                          <button class="btn btn-secondary btn-sm" onclick="openEmployeeSalaryModal('${emp.id}')" style="flex: 1; min-width: 65px; height: 36px;">Salary</button>
+                          <button class="btn btn-secondary btn-sm" onclick="openEmployeeDocumentsModal('${emp.id}')" style="flex: 1; min-width: 60px; height: 36px;">Docs</button>
+                          <button class="btn btn-secondary btn-sm" onclick="openUpdateEmployeeStatusModal('${emp.id}')" style="flex: 1; min-width: 65px; height: 36px;">Status</button>
+                        ` : ''}
                       </div>
                     </div>
                   `;
@@ -13279,7 +13847,9 @@
             </div>
             <div style="display: flex; gap: 8px;">
               <button class="btn btn-secondary" onclick="renderView('payroll-reports')">Payroll Reports</button>
-              <button class="btn btn-primary" id="btnOpenCreatePayroll" onclick="openCreatePayrollRunModal()">+ New Payroll Run</button>
+              ${hasPermission('hrm:payroll:process') ? `
+                <button class="btn btn-primary" id="btnOpenCreatePayroll" onclick="openCreatePayrollRunModal()">+ New Payroll Run</button>
+              ` : ''}
             </div>
           </div>
 
@@ -13338,7 +13908,9 @@
                 <div style="font-size: 40px; margin-bottom: 12px;">💳</div>
                 <div class="empty-state-title" style="font-size: 18px; font-weight: 600; margin-bottom: 6px;">No Payroll Runs Found</div>
                 <p class="empty-state-desc" style="color: var(--text-secondary); margin-bottom: 16px;">Create a new Monthly, Weekly, or Daily payroll run to automatically aggregate basic salaries and allowances.</p>
-                <button class="btn btn-primary" onclick="openCreatePayrollRunModal()">+ New Payroll Run</button>
+                ${hasPermission('hrm:payroll:process') ? `
+                  <button class="btn btn-primary" onclick="openCreatePayrollRunModal()">+ New Payroll Run</button>
+                ` : ''}
               </div>
             ` : `
               <div class="desktop-table-container">
@@ -13389,17 +13961,19 @@
                             <td style="text-align: right; white-space: nowrap;">
                               <div style="display: inline-flex; gap: 6px;">
                                 <button class="btn btn-secondary btn-sm" onclick="openPayrollRunDetailModal('${r.id}')">View Items</button>
-                                ${r.status === 'DRAFT' ? `
-                                  <button class="btn btn-secondary btn-sm" onclick="submitPayrollRunAction('${r.id}', this)" title="Submit for supervisor signoff">Submit</button>
-                                  <button class="btn btn-primary btn-sm" onclick="approvePayrollRunAction('${r.id}', this)" title="Approve Run">Approve</button>
-                                  <button class="btn btn-secondary btn-sm" onclick="cancelPayrollRunAction('${r.id}', this)" style="color: var(--status-danger);">Cancel</button>
-                                ` : ''}
-                                ${r.status === 'PENDING_APPROVAL' ? `
-                                  <button class="btn btn-primary btn-sm" onclick="approvePayrollRunAction('${r.id}', this)">Approve</button>
-                                  <button class="btn btn-secondary btn-sm" onclick="cancelPayrollRunAction('${r.id}', this)" style="color: var(--status-danger);">Cancel</button>
-                                ` : ''}
-                                ${['APPROVED', 'PARTIALLY_PAID'].includes(r.status) && balanceDue > 0 ? `
-                                  <button class="btn btn-primary btn-sm" onclick="openRecordPayrollPaymentModal('${r.id}')">Pay</button>
+                                ${hasPermission('hrm:payroll:process') ? `
+                                  ${r.status === 'DRAFT' ? `
+                                    <button class="btn btn-secondary btn-sm" onclick="submitPayrollRunAction('${r.id}', this)" title="Submit for supervisor signoff">Submit</button>
+                                    <button class="btn btn-primary btn-sm" onclick="approvePayrollRunAction('${r.id}', this)" title="Approve Run">Approve</button>
+                                    <button class="btn btn-secondary btn-sm" onclick="cancelPayrollRunAction('${r.id}', this)" style="color: var(--status-danger);">Cancel</button>
+                                  ` : ''}
+                                  ${r.status === 'PENDING_APPROVAL' ? `
+                                    <button class="btn btn-primary btn-sm" onclick="approvePayrollRunAction('${r.id}', this)">Approve</button>
+                                    <button class="btn btn-secondary btn-sm" onclick="cancelPayrollRunAction('${r.id}', this)" style="color: var(--status-danger);">Cancel</button>
+                                  ` : ''}
+                                  ${['APPROVED', 'PARTIALLY_PAID'].includes(r.status) && balanceDue > 0 ? `
+                                    <button class="btn btn-primary btn-sm" onclick="openRecordPayrollPaymentModal('${r.id}')">Pay</button>
+                                  ` : ''}
                                 ` : ''}
                               </div>
                             </td>
@@ -13459,17 +14033,19 @@
 
                       <div style="display: flex; flex-wrap: wrap; gap: 8px;">
                         <button class="btn btn-secondary btn-sm" style="flex: 1;" onclick="openPayrollRunDetailModal('${r.id}')">View Items</button>
-                        ${r.status === 'DRAFT' ? `
-                          <button class="btn btn-secondary btn-sm" onclick="submitPayrollRunAction('${r.id}', this)" title="Submit for supervisor signoff">Submit</button>
-                          <button class="btn btn-primary btn-sm" onclick="approvePayrollRunAction('${r.id}', this)" title="Approve Run">Approve</button>
-                          <button class="btn btn-secondary btn-sm" onclick="cancelPayrollRunAction('${r.id}', this)" style="color: var(--status-danger);">Cancel</button>
-                        ` : ''}
-                        ${r.status === 'PENDING_APPROVAL' ? `
-                          <button class="btn btn-primary btn-sm" onclick="approvePayrollRunAction('${r.id}', this)">Approve</button>
-                          <button class="btn btn-secondary btn-sm" onclick="cancelPayrollRunAction('${r.id}', this)" style="color: var(--status-danger);">Cancel</button>
-                        ` : ''}
-                        ${['APPROVED', 'PARTIALLY_PAID'].includes(r.status) && balanceDue > 0 ? `
-                          <button class="btn btn-primary btn-sm" onclick="openRecordPayrollPaymentModal('${r.id}')">Pay</button>
+                        ${hasPermission('hrm:payroll:process') ? `
+                          ${r.status === 'DRAFT' ? `
+                            <button class="btn btn-secondary btn-sm" onclick="submitPayrollRunAction('${r.id}', this)" title="Submit for supervisor signoff">Submit</button>
+                            <button class="btn btn-primary btn-sm" onclick="approvePayrollRunAction('${r.id}', this)" title="Approve Run">Approve</button>
+                            <button class="btn btn-secondary btn-sm" onclick="cancelPayrollRunAction('${r.id}', this)" style="color: var(--status-danger);">Cancel</button>
+                          ` : ''}
+                          ${r.status === 'PENDING_APPROVAL' ? `
+                            <button class="btn btn-primary btn-sm" onclick="approvePayrollRunAction('${r.id}', this)">Approve</button>
+                            <button class="btn btn-secondary btn-sm" onclick="cancelPayrollRunAction('${r.id}', this)" style="color: var(--status-danger);">Cancel</button>
+                          ` : ''}
+                          ${['APPROVED', 'PARTIALLY_PAID'].includes(r.status) && balanceDue > 0 ? `
+                            <button class="btn btn-primary btn-sm" onclick="openRecordPayrollPaymentModal('${r.id}')">Pay</button>
+                          ` : ''}
                         ` : ''}
                       </div>
                     </div>
@@ -14998,8 +15574,12 @@
             </div>
             <div style="display: flex; gap: 8px; flex-wrap: wrap;">
               <button class="btn btn-secondary" id="btnOpenExpenseSummary" onclick="openExpenseSummaryReportModal()">Summary Report</button>
-              <button class="btn btn-secondary" id="btnOpenExpenseCategories" onclick="openExpenseCategoriesModal()">Categories</button>
-              <button class="btn btn-primary" id="btnOpenCreateExpense" onclick="openCreateExpenseModal()">+ New Expense</button>
+              ${hasPermission('exp:category:manage') ? `
+                <button class="btn btn-secondary" id="btnOpenExpenseCategories" onclick="openExpenseCategoriesModal()">Categories</button>
+              ` : ''}
+              ${hasPermission('exp:expense:create') ? `
+                <button class="btn btn-primary" id="btnOpenCreateExpense" onclick="openCreateExpenseModal()">+ New Expense</button>
+              ` : ''}
             </div>
           </div>
 
@@ -15128,18 +15708,18 @@
                         <td class="text-right">
                           <div style="display: flex; gap: 4px; justify-content: flex-end; flex-wrap: wrap;">
                             <button class="btn btn-secondary btn-sm" style="padding: 3px 8px; font-size: 11px;" onclick="openExpenseDetailsModal('${exp.id}')">View</button>
-                            ${exp.status === 'DRAFT' || exp.status === 'REJECTED' ? `
+                            ${(exp.status === 'DRAFT' || exp.status === 'REJECTED') && hasPermission('exp:expense:create') ? `
                               <button class="btn btn-secondary btn-sm" style="padding: 3px 8px; font-size: 11px;" onclick="openCreateExpenseModal('${exp.id}')">Edit</button>
                               <button class="btn btn-primary btn-sm" style="padding: 3px 8px; font-size: 11px;" onclick="submitExpenseFromUi('${exp.id}')">Submit</button>
                             ` : ''}
-                            ${exp.status === 'PENDING_APPROVAL' ? `
+                            ${exp.status === 'PENDING_APPROVAL' && hasPermission('exp:expense:approve') ? `
                               <button class="btn btn-primary btn-sm" style="padding: 3px 8px; font-size: 11px; background: var(--status-success); border-color: var(--status-success);" onclick="approveExpenseFromUi('${exp.id}')">Approve</button>
                               <button class="btn btn-secondary btn-sm" style="padding: 3px 8px; font-size: 11px; color: var(--status-danger);" onclick="openRejectExpenseModal('${exp.id}')">Reject</button>
                             ` : ''}
-                            ${exp.status === 'APPROVED' ? `
+                            ${exp.status === 'APPROVED' && hasPermission('exp:expense:disburse') ? `
                               <button class="btn btn-primary btn-sm" style="padding: 3px 8px; font-size: 11px;" onclick="openRecordPaymentModal('${exp.id}')">Pay</button>
                             ` : ''}
-                            ${exp.status === 'DRAFT' ? `
+                            ${exp.status === 'DRAFT' && hasPermission('exp:expense:create') ? `
                               <button class="btn btn-secondary btn-sm" style="padding: 3px 8px; font-size: 11px; color: var(--status-danger);" onclick="deleteExpenseFromUi('${exp.id}')">Del</button>
                             ` : ''}
                           </div>
@@ -15178,15 +15758,15 @@
 
                     <div style="display: flex; gap: 6px; justify-content: flex-end; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border-subtle); flex-wrap: wrap;">
                       <button class="btn btn-secondary btn-sm" onclick="openExpenseDetailsModal('${exp.id}')">Details</button>
-                      ${exp.status === 'DRAFT' || exp.status === 'REJECTED' ? `
+                      ${(exp.status === 'DRAFT' || exp.status === 'REJECTED') && hasPermission('exp:expense:create') ? `
                         <button class="btn btn-secondary btn-sm" onclick="openCreateExpenseModal('${exp.id}')">Edit</button>
                         <button class="btn btn-primary btn-sm" onclick="submitExpenseFromUi('${exp.id}')">Submit</button>
                       ` : ''}
-                      ${exp.status === 'PENDING_APPROVAL' ? `
+                      ${exp.status === 'PENDING_APPROVAL' && hasPermission('exp:expense:approve') ? `
                         <button class="btn btn-primary btn-sm" style="background: var(--status-success); border-color: var(--status-success);" onclick="approveExpenseFromUi('${exp.id}')">Approve</button>
                         <button class="btn btn-secondary btn-sm" style="color: var(--status-danger);" onclick="openRejectExpenseModal('${exp.id}')">Reject</button>
                       ` : ''}
-                      ${exp.status === 'APPROVED' ? `
+                      ${exp.status === 'APPROVED' && hasPermission('exp:expense:disburse') ? `
                         <button class="btn btn-primary btn-sm" onclick="openRecordPaymentModal('${exp.id}')">Pay</button>
                       ` : ''}
                     </div>

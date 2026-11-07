@@ -24,7 +24,10 @@ import {
   Quantity,
   calculateLinePricingAndTax,
 } from '@nexstock/domain-core';
-import { assertAuthorized } from '../../iam/index.js';
+import {
+  assertAuthorized,
+  resolveMemberAuthorizationContext,
+} from '../../iam/index.js';
 import { postStockMovement, selectFefoBatches } from '../../inv/index.js';
 import {
   AppError,
@@ -126,6 +129,25 @@ export async function openPosShift(
       errorCode: 'POS_SHIFT_ALREADY_OPEN',
       title: 'Active Shift Already Open',
       detail: `An active cashier shift is already open for register "${register.code}". Close it before opening a new one.`,
+    });
+  }
+
+  // Check if caller already has an active OPEN shift on ANY register in this tenant
+  const userActiveShift = await trx.db
+    .selectFrom('pos_shifts')
+    .innerJoin('pos_registers', 'pos_registers.id', 'pos_shifts.register_id')
+    .select(['pos_shifts.id', 'pos_registers.code as register_code'])
+    .where('pos_shifts.tenant_id', '=', trx.tenantId)
+    .where('pos_shifts.opened_by_user_id', '=', trx.userId)
+    .where('pos_shifts.status', '=', 'OPEN')
+    .executeTakeFirst();
+
+  if (userActiveShift) {
+    throw new AppError({
+      statusCode: 409,
+      errorCode: 'POS_CASHIER_SHIFT_ALREADY_OPEN',
+      title: 'Active Shift Already Open',
+      detail: `You already have an active shift open on register "${userActiveShift.register_code}". Close it before opening a new shift.`,
     });
   }
 
@@ -382,6 +404,28 @@ export async function closePosShift(
     branchId: shift.branch_id,
   });
 
+  // Shift ownership enforcement:
+  // Only the cashier who opened the shift or an authorized manager/admin may close it.
+  if (shift.opened_by_user_id !== trx.userId) {
+    const authCtx = await resolveMemberAuthorizationContext(trx);
+    const isManagerOrAdmin =
+      authCtx.roleCodes.includes('TENANT_OWNER') ||
+      authCtx.roleCodes.includes('ORG_ADMIN') ||
+      authCtx.roleCodes.includes('BRANCH_MANAGER') ||
+      authCtx.permissions.has('org:branch:manage') ||
+      authCtx.permissions.has('iam:member:manage');
+
+    if (!isManagerOrAdmin) {
+      throw new AppError({
+        statusCode: 403,
+        errorCode: 'POS_SHIFT_CLOSE_UNAUTHORIZED',
+        title: 'Unauthorized to Close Shift',
+        detail:
+          'Only the cashier who opened this shift or an authorized manager may close it.',
+      });
+    }
+  }
+
   await assertSubscriptionEntitlement(trx, { requireWriteAccess: true });
 
   const recon = await calculateShiftReconciliation(trx, {
@@ -491,7 +535,32 @@ export async function getActivePosShift(
     return null;
   }
 
-  const recon = await calculateShiftReconciliation(trx, shiftRow);
+  const isShiftOwner = shiftRow.opened_by_user_id === trx.userId;
+  let canViewFinancials = isShiftOwner;
+
+  if (!isShiftOwner) {
+    const authCtx = await resolveMemberAuthorizationContext(trx);
+    const isManagerOrAdmin =
+      authCtx.roleCodes.includes('TENANT_OWNER') ||
+      authCtx.roleCodes.includes('ORG_ADMIN') ||
+      authCtx.roleCodes.includes('BRANCH_MANAGER') ||
+      authCtx.permissions.has('org:branch:manage') ||
+      authCtx.permissions.has('iam:member:manage');
+    canViewFinancials = isManagerOrAdmin;
+  }
+
+  const recon = canViewFinancials
+    ? await calculateShiftReconciliation(trx, shiftRow)
+    : {
+        openingCashFloat: '0.00',
+        cashSales: '0.00',
+        cashIn: '0.00',
+        cashOut: '0.00',
+        cashRefunds: '0.00',
+        expectedClosingCash: '0.00',
+        countedClosingCash: null,
+        cashVariance: null,
+      };
 
   return {
     id: shiftRow.id,
@@ -514,6 +583,8 @@ export async function getActivePosShift(
       ? (shiftRow.closed_at instanceof Date ? shiftRow.closed_at : new Date(shiftRow.closed_at)).toISOString()
       : null,
     notes: shiftRow.notes,
+    isOwnShift: isShiftOwner,
+    openedByOtherCashier: !isShiftOwner && !canViewFinancials,
   };
 }
 
@@ -552,6 +623,27 @@ export async function createPosShiftAdjustment(
     permission: 'pos:register:read',
     branchId: shift.branch_id,
   });
+
+  // Shift ownership enforcement for cash adjustments:
+  if (shift.opened_by_user_id !== trx.userId) {
+    const authCtx = await resolveMemberAuthorizationContext(trx);
+    const isManagerOrAdmin =
+      authCtx.roleCodes.includes('TENANT_OWNER') ||
+      authCtx.roleCodes.includes('ORG_ADMIN') ||
+      authCtx.roleCodes.includes('BRANCH_MANAGER') ||
+      authCtx.permissions.has('org:branch:manage') ||
+      authCtx.permissions.has('iam:member:manage');
+
+    if (!isManagerOrAdmin) {
+      throw new AppError({
+        statusCode: 403,
+        errorCode: 'POS_SHIFT_CLOSE_UNAUTHORIZED',
+        title: 'Unauthorized Shift Adjustment',
+        detail:
+          'Only the cashier who opened this shift or an authorized manager may record cash adjustments.',
+      });
+    }
+  }
 
   await assertSubscriptionEntitlement(trx, { requireWriteAccess: true });
 
@@ -920,7 +1012,7 @@ export async function checkoutSale(
   if (input.shiftId) {
     const shift = await trx.db
       .selectFrom('pos_shifts')
-      .select(['id', 'register_id', 'status'])
+      .select(['id', 'register_id', 'status', 'opened_by_user_id'])
       .where('tenant_id', '=', trx.tenantId)
       .where('id', '=', input.shiftId)
       .executeTakeFirst();
@@ -932,6 +1024,25 @@ export async function checkoutSale(
         title: 'POS Shift Not Open',
         detail: `The specified shift "${input.shiftId}" is not currently open for register "${register.code}".`,
       });
+    }
+
+    if (shift.opened_by_user_id !== trx.userId) {
+      const authCtx = await resolveMemberAuthorizationContext(trx);
+      const isManagerOrAdmin =
+        authCtx.roleCodes.includes('TENANT_OWNER') ||
+        authCtx.roleCodes.includes('ORG_ADMIN') ||
+        authCtx.roleCodes.includes('BRANCH_MANAGER') ||
+        authCtx.permissions.has('org:branch:manage') ||
+        authCtx.permissions.has('iam:member:manage');
+
+      if (!isManagerOrAdmin) {
+        throw new AppError({
+          statusCode: 403,
+          errorCode: 'POS_SHIFT_CLOSE_UNAUTHORIZED',
+          title: 'Unauthorized Sale Shift',
+          detail: "You cannot record sales under another cashier's active shift.",
+        });
+      }
     }
   }
 

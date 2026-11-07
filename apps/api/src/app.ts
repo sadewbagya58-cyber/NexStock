@@ -61,6 +61,7 @@ import {
   ListSuppliersQuerySchema,
   LoginRequestSchema,
   LoginResponseSchema,
+  MemberPermissionsResponseSchema,
   MemberSummaryResponseSchema,
   OnboardBusinessRequestSchema,
   OnboardBusinessResponseSchema,
@@ -247,6 +248,7 @@ import {
   createRole,
   createStaffInvitation,
   deleteRole,
+  getEffectiveMemberPermissions,
   getPermissionsCatalog,
   getRoleById,
   getUserProfileAndMemberships,
@@ -1927,6 +1929,36 @@ export async function buildApp(
         options.db,
         { tenantId, userId: principal.userId, traceId },
         (trx) => deleteRole(trx, request.params.roleId),
+      );
+    },
+  );
+
+  // 13g. Get Effective Permissions for Calling Member (Phase 7.2 RBAC)
+  app.get(
+    '/v1/iam/members/me',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        response: {
+          200: MemberPermissionsResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => getEffectiveMemberPermissions(trx),
       );
     },
   );

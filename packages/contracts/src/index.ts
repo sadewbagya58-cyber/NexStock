@@ -92,6 +92,8 @@ export const ErrorCodeSchema = Type.Union([
   Type.Literal('POS_REGISTER_NOT_FOUND'),
   Type.Literal('POS_REGISTER_INACTIVE'),
   Type.Literal('POS_SHIFT_ALREADY_OPEN'),
+  Type.Literal('POS_CASHIER_SHIFT_ALREADY_OPEN'),
+  Type.Literal('POS_SHIFT_CLOSE_UNAUTHORIZED'),
   Type.Literal('POS_NO_ACTIVE_SHIFT'),
   Type.Literal('POS_SHIFT_NOT_FOUND'),
   Type.Literal('POS_SHIFT_ALREADY_CLOSED'),
@@ -1334,6 +1336,8 @@ export const PosShiftResponseSchema = Type.Object({
   openedAt: IsoTimestampSchema,
   closedAt: Type.Union([IsoTimestampSchema, Type.Null()]),
   notes: Type.Union([Type.String(), Type.Null()]),
+  isOwnShift: Type.Optional(Type.Boolean()),
+  openedByOtherCashier: Type.Optional(Type.Boolean()),
 });
 export type PosShiftResponse = Static<typeof PosShiftResponseSchema>;
 
@@ -2007,11 +2011,34 @@ export const TenantMembershipSummarySchema = Type.Object({
   baseCurrency: CurrencyCodeSchema,
   status: Type.String(),
   role: Type.String(),
+  roles: Type.Optional(Type.Array(Type.String())),
+  permissions: Type.Optional(Type.Array(Type.String())),
+  allLocationsAccess: Type.Optional(Type.Boolean()),
+  allowedBranchIds: Type.Optional(
+    Type.Union([Type.Array(Type.String()), Type.Null()]),
+  ),
+  allowedWarehouseIds: Type.Optional(
+    Type.Union([Type.Array(Type.String()), Type.Null()]),
+  ),
   timezone: Type.Optional(Type.String()),
   branches: Type.Array(BranchSummarySchema),
 });
 export type TenantMembershipSummary = Static<
   typeof TenantMembershipSummarySchema
+>;
+
+export const MemberPermissionsResponseSchema = Type.Object({
+  membershipId: UuidSchema,
+  status: Type.String(),
+  role: Type.Optional(Type.String()),
+  roles: Type.Array(Type.String()),
+  permissions: Type.Array(Type.String()),
+  allLocationsAccess: Type.Boolean(),
+  allowedBranchIds: Type.Union([Type.Array(UuidSchema), Type.Null()]),
+  allowedWarehouseIds: Type.Union([Type.Array(UuidSchema), Type.Null()]),
+});
+export type MemberPermissionsResponse = Static<
+  typeof MemberPermissionsResponseSchema
 >;
 
 export const AuthUserSummarySchema = Type.Object({

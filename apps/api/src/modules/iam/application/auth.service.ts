@@ -22,6 +22,10 @@ import {
   DEFAULT_SUPABASE_URL,
   signDevJwt,
 } from '../domain/jwt-verifier.js';
+import {
+  SYSTEM_ROLE_DEFINITIONS,
+  type SystemRoleCode,
+} from '../domain/system-roles.js';
 
 export interface AuthServiceConfig {
   readonly supabaseUrl?: string | undefined;
@@ -119,42 +123,13 @@ export async function ensureUserRecordDirect(
             .execute();
         }
       } else if (existing.email === normalizedEmail && existing.id !== input.userId) {
-        // Collision or orphan: check if existing user has active memberships
-        const activeMemberships = await trx
-          .selectFrom('tenant_memberships')
-          .select('id')
-          .where('user_id', '=', existing.id)
-          .execute();
-
-        if (activeMemberships.length === 0) {
-          // Orphan user row without active memberships: safe to heal and point to real userId
-          await trx
-            .updateTable('employees')
-            .set({ linked_user_id: input.userId })
-            .where('linked_user_id', '=', existing.id)
-            .execute();
-          await trx
-            .deleteFrom('users')
-            .where('id', '=', existing.id)
-            .execute();
-          await trx
-            .insertInto('users')
-            .values({
-              id: input.userId,
-              email: normalizedEmail,
-              full_name: trimmedName,
-              is_platform_admin: false,
-            })
-            .execute();
-        } else {
-          // Collision: email already registered under a different active user
-          throw new AppError({
-            statusCode: 409,
-            errorCode: 'AUTH_EMAIL_ALREADY_EXISTS',
-            title: 'Email Already Registered',
-            detail: 'An account with this email address already exists. Please log in instead.',
-          });
-        }
+        // Collision: email already registered under a different user identifier
+        throw new AppError({
+          statusCode: 409,
+          errorCode: 'AUTH_EMAIL_ALREADY_EXISTS',
+          title: 'Email Already Registered',
+          detail: 'An account with this email address already exists. Please log in instead.',
+        });
       }
     },
   );
@@ -724,6 +699,7 @@ export async function getUserProfileAndMemberships(
           'tenant_memberships.id as membership_id',
           'tenant_memberships.tenant_id',
           'tenant_memberships.status as membership_status',
+          'tenant_memberships.all_locations_access as all_locations_access',
           'tenants.legal_name as business_name',
           'tenants.slug',
           'tenants.base_currency',
@@ -751,8 +727,14 @@ export async function getUserProfileAndMemberships(
     const membershipIds = membershipRows.map((m) => m.membership_id);
     const tenantIds = Array.from(new Set(membershipRows.map((m) => m.tenant_id)));
 
-    // 2. Batch-fetch all role assignments and branches across memberships in parallel
-    const [roleRows, allBranchRows] = await Promise.all([
+    // 2. Batch-fetch roles, permissions, scopes, and branches across memberships in parallel
+    const [
+      roleRows,
+      allBranchRows,
+      permRows,
+      scopeRows,
+      linkedEmployeeRows,
+    ] = await Promise.all([
       trx
         .selectFrom('member_role_assignments')
         .innerJoin('roles', (join) =>
@@ -762,7 +744,9 @@ export async function getUserProfileAndMemberships(
         )
         .select([
           'member_role_assignments.membership_id as membership_id',
+          'member_role_assignments.role_id as role_id',
           'roles.code as role_code',
+          'roles.is_system_role as is_system_role',
         ])
         .where('member_role_assignments.membership_id', 'in', membershipIds)
         .execute(),
@@ -773,12 +757,67 @@ export async function getUserProfileAndMemberships(
         .where('is_active', '=', true)
         .orderBy('name', 'asc')
         .execute(),
+      trx
+        .selectFrom('role_permissions')
+        .select(['role_id', 'permission_key'])
+        .where('tenant_id', 'in', tenantIds)
+        .execute(),
+      trx
+        .selectFrom('member_location_scopes')
+        .select(['membership_id', 'branch_id', 'warehouse_id'])
+        .where('membership_id', 'in', membershipIds)
+        .execute(),
+      trx
+        .selectFrom('employees')
+        .select(['tenant_id', 'primary_branch_id'])
+        .where('tenant_id', 'in', tenantIds)
+        .where('linked_user_id', '=', userId)
+        .where('employment_status', '=', 'ACTIVE')
+        .execute(),
     ]);
 
-    const roleByMembershipId = new Map<string, string>();
+    const rolesByMembershipId = new Map<
+      string,
+      Array<{ roleId: string; roleCode: string; isSystemRole: boolean }>
+    >();
     for (const r of roleRows) {
-      if (!roleByMembershipId.has(r.membership_id)) {
-        roleByMembershipId.set(r.membership_id, r.role_code);
+      const list = rolesByMembershipId.get(r.membership_id) ?? [];
+      list.push({
+        roleId: r.role_id,
+        roleCode: r.role_code,
+        isSystemRole: Boolean(r.is_system_role),
+      });
+      rolesByMembershipId.set(r.membership_id, list);
+    }
+
+    const permsByRoleId = new Map<string, Set<string>>();
+    for (const p of permRows) {
+      let set = permsByRoleId.get(p.role_id);
+      if (!set) {
+        set = new Set<string>();
+        permsByRoleId.set(p.role_id, set);
+      }
+      set.add(p.permission_key);
+    }
+
+    const scopesByMembershipId = new Map<
+      string,
+      { branches: Set<string>; warehouses: Set<string> }
+    >();
+    for (const s of scopeRows) {
+      let entry = scopesByMembershipId.get(s.membership_id);
+      if (!entry) {
+        entry = { branches: new Set<string>(), warehouses: new Set<string>() };
+        scopesByMembershipId.set(s.membership_id, entry);
+      }
+      if (s.branch_id) entry.branches.add(s.branch_id);
+      if (s.warehouse_id) entry.warehouses.add(s.warehouse_id);
+    }
+
+    const employeeBranchByTenantId = new Map<string, string>();
+    for (const emp of linkedEmployeeRows) {
+      if (emp.primary_branch_id) {
+        employeeBranchByTenantId.set(emp.tenant_id, emp.primary_branch_id);
       }
     }
 
@@ -790,16 +829,65 @@ export async function getUserProfileAndMemberships(
     }
 
     const memberships: TenantMembershipSummary[] = membershipRows.map((m) => {
-      const branchRows = branchesByTenantId.get(m.tenant_id) ?? [];
+      const assigned = rolesByMembershipId.get(m.membership_id) ?? [];
+      const roleCodes = assigned.map((r) => r.roleCode);
+      const isOwnerOrAdmin =
+        roleCodes.includes('TENANT_OWNER') || roleCodes.includes('ORG_ADMIN');
+      const allLocationsAccess = Boolean(m.all_locations_access || isOwnerOrAdmin);
+
+      const permissions = new Set<string>();
+      for (const role of assigned) {
+        const dbPerms = permsByRoleId.get(role.roleId);
+        if (dbPerms) {
+          for (const p of dbPerms) permissions.add(p);
+        }
+        if (role.isSystemRole && role.roleCode in SYSTEM_ROLE_DEFINITIONS) {
+          const sysDef = SYSTEM_ROLE_DEFINITIONS[role.roleCode as SystemRoleCode];
+          for (const p of sysDef.permissions) permissions.add(p);
+        }
+      }
+
+      const scopes = scopesByMembershipId.get(m.membership_id);
+      const allowedBranches = new Set<string>(scopes ? scopes.branches : []);
+      const allowedWarehouses = new Set<string>(scopes ? scopes.warehouses : []);
+
+      // Auto-heal location scopes if none specified
+      if (!allLocationsAccess && allowedBranches.size === 0) {
+        const empBranch = employeeBranchByTenantId.get(m.tenant_id);
+        if (empBranch) {
+          allowedBranches.add(empBranch);
+        }
+      }
+
+      const tenantBranches = branchesByTenantId.get(m.tenant_id) ?? [];
+      if (
+        !allLocationsAccess &&
+        allowedBranches.size === 0 &&
+        tenantBranches.length === 1 &&
+        tenantBranches[0]
+      ) {
+        allowedBranches.add(tenantBranches[0].id);
+      }
+
+      // Filter visible branches if user has restricted location access
+      const permittedBranches = allLocationsAccess
+        ? tenantBranches
+        : tenantBranches.filter((b) => allowedBranches.has(b.id));
+
       return {
         tenantId: m.tenant_id,
         businessName: m.business_name,
         slug: m.slug,
         baseCurrency: m.base_currency,
         status: m.tenant_status,
-        role: roleByMembershipId.get(m.membership_id) ?? 'MEMBER',
+        role: roleCodes[0] ?? 'MEMBER',
+        roles: roleCodes,
+        permissions: Array.from(permissions),
+        allLocationsAccess,
+        allowedBranchIds: allLocationsAccess ? null : Array.from(allowedBranches),
+        allowedWarehouseIds: allLocationsAccess ? null : Array.from(allowedWarehouses),
         timezone: m.default_timezone ?? 'UTC',
-        branches: branchRows.map((b) => ({
+        branches: permittedBranches.map((b) => ({
           id: b.id,
           code: b.code,
           name: b.name,
