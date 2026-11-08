@@ -442,10 +442,12 @@ import {
   generateUuidV7,
   processSyncCommandBatch,
   sanitizeLogMessage,
+  type TenantTransactionContext,
   withTenantTransaction,
 } from './modules/shared/index.js';
 import {
   type SubscriptionPlanCode,
+  assertModuleEntitlement,
   assertSubscriptionEntitlement,
   defaultManualBillingAdapter,
   getTenantSubscriptionEntitlement,
@@ -4978,8 +4980,24 @@ export async function buildApp(
   );
 
   // ============================================================================
-  // Phase 7.1 HRM & Flexible Payroll API Routes
+  // Phase 7.1 HRM & Flexible Payroll API Routes (Protected by V2 Feature Entitlement)
   // ============================================================================
+
+  const withHrmTransaction = async <T>(
+    tenantId: string,
+    userId: string,
+    traceId: string,
+    operation: (trx: TenantTransactionContext) => Promise<T>,
+  ): Promise<T> => {
+    return withTenantTransaction(
+      options.db,
+      { tenantId, userId, traceId },
+      async (trx) => {
+        await assertModuleEntitlement(trx, 'HRM');
+        return operation(trx);
+      },
+    );
+  };
 
   // 1. Create Employee
   app.post(
@@ -5006,9 +5024,10 @@ export async function buildApp(
       const tenantId = request.headers['x-tenant-id'];
       const traceId = String(request.id);
 
-      const employee = await withTenantTransaction(
-        options.db,
-        { tenantId, userId: principal.userId, traceId },
+      const employee = await withHrmTransaction(
+        tenantId,
+        principal.userId,
+        traceId,
         (trx) => createEmployee(trx, request.body),
       );
       return reply.status(201).send(employee);
@@ -5045,9 +5064,10 @@ export async function buildApp(
       const tenantId = request.headers['x-tenant-id'];
       const traceId = String(request.id);
 
-      return withTenantTransaction(
-        options.db,
-        { tenantId, userId: principal.userId, traceId },
+      return withHrmTransaction(
+        tenantId,
+        principal.userId,
+        traceId,
         (trx) =>
           listEmployees(trx, {
             search: request.query.search,
@@ -5084,9 +5104,10 @@ export async function buildApp(
       const tenantId = request.headers['x-tenant-id'];
       const traceId = String(request.id);
 
-      return withTenantTransaction(
-        options.db,
-        { tenantId, userId: principal.userId, traceId },
+      return withHrmTransaction(
+        tenantId,
+        principal.userId,
+        traceId,
         (trx) => getMyEmployee(trx),
       );
     },
@@ -5116,9 +5137,10 @@ export async function buildApp(
       const tenantId = request.headers['x-tenant-id'];
       const traceId = String(request.id);
 
-      return withTenantTransaction(
-        options.db,
-        { tenantId, userId: principal.userId, traceId },
+      return withHrmTransaction(
+        tenantId,
+        principal.userId,
+        traceId,
         (trx) => getEmployeeById(trx, request.params.employeeId),
       );
     },
@@ -5151,9 +5173,10 @@ export async function buildApp(
       const tenantId = request.headers['x-tenant-id'];
       const traceId = String(request.id);
 
-      return withTenantTransaction(
-        options.db,
-        { tenantId, userId: principal.userId, traceId },
+      return withHrmTransaction(
+        tenantId,
+        principal.userId,
+        traceId,
         (trx) => updateEmployee(trx, request.params.employeeId, request.body),
       );
     },
@@ -5185,9 +5208,10 @@ export async function buildApp(
       const tenantId = request.headers['x-tenant-id'];
       const traceId = String(request.id);
 
-      return withTenantTransaction(
-        options.db,
-        { tenantId, userId: principal.userId, traceId },
+      return withHrmTransaction(
+        tenantId,
+        principal.userId,
+        traceId,
         (trx) =>
           updateEmployeeStatus(
             trx,
@@ -5226,9 +5250,10 @@ export async function buildApp(
       const tenantId = request.headers['x-tenant-id'];
       const traceId = String(request.id);
 
-      return withTenantTransaction(
-        options.db,
-        { tenantId, userId: principal.userId, traceId },
+      return withHrmTransaction(
+        tenantId,
+        principal.userId,
+        traceId,
         (trx) =>
           linkEmployeeUser(trx, request.params.employeeId, request.body.userId),
       );
@@ -5259,9 +5284,10 @@ export async function buildApp(
       const tenantId = request.headers['x-tenant-id'];
       const traceId = String(request.id);
 
-      return withTenantTransaction(
-        options.db,
-        { tenantId, userId: principal.userId, traceId },
+      return withHrmTransaction(
+        tenantId,
+        principal.userId,
+        traceId,
         (trx) => getEmployeeProfile(trx, request.params.employeeId),
       );
     },
@@ -5300,9 +5326,10 @@ export async function buildApp(
       const tenantId = request.headers['x-tenant-id'];
       const traceId = String(request.id);
 
-      return withTenantTransaction(
-        options.db,
-        { tenantId, userId: principal.userId, traceId },
+      return withHrmTransaction(
+        tenantId,
+        principal.userId,
+        traceId,
         (trx) => getEmployeeActivity(trx, request.params.employeeId),
       );
     },
@@ -5336,9 +5363,10 @@ export async function buildApp(
       const tenantId = request.headers['x-tenant-id'];
       const traceId = String(request.id);
 
-      const doc = await withTenantTransaction(
-        options.db,
-        { tenantId, userId: principal.userId, traceId },
+      const doc = await withHrmTransaction(
+        tenantId,
+        principal.userId,
+        traceId,
         (trx) =>
           uploadEmployeeDocument(trx, request.params.employeeId, request.body),
       );
@@ -5370,9 +5398,10 @@ export async function buildApp(
       const tenantId = request.headers['x-tenant-id'];
       const traceId = String(request.id);
 
-      return withTenantTransaction(
-        options.db,
-        { tenantId, userId: principal.userId, traceId },
+      return withHrmTransaction(
+        tenantId,
+        principal.userId,
+        traceId,
         (trx) => listEmployeeDocuments(trx, request.params.employeeId),
       );
     },
@@ -5405,9 +5434,10 @@ export async function buildApp(
       const tenantId = request.headers['x-tenant-id'];
       const traceId = String(request.id);
 
-      return withTenantTransaction(
-        options.db,
-        { tenantId, userId: principal.userId, traceId },
+      return withHrmTransaction(
+        tenantId,
+        principal.userId,
+        traceId,
         (trx) =>
           getEmployeeDocument(
             trx,
@@ -5450,9 +5480,10 @@ export async function buildApp(
       const tenantId = request.headers['x-tenant-id'];
       const traceId = String(request.id);
 
-      return withTenantTransaction(
-        options.db,
-        { tenantId, userId: principal.userId, traceId },
+      return withHrmTransaction(
+        tenantId,
+        principal.userId,
+        traceId,
         (trx) =>
           getEmployeeDocumentContent(
             trx,
@@ -5490,9 +5521,10 @@ export async function buildApp(
       const tenantId = request.headers['x-tenant-id'];
       const traceId = String(request.id);
 
-      return withTenantTransaction(
-        options.db,
-        { tenantId, userId: principal.userId, traceId },
+      return withHrmTransaction(
+        tenantId,
+        principal.userId,
+        traceId,
         (trx) =>
           deleteEmployeeDocument(
             trx,
@@ -5529,9 +5561,10 @@ export async function buildApp(
       const tenantId = request.headers['x-tenant-id'];
       const traceId = String(request.id);
 
-      const structure = await withTenantTransaction(
-        options.db,
-        { tenantId, userId: principal.userId, traceId },
+      const structure = await withHrmTransaction(
+        tenantId,
+        principal.userId,
+        traceId,
         (trx) =>
           createSalaryStructure(
             trx,
@@ -5566,9 +5599,10 @@ export async function buildApp(
       const tenantId = request.headers['x-tenant-id'];
       const traceId = String(request.id);
 
-      return withTenantTransaction(
-        options.db,
-        { tenantId, userId: principal.userId, traceId },
+      return withHrmTransaction(
+        tenantId,
+        principal.userId,
+        traceId,
         (trx) => getActiveSalaryStructure(trx, request.params.employeeId),
       );
     },
@@ -5597,9 +5631,10 @@ export async function buildApp(
       const tenantId = request.headers['x-tenant-id'];
       const traceId = String(request.id);
 
-      return withTenantTransaction(
-        options.db,
-        { tenantId, userId: principal.userId, traceId },
+      return withHrmTransaction(
+        tenantId,
+        principal.userId,
+        traceId,
         (trx) => getSalaryStructureHistory(trx, request.params.employeeId),
       );
     },
@@ -5630,9 +5665,10 @@ export async function buildApp(
       const tenantId = request.headers['x-tenant-id'];
       const traceId = String(request.id);
 
-      const run = await withTenantTransaction(
-        options.db,
-        { tenantId, userId: principal.userId, traceId },
+      const run = await withHrmTransaction(
+        tenantId,
+        principal.userId,
+        traceId,
         (trx) => createPayrollRun(trx, request.body),
       );
       return reply.status(201).send(run);
@@ -5667,9 +5703,10 @@ export async function buildApp(
       const tenantId = request.headers['x-tenant-id'];
       const traceId = String(request.id);
 
-      return withTenantTransaction(
-        options.db,
-        { tenantId, userId: principal.userId, traceId },
+      return withHrmTransaction(
+        tenantId,
+        principal.userId,
+        traceId,
         (trx) =>
           listPayrollRuns(trx, {
             frequency: request.query.frequency,
@@ -5705,9 +5742,10 @@ export async function buildApp(
       const tenantId = request.headers['x-tenant-id'];
       const traceId = String(request.id);
 
-      return withTenantTransaction(
-        options.db,
-        { tenantId, userId: principal.userId, traceId },
+      return withHrmTransaction(
+        tenantId,
+        principal.userId,
+        traceId,
         (trx) => getPayrollRunById(trx, request.params.runId),
       );
     },
@@ -5743,9 +5781,10 @@ export async function buildApp(
       const tenantId = request.headers['x-tenant-id'];
       const traceId = String(request.id);
 
-      return withTenantTransaction(
-        options.db,
-        { tenantId, userId: principal.userId, traceId },
+      return withHrmTransaction(
+        tenantId,
+        principal.userId,
+        traceId,
         (trx) =>
           updatePayrollItemAdjustments(
             trx,
@@ -5783,9 +5822,10 @@ export async function buildApp(
       const tenantId = request.headers['x-tenant-id'];
       const traceId = String(request.id);
 
-      return withTenantTransaction(
-        options.db,
-        { tenantId, userId: principal.userId, traceId },
+      return withHrmTransaction(
+        tenantId,
+        principal.userId,
+        traceId,
         (trx) => submitPayrollRunForApproval(trx, request.params.runId),
       );
     },
@@ -5817,9 +5857,10 @@ export async function buildApp(
       const tenantId = request.headers['x-tenant-id'];
       const traceId = String(request.id);
 
-      return withTenantTransaction(
-        options.db,
-        { tenantId, userId: principal.userId, traceId },
+      return withHrmTransaction(
+        tenantId,
+        principal.userId,
+        traceId,
         (trx) => approvePayrollRun(trx, request.params.runId),
       );
     },
@@ -5851,9 +5892,10 @@ export async function buildApp(
       const tenantId = request.headers['x-tenant-id'];
       const traceId = String(request.id);
 
-      return withTenantTransaction(
-        options.db,
-        { tenantId, userId: principal.userId, traceId },
+      return withHrmTransaction(
+        tenantId,
+        principal.userId,
+        traceId,
         (trx) =>
           cancelPayrollRun(trx, request.params.runId, request.body?.reason),
       );
@@ -5887,9 +5929,10 @@ export async function buildApp(
       const tenantId = request.headers['x-tenant-id'];
       const traceId = String(request.id);
 
-      const payment = await withTenantTransaction(
-        options.db,
-        { tenantId, userId: principal.userId, traceId },
+      const payment = await withHrmTransaction(
+        tenantId,
+        principal.userId,
+        traceId,
         (trx) =>
           recordPayrollPayment(trx, request.params.runId, request.body),
       );
@@ -5924,9 +5967,10 @@ export async function buildApp(
       const tenantId = request.headers['x-tenant-id'];
       const traceId = String(request.id);
 
-      return withTenantTransaction(
-        options.db,
-        { tenantId, userId: principal.userId, traceId },
+      return withHrmTransaction(
+        tenantId,
+        principal.userId,
+        traceId,
         (trx) =>
           generatePayslip(
             trx,
@@ -5964,9 +6008,10 @@ export async function buildApp(
       const tenantId = request.headers['x-tenant-id'];
       const traceId = String(request.id);
 
-      return withTenantTransaction(
-        options.db,
-        { tenantId, userId: principal.userId, traceId },
+      return withHrmTransaction(
+        tenantId,
+        principal.userId,
+        traceId,
         (trx) =>
           getPayrollSummaryReport(trx, {
             startDate: request.query.startDate,
@@ -6000,9 +6045,10 @@ export async function buildApp(
       const tenantId = request.headers['x-tenant-id'];
       const traceId = String(request.id);
 
-      return withTenantTransaction(
-        options.db,
-        { tenantId, userId: principal.userId, traceId },
+      return withHrmTransaction(
+        tenantId,
+        principal.userId,
+        traceId,
         (trx) => validatePrePayrollRun(trx, request.body),
       );
     },
@@ -6036,9 +6082,10 @@ export async function buildApp(
       const tenantId = request.headers['x-tenant-id'];
       const traceId = String(request.id);
 
-      const created = await withTenantTransaction(
-        options.db,
-        { tenantId, userId: principal.userId, traceId },
+      const created = await withHrmTransaction(
+        tenantId,
+        principal.userId,
+        traceId,
         (trx) =>
           createWorkSchedule(trx, request.params.employeeId, request.body),
       );
@@ -6073,9 +6120,10 @@ export async function buildApp(
       const tenantId = request.headers['x-tenant-id'];
       const traceId = String(request.id);
 
-      return withTenantTransaction(
-        options.db,
-        { tenantId, userId: principal.userId, traceId },
+      return withHrmTransaction(
+        tenantId,
+        principal.userId,
+        traceId,
         (trx) =>
           getActiveWorkSchedule(
             trx,
@@ -6110,9 +6158,10 @@ export async function buildApp(
       const tenantId = request.headers['x-tenant-id'];
       const traceId = String(request.id);
 
-      return withTenantTransaction(
-        options.db,
-        { tenantId, userId: principal.userId, traceId },
+      return withHrmTransaction(
+        tenantId,
+        principal.userId,
+        traceId,
         (trx) => listWorkSchedules(trx, request.params.employeeId),
       );
     },
@@ -6143,9 +6192,10 @@ export async function buildApp(
       const tenantId = request.headers['x-tenant-id'];
       const traceId = String(request.id);
 
-      return withTenantTransaction(
-        options.db,
-        { tenantId, userId: principal.userId, traceId },
+      return withHrmTransaction(
+        tenantId,
+        principal.userId,
+        traceId,
         (trx) => checkIn(trx, request.body),
       );
     },
@@ -6175,9 +6225,10 @@ export async function buildApp(
       const tenantId = request.headers['x-tenant-id'];
       const traceId = String(request.id);
 
-      return withTenantTransaction(
-        options.db,
-        { tenantId, userId: principal.userId, traceId },
+      return withHrmTransaction(
+        tenantId,
+        principal.userId,
+        traceId,
         (trx) => checkOut(trx, request.body),
       );
     },
@@ -6207,9 +6258,10 @@ export async function buildApp(
       const tenantId = request.headers['x-tenant-id'];
       const traceId = String(request.id);
 
-      return withTenantTransaction(
-        options.db,
-        { tenantId, userId: principal.userId, traceId },
+      return withHrmTransaction(
+        tenantId,
+        principal.userId,
+        traceId,
         (trx) => recordManualAttendance(trx, request.body),
       );
     },
@@ -6244,9 +6296,10 @@ export async function buildApp(
     const tenantId = request.headers['x-tenant-id'];
     const traceId = String(request.id);
 
-    return withTenantTransaction(
-      options.db,
-      { tenantId, userId: principal.userId, traceId },
+    return withHrmTransaction(
+      tenantId,
+      principal.userId,
+        traceId,
       (trx) =>
         listAttendance(trx, {
           employeeId: request.query.employeeId,
@@ -6269,9 +6322,10 @@ export async function buildApp(
     const tenantId = request.headers['x-tenant-id'];
     const traceId = String(request.id);
 
-    return withTenantTransaction(
-      options.db,
-      { tenantId, userId: principal.userId, traceId },
+    return withHrmTransaction(
+      tenantId,
+      principal.userId,
+        traceId,
       (trx) =>
         listAttendance(trx, {
           employeeId: request.query.employeeId,
@@ -6311,9 +6365,10 @@ export async function buildApp(
       const tenantId = request.headers['x-tenant-id'];
       const traceId = String(request.id);
 
-      const created = await withTenantTransaction(
-        options.db,
-        { tenantId, userId: principal.userId, traceId },
+      const created = await withHrmTransaction(
+        tenantId,
+        principal.userId,
+        traceId,
         (trx) => createLeaveRequest(trx, request.body),
       );
       return reply.status(201).send(created);
@@ -6347,9 +6402,10 @@ export async function buildApp(
       const tenantId = request.headers['x-tenant-id'];
       const traceId = String(request.id);
 
-      return withTenantTransaction(
-        options.db,
-        { tenantId, userId: principal.userId, traceId },
+      return withHrmTransaction(
+        tenantId,
+        principal.userId,
+        traceId,
         (trx) =>
           reviewLeaveRequest(trx, request.params.requestId, request.body),
       );
@@ -6382,9 +6438,10 @@ export async function buildApp(
       const tenantId = request.headers['x-tenant-id'];
       const traceId = String(request.id);
 
-      return withTenantTransaction(
-        options.db,
-        { tenantId, userId: principal.userId, traceId },
+      return withHrmTransaction(
+        tenantId,
+        principal.userId,
+        traceId,
         (trx) =>
           listLeaveRequests(trx, {
             employeeId: request.query.employeeId,
@@ -6422,9 +6479,10 @@ export async function buildApp(
       const tenantId = request.headers['x-tenant-id'];
       const traceId = String(request.id);
 
-      return withTenantTransaction(
-        options.db,
-        { tenantId, userId: principal.userId, traceId },
+      return withHrmTransaction(
+        tenantId,
+        principal.userId,
+        traceId,
         (trx) =>
           getLeaveBalances(
             trx,
@@ -6460,9 +6518,10 @@ export async function buildApp(
       const tenantId = request.headers['x-tenant-id'];
       const traceId = String(request.id);
 
-      const created = await withTenantTransaction(
-        options.db,
-        { tenantId, userId: principal.userId, traceId },
+      const created = await withHrmTransaction(
+        tenantId,
+        principal.userId,
+        traceId,
         (trx) => createOrgHoliday(trx, request.body),
       );
       return reply.status(201).send(created);
@@ -6493,9 +6552,10 @@ export async function buildApp(
       const tenantId = request.headers['x-tenant-id'];
       const traceId = String(request.id);
 
-      return withTenantTransaction(
-        options.db,
-        { tenantId, userId: principal.userId, traceId },
+      return withHrmTransaction(
+        tenantId,
+        principal.userId,
+        traceId,
         (trx) => listOrgHolidays(trx, { year: request.query.year }),
       );
     },
@@ -6526,9 +6586,10 @@ export async function buildApp(
       const tenantId = request.headers['x-tenant-id'];
       const traceId = String(request.id);
 
-      return withTenantTransaction(
-        options.db,
-        { tenantId, userId: principal.userId, traceId },
+      return withHrmTransaction(
+        tenantId,
+        principal.userId,
+        traceId,
         (trx) => deleteOrgHoliday(trx, request.params.holidayId),
       );
     },
@@ -6556,9 +6617,10 @@ export async function buildApp(
       const tenantId = request.headers['x-tenant-id'];
       const traceId = String(request.id);
 
-      return withTenantTransaction(
-        options.db,
-        { tenantId, userId: principal.userId, traceId },
+      return withHrmTransaction(
+        tenantId,
+        principal.userId,
+        traceId,
         (trx) => getOrgPayrollSettings(trx),
       );
     },
@@ -6587,9 +6649,10 @@ export async function buildApp(
       const tenantId = request.headers['x-tenant-id'];
       const traceId = String(request.id);
 
-      return withTenantTransaction(
-        options.db,
-        { tenantId, userId: principal.userId, traceId },
+      return withHrmTransaction(
+        tenantId,
+        principal.userId,
+        traceId,
         (trx) => updateOrgPayrollSettings(trx, request.body),
       );
     },

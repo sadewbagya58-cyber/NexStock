@@ -65,6 +65,7 @@ export const ErrorCodeSchema = Type.Union([
   Type.Literal('SUB_SUBSCRIPTION_INACTIVE'),
   Type.Literal('SUB_TRIAL_EXPIRED'),
   Type.Literal('SUB_QUOTA_EXCEEDED'),
+  Type.Literal('SUB_FEATURE_NOT_ENTITLED'),
   Type.Literal('CAT_DUPLICATE_CATEGORY_NAME'),
   Type.Literal('CAT_CIRCULAR_CATEGORY_HIERARCHY'),
   Type.Literal('CAT_CATEGORY_HAS_ACTIVE_CHILDREN_OR_PRODUCTS'),

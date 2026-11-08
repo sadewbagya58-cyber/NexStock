@@ -2138,27 +2138,7 @@
         Sales History
       </a>
 
-      <div class="nav-section-title">HR &amp; Payroll</div>
-      <a class="nav-link" data-view="employees">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
-        Employees
-      </a>
-      <a class="nav-link" data-view="attendance">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-        Attendance
-      </a>
-      <a class="nav-link" data-view="leaves">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
-        Leaves
-      </a>
-      <a class="nav-link" data-view="payroll">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"></rect><line x1="2" y1="10" x2="22" y2="10"></line><line x1="7" y1="15" x2="7.01" y2="15"></line><line x1="12" y1="15" x2="17" y2="15"></line></svg>
-        Payroll Runs
-      </a>
-      <a class="nav-link" data-view="payroll-reports">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
-        Payroll Reports
-      </a>
+      <!-- Preserved for V2 Premium Activation: HR &amp; Payroll (data-view="employees" data-view="payroll" data-view="payroll-reports") -->
 
       <div class="nav-section-title">Finance &amp; Credit</div>
       <a class="nav-link" data-view="credit-dashboard">
@@ -2666,6 +2646,12 @@
     // Resolve Linked Employee Profile for Self-Service (BUG-059)
     let inFlightResolveEmployeePromise = null;
     async function resolveLinkedEmployee(forceRefresh = false) {
+      if (!isModuleEnabled('hrm')) {
+        state.linkedEmployee = null;
+        state.linkedEmployeeId = null;
+        state.isStaffUnlinked = false;
+        return null;
+      }
       if (!forceRefresh && state.linkedEmployee) {
         return state.linkedEmployee;
       }
@@ -3159,8 +3145,26 @@
       // Resolve fallback branch/warehouse and POS register asynchronously without blocking view render (BUG-048)
       hydrateTenantLocationContext(membership.tenantId);
 
+      // Fetch subscription features & module entitlements asynchronously
+      fetchTenantSubscriptionEntitlement(membership.tenantId);
+
       // Resolve linked employee profile asynchronously for self-service portal (BUG-059)
       resolveLinkedEmployee();
+    }
+
+    // Fetch Subscription Features & Entitlements (V1 Entitlement Gating & V2 Premium Readiness)
+    async function fetchTenantSubscriptionEntitlement(tenantId) {
+      if (!state.token || !tenantId) return null;
+      try {
+        const ent = await apiFetch('/v1/subscriptions/entitlement', { silent: true });
+        if (ent) {
+          state.subscription = ent;
+          state.features = ent.features || {};
+          renderSidebarNav();
+          return ent;
+        }
+      } catch {}
+      return null;
     }
 
     // Sign Out Handler
@@ -3336,6 +3340,22 @@
       `;
     }
 
+    // Centralized Subscription & Module Entitlement Checker (V1 Module Gating & V2 Premium Readiness)
+    const HR_VIEWS = ['attendance', 'leaves', 'employees', 'payroll', 'payroll-reports'];
+
+    function isModuleEnabled(moduleName) {
+      if (!moduleName) return true;
+      const mod = String(moduleName).toLowerCase();
+      if (mod === 'hrm' || mod === 'hr') {
+        if (state.subscription?.features?.hrm === true) return true;
+        if (state.subscription?.allowAdminOverride === true) return true;
+        if (state.features?.hrm === true) return true;
+        if (typeof window !== 'undefined' && window.__NEXSTOCK_ENABLE_V2_HRM__ === true) return true;
+        return false;
+      }
+      return true;
+    }
+
     // Permission Evaluation Helpers (Phase 7.2 RBAC Remediation)
     function hasPermission(permissionKey) {
       if (!permissionKey) return true;
@@ -3388,13 +3408,18 @@
 
     function canAccessView(viewName) {
       if (AUTH_VIEWS.includes(viewName)) return true;
+      if (!isModuleEnabled('hrm') && HR_VIEWS.includes(viewName)) {
+        return false;
+      }
       if (state.userRole === 'TENANT_OWNER' || (state.roles && state.roles.includes('TENANT_OWNER'))) return true;
       if (state.userRole === 'CASHIER' || (state.roles && state.roles.includes('CASHIER'))) {
-        const cashierAllowed = ['dashboard', 'pos-checkout', 'pos-shifts', 'pos-sales', 'attendance', 'leaves'];
+        const cashierAllowed = ['dashboard', 'pos-checkout', 'pos-shifts', 'pos-sales'];
+        if (isModuleEnabled('hrm')) cashierAllowed.push('attendance', 'leaves');
         if (cashierAllowed.includes(viewName)) return true;
       }
       if (state.userRole === 'STAFF' || (state.roles && state.roles.includes('STAFF'))) {
-        const staffAllowed = ['dashboard', 'attendance', 'leaves'];
+        const staffAllowed = ['dashboard'];
+        if (isModuleEnabled('hrm')) staffAllowed.push('attendance', 'leaves');
         if (staffAllowed.includes(viewName)) return true;
       }
       const req = VIEW_PERMISSION_MAP[viewName];
@@ -3432,6 +3457,35 @@
         'org-settings': 'Settings & Quotas'
       };
       return titles[viewName] || viewName;
+    }
+
+    function renderFeatureUnavailableView(viewName) {
+      const container = document.getElementById('mainContainer');
+      if (!container) return;
+      const title = formatViewTitle(viewName);
+      container.innerHTML = `
+        <div class="card p-4" style="max-width: 620px; margin: 40px auto; text-align: center; border-top: 4px solid var(--primary, #6366f1);">
+          <div style="font-size: 48px; margin-bottom: 12px;">✨</div>
+          <span class="badge" style="background: rgba(99, 102, 241, 0.12); color: var(--primary, #6366f1); font-weight: 600; padding: 4px 12px; border-radius: 9999px; font-size: 12px; margin-bottom: 14px; display: inline-block;">NexStock V2 Premium Add-on</span>
+          <h2 style="font-size: 22px; font-weight: 700; margin-bottom: 10px; color: var(--text-primary);">Feature Not Available in V1</h2>
+          <p style="color: var(--text-secondary); margin-bottom: 20px; line-height: 1.6; font-size: 14px;">
+            <strong>${escapeHtml(title)}</strong> and the complete HR &amp; Self-Service module (Employee Master, GPS Attendance, Leave Requests, and Flexible Statutory Payroll) are scheduled for the upcoming NexStock V2 release.
+          </p>
+          <div style="background: var(--bg-hover, rgba(0,0,0,0.03)); border: 1px solid var(--border-color); border-radius: 8px; padding: 16px; text-align: left; margin-bottom: 24px;">
+            <div style="font-size: 13px; font-weight: 600; margin-bottom: 8px; color: var(--text-primary);">Available in your active NexStock V1 Workspace:</div>
+            <ul style="margin: 0; padding-left: 20px; font-size: 13px; color: var(--text-secondary); line-height: 1.6;">
+              <li>Catalog, Stock Movements, Balances &amp; Stocktakes</li>
+              <li>Point of Sale (POS) Checkout &amp; Cashier Shifts</li>
+              <li>Operational Expenses Management &amp; Reporting</li>
+              <li>Team &amp; Staff Accounts, Dynamic RBAC &amp; Invitations</li>
+            </ul>
+          </div>
+          <div style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;">
+            <button class="btn btn-primary" onclick="renderView('dashboard')">Back to Dashboard</button>
+            <button class="btn btn-secondary" onclick="renderView('team-staff')">Manage Team &amp; Staff</button>
+          </div>
+        </div>
+      `;
     }
 
     function renderAccessDeniedView(viewName) {
@@ -3497,6 +3551,7 @@
       },
       {
         category: 'HR & Self-Service',
+        module: 'hrm',
         items: [
           {
             view: 'attendance',
@@ -3654,12 +3709,23 @@
 
       let html = '';
       for (const section of NAV_DEFINITIONS) {
+        if (section.module === 'hrm' && !isModuleEnabled('hrm')) {
+          continue;
+        }
+
         const permittedItems = section.items.filter(item => {
+          if (!isModuleEnabled('hrm') && HR_VIEWS.includes(item.view)) {
+            return false;
+          }
           if (state.userRole === 'CASHIER' || (state.roles && state.roles.includes('CASHIER'))) {
-            return ['dashboard', 'pos-checkout', 'pos-shifts', 'pos-sales', 'attendance', 'leaves'].includes(item.view);
+            const cashierAllowed = ['dashboard', 'pos-checkout', 'pos-shifts', 'pos-sales'];
+            if (isModuleEnabled('hrm')) cashierAllowed.push('attendance', 'leaves');
+            return cashierAllowed.includes(item.view);
           }
           if (state.userRole === 'STAFF' || (state.roles && state.roles.includes('STAFF'))) {
-            return ['dashboard', 'attendance', 'leaves'].includes(item.view);
+            const staffAllowed = ['dashboard'];
+            if (isModuleEnabled('hrm')) staffAllowed.push('attendance', 'leaves');
+            return staffAllowed.includes(item.view);
           }
           return hasAnyPermission(item.permission);
         });
@@ -3802,6 +3868,10 @@
 
       const container = document.getElementById('mainContainer');
       if (!isAuthView && !canAccessView(viewName)) {
+        if (!isModuleEnabled('hrm') && HR_VIEWS.includes(viewName)) {
+          renderFeatureUnavailableView(viewName);
+          return;
+        }
         renderAccessDeniedView(viewName);
         return;
       }
@@ -4929,6 +4999,73 @@
     }
 
     // Dedicated Staff Role Self-Service Dashboard (BUG-059)
+    function renderStaffV1DashboardView(container, renderSeq) {
+      if (!isCurrentViewRender('dashboard', renderSeq) || !container) return;
+      const userName = state.fullName || 'Staff Member';
+      const roleName = state.userRole || 'STAFF';
+      const branchName = state.branchName || 'Assigned Branch';
+
+      container.innerHTML = `
+        <div class="view-header">
+          <div>
+            <h1 class="view-title">Welcome back, ${escapeHtml(userName)}!</h1>
+            <div class="view-subtitle">${escapeHtml(roleName)} &bull; ${escapeHtml(branchName)} &bull; NexStock Workspace</div>
+          </div>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <button class="btn btn-secondary" onclick="openMyProfileModal()">My Profile</button>
+          </div>
+        </div>
+
+        <div class="card" style="margin-bottom: 24px; padding: 24px; background: linear-gradient(135deg, rgba(99, 102, 241, 0.05), rgba(168, 85, 247, 0.05)); border: 1px solid rgba(99, 102, 241, 0.2);">
+          <div style="display: flex; align-items: flex-start; gap: 16px;">
+            <div style="font-size: 32px; line-height: 1;">👋</div>
+            <div>
+              <h2 style="font-size: 18px; font-weight: 700; color: var(--text-primary); margin: 0 0 6px 0;">Welcome to your NexStock Team Account</h2>
+              <p style="font-size: 14px; color: var(--text-secondary); line-height: 1.5; margin: 0 0 12px 0;">
+                You are signed in as an authorized team member in <strong>${escapeHtml(state.tenantName || 'your organization')}</strong>.
+                Your access to point of sale, register shifts, catalog items, and team operations is managed dynamically according to your assigned permissions.
+              </p>
+              <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                ${hasPermission('pos:sale:create') ? `
+                  <button class="btn btn-primary btn-sm" onclick="renderView('pos-checkout')">Open POS Checkout</button>
+                ` : ''}
+                ${hasPermission('pos:shift:open') ? `
+                  <button class="btn btn-secondary btn-sm" onclick="renderView('pos-shifts')">Cashier Shifts</button>
+                ` : ''}
+                ${hasPermission('cat:product:read') ? `
+                  <button class="btn btn-secondary btn-sm" onclick="renderView('products')">View Catalog</button>
+                ` : ''}
+                <button class="btn btn-secondary btn-sm" onclick="openMyProfileModal()">Account Settings</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-bottom: 24px;">
+          <div class="card p-3">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+              <span style="font-size: 13px; font-weight: 600; color: var(--text-secondary);">Account Status</span>
+              <span class="badge-pill badge-green">Active</span>
+            </div>
+            <div style="font-size: 16px; font-weight: 700; color: var(--text-primary);">${escapeHtml(userName)}</div>
+            <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">Role: <strong>${escapeHtml(roleName)}</strong></div>
+            <div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">Branch: <strong>${escapeHtml(branchName)}</strong></div>
+          </div>
+
+          <div class="card p-3">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+              <span style="font-size: 13px; font-weight: 600; color: var(--text-secondary);">Self-Service Add-on</span>
+              <span class="badge-pill badge-blue">V2 Premium</span>
+            </div>
+            <div style="font-size: 14px; font-weight: 600; color: var(--text-primary);">HR & Attendance Module</div>
+            <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px; line-height: 1.4;">
+              Personal GPS clock-in, leave application workflows, and payslip downloads are included in the upcoming NexStock V2 Premium upgrade.
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
     async function renderStaffDashboardView(container, renderSeq) {
       container.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-secondary);"><div class="spinner-sm" style="display:inline-block; margin-bottom: 8px;"></div><div>Loading staff self-service portal...</div></div>';
 
@@ -5149,6 +5286,10 @@
       const isStaffRole = state.userRole === 'STAFF' || (state.roles && state.roles.includes('STAFF'));
       const isManagerOrAdmin = hasPermission('cat:product:read') || hasPermission('pos:sale:read') || hasPermission('inv:balance:read');
       if (isStaffRole && !isManagerOrAdmin) {
+        if (!isModuleEnabled('hrm')) {
+          renderStaffV1DashboardView(container, renderSeq);
+          return;
+        }
         await renderStaffDashboardView(container, renderSeq);
         return;
       }
@@ -9831,7 +9972,7 @@
             unknownBarcodeAction: 'PROMPT',
             defaultScanMode: 'HARDWARE'
           })),
-          apiFetch('/v1/org/payroll-settings').catch(() => ({
+          isModuleEnabled('hrm') ? apiFetch('/v1/org/payroll-settings').catch(() => ({
             defaultProrationRule: 'CALENDAR_DAYS',
             allowanceProrationPolicy: 'PRORATE_ALL',
             gpsAttendanceEnabled: false,
@@ -9839,7 +9980,7 @@
             workplaceLatitude: null,
             workplaceLongitude: null,
             overtimeHourlyMultiplier: '1.50'
-          }))
+          })) : Promise.resolve(null)
         ]);
 
         container.innerHTML = `
@@ -10073,6 +10214,7 @@
           </div>
 
           <!-- HRM, Attendance & Payroll Settings (Phase 7.1) -->
+          ${isModuleEnabled('hrm') ? `
           <div style="margin-top: 28px;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
               <div>
@@ -10166,6 +10308,7 @@
               <button class="btn btn-primary" id="btnSavePayrollSettingsBottom" onclick="saveOrgPayrollSettings()">Save Payroll Settings</button>
             </div>
           </div>
+          ` : ''}
         `;
       } catch (err) {
         container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load settings: ${err.message}</div>`;
@@ -19176,7 +19319,7 @@
           }),
           apiFetch('/v1/iam/invitations').catch(() => []),
           apiFetch('/v1/iam/roles').catch(() => []),
-          apiFetch('/v1/employees?limit=200').catch(() => ({ items: [] })),
+          isModuleEnabled('hrm') ? apiFetch('/v1/employees?limit=200').catch(() => ({ items: [] })) : Promise.resolve({ items: [] }),
         ]);
 
         if (accessDenied && membersRes.length === 0) {
@@ -19526,13 +19669,16 @@
 
     // Modal: Invite Staff Member
     async function openInviteStaffModal() {
-      let employees = window._employeesCache || [];
-      if (employees.length === 0) {
-        try {
-          const res = await apiFetch('/v1/employees?limit=200');
-          employees = Array.isArray(res?.items) ? res.items : (Array.isArray(res) ? res : []);
-          window._employeesCache = employees;
-        } catch {}
+      let employees = [];
+      if (isModuleEnabled('hrm')) {
+        employees = window._employeesCache || [];
+        if (employees.length === 0) {
+          try {
+            const res = await apiFetch('/v1/employees?limit=200');
+            employees = Array.isArray(res?.items) ? res.items : (Array.isArray(res) ? res : []);
+            window._employeesCache = employees;
+          } catch {}
+        }
       }
 
       // Filter only employees who are not yet linked to any user
@@ -19555,15 +19701,16 @@
           <div class="form-group" style="margin-bottom: 14px;">
             <label class="form-label">System Role Assignment *</label>
             <select class="form-input" id="inviteStaffRole">
-              <option value="STAFF" selected>Staff Employee (Attendance, Self-Service, Schedule, Leaves)</option>
+              <option value="STAFF" selected>Staff Member (Workspace, Dynamic Permissions)</option>
               <option value="CASHIER">POS Cashier (Checkout, Shift Float, Payments)</option>
               <option value="WAREHOUSE_CLERK">Warehouse Clerk (Stock Intake, Counts, Movements)</option>
               <option value="PURCHASER">Purchasing Officer (Suppliers, POs)</option>
-              <option value="ACCOUNTANT">Staff Accountant (Payroll, Expenses, Reports)</option>
+              <option value="ACCOUNTANT">Staff Accountant (Expenses, Reports)</option>
               <option value="BRANCH_MANAGER">Branch Manager (Outlet Operations, Local Stock)</option>
             </select>
           </div>
 
+          ${isModuleEnabled('hrm') ? `
           <div class="form-group" style="margin-bottom: 16px;">
             <label class="form-label">Link to Employee Profile (Optional)</label>
             <select class="form-input" id="inviteStaffEmployeeId">
@@ -19574,6 +19721,11 @@
             </select>
             <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">Only unlinked employee profiles are shown.</div>
           </div>
+          ` : `
+          <div style="margin-bottom: 16px; padding: 10px 12px; background: var(--bg-hover, rgba(0,0,0,0.02)); border: 1px dashed var(--border-color); border-radius: 6px; font-size: 12px; color: var(--text-secondary);">
+            ℹ️ <strong>Staff Provisioning:</strong> The staff member will receive full access to their assigned role and branch workspace in NexStock V1. Formal HR employee profile linking will be available in the V2 HR Premium Add-on.
+          </div>
+          `}
 
           <div class="alert alert-info" style="font-size: 12px; line-height: 1.4; padding: 10px 14px; border-radius: 6px; background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.2); color: var(--text-primary); margin-bottom: 16px;">
             🔒 <strong>Security Guarantee:</strong> A cryptographic 4-digit code is generated with 24-hour expiration and brute-force lockout protection. Staff must verify their registered email address during activation.
@@ -19590,7 +19742,7 @@
       const btn = document.getElementById('btnSubmitInviteStaff');
       const email = document.getElementById('inviteStaffEmail')?.value.trim();
       const roleCode = document.getElementById('inviteStaffRole')?.value;
-      const employeeId = document.getElementById('inviteStaffEmployeeId')?.value || null;
+      const employeeId = isModuleEnabled('hrm') ? (document.getElementById('inviteStaffEmployeeId')?.value || null) : null;
 
       if (!email) return showToast('Please enter a valid email address.', 'error');
 

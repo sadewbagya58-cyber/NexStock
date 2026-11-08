@@ -1,3 +1,4 @@
+process.env.NEXSTOCK_ENABLE_V2_HRM = 'true';
 import { type KeyObject, generateKeyPairSync, sign } from 'node:crypto';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import {

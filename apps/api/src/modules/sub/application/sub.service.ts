@@ -14,6 +14,14 @@ export type SubscriptionQuotaResource =
   | 'WAREHOUSE'
   | 'REGISTER'
   | 'USER';
+export type PlatformModule = 'HRM' | 'EXPENSES' | 'CUSTOMER_CREDIT';
+
+export interface SubscriptionFeaturesDto {
+  readonly hrm: boolean;
+  readonly multiCurrency: boolean;
+  readonly batchTracking: boolean;
+  readonly [key: string]: boolean | unknown;
+}
 
 export interface SubscriptionEntitlementDto {
   readonly subscriptionId: string;
@@ -34,6 +42,32 @@ export interface SubscriptionEntitlementDto {
     readonly maxWarehouses: number;
     readonly maxRegisters: number;
     readonly maxUsers: number;
+  };
+  readonly features: SubscriptionFeaturesDto;
+}
+
+function parsePlanFeatures(rawJson: unknown): SubscriptionFeaturesDto {
+  let parsed: Record<string, unknown> = {};
+  if (typeof rawJson === 'string') {
+    try {
+      parsed = JSON.parse(rawJson);
+    } catch {
+      parsed = {};
+    }
+  } else if (rawJson && typeof rawJson === 'object') {
+    parsed = rawJson as Record<string, unknown>;
+  }
+
+  const isV2HrmGloballyEnabled = process.env.NEXSTOCK_ENABLE_V2_HRM === 'true';
+  const hasHrm =
+    isV2HrmGloballyEnabled ||
+    Boolean(parsed.hrm || parsed.hrmAndSelfService);
+
+  return {
+    ...parsed,
+    hrm: hasHrm,
+    multiCurrency: Boolean(parsed.multiCurrency),
+    batchTracking: Boolean(parsed.batchTracking),
   };
 }
 
@@ -94,6 +128,7 @@ export async function provisionTenantSubscription(
       'max_warehouses',
       'max_registers',
       'max_users',
+      'features_json',
     ])
     .where('code', '=', input.planCode)
     .where('is_active', '=', true)
@@ -192,6 +227,7 @@ export async function provisionTenantSubscription(
       maxRegisters: plan.max_registers,
       maxUsers: plan.max_users,
     },
+    features: parsePlanFeatures(plan.features_json),
   };
   trx._trxCache?.set(`subEntitlement:${trx.tenantId}`, entitlement);
   return entitlement;
@@ -231,6 +267,7 @@ export async function getTenantSubscriptionEntitlement(
       'subscription_plans.max_warehouses as max_warehouses',
       'subscription_plans.max_registers as max_registers',
       'subscription_plans.max_users as max_users',
+      'subscription_plans.features_json as features_json',
     ])
     .where('tenant_subscriptions.tenant_id', '=', trx.tenantId)
     .executeTakeFirst();
@@ -255,6 +292,7 @@ export async function getTenantSubscriptionEntitlement(
           'max_warehouses',
           'max_registers',
           'max_users',
+          'features_json',
         ])
         .where('code', '=', 'STARTER')
         .where('is_active', '=', true)
@@ -336,6 +374,7 @@ export async function getTenantSubscriptionEntitlement(
             'subscription_plans.max_warehouses as max_warehouses',
             'subscription_plans.max_registers as max_registers',
             'subscription_plans.max_users as max_users',
+            'subscription_plans.features_json as features_json',
           ])
           .where('tenant_subscriptions.tenant_id', '=', trx.tenantId)
           .executeTakeFirst();
@@ -374,6 +413,7 @@ export async function getTenantSubscriptionEntitlement(
       maxRegisters: row.max_registers,
       maxUsers: row.max_users,
     },
+    features: parsePlanFeatures(row.features_json),
   };
   trx._trxCache?.set(cacheKey, entitlement);
   return entitlement;
@@ -564,6 +604,50 @@ export async function assertSubscriptionEntitlement(
           resource,
           maxAllowed,
           currentActiveCount,
+        },
+      });
+    }
+  }
+
+  return entitlement;
+}
+
+/**
+ * Asserts module entitlement for a tenant.
+ *
+ * In NexStock V1, HR & Self-Service is hidden from the customer experience and preserved for V2 Premium.
+ * A tenant is entitled to access the HRM module if:
+ * 1. Global V2 flag is enabled (`NEXSTOCK_ENABLE_V2_HRM=true`), OR
+ * 2. Subscription has an active administrative override (`allowAdminOverride = true`), OR
+ * 3. Subscription plan includes the feature (`features.hrm = true`).
+ *
+ * If not entitled, rejects with 403 Forbidden Problem Details (SUB_FEATURE_NOT_ENTITLED).
+ */
+export async function assertModuleEntitlement(
+  trx: TenantTransactionContext,
+  module: PlatformModule,
+): Promise<SubscriptionEntitlementDto> {
+  const entitlement = await getTenantSubscriptionEntitlement(trx);
+
+  if (module === 'HRM') {
+    const isV2HrmGloballyEnabled = process.env.NEXSTOCK_ENABLE_V2_HRM === 'true';
+    const isEntitled =
+      isV2HrmGloballyEnabled ||
+      entitlement.allowAdminOverride ||
+      Boolean(entitlement.features?.hrm);
+
+    if (!isEntitled) {
+      throw new AppError({
+        statusCode: 403,
+        errorCode: 'SUB_FEATURE_NOT_ENTITLED',
+        title: 'Feature Not Entitled',
+        detail:
+          'The HR & Self-Service module is not included in your NexStock V1 subscription. This module is available as a V2 Premium Add-on.',
+        extensions: {
+          module: 'HRM',
+          version: 'V1',
+          planCode: entitlement.planCode,
+          upgradeRequired: true,
         },
       });
     }

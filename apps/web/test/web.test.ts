@@ -2850,4 +2850,101 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       expect(html).toContain('margin: 12mm;');
     });
   });
+
+  describe('18. NexStock V1 — HR & Self-Service Module Hiding & V2 Premium Readiness', () => {
+    const indexPath = resolve(WEB_ROOT, 'public/index.html');
+    const html = readFileSync(indexPath, 'utf8');
+
+    it('defines centralized module entitlement helper isModuleEnabled() defaulting to false for HRM in V1', () => {
+      expect(html).toContain('function isModuleEnabled(moduleName)');
+      expect(html).toContain("const mod = String(moduleName).toLowerCase();");
+      expect(html).toContain("if (mod === 'hrm' || mod === 'hr')");
+      expect(html).toContain('state.subscription?.features?.hrm === true');
+      expect(html).toContain('state.subscription?.allowAdminOverride === true');
+      expect(html).toContain('window.__NEXSTOCK_ENABLE_V2_HRM__ === true');
+      expect(html).toContain('const HR_VIEWS = [\'attendance\', \'leaves\', \'employees\', \'payroll\', \'payroll-reports\'];');
+    });
+
+    it('configures NAV_DEFINITIONS and renderSidebarNav() to completely hide HR & Self-Service in V1', () => {
+      // 1. HR & Self-Service section tagged with module: 'hrm'
+      expect(html).toContain("category: 'HR & Self-Service'");
+      expect(html).toContain("module: 'hrm'");
+
+      // 2. renderSidebarNav skips section when module is hrm and not enabled
+      expect(html).toContain("if (section.module === 'hrm' && !isModuleEnabled('hrm'))");
+      expect(html).toContain("if (!isModuleEnabled('hrm') && HR_VIEWS.includes(item.view))");
+
+      // 3. Cashier and Staff role-specific navigation also filters out HR items in V1
+      expect(html).toContain("const cashierAllowed = ['dashboard', 'pos-checkout', 'pos-shifts', 'pos-sales'];");
+      expect(html).toContain("if (isModuleEnabled('hrm')) cashierAllowed.push('attendance', 'leaves');");
+      expect(html).toContain("const staffAllowed = ['dashboard'];");
+      expect(html).toContain("if (isModuleEnabled('hrm')) staffAllowed.push('attendance', 'leaves');");
+
+      // 4. Ensures no empty navigation headers or broken spacing remain
+      expect(html).toContain('if (permittedItems.length === 0) continue;');
+    });
+
+    it('enforces route access protection and renders Feature Unavailable view on direct URL access in V1', () => {
+      // 1. canAccessView returns false for HR views in V1
+      expect(html).toContain("if (!isModuleEnabled('hrm') && HR_VIEWS.includes(viewName))");
+      expect(html).toContain('return false;');
+
+      // 2. renderView routes unauthorized V1 HR access to renderFeatureUnavailableView
+      expect(html).toContain("if (!isModuleEnabled('hrm') && HR_VIEWS.includes(viewName)) {");
+      expect(html).toContain('renderFeatureUnavailableView(viewName);');
+
+      // 3. renderFeatureUnavailableView explains V2 Premium Add-on with quick links
+      expect(html).toContain('function renderFeatureUnavailableView(viewName)');
+      expect(html).toContain('NexStock V2 Premium Add-on');
+      expect(html).toContain('Feature Not Available in V1');
+      expect(html).toContain('onclick="renderView(\'dashboard\')"');
+      expect(html).toContain('onclick="renderView(\'team-staff\')"');
+    });
+
+    it('preserves Phase 7.2 Team & Staff Accounts, Roles & Permissions, and staff invitations in V1', () => {
+      // 1. Team & Staff Accounts remains accessible in sidebar and routing
+      expect(html).toContain("view: 'team-staff'");
+      expect(html).toContain("label: 'Team &amp; Staff Accounts'");
+      expect(html).toContain("case 'team-staff': renderTeamStaffAccountsView();");
+
+      // 2. Roles & Permissions remains accessible
+      expect(html).toContain("view: 'roles-permissions'");
+      expect(html).toContain("label: 'Roles &amp; Permissions'");
+      expect(html).toContain("case 'roles-permissions': renderRolesPermissionsView();");
+
+      // 3. Staff invitation modal works without requiring employee linking in V1
+      expect(html).toContain('async function openInviteStaffModal()');
+      expect(html).toContain("if (isModuleEnabled('hrm')) {");
+      expect(html).toContain('Staff Provisioning:');
+      expect(html).toContain('V2 HR Premium Add-on');
+
+      // 4. resolveLinkedEmployee skips /v1/employees/me in V1
+      expect(html).toContain("if (!isModuleEnabled('hrm')) {");
+      expect(html).toContain('state.linkedEmployee = null;');
+      expect(html).toContain('state.isStaffUnlinked = false;');
+    });
+
+    it('provides a dedicated V1 Staff Dashboard without unauthorized HR API calls', () => {
+      expect(html).toContain('function renderStaffV1DashboardView(container, renderSeq)');
+      expect(html).toContain('Welcome to your NexStock Team Account');
+      expect(html).toContain('Self-Service Add-on');
+      expect(html).toContain('V2 Premium');
+      expect(html).toContain("if (!isModuleEnabled('hrm')) {");
+      expect(html).toContain('renderStaffV1DashboardView(container, renderSeq);');
+    });
+
+    it('preserves complete HR & Self-Service implementation for seamless V2 reactivation', () => {
+      // HR view rendering functions intact
+      expect(html).toContain('function renderEmployeesView()');
+      expect(html).toContain('function renderAttendanceView()');
+      expect(html).toContain('function renderLeavesView()');
+      expect(html).toContain('function renderPayrollView()');
+      expect(html).toContain('function renderPayrollReportsView()');
+      expect(html).toContain('async function renderStaffDashboardView(container, renderSeq)');
+
+      // Asynchronous subscription entitlement fetching for instant V2 toggle
+      expect(html).toContain('async function fetchTenantSubscriptionEntitlement(tenantId)');
+      expect(html).toContain('/v1/subscriptions/entitlement');
+    });
+  });
 });
