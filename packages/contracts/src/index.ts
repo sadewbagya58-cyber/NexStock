@@ -98,6 +98,9 @@ export const ErrorCodeSchema = Type.Union([
   Type.Literal('POS_NO_ACTIVE_SHIFT'),
   Type.Literal('POS_SHIFT_NOT_FOUND'),
   Type.Literal('POS_SHIFT_ALREADY_CLOSED'),
+  Type.Literal('POS_REGISTER_CODE_EXISTS'),
+  Type.Literal('SUB_PLAN_LIMIT_REACHED'),
+  Type.Literal('ORG_BRANCH_NOT_FOUND'),
   Type.Literal('POS_CART_EMPTY'),
   Type.Literal('POS_INSUFFICIENT_PAYMENT'),
   Type.Literal('POS_SALE_NOT_FOUND'),
@@ -503,6 +506,7 @@ export const CreateCategoryRequestSchema = Type.Object(
       Type.Union([Type.String({ maxLength: 500 }), Type.Null()]),
     ),
     parentId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
+    color: Type.Optional(Type.Union([Type.String({ maxLength: 30 }), Type.Null()])),
   },
   { additionalProperties: false },
 );
@@ -515,6 +519,7 @@ export const UpdateCategoryRequestSchema = Type.Object(
       Type.Union([Type.String({ maxLength: 500 }), Type.Null()]),
     ),
     parentId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
+    color: Type.Optional(Type.Union([Type.String({ maxLength: 30 }), Type.Null()])),
   },
   { additionalProperties: false },
 );
@@ -539,6 +544,7 @@ export const CategoryResponseSchema = Type.Object({
   name: Type.String(),
   description: Type.Union([Type.String(), Type.Null()]),
   status: RecordLifecycleStatusSchema,
+  color: Type.Optional(Type.Union([Type.String(), Type.Null()])),
   syncVersion: Type.Integer(),
   createdAt: IsoTimestampSchema,
   updatedAt: IsoTimestampSchema,
@@ -1241,6 +1247,20 @@ export type PosRegisterSummaryResponse = Static<
   typeof PosRegisterSummaryResponseSchema
 >;
 
+export const CreatePosRegisterRequestSchema = Type.Object(
+  {
+    branchId: UuidSchema,
+    warehouseId: Type.Optional(UuidSchema),
+    code: Type.String({ minLength: 2, maxLength: 30 }),
+    name: Type.String({ minLength: 2, maxLength: 100 }),
+    isActive: Type.Optional(Type.Boolean()),
+  },
+  { additionalProperties: false },
+);
+export type CreatePosRegisterRequest = Static<
+  typeof CreatePosRegisterRequestSchema
+>;
+
 export const UpdatePosRegisterRequestSchema = Type.Object(
   {
     name: Type.Optional(Type.String({ minLength: 1, maxLength: 160 })),
@@ -1266,7 +1286,7 @@ export const OpenPosShiftRequestSchema = Type.Object(
   {
     registerId: UuidSchema,
     openingCashFloat: DecimalMoneyStringSchema,
-    notes: Type.Optional(Type.String({ maxLength: 500 })),
+    notes: Type.Optional(Type.Union([Type.String({ maxLength: 500 }), Type.Null()])),
   },
   { additionalProperties: false },
 );
@@ -1277,12 +1297,27 @@ export type OpenPosShiftRequest = Static<
 export const ClosePosShiftRequestSchema = Type.Object(
   {
     countedClosingCash: DecimalMoneyStringSchema,
-    notes: Type.Optional(Type.String({ maxLength: 500 })),
+    notes: Type.Optional(Type.Union([Type.String({ maxLength: 500 }), Type.Null()])),
+    adminOverride: Type.Optional(Type.Boolean()),
+    overrideReason: Type.Optional(Type.Union([Type.String({ maxLength: 500 }), Type.Null()])),
   },
   { additionalProperties: false },
 );
 export type ClosePosShiftRequest = Static<
   typeof ClosePosShiftRequestSchema
+>;
+
+export const ListPosShiftsQuerySchema = Type.Object(
+  {
+    registerId: Type.Optional(UuidSchema),
+    status: Type.Optional(Type.Union([Type.Literal('OPEN'), Type.Literal('CLOSED'), Type.Literal('ALL')])),
+    limit: Type.Optional(PaginationLimitQueryParamSchema),
+    offset: Type.Optional(Type.Integer({ minimum: 0 })),
+  },
+  { additionalProperties: false },
+);
+export type ListPosShiftsQuery = Static<
+  typeof ListPosShiftsQuerySchema
 >;
 
 export const CreatePosShiftAdjustmentRequestSchema = Type.Object(
@@ -1323,7 +1358,9 @@ export const PosShiftResponseSchema = Type.Object({
   branchId: UuidSchema,
   registerId: UuidSchema,
   openedByUserId: UuidSchema,
+  openedByUserName: Type.Optional(Type.Union([Type.String(), Type.Null()])),
   closedByUserId: Type.Union([UuidSchema, Type.Null()]),
+  closedByUserName: Type.Optional(Type.Union([Type.String(), Type.Null()])),
   currencyCode: CurrencyCodeSchema,
   openingCashFloat: DecimalMoneyStringSchema,
   cashSales: Type.Optional(DecimalMoneyStringSchema),
@@ -1339,6 +1376,8 @@ export const PosShiftResponseSchema = Type.Object({
   notes: Type.Union([Type.String(), Type.Null()]),
   isOwnShift: Type.Optional(Type.Boolean()),
   openedByOtherCashier: Type.Optional(Type.Boolean()),
+  adminOverride: Type.Optional(Type.Boolean()),
+  overrideReason: Type.Optional(Type.Union([Type.String(), Type.Null()])),
 });
 export type PosShiftResponse = Static<typeof PosShiftResponseSchema>;
 
@@ -1647,6 +1686,7 @@ export const CreateBatchRequestSchema = Type.Object(
     ),
     initialQuantity: DecimalQuantityStringSchema,
     unitCost: DecimalMoneyStringSchema,
+    sellingPrice: Type.Optional(Type.Union([DecimalMoneyStringSchema, Type.Null()])),
     currencyCode: Type.Optional(CurrencyCodeSchema),
   },
   { additionalProperties: false },
@@ -1667,6 +1707,7 @@ export const BatchResponseSchema = Type.Object({
   initialQuantity: DecimalQuantityStringSchema,
   currentQuantity: DecimalQuantityStringSchema,
   unitCost: DecimalMoneyStringSchema,
+  sellingPrice: Type.Optional(Type.Union([DecimalMoneyStringSchema, Type.Null()])),
   currencyCode: CurrencyCodeSchema,
   expiryStatus: BatchExpiryStatusSchema,
   quarantineReason: Type.Union([Type.String(), Type.Null()]),
@@ -3465,8 +3506,14 @@ export const CreateCustomerRequestSchema = Type.Object(
     email: Type.Optional(Type.Union([Type.String({ maxLength: 255 }), Type.Null()])),
     phone: Type.Optional(Type.Union([Type.String({ maxLength: 50 }), Type.Null()])),
     address: Type.Optional(Type.Union([Type.String({ maxLength: 500 }), Type.Null()])),
+    addressLine1: Type.Optional(Type.Union([Type.String({ maxLength: 255 }), Type.Null()])),
+    addressCity: Type.Optional(Type.Union([Type.String({ maxLength: 100 }), Type.Null()])),
+    addressPostalCode: Type.Optional(Type.Union([Type.String({ maxLength: 20 }), Type.Null()])),
+    companyName: Type.Optional(Type.Union([Type.String({ maxLength: 255 }), Type.Null()])),
     taxId: Type.Optional(Type.Union([Type.String({ maxLength: 100 }), Type.Null()])),
     notes: Type.Optional(Type.Union([Type.String({ maxLength: 1000 }), Type.Null()])),
+    status: Type.Optional(CustomerStatusSchema),
+    isActive: Type.Optional(Type.Boolean()),
   },
   { additionalProperties: false },
 );
@@ -3478,9 +3525,14 @@ export const UpdateCustomerRequestSchema = Type.Object(
     email: Type.Optional(Type.Union([Type.String({ maxLength: 255 }), Type.Null()])),
     phone: Type.Optional(Type.Union([Type.String({ maxLength: 50 }), Type.Null()])),
     address: Type.Optional(Type.Union([Type.String({ maxLength: 500 }), Type.Null()])),
+    addressLine1: Type.Optional(Type.Union([Type.String({ maxLength: 255 }), Type.Null()])),
+    addressCity: Type.Optional(Type.Union([Type.String({ maxLength: 100 }), Type.Null()])),
+    addressPostalCode: Type.Optional(Type.Union([Type.String({ maxLength: 20 }), Type.Null()])),
+    companyName: Type.Optional(Type.Union([Type.String({ maxLength: 255 }), Type.Null()])),
     taxId: Type.Optional(Type.Union([Type.String({ maxLength: 100 }), Type.Null()])),
     notes: Type.Optional(Type.Union([Type.String({ maxLength: 1000 }), Type.Null()])),
     status: Type.Optional(CustomerStatusSchema),
+    isActive: Type.Optional(Type.Boolean()),
   },
   { additionalProperties: false },
 );

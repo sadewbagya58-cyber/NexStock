@@ -340,6 +340,11 @@ describe('@nexstock/api — Milestone 0 Foundation, RLS, Idempotency & Sync Inva
           name: '0021_phase72_staff_invitation_code_redesign',
           filename: '0021_phase72_staff_invitation_code_redesign.sql',
         },
+        {
+          version: 22,
+          name: '0022_category_color_and_staff_role',
+          filename: '0022_category_color_and_staff_role.sql',
+        },
       ]);
     });
 
@@ -419,6 +424,7 @@ describe('@nexstock/api — Milestone 0 Foundation, RLS, Idempotency & Sync Inva
         '0019_phase74_customer_credit.sql',
         '0020_phase72_staff_invitations.sql',
         '0021_phase72_staff_invitation_code_redesign.sql',
+        '0022_category_color_and_staff_role.sql',
       ]);
 
       await expect(

@@ -976,14 +976,19 @@
     /* Toast Notifications */
     .toast-container {
       position: fixed;
-      bottom: 24px;
+      top: 24px;
       right: 24px;
-      z-index: 100;
+      z-index: 999999 !important;
+      pointer-events: none;
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      gap: 10px;
+      max-width: 440px;
+      width: calc(100vw - 48px);
     }
     .toast {
+      pointer-events: auto;
+      word-break: break-word;
       background: var(--surface-card);
       color: var(--text-primary);
       border: 1px solid var(--border-subtle);
@@ -2074,103 +2079,14 @@
         <button class="btn-icon btn-sm" id="sidebarCloseBtn" aria-label="Close menu">&times;</button>
       </div>
       <div id="sidebarNavContent">
-      <div class="nav-section-title">Overview</div>
-      <a class="nav-link active" data-view="dashboard">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
-        Dashboard
-      </a>
-
-      <div class="nav-section-title">Inventory</div>
-      <a class="nav-link" data-view="products">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path><line x1="3" y1="6" x2="21" y2="6"></line><path d="M16 10a4 4 0 0 1-8 0"></path></svg>
-        Products
-      </a>
-      <a class="nav-link" data-view="categories">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path><line x1="7" y1="7" x2="7.01" y2="7"></line></svg>
-        Categories
-      </a>
-      <a class="nav-link" data-view="suppliers">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"></rect><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"></polygon><circle cx="5.5" cy="18.5" r="2.5"></circle><circle cx="18.5" cy="18.5" r="2.5"></circle></svg>
-        Suppliers
-      </a>
-      <a class="nav-link" data-view="movements">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"></polyline><path d="M3 11V9a4 4 0 0 1 4-4h14"></path><polyline points="7 23 3 19 7 15"></polyline><path d="M21 13v2a4 4 0 0 1-4 4H3"></path></svg>
-        Stock Movements
-      </a>
-      <a class="nav-link" data-view="balances">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path></svg>
-        Inventory Balances
-      </a>
-
-      <div class="nav-section-title">Advanced Inventory</div>
-      <a class="nav-link" data-view="batches">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
-        Batches &amp; Expiry
-      </a>
-      <a class="nav-link" data-view="serials">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="9" x2="20" y2="9"></line><line x1="4" y1="15" x2="20" y2="15"></line><line x1="10" y1="3" x2="8" y2="21"></line><line x1="16" y1="3" x2="14" y2="21"></line></svg>
-        Serial Registry
-      </a>
-      <a class="nav-link" data-view="valuation">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
-        Costing &amp; Valuation
-      </a>
-      <a class="nav-link" data-view="stocktakes">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
-        Stock Counts &amp; Stocktake
-      </a>
-
-      <div class="nav-section-title">Point of Sale</div>
-      <a class="nav-link" data-view="pos-checkout">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="21" r="1"></circle><circle cx="20" cy="21" r="1"></circle><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path></svg>
-        POS Checkout
-      </a>
-      <a class="nav-link" data-view="pos-registers">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
-        Registers
-      </a>
-      <a class="nav-link" data-view="pos-shifts">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-        Cashier Shifts
-      </a>
-      <a class="nav-link" data-view="pos-sales">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
-        Sales History
-      </a>
-
-      <!-- Preserved for V2 Premium Activation: HR &amp; Payroll (data-view="employees" data-view="payroll" data-view="payroll-reports") -->
-
-      <div class="nav-section-title">Finance &amp; Credit</div>
-      <a class="nav-link" data-view="credit-dashboard">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
-        Credit Dashboard
-      </a>
-      <a class="nav-link" data-view="customers">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
-        Customers
-      </a>
-      <a class="nav-link" data-view="credit-accounts">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"></rect><line x1="1" y1="10" x2="23" y2="10"></line></svg>
-        Credit Accounts
-      </a>
-      <a class="nav-link" data-view="expenses">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
-        Expenses
-      </a>
-
-      <div class="nav-section-title">Organization</div>
-      <a class="nav-link" data-view="team-staff">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
-        Team &amp; Staff Accounts
-      </a>
-      <a class="nav-link" data-view="roles-permissions">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
-        Roles &amp; Permissions
-      </a>
-      <a class="nav-link" data-view="org-settings">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
-        Settings &amp; Quotas
-      </a>
+        <div style="padding: 16px 12px; display: flex; flex-direction: column; gap: 12px;">
+          <div style="height: 12px; width: 60px; background: var(--border-subtle); border-radius: 4px; opacity: 0.5;"></div>
+          <div style="height: 36px; background: var(--surface-card); border-radius: 6px; opacity: 0.6;"></div>
+          <div style="height: 36px; background: var(--surface-card); border-radius: 6px; opacity: 0.4;"></div>
+          <div style="height: 12px; width: 80px; background: var(--border-subtle); border-radius: 4px; opacity: 0.5; margin-top: 8px;"></div>
+          <div style="height: 36px; background: var(--surface-card); border-radius: 6px; opacity: 0.6;"></div>
+          <div style="height: 36px; background: var(--surface-card); border-radius: 6px; opacity: 0.4;"></div>
+        </div>
       </div>
     </aside>
 
@@ -3300,7 +3216,7 @@
       brandLogoBtn.onclick = (e) => {
         e.preventDefault();
         if (state.token && state.tenantId) {
-          renderView('dashboard');
+          renderView(resolveDefaultLandingView());
         } else if (state.token) {
           renderView('onboard-business');
         } else {
@@ -3425,6 +3341,44 @@
       const req = VIEW_PERMISSION_MAP[viewName];
       if (!req) return true;
       return hasAnyPermission(req);
+    }
+
+    function resolveDefaultLandingView() {
+      // 1. If dashboard is permitted, it is the natural default
+      if (canAccessView('dashboard')) return 'dashboard';
+
+      // 2. Operational priority order for focused roles (e.g. Warehouse Clerk, Cashier, Purchaser, Accountant)
+      const priorityViews = [
+        'balances',
+        'movements',
+        'stocktakes',
+        'batches',
+        'serials',
+        'pos-checkout',
+        'pos-shifts',
+        'products',
+        'suppliers',
+        'expenses',
+        'customers',
+        'credit-dashboard',
+        'team-staff',
+        'org-settings'
+      ];
+
+      for (const v of priorityViews) {
+        if (canAccessView(v)) return v;
+      }
+
+      // 3. Fallback to any permitted navigation item
+      for (const section of NAV_DEFINITIONS) {
+        if (section.module === 'hrm' && !isModuleEnabled('hrm')) continue;
+        for (const item of section.items) {
+          if (!isModuleEnabled('hrm') && HR_VIEWS.includes(item.view)) continue;
+          if (canAccessView(item.view)) return item.view;
+        }
+      }
+
+      return 'welcome';
     }
 
     function formatViewTitle(viewName) {
@@ -4318,7 +4272,7 @@
           renderView('onboard-business');
         } else if (state.memberships.length === 1) {
           await selectActiveTenant(state.memberships[0]);
-          renderView('dashboard');
+          renderView(resolveDefaultLandingView());
         } else {
           renderView('tenant-select');
         }
@@ -4881,7 +4835,7 @@
       if (match) {
         await selectActiveTenant(match);
         showToast(`Switched to business: ${match.tenantName}`, 'info');
-        renderView('dashboard');
+        renderView(resolveDefaultLandingView());
       }
     }
 
@@ -5937,12 +5891,18 @@
                       ${categories.map(c => {
                         const name = escapeHtml(c.name);
                         const desc = escapeHtml(c.description || '—');
+                        const color = c.color || '#6366f1';
                         const isActive = c.status === 'ACTIVE' || c.isActive === true;
                         const dateStr = c.createdAt ? new Date(c.createdAt).toLocaleDateString() : '—';
 
                         return `
                           <tr>
-                            <td><strong>${name}</strong></td>
+                            <td>
+                              <div style="display: flex; align-items: center; gap: 8px;">
+                                <span style="display: inline-block; width: 14px; height: 14px; border-radius: 50%; background: ${escapeHtml(color)}; flex-shrink: 0; box-shadow: 0 0 0 1px rgba(0,0,0,0.1);"></span>
+                                <strong>${name}</strong>
+                              </div>
+                            </td>
                             <td>${desc}</td>
                             <td><span class="badge-pill ${isActive ? 'badge-green' : 'badge-red'}">${isActive ? 'ACTIVE' : 'ARCHIVED'}</span></td>
                             <td>${dateStr}</td>
@@ -5961,13 +5921,17 @@
                 ${categories.map(c => {
                   const name = escapeHtml(c.name);
                   const desc = escapeHtml(c.description || '—');
+                  const color = c.color || '#6366f1';
                   const isActive = c.status === 'ACTIVE' || c.isActive === true;
                   const dateStr = c.createdAt ? new Date(c.createdAt).toLocaleDateString() : '—';
 
                   return `
                     <div class="entity-card">
                       <div class="entity-card-header">
-                        <span class="entity-card-code"><strong>${name}</strong></span>
+                        <span class="entity-card-code" style="display: flex; align-items: center; gap: 6px;">
+                          <span style="display: inline-block; width: 12px; height: 12px; border-radius: 50%; background: ${escapeHtml(color)}; flex-shrink: 0;"></span>
+                          <strong>${name}</strong>
+                        </span>
                         <span class="badge-pill ${isActive ? 'badge-green' : 'badge-red'}">${isActive ? 'ACTIVE' : 'ARCHIVED'}</span>
                       </div>
                       <div class="entity-card-details">
@@ -6020,6 +5984,13 @@
             <input type="text" class="form-input" id="newCatName" placeholder="e.g. Audio Equipment" required>
           </div>
           <div class="form-group">
+            <label class="form-label">Category Color</label>
+            <div style="display: flex; gap: 10px; align-items: center;">
+              <input type="color" id="newCatColor" value="#6366f1" style="width: 44px; height: 38px; border: none; border-radius: 6px; cursor: pointer; background: transparent;">
+              <span style="font-size: 13px; color: var(--text-secondary);">Used for POS category quick-selection pills</span>
+            </div>
+          </div>
+          <div class="form-group">
             <label class="form-label">Description</label>
             <textarea class="form-textarea" id="newCatDesc" rows="3" placeholder="Category notes or details..."></textarea>
           </div>
@@ -6034,12 +6005,13 @@
     async function submitCreateCategory() {
       const name = document.getElementById('newCatName').value.trim();
       const description = document.getElementById('newCatDesc').value.trim() || null;
+      const color = document.getElementById('newCatColor')?.value || '#6366f1';
       if (!name) return showToast('Category Name is required', 'error');
 
       try {
         await apiFetch('/v1/categories', {
           method: 'POST',
-          body: JSON.stringify({ name, description })
+          body: JSON.stringify({ name, description, color })
         });
         showToast(`Category "${name}" created`, 'success');
         closeModal();
@@ -6062,6 +6034,13 @@
             <input type="text" class="form-input" id="editCatName" value="${escapeHtml(c.name)}" required>
           </div>
           <div class="form-group">
+            <label class="form-label">Category Color</label>
+            <div style="display: flex; gap: 10px; align-items: center;">
+              <input type="color" id="editCatColor" value="${escapeHtml(c.color || '#6366f1')}" style="width: 44px; height: 38px; border: none; border-radius: 6px; cursor: pointer; background: transparent;">
+              <span style="font-size: 13px; color: var(--text-secondary);">Used for POS category quick-selection pills</span>
+            </div>
+          </div>
+          <div class="form-group">
             <label class="form-label">Description</label>
             <textarea class="form-textarea" id="editCatDesc" rows="3">${escapeHtml(c.description || '')}</textarea>
           </div>
@@ -6076,6 +6055,7 @@
     async function submitEditCategory(categoryId) {
       const name = document.getElementById('editCatName').value.trim();
       const description = document.getElementById('editCatDesc').value.trim() || null;
+      const color = document.getElementById('editCatColor')?.value || '#6366f1';
       if (!name) return showToast('Category Name is required', 'error');
 
       const submitBtn = document.getElementById('btnSubmitEditCategory');
@@ -6087,7 +6067,7 @@
       try {
         await apiFetch(`/v1/categories/${categoryId}`, {
           method: 'PATCH',
-          body: JSON.stringify({ name, description })
+          body: JSON.stringify({ name, description, color })
         });
 
         showToast(`Category "${name}" updated successfully`, 'success');
@@ -6547,16 +6527,19 @@
     }
 
     async function openRecordStockMovementModal() {
-      const prodsRes = await apiFetch('/v1/products?limit=100').catch(() => ({ data: [] }));
-      const products = prodsRes.data || [];
+      const cachedProds = window._productsCache || [];
+      const hasCached = cachedProds.length > 0;
 
       openModal({
         title: 'Post Inventory Stock Movement',
         bodyHtml: `
           <div class="form-group">
             <label class="form-label">Product *</label>
-            <select class="form-select" id="moveProdId">
-              ${products.map(p => `<option value="${p.id}">${escapeHtml(p.sku)} — ${escapeHtml(p.name)} (${formatTenantMoney(p.purchaseCost)})</option>`).join('')}
+            <select class="form-select" id="moveProdId" ${hasCached ? '' : 'disabled'}>
+              ${hasCached 
+                ? cachedProds.map(p => `<option value="${p.id}">${escapeHtml(p.sku)} — ${escapeHtml(p.name)} (${formatTenantMoney(p.purchaseCost)})</option>`).join('')
+                : '<option value="">Loading products catalog...</option>'
+              }
             </select>
           </div>
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
@@ -6571,7 +6554,7 @@
             </div>
             <div class="form-group">
               <label class="form-label">Quantity *</label>
-              <input type="number" step="1" class="form-input" id="moveQty" value="10" required>
+              <input type="number" step="any" min="0.0001" class="form-input" id="moveQty" value="10" required>
             </div>
           </div>
           <div class="form-group">
@@ -6585,9 +6568,30 @@
         `,
         footerHtml: `
           <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-          <button id="btnSubmitStockMovement" class="btn btn-primary" onclick="submitStockMovement()">Post to Ledger</button>
+          <button id="btnSubmitStockMovement" class="btn btn-primary" onclick="submitStockMovement()" ${hasCached ? '' : 'disabled'}>Post to Ledger</button>
         `
       });
+
+      if (!hasCached) {
+        try {
+          const prodsRes = await apiFetch('/v1/products?limit=200').catch(() => ({ data: [] }));
+          const products = prodsRes.data || [];
+          window._productsCache = products;
+          const select = document.getElementById('moveProdId');
+          const submitBtn = document.getElementById('btnSubmitStockMovement');
+          if (select) {
+            select.innerHTML = products.length 
+              ? products.map(p => `<option value="${p.id}">${escapeHtml(p.sku)} — ${escapeHtml(p.name)} (${formatTenantMoney(p.purchaseCost)})</option>`).join('')
+              : '<option value="">No products found</option>';
+            select.disabled = false;
+          }
+          if (submitBtn && products.length > 0) {
+            submitBtn.disabled = false;
+          }
+        } catch (e) {
+          console.error('Failed to load products for stock movement:', e);
+        }
+      }
     }
 
     async function submitStockMovement() {
@@ -6848,12 +6852,15 @@
           ? apiFetch(`/v1/pos/products/search?warehouseId=${encodeURIComponent(state.warehouseId)}&limit=100`, { silent: true }).catch(() => [])
           : Promise.resolve([]);
 
-        const [shiftRes, productsRes] = await Promise.all([
+        const [shiftRes, productsRes, catRes] = await Promise.all([
           shiftPromise,
-          productsPromise
+          productsPromise,
+          apiFetch('/v1/categories', { silent: true }).catch(() => ({ data: [] }))
         ]);
 
         let activeShift = shiftRes;
+        const categories = Array.isArray(catRes) ? catRes : (catRes?.data || []);
+        state.cachedCategories = categories;
 
         // Fallback: If current register has no open shift, check if cashier has active shift on another register
         if (!activeShift && !shiftStatusError) {
@@ -6886,13 +6893,21 @@
           }
         }
 
+        const selectedCatId = state.posSelectedCategoryId || null;
+        const visibleProducts = selectedCatId
+          ? products.filter(p => p.categoryId === selectedCatId)
+          : products;
+
         if (!isCurrentViewRender('pos-checkout', renderSeq) || !container) return;
 
         container.innerHTML = `
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 12px;">
             <div>
               <h1 class="view-title">Point of Sale (POS)</h1>
-              <div class="view-subtitle">${escapeHtml(state.branchName || 'Main Store')} &bull; Register ${escapeHtml(state.registerCode || 'POS-01')}</div>
+              <div class="view-subtitle" style="display: flex; align-items: center; gap: 8px;">
+                <span>${escapeHtml(state.branchName || 'Main Store')} &bull; Register ${escapeHtml(state.registerCode || 'POS-01')}</span>
+                <button class="btn btn-secondary btn-sm" onclick="openSwitchRegisterModal()" style="font-size: 11px; padding: 2px 8px;">Change</button>
+              </div>
             </div>
             <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
               ${state.shiftStatusError ? `
@@ -6904,7 +6919,7 @@
                   ${hasAnyPermission(['org:branch:manage', 'iam:member:manage']) ? `
                     <button class="btn btn-secondary btn-sm" onclick="openCloseShiftModal('${state.activeShift.id}')">Manager: Close Shift</button>
                   ` : `
-                    <button class="btn btn-secondary btn-sm" onclick="renderView('pos-shifts')">Switch Register</button>
+                    <button class="btn btn-secondary btn-sm" onclick="openSwitchRegisterModal()">Switch Register</button>
                   `}
                 ` : `
                   <div class="badge-pill badge-green">● Shift Open (Opened: ${formatTenantMoney(state.activeShift.openingCashFloat)})</div>
@@ -6944,6 +6959,27 @@
                 </button>
               </div>
 
+              <!-- Category Quick-Selection Pills (F1) -->
+              ${categories.length > 0 ? `
+                <div class="pos-category-pills" style="display: flex; gap: 8px; overflow-x: auto; padding: 4px 0 10px 0; margin-bottom: 6px;">
+                  <button class="btn btn-sm" onclick="filterPosCategory(null)" style="border-radius: 20px; font-weight: 600; white-space: nowrap; ${!selectedCatId ? 'background: var(--accent-primary); color: #fff;' : 'background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-subtle);'}">
+                    All Items (${products.length})
+                  </button>
+                  ${categories.map(cat => {
+                    const isSel = selectedCatId === cat.id;
+                    const catColor = cat.color || '#6366f1';
+                    const count = products.filter(p => p.categoryId === cat.id).length;
+                    return `
+                      <button class="btn btn-sm" onclick="filterPosCategory('${cat.id}')" style="border-radius: 20px; font-weight: 600; white-space: nowrap; display: flex; align-items: center; gap: 6px; ${isSel ? `background: ${escapeHtml(catColor)}; color: #fff;` : 'background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-subtle);'}">
+                        <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: ${isSel ? '#fff' : escapeHtml(catColor)};"></span>
+                        <span>${escapeHtml(cat.name)}</span>
+                        <span style="opacity: 0.7; font-size: 11px;">(${count})</span>
+                      </button>
+                    `;
+                  }).join('')}
+                </div>
+              ` : ''}
+
               ${!state.warehouseId ? `
                 <div class="card" style="text-align: center; padding: 36px 16px; color: var(--text-secondary);">
                   <div style="font-weight: 600; color: var(--text-primary); margin-bottom: 6px;">Warehouse Location Connecting</div>
@@ -6951,11 +6987,11 @@
                 </div>
               ` : `
                 <div class="pos-product-grid" id="posProductGrid">
-                  ${products.length === 0 ? `
+                  ${visibleProducts.length === 0 ? `
                     <div style="grid-column: 1 / -1; text-align: center; padding: 40px 16px; color: var(--text-secondary);">
-                      No active products found in this branch's catalog. Add products in the Inventory menu to begin sales.
+                      ${selectedCatId ? 'No products in this category.' : 'No active products found in this branch catalog. Add products in the Inventory menu to begin sales.'}
                     </div>
-                  ` : products.map(p => {
+                  ` : visibleProducts.map(p => {
                     const price = p.retailPrice || p.sellingPrice || '0.0000';
                     const resolvedImg = p.imageUrl ? resolveMediaUrl(p.imageUrl) : null;
                     const imgUrl = resolvedImg ? escapeHtml(resolvedImg) : null;
@@ -7035,7 +7071,7 @@
                   <div style="margin-top: 14px; padding: 10px; background: rgba(245, 158, 11, 0.1); border: 1px solid var(--status-warning); border-radius: 6px; font-size: 12px; color: var(--status-warning); text-align: center;">
                     ⚠️ Register is currently in use by another cashier. Checkout is locked to prevent drawer collisions.
                   </div>
-                  <button class="btn btn-secondary" style="width: 100%; margin-top: 8px; justify-content: center;" onclick="renderView('pos-shifts')">Switch to Your Register</button>
+                  <button class="btn btn-secondary" style="width: 100%; margin-top: 8px; justify-content: center;" onclick="openSwitchRegisterModal()">Switch to Your Register</button>
                 ` : `
                   <button id="posCheckoutBtn" class="btn btn-primary" style="width: 100%; margin-top: 14px; justify-content: center; font-size: 16px; padding: 12px;" onclick="openPaymentDrawer()" ${state.cart.length === 0 ? 'disabled' : ''}>
                     Checkout &amp; Pay (${formatTenantMoney(calculateCartGrandTotal())})
@@ -7063,6 +7099,11 @@
       } catch (err) {
         container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load POS: ${err.message}</div>`;
       }
+    }
+
+    function filterPosCategory(catId) {
+      state.posSelectedCategoryId = catId || null;
+      renderPosCheckoutView();
     }
 
     async function executeBarcodeScan(barcodeOrSku) {
@@ -8292,18 +8333,27 @@
       renderPosCartPanel();
     }
 
+    function isDecimalUom(uomCode) {
+      if (!uomCode) return false;
+      const code = String(uomCode).trim().toUpperCase();
+      return ['KG', 'L', 'M', 'G', 'ML', 'MTR', 'LITRE', 'KILOGRAM'].includes(code);
+    }
+
     function updateCartQty(index, delta) {
       const item = state.cart[index];
       if (!item) return;
 
+      const isDec = isDecimalUom(item.uomCode);
+      const step = isDec ? delta : delta;
+
       if (delta > 0 && item.trackInventory) {
-        if (item.qty + delta > item.availableQuantity) {
-          showToast(`Cannot increase quantity: Only ${item.availableQuantity} available in stock for "${item.name}"`, 'warning');
+        if (item.qty + step > item.availableQuantity) {
+          showToast(`Cannot increase quantity: Only ${item.availableQuantity} ${escapeHtml(item.uomCode)} available in stock for "${item.name}"`, 'warning');
           return;
         }
       }
 
-      item.qty += delta;
+      item.qty = isDec ? Math.round((item.qty + step) * 1000) / 1000 : item.qty + step;
       if (item.qty <= 0) {
         state.cart.splice(index, 1);
       }
@@ -8314,12 +8364,13 @@
     function setCartQty(index, rawVal) {
       const item = state.cart[index];
       if (!item) return;
-      let val = parseInt(rawVal, 10);
-      if (isNaN(val) || val < 1) val = 1;
+      const isDec = isDecimalUom(item.uomCode);
+      let val = isDec ? parseFloat(rawVal) : parseInt(rawVal, 10);
+      if (isNaN(val) || val <= 0) val = isDec ? 0.1 : 1;
 
       if (item.trackInventory && val > item.availableQuantity) {
-        showToast(`Quantity exceeds available stock (${item.availableQuantity} PCS). Adjusted to maximum available.`, 'warning');
-        val = Math.max(1, Math.floor(item.availableQuantity));
+        showToast(`Quantity exceeds available stock (${item.availableQuantity} ${escapeHtml(item.uomCode)}). Adjusted to maximum available.`, 'warning');
+        val = isDec ? item.availableQuantity : Math.max(1, Math.floor(item.availableQuantity));
       }
 
       item.qty = val;
@@ -8358,7 +8409,9 @@
             <div class="empty-state-title">Cart is empty</div>
             <div style="font-size: 13px;">Scan a barcode or tap products from the catalog to add items.</div>
           </div>
-        ` : state.cart.map((line, idx) => `
+        ` : state.cart.map((line, idx) => {
+          const isDec = isDecimalUom(line.uomCode);
+          return `
           <div class="cart-line">
             <div class="cart-line-info">
               <div class="cart-line-name">${escapeHtml(line.name)}</div>
@@ -8366,14 +8419,14 @@
             </div>
             <div class="cart-line-controls">
               <button class="qty-btn" onclick="updateCartQty(${idx}, -1)">-</button>
-              <input type="number" min="1" max="${line.trackInventory ? Math.max(1, Math.floor(line.availableQuantity)) : 9999}" value="${line.qty}" style="width: 44px; text-align: center; border: 1px solid var(--border-subtle); border-radius: 4px; padding: 2px 4px; font-weight: 600; font-size: 13px; background: var(--bg-primary); color: var(--text-primary);" onchange="setCartQty(${idx}, this.value)" />
+              <input type="number" step="${isDec ? 'any' : '1'}" min="${isDec ? '0.001' : '1'}" max="${line.trackInventory ? line.availableQuantity : 9999}" value="${isDec ? line.qty : line.qty}" style="width: 50px; text-align: center; border: 1px solid var(--border-subtle); border-radius: 4px; padding: 2px 4px; font-weight: 600; font-size: 13px; background: var(--bg-primary); color: var(--text-primary);" onchange="setCartQty(${idx}, this.value)" />
               <button class="qty-btn" onclick="updateCartQty(${idx}, 1)">+</button>
             </div>
             <div style="min-width: 65px; text-align: right; font-weight: 700; color: var(--text-primary); margin-left: 12px;">
               ${formatTenantMoney(line.qty * (parseFloat(line.unitPrice) || 0))}
             </div>
           </div>
-        `).join('');
+        `;}).join('');
       }
 
       const subEl = document.getElementById('cartSubtotalText');
@@ -8477,11 +8530,13 @@
             <select class="form-select" id="payMethod" onchange="togglePaymentInputs()">
               <option value="CASH">Cash Payment</option>
               <option value="CARD">Credit / Debit Card</option>
-              <option value="CREDIT">Customer Credit Account (On Account)</option>
-              <option value="SPLIT">Split Payment (Cash + Card)</option>
+              <option value="CREDIT">Customer Credit Account (Full)</option>
+              <option value="SPLIT_CASH_CARD">Split Tender: Cash + Card</option>
+              <option value="SPLIT_CASH_CREDIT">Split Tender: Cash + Customer Credit</option>
             </select>
           </div>
 
+          <!-- Single Tender Cash -->
           <div id="cashPaymentFields">
             <div class="form-group">
               <label class="form-label">Tendered Cash (${escapeHtml(getTenantCurrency())})</label>
@@ -8493,6 +8548,7 @@
             </div>
           </div>
 
+          <!-- Single Tender Card -->
           <div id="cardPaymentFields" style="display: none; margin-top: 12px;">
             <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 12px;">
               <div class="form-group">
@@ -8506,10 +8562,70 @@
             </div>
           </div>
 
+          <!-- Single Tender Credit -->
           <div id="creditPaymentFields" style="display: none; margin-top: 12px; padding: 14px; background: var(--bg-primary); border-radius: var(--radius); border: 1px solid var(--border-subtle);">
             <div style="font-weight: 700; font-size: 13px; margin-bottom: 6px; color: var(--text-primary);">Customer Credit Verification</div>
             <div id="creditAccountStatusDetails" style="font-size: 12px; color: var(--text-secondary); line-height: 1.4;">
               Please select a registered customer with an active credit account to bill this sale on credit.
+            </div>
+          </div>
+
+          <!-- Multi-Tender Split: Cash + Card (D3) -->
+          <div id="splitCashCardFields" style="display: none; margin-top: 12px; padding: 14px; background: var(--bg-primary); border-radius: var(--radius); border: 1px solid var(--border-subtle);">
+            <div style="font-weight: 700; font-size: 13px; margin-bottom: 12px; color: var(--text-primary);">Split Allocation: Cash + Card</div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+              <div class="form-group" style="margin-bottom: 0;">
+                <label class="form-label">Cash Portion (${escapeHtml(getTenantCurrency())})</label>
+                <input type="number" step="${getCurrencyInputStep()}" min="0" max="${grandTotal.toFixed(decimals)}" class="form-input" id="splitCardCashAmount" value="${(grandTotal / 2).toFixed(decimals)}" oninput="syncSplitCardPortions('CASH')">
+              </div>
+              <div class="form-group" style="margin-bottom: 0;">
+                <label class="form-label">Card Portion (${escapeHtml(getTenantCurrency())})</label>
+                <input type="number" step="${getCurrencyInputStep()}" min="0" max="${grandTotal.toFixed(decimals)}" class="form-input" id="splitCardCardAmount" value="${(grandTotal - (grandTotal / 2)).toFixed(decimals)}" oninput="syncSplitCardPortions('CARD')">
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Cash Tendered (${escapeHtml(getTenantCurrency())})</label>
+              <input type="number" step="${getCurrencyInputStep()}" class="form-input" id="splitCardCashTendered" value="${(grandTotal / 2).toFixed(decimals)}" oninput="calcSplitCashChange()">
+            </div>
+            <div style="display: flex; justify-content: space-between; padding: 8px 12px; background: var(--bg-surface); border-radius: var(--radius); font-size: 13px; font-weight: 600; margin-bottom: 12px;">
+              <span>Cash Change Due:</span>
+              <strong id="splitCardChangeDueText" style="color: var(--status-success);">${formatTenantMoney(0)}</strong>
+            </div>
+            <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 12px;">
+              <div class="form-group" style="margin-bottom: 0;">
+                <label class="form-label">Card Auth Ref</label>
+                <input type="text" class="form-input" id="splitCardAuth" value="AUTH-${Math.floor(100000 + Math.random() * 900000)}">
+              </div>
+              <div class="form-group" style="margin-bottom: 0;">
+                <label class="form-label">Last 4 Digits</label>
+                <input type="text" class="form-input" id="splitCardDigits" maxlength="4" value="4242">
+              </div>
+            </div>
+          </div>
+
+          <!-- Multi-Tender Split: Cash + Credit (D3) -->
+          <div id="splitCashCreditFields" style="display: none; margin-top: 12px; padding: 14px; background: var(--bg-primary); border-radius: var(--radius); border: 1px solid var(--border-subtle);">
+            <div style="font-weight: 700; font-size: 13px; margin-bottom: 6px; color: var(--text-primary);">Split Allocation: Cash + Customer Credit</div>
+            <div id="splitCreditStatusNotice" style="font-size: 12px; color: var(--text-secondary); margin-bottom: 12px;">
+              Select a customer profile above to unlock partial credit charging.
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+              <div class="form-group" style="margin-bottom: 0;">
+                <label class="form-label">Credit Portion (${escapeHtml(getTenantCurrency())})</label>
+                <input type="number" step="${getCurrencyInputStep()}" min="0" max="${grandTotal.toFixed(decimals)}" class="form-input" id="splitCreditAmount" value="${(grandTotal / 2).toFixed(decimals)}" oninput="syncSplitCreditPortions('CREDIT')">
+              </div>
+              <div class="form-group" style="margin-bottom: 0;">
+                <label class="form-label">Cash Portion (${escapeHtml(getTenantCurrency())})</label>
+                <input type="number" step="${getCurrencyInputStep()}" min="0" max="${grandTotal.toFixed(decimals)}" class="form-input" id="splitCreditCashAmount" value="${(grandTotal - (grandTotal / 2)).toFixed(decimals)}" oninput="syncSplitCreditPortions('CASH')">
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Cash Tendered (${escapeHtml(getTenantCurrency())})</label>
+              <input type="number" step="${getCurrencyInputStep()}" class="form-input" id="splitCreditCashTendered" value="${(grandTotal - (grandTotal / 2)).toFixed(decimals)}" oninput="calcSplitCreditCashChange()">
+            </div>
+            <div style="display: flex; justify-content: space-between; padding: 8px 12px; background: var(--bg-surface); border-radius: var(--radius); font-size: 13px; font-weight: 600;">
+              <span>Cash Change Due:</span>
+              <strong id="splitCreditChangeDueText" style="color: var(--status-success);">${formatTenantMoney(0)}</strong>
             </div>
           </div>
 
@@ -8529,16 +8645,72 @@
       }
     }
 
+    function syncSplitCardPortions(source) {
+      const grandTotal = calculateCartGrandTotal();
+      const decimals = getCurrencyMinorUnits();
+      const cashEl = document.getElementById('splitCardCashAmount');
+      const cardEl = document.getElementById('splitCardCardAmount');
+      if (!cashEl || !cardEl) return;
+
+      if (source === 'CASH') {
+        const cashVal = parseFloat(cashEl.value || '0');
+        const cardVal = Math.max(0, grandTotal - cashVal);
+        cardEl.value = cardVal.toFixed(decimals);
+      } else {
+        const cardVal = parseFloat(cardEl.value || '0');
+        const cashVal = Math.max(0, grandTotal - cardVal);
+        cashEl.value = cashVal.toFixed(decimals);
+      }
+      calcSplitCashChange();
+    }
+
+    function calcSplitCashChange() {
+      const cashPortion = parseFloat(document.getElementById('splitCardCashAmount')?.value || '0');
+      const tendered = parseFloat(document.getElementById('splitCardCashTendered')?.value || '0');
+      const change = Math.max(0, tendered - cashPortion);
+      const textEl = document.getElementById('splitCardChangeDueText');
+      if (textEl) textEl.innerText = formatTenantMoney(change);
+    }
+
+    function syncSplitCreditPortions(source) {
+      const grandTotal = calculateCartGrandTotal();
+      const decimals = getCurrencyMinorUnits();
+      const creditEl = document.getElementById('splitCreditAmount');
+      const cashEl = document.getElementById('splitCreditCashAmount');
+      if (!creditEl || !cashEl) return;
+
+      if (source === 'CREDIT') {
+        const creditVal = parseFloat(creditEl.value || '0');
+        const cashVal = Math.max(0, grandTotal - creditVal);
+        cashEl.value = cashVal.toFixed(decimals);
+      } else {
+        const cashVal = parseFloat(cashEl.value || '0');
+        const creditVal = Math.max(0, grandTotal - cashVal);
+        creditEl.value = creditVal.toFixed(decimals);
+      }
+      calcSplitCreditCashChange();
+    }
+
+    function calcSplitCreditCashChange() {
+      const cashPortion = parseFloat(document.getElementById('splitCreditCashAmount')?.value || '0');
+      const tendered = parseFloat(document.getElementById('splitCreditCashTendered')?.value || '0');
+      const change = Math.max(0, tendered - cashPortion);
+      const textEl = document.getElementById('splitCreditChangeDueText');
+      if (textEl) textEl.innerText = formatTenantMoney(change);
+    }
+
     async function onSelectCheckoutCustomer(customerId) {
       state.selectedCheckoutCustomerId = customerId || null;
       state.selectedCustomerCreditAccount = null;
       const badge = document.getElementById('payCustomerCreditBadge');
       const details = document.getElementById('creditAccountStatusDetails');
+      const splitNotice = document.getElementById('splitCreditStatusNotice');
       const nameInput = document.getElementById('payCustomerName');
 
       if (!customerId) {
         if (badge) badge.innerHTML = '';
         if (details) details.innerHTML = 'Please select a registered customer with an active credit account to bill on credit.';
+        if (splitNotice) splitNotice.innerHTML = 'Select a customer profile above to unlock partial credit charging.';
         return;
       }
 
@@ -8557,6 +8729,7 @@
         if (!account) {
           if (badge) badge.innerHTML = '<span style="color: var(--status-warning);">⚠️ No Credit Account found for this customer</span>';
           if (details) details.innerHTML = '<div style="color: var(--status-warning);">This customer does not have a credit account. Sales cannot be charged on credit.</div>';
+          if (splitNotice) splitNotice.innerHTML = '<span style="color: var(--status-warning);">⚠️ Customer has no active credit account.</span>';
           return;
         }
 
@@ -8586,6 +8759,10 @@
             </div>
           `;
         }
+
+        if (splitNotice) {
+          splitNotice.innerHTML = `Available Credit: <strong style="color: ${parseFloat(account.availableCredit) > 0 ? 'var(--status-success)' : 'var(--status-danger)'};">${availStr}</strong> (Limit: ${limitStr})`;
+        }
       } catch (err) {
         if (badge) badge.innerHTML = '<span style="color: var(--status-danger);">Failed to verify credit account</span>';
         if (details) details.innerHTML = `<span style="color: var(--status-danger);">${escapeHtml(err.message)}</span>`;
@@ -8597,10 +8774,14 @@
       const cashDiv = document.getElementById('cashPaymentFields');
       const cardDiv = document.getElementById('cardPaymentFields');
       const creditDiv = document.getElementById('creditPaymentFields');
+      const splitCardDiv = document.getElementById('splitCashCardFields');
+      const splitCreditDiv = document.getElementById('splitCashCreditFields');
 
       if (cashDiv) cashDiv.style.display = 'none';
       if (cardDiv) cardDiv.style.display = 'none';
       if (creditDiv) creditDiv.style.display = 'none';
+      if (splitCardDiv) splitCardDiv.style.display = 'none';
+      if (splitCreditDiv) splitCreditDiv.style.display = 'none';
 
       if (method === 'CASH') {
         if (cashDiv) cashDiv.style.display = 'block';
@@ -8608,9 +8789,14 @@
         if (cardDiv) cardDiv.style.display = 'block';
       } else if (method === 'CREDIT') {
         if (creditDiv) creditDiv.style.display = 'block';
+      } else if (method === 'SPLIT_CASH_CARD') {
+        if (splitCardDiv) splitCardDiv.style.display = 'block';
+        syncSplitCardPortions('CASH');
+      } else if (method === 'SPLIT_CASH_CREDIT') {
+        if (splitCreditDiv) splitCreditDiv.style.display = 'block';
+        syncSplitCreditPortions('CREDIT');
       } else {
         if (cashDiv) cashDiv.style.display = 'block';
-        if (cardDiv) cardDiv.style.display = 'block';
       }
       calculateChangeDue();
     }
@@ -8630,7 +8816,7 @@
         return;
       }
 
-      // BUG-020: Guard against stock oversubscription before sending request
+      // Guard against stock oversubscription
       for (const item of state.cart) {
         if (item.trackInventory && item.qty > (item.availableQuantity || 0)) {
           showToast(`Checkout blocked: "${item.name}" quantity (${item.qty}) exceeds available stock (${item.availableQuantity || 0})`, 'error');
@@ -8641,7 +8827,7 @@
       const grandTotal = calculateCartGrandTotal();
       const method = document.getElementById('payMethod')?.value || 'CASH';
 
-      // BUG-027: Validate cash tendered is not less than grand total
+      // Validate cash tendered if single CASH
       if (method === 'CASH') {
         const tenderedVal = parseFloat(document.getElementById('payCashTendered')?.value || '0');
         if (isNaN(tenderedVal) || tenderedVal < grandTotal) {
@@ -8717,8 +8903,107 @@
           amount: grandTotal.toFixed(4),
           tenderedAmount: grandTotal.toFixed(4)
         });
+      } else if (method === 'SPLIT_CASH_CARD') {
+        const cashAmt = parseFloat(document.getElementById('splitCardCashAmount')?.value || '0');
+        const cardAmt = parseFloat(document.getElementById('splitCardCardAmount')?.value || '0');
+        const tenderedCash = parseFloat(document.getElementById('splitCardCashTendered')?.value || cashAmt.toString());
+
+        if (Math.abs((cashAmt + cardAmt) - grandTotal) > 0.01) {
+          showToast(`Split total (${formatTenantMoney(cashAmt + cardAmt)}) must equal amount due (${formatTenantMoney(grandTotal)})`, 'error');
+          state.isSubmittingCheckout = false;
+          if (submitBtn) { submitBtn.disabled = false; submitBtn.innerText = `Process Payment (${formatTenantMoney(grandTotal)})`; }
+          if (cancelBtn) cancelBtn.disabled = false;
+          return;
+        }
+
+        if (tenderedCash < cashAmt) {
+          showToast(`Tendered cash (${formatTenantMoney(tenderedCash)}) cannot be less than cash portion (${formatTenantMoney(cashAmt)})`, 'warning');
+          state.isSubmittingCheckout = false;
+          if (submitBtn) { submitBtn.disabled = false; submitBtn.innerText = `Process Payment (${formatTenantMoney(grandTotal)})`; }
+          if (cancelBtn) cancelBtn.disabled = false;
+          return;
+        }
+
+        const auth = document.getElementById('splitCardAuth')?.value.trim() || 'SPLIT-AUTH';
+        const last4 = document.getElementById('splitCardDigits')?.value.trim() || '4242';
+
+        if (cashAmt > 0) {
+          payments.push({
+            paymentMethod: 'CASH',
+            amount: cashAmt.toFixed(4),
+            tenderedAmount: tenderedCash.toFixed(4)
+          });
+        }
+        if (cardAmt > 0) {
+          payments.push({
+            paymentMethod: 'CARD',
+            amount: cardAmt.toFixed(4),
+            tenderedAmount: cardAmt.toFixed(4),
+            cardReference: auth,
+            cardLastFour: last4
+          });
+        }
+      } else if (method === 'SPLIT_CASH_CREDIT') {
+        if (!state.selectedCheckoutCustomerId) {
+          showToast('Customer selection required: Please select a customer with an active credit account', 'error');
+          state.isSubmittingCheckout = false;
+          if (submitBtn) { submitBtn.disabled = false; submitBtn.innerText = `Process Payment (${formatTenantMoney(grandTotal)})`; }
+          if (cancelBtn) cancelBtn.disabled = false;
+          return;
+        }
+        if (!state.selectedCustomerCreditAccount || state.selectedCustomerCreditAccount.status !== 'ACTIVE') {
+          showToast('Credit account inactive: Selected customer does not have an active credit account', 'error');
+          state.isSubmittingCheckout = false;
+          if (submitBtn) { submitBtn.disabled = false; submitBtn.innerText = `Process Payment (${formatTenantMoney(grandTotal)})`; }
+          if (cancelBtn) cancelBtn.disabled = false;
+          return;
+        }
+
+        const creditAmt = parseFloat(document.getElementById('splitCreditAmount')?.value || '0');
+        const cashAmt = parseFloat(document.getElementById('splitCreditCashAmount')?.value || '0');
+        const tenderedCash = parseFloat(document.getElementById('splitCreditCashTendered')?.value || cashAmt.toString());
+
+        if (Math.abs((creditAmt + cashAmt) - grandTotal) > 0.01) {
+          showToast(`Split total (${formatTenantMoney(creditAmt + cashAmt)}) must equal amount due (${formatTenantMoney(grandTotal)})`, 'error');
+          state.isSubmittingCheckout = false;
+          if (submitBtn) { submitBtn.disabled = false; submitBtn.innerText = `Process Payment (${formatTenantMoney(grandTotal)})`; }
+          if (cancelBtn) cancelBtn.disabled = false;
+          return;
+        }
+
+        const avail = parseFloat(state.selectedCustomerCreditAccount.availableCredit || '0');
+        if (creditAmt > avail) {
+          showToast(`Credit limit exceeded: Credit portion (${formatTenantMoney(creditAmt, 'LKR')}) exceeds available credit (${formatTenantMoney(avail, 'LKR')})`, 'error');
+          state.isSubmittingCheckout = false;
+          if (submitBtn) { submitBtn.disabled = false; submitBtn.innerText = `Process Payment (${formatTenantMoney(grandTotal)})`; }
+          if (cancelBtn) cancelBtn.disabled = false;
+          return;
+        }
+
+        if (tenderedCash < cashAmt) {
+          showToast(`Tendered cash (${formatTenantMoney(tenderedCash)}) cannot be less than cash portion (${formatTenantMoney(cashAmt)})`, 'warning');
+          state.isSubmittingCheckout = false;
+          if (submitBtn) { submitBtn.disabled = false; submitBtn.innerText = `Process Payment (${formatTenantMoney(grandTotal)})`; }
+          if (cancelBtn) cancelBtn.disabled = false;
+          return;
+        }
+
+        if (cashAmt > 0) {
+          payments.push({
+            paymentMethod: 'CASH',
+            amount: cashAmt.toFixed(4),
+            tenderedAmount: tenderedCash.toFixed(4)
+          });
+        }
+        if (creditAmt > 0) {
+          payments.push({
+            paymentMethod: 'CREDIT',
+            amount: creditAmt.toFixed(4),
+            tenderedAmount: creditAmt.toFixed(4)
+          });
+        }
       } else {
-        // Split 50/50
+        // Fallback split 50/50
         const half = (grandTotal / 2).toFixed(4);
         const secondHalf = (grandTotal - parseFloat(half)).toFixed(4);
         payments.push({
@@ -9088,6 +9373,12 @@
               <h1 class="view-title">Point of Sale Registers</h1>
               <div class="view-subtitle">Manage physical checkouts, assigned warehouses and hardware terminals</div>
             </div>
+            ${(hasPermission('pos:register:create') || state.user?.role === 'OWNER' || state.user?.role === 'ADMIN') ? `
+              <button class="btn btn-primary" onclick="openCreateRegisterModal()">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                + Add Register
+              </button>
+            ` : ''}
           </div>
 
           <div class="card">
@@ -9095,7 +9386,10 @@
               <div class="empty-state-card">
                 <svg class="empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
                 <div class="empty-state-title">No POS Registers</div>
-                <p class="empty-state-desc">No POS registers found for this branch. Contact administrator to configure registers.</p>
+                <p class="empty-state-desc">No POS registers found for this branch. Create your first checkout terminal to begin sales.</p>
+                ${(hasPermission('pos:register:create') || state.user?.role === 'OWNER' || state.user?.role === 'ADMIN') ? `
+                  <button class="btn btn-primary" onclick="openCreateRegisterModal()">+ Add Register</button>
+                ` : ''}
               </div>
             ` : `
               <div class="desktop-table-container">
@@ -9245,6 +9539,113 @@
       }
     }
 
+    function openCreateRegisterModal() {
+      openModal({
+        title: 'Add New POS Register Terminal',
+        bodyHtml: `
+          <div class="form-group">
+            <label class="form-label">Register Code *</label>
+            <input type="text" class="form-input" id="newRegCode" placeholder="e.g. REG-02" required style="text-transform: uppercase;">
+            <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">Unique identifier code for this checkout terminal (e.g. REG-01, POS-FRONT)</div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Terminal / Station Name *</label>
+            <input type="text" class="form-input" id="newRegName" placeholder="e.g. Counter 2 (Front Store)" required>
+          </div>
+        `,
+        footerHtml: `
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button id="btnSubmitCreateRegister" class="btn btn-primary" onclick="submitCreateRegister()">Create Register</button>
+        `
+      });
+    }
+
+    async function submitCreateRegister() {
+      const code = document.getElementById('newRegCode')?.value.trim().toUpperCase();
+      const name = document.getElementById('newRegName')?.value.trim();
+
+      if (!code) return showToast('Register Code is required', 'error');
+      if (!name) return showToast('Terminal Name is required', 'error');
+
+      const submitBtn = document.getElementById('btnSubmitCreateRegister');
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Creating...';
+      }
+
+      try {
+        await apiFetch('/v1/pos/registers', {
+          method: 'POST',
+          body: JSON.stringify({
+            branchId: state.branchId,
+            code,
+            name
+          })
+        });
+
+        showToast(`Register "${code}" created successfully`, 'success');
+        closeModal();
+        renderPosRegistersView();
+      } catch (err) {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Create Register';
+        }
+      }
+    }
+
+    async function openSwitchRegisterModal() {
+      try {
+        const regParam = state.branchId ? `?branchId=${encodeURIComponent(state.branchId)}` : '';
+        const res = await apiFetch(`/v1/pos/registers${regParam}`).catch(() => []);
+        const registers = Array.isArray(res) ? res : (res?.data || []);
+        state.cachedRegisters = registers;
+
+        openModal({
+          title: 'Select Active POS Checkout Register',
+          bodyHtml: `
+            <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 14px;">
+              Select the physical checkout terminal you are currently operating at:
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 8px;">
+              ${registers.map(r => {
+                const isSelected = r.id === state.registerId;
+                return `
+                  <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; border: 2px solid ${isSelected ? 'var(--accent-primary)' : 'var(--border-subtle)'}; border-radius: 8px; background: ${isSelected ? 'rgba(99, 102, 241, 0.05)' : 'var(--bg-primary)'}; cursor: pointer;" onclick="confirmSwitchRegister('${r.id}', '${escapeHtml(r.code)}')">
+                    <div>
+                      <div style="font-weight: 700; color: var(--text-primary); font-size: 15px;">
+                        ${escapeHtml(r.code)} — ${escapeHtml(r.name)}
+                      </div>
+                      <div style="font-size: 11px; color: var(--text-secondary); margin-top: 2px;">
+                        Status: <span class="badge-pill ${r.isActive ? 'badge-green' : 'badge-red'}">${r.isActive ? 'ACTIVE' : 'INACTIVE'}</span>
+                        ${r.lastInvoiceSeq ? ` &bull; Last Invoice: <code>${r.code}-${String(r.lastInvoiceSeq).padStart(6, '0')}</code>` : ''}
+                      </div>
+                    </div>
+                    <div>
+                      ${isSelected ? '<span class="badge-pill badge-blue">CURRENT REGISTER</span>' : '<button class="btn btn-secondary btn-sm">Select</button>'}
+                    </div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          `,
+          footerHtml: `
+            <button class="btn btn-secondary" onclick="closeModal()">Close</button>
+          `
+        });
+      } catch (err) {
+        showToast(`Failed to load registers: ${err.message}`, 'error');
+      }
+    }
+
+    function confirmSwitchRegister(id, code) {
+      state.registerId = id;
+      state.registerCode = code;
+      closeModal();
+      showToast(`Switched active register to ${code}`, 'success');
+      renderPosCheckoutView();
+    }
+
     function changePosShiftRegister(regId) {
       state.registerId = regId;
       const reg = (state.cachedRegisters || []).find(r => r.id === regId);
@@ -9286,6 +9687,13 @@
           } catch (e) {}
         }
         state.activeShift = activeShift;
+
+        // Fetch shift history (B5 & C3)
+        let shiftsHistory = [];
+        try {
+          const histRes = await apiFetch('/v1/pos/shifts?limit=20', { silent: true });
+          shiftsHistory = Array.isArray(histRes) ? histRes : (histRes?.data || []);
+        } catch (e) {}
 
         const isManagerOrAdmin = hasAnyPermission(['org:branch:manage', 'iam:member:manage']);
         const canOpenShift = hasPermission('pos:shift:open');
@@ -9335,7 +9743,7 @@
                 <div style="font-size: 22px; line-height: 1;">⚠️</div>
                 <div>
                   <div style="font-weight: 700; color: var(--status-warning); margin-bottom: 4px;">Register Currently In Use by Another Staff Member</div>
-                  <div style="font-size: 13px; color: var(--text-secondary); line-height: 1.5;">This shift was opened by another cashier. Real-time cash float balances and expected drawer counts are concealed to protect financial privacy and maintain shift drawer integrity.</div>
+                  <div style="font-size: 13px; color: var(--text-secondary); line-height: 1.5;">This shift was opened by <strong>${escapeHtml(activeShift.openedByUserName || 'another staff member')}</strong>. Real-time cash float balances and expected drawer counts are concealed to protect financial privacy and maintain shift drawer integrity.</div>
                 </div>
               </div>
             ` : ''}
@@ -9345,6 +9753,12 @@
                 <div style="padding: 12px; background: var(--bg-primary); border-radius: 8px; border: 1px solid var(--border-color);">
                   <div class="kpi-label">Shift Status</div>
                   <div style="font-weight: 700; color: var(--status-success); margin-top: 4px; font-size: 16px;">OPEN</div>
+                </div>
+                <div style="padding: 12px; background: var(--bg-primary); border-radius: 8px; border: 1px solid var(--border-color);">
+                  <div class="kpi-label">Cashier</div>
+                  <div style="font-weight: 700; color: var(--text-primary); margin-top: 4px; font-size: 15px;">
+                    ${escapeHtml(activeShift.openedByUserName || 'Staff')} ${activeShift.isOwnShift ? '(You)' : ''}
+                  </div>
                 </div>
                 <div style="padding: 12px; background: var(--bg-primary); border-radius: 8px; border: 1px solid var(--border-color);">
                   <div class="kpi-label">Opened At</div>
@@ -9403,6 +9817,108 @@
                 ` : `
                   <div style="font-size: 13px; color: var(--text-secondary);">Your current account permissions do not permit opening cash registers.</div>
                 `}
+              </div>
+            `}
+          </div>
+
+          <!-- Shift History Table (B5 & C3) -->
+          <div class="card" style="margin-top: 24px;">
+            <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
+              <span>Recent Cashier Shifts History</span>
+              <span class="badge-pill badge-blue">${shiftsHistory.length} Recorded Shifts</span>
+            </div>
+            ${shiftsHistory.length === 0 ? `
+              <div class="empty-state-card" style="padding: 24px; text-align: center;">
+                <div style="color: var(--text-secondary); font-size: 13px;">No previous closed shifts recorded for this organization.</div>
+              </div>
+            ` : `
+              <div class="desktop-table-container">
+                <div class="table-responsive">
+                  <table class="data-table">
+                    <thead>
+                      <tr>
+                        <th>Register</th>
+                        <th>Opened By</th>
+                        <th>Closed By</th>
+                        <th>Status</th>
+                        <th>Opened At</th>
+                        <th>Closed At</th>
+                        <th>Opening Float</th>
+                        <th>Counted Cash</th>
+                        <th>Variance</th>
+                        <th>Notes / Audit</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${shiftsHistory.map(sh => {
+                        const regCode = escapeHtml(sh.registerCode || 'REG');
+                        const opener = escapeHtml(sh.openedByUserName || 'Unknown');
+                        const closer = escapeHtml(sh.closedByUserName || (sh.status === 'OPEN' ? '—' : 'Auto'));
+                        const openedDate = sh.openedAt ? new Date(sh.openedAt).toLocaleString() : '—';
+                        const closedDate = sh.closedAt ? new Date(sh.closedAt).toLocaleString() : 'In Progress';
+                        const varianceNum = parseFloat(sh.cashVariance ?? 0);
+                        const varColor = varianceNum === 0 ? 'var(--status-success)' : varianceNum < 0 ? 'var(--status-danger)' : 'var(--accent-primary)';
+                        const statusBadge = sh.status === 'OPEN' ? '<span class="badge-pill badge-blue">OPEN</span>'
+                          : sh.status === 'FORCE_CLOSED' ? '<span class="badge-pill badge-yellow">FORCE CLOSED</span>'
+                          : '<span class="badge-pill badge-green">CLOSED</span>';
+
+                        return `
+                          <tr>
+                            <td><strong>${regCode}</strong></td>
+                            <td>${opener} ${sh.isOwnShift ? '<em>(You)</em>' : ''}</td>
+                            <td>${closer}</td>
+                            <td>${statusBadge}</td>
+                            <td><span style="font-size: 12px;">${openedDate}</span></td>
+                            <td><span style="font-size: 12px;">${closedDate}</span></td>
+                            <td>${formatTenantMoney(sh.openingCashFloat)}</td>
+                            <td>${sh.countedClosingCash != null ? formatTenantMoney(sh.countedClosingCash) : '—'}</td>
+                            <td><strong style="color: ${varColor};">${sh.cashVariance != null ? formatTenantMoney(varianceNum) : '—'}</strong></td>
+                            <td style="font-size: 12px; color: var(--text-secondary);">${escapeHtml(sh.notes || '—')}</td>
+                          </tr>
+                        `;
+                      }).join('')}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div class="mobile-cards-container">
+                ${shiftsHistory.map(sh => {
+                  const regCode = escapeHtml(sh.registerCode || 'REG');
+                  const opener = escapeHtml(sh.openedByUserName || 'Unknown');
+                  const statusBadge = sh.status === 'OPEN' ? '<span class="badge-pill badge-blue">OPEN</span>'
+                    : sh.status === 'FORCE_CLOSED' ? '<span class="badge-pill badge-yellow">FORCE CLOSED</span>'
+                    : '<span class="badge-pill badge-green">CLOSED</span>';
+                  const varianceNum = parseFloat(sh.cashVariance ?? 0);
+                  const varColor = varianceNum === 0 ? 'var(--status-success)' : varianceNum < 0 ? 'var(--status-danger)' : 'var(--accent-primary)';
+
+                  return `
+                    <div class="entity-card">
+                      <div class="entity-card-header">
+                        <span class="entity-card-code"><strong>${regCode}</strong> &bull; ${opener}</span>
+                        ${statusBadge}
+                      </div>
+                      <div class="entity-card-details">
+                        <div class="detail-row">
+                          <span class="detail-label">Opening Float</span>
+                          <span class="detail-value">${formatTenantMoney(sh.openingCashFloat)}</span>
+                        </div>
+                        <div class="detail-row">
+                          <span class="detail-label">Counted Cash</span>
+                          <span class="detail-value">${sh.countedClosingCash != null ? formatTenantMoney(sh.countedClosingCash) : '—'}</span>
+                        </div>
+                        <div class="detail-row">
+                          <span class="detail-label">Cash Variance</span>
+                          <span class="detail-value"><strong style="color: ${varColor};">${sh.cashVariance != null ? formatTenantMoney(varianceNum) : '—'}</strong></span>
+                        </div>
+                        <div class="detail-row">
+                          <span class="detail-label">Opened At</span>
+                          <span class="detail-value">${sh.openedAt ? new Date(sh.openedAt).toLocaleDateString() : '—'}</span>
+                        </div>
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
               </div>
             `}
           </div>
@@ -9526,11 +10042,15 @@
       const expectedFormatted = formatTenantMoney(expectedCash);
 
       openModal({
-        title: isOccupiedByOther ? 'Manager Override: Close Cashier Shift' : 'Close Cashier Shift &amp; Reconcile Cash',
+        title: isOccupiedByOther ? 'Manager Override: Force Close Shift' : 'Close Cashier Shift &amp; Reconcile Cash',
         bodyHtml: `
           ${isOccupiedByOther ? `
             <div style="background: rgba(245, 158, 11, 0.1); border: 1px solid var(--status-warning); padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; font-size: 13px;">
-              <strong>Manager Override Notice:</strong> You are closing a shift opened by another cashier. Drawer totals and variance will be calculated and audited by the server upon finalization.
+              <strong>Manager Override Notice:</strong> You are closing a shift opened by <strong>${escapeHtml(state.activeShift.openedByUserName || 'another cashier')}</strong>. A mandatory audit reason is required and will be permanently recorded.
+            </div>
+            <div class="form-group">
+              <label class="form-label">Manager Override Reason *</label>
+              <input type="text" class="form-input" id="overrideReasonInput" placeholder="e.g. Cashier shift ended, emergency register release" required>
             </div>
           ` : `
             <div style="background: var(--bg-secondary); padding: 12px 16px; border-radius: 8px; margin-bottom: 16px;">
@@ -9547,7 +10067,7 @@
           </div>
           <div class="form-group">
             <label class="form-label">Closing Notes</label>
-            <textarea class="form-textarea" id="closeShiftNotes" rows="2" placeholder="${isOccupiedByOther ? 'Reason for manager override / end of day closing notes...' : 'Variance explanation or end of shift notes...'}"></textarea>
+            <textarea class="form-textarea" id="closeShiftNotes" rows="2" placeholder="${isOccupiedByOther ? 'Additional handover notes or audit remarks...' : 'Variance explanation or end of shift notes...'}"></textarea>
           </div>
         `,
         footerHtml: `
@@ -9606,8 +10126,18 @@
     }
 
     async function submitCloseShift(shiftId) {
+      const isOccupiedByOther = state.activeShift && state.activeShift.openedByOtherCashier;
+      let overrideReason = null;
+      if (isOccupiedByOther) {
+        overrideReason = document.getElementById('overrideReasonInput')?.value.trim();
+        if (!overrideReason || overrideReason.length < 3) {
+          showToast('Manager override requires an audit reason of at least 3 characters', 'error');
+          return;
+        }
+      }
+
       const counted = parseFloat(document.getElementById('closeCountedInput')?.value || '0').toFixed(4);
-      const notes = document.getElementById('closeShiftNotes')?.value.trim() || null;
+      const notes = document.getElementById('closeShiftNotes')?.value.trim() || undefined;
       const submitBtn = document.getElementById('btnSubmitCloseShift');
 
       if (submitBtn) {
@@ -9616,13 +10146,29 @@
       }
 
       try {
+        const payload = {
+          countedClosingCash: counted,
+          ...(notes ? { notes } : {}),
+          ...(isOccupiedByOther ? { adminOverride: true, overrideReason } : {})
+        };
+
         const closed = await apiFetch(`/v1/pos/shifts/${shiftId}/close`, {
           method: 'POST',
-          body: JSON.stringify({
-            countedClosingCash: counted,
-            notes
-          })
+          body: JSON.stringify(payload)
         });
+
+        const variance = parseFloat(closed.cashVariance || '0');
+        showToast(`Shift closed! Cash variance: ${formatTenantMoney(variance)}`, variance === 0 ? 'success' : 'warning');
+        state.activeShift = null;
+        closeModal();
+        renderView('pos-shifts');
+      } catch (err) {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Close & Finalize Shift';
+        }
+      }
+    }
 
         const variance = parseFloat(closed.cashVariance || '0');
         showToast(`Shift closed! Cash variance: ${formatTenantMoney(variance)}`, variance === 0 ? 'success' : 'warning');
@@ -9983,162 +10529,196 @@
           })) : Promise.resolve(null)
         ]);
 
+        const activeTab = state.orgSettingsActiveTab || 'profile';
+
         container.innerHTML = `
           <div class="view-header">
             <div>
               <h1 class="view-title">Organization Settings &amp; Subscription</h1>
-              <div class="view-subtitle">Multi-tenant account parameters, plan limits, and tax configurations</div>
+              <div class="view-subtitle">Multi-tenant account parameters, plan limits, barcode scanners, and operational configurations</div>
             </div>
           </div>
 
-          <div class="dashboard-split-grid">
-            <div class="card">
-              <div class="card-title">Tenant Profile</div>
-              <div class="form-group">
-                <label class="form-label">Legal Name</label>
-                <input type="text" class="form-input" value="${escapeHtml(state.tenantName || 'My Business')}" readonly>
-              </div>
-              <div class="form-group">
-                <label class="form-label">Tenant ID</label>
-                <input type="text" class="form-input" value="${escapeHtml(state.tenantId)}" readonly style="font-family: monospace; font-size: 12px;">
-              </div>
-              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-                <div class="form-group">
-                  <label class="form-label">Base Currency</label>
-                  <input type="text" class="form-input" value="${escapeHtml(state.currency || getTenantCurrency())}" readonly>
-                </div>
-                <div class="form-group">
-                  <label class="form-label">Default Country</label>
-                  <input type="text" class="form-input" value="${escapeHtml(state.countryCode || 'US')}" readonly>
-                </div>
-              </div>
-            </div>
+          <!-- Categorized Navigation Tabs (Phase E2) -->
+          <div class="org-settings-tabs" style="display: flex; gap: 8px; border-bottom: 2px solid var(--border-color); margin-bottom: 20px; overflow-x: auto; padding-bottom: 6px;">
+            <button type="button" class="btn btn-sm ${activeTab === 'profile' ? 'btn-primary' : 'btn-secondary'}" onclick="switchOrgSettingsTab('profile')">Profile &amp; Subscription</button>
+            <button type="button" class="btn btn-sm ${activeTab === 'barcodes' ? 'btn-primary' : 'btn-secondary'}" onclick="switchOrgSettingsTab('barcodes')">Hardware Scanners</button>
+            <button type="button" class="btn btn-sm ${activeTab === 'pos' ? 'btn-primary' : 'btn-secondary'}" onclick="switchOrgSettingsTab('pos')">POS Automation</button>
+            <button type="button" class="btn btn-sm ${activeTab === 'generator' ? 'btn-primary' : 'btn-secondary'}" onclick="switchOrgSettingsTab('generator')">Barcode Generator &amp; Console</button>
+            ${isModuleEnabled('hrm') ? `
+              <button type="button" class="btn btn-sm ${activeTab === 'payroll' ? 'btn-primary' : 'btn-secondary'}" onclick="switchOrgSettingsTab('payroll')">Attendance &amp; Payroll</button>
+            ` : ''}
+          </div>
 
-            <div class="card">
-              <div class="card-title">
-                <span>Subscription Plan</span>
-                <span class="badge-pill badge-green">${entRes.planCode} (${entRes.status})</span>
+          <!-- Tab 1: Tenant Profile & Subscription Quotas -->
+          <div id="orgTabProfile" style="display: ${activeTab === 'profile' ? 'block' : 'none'};">
+            <div class="dashboard-split-grid">
+              <div class="card">
+                <div class="card-title">Tenant Profile</div>
+                <div class="form-group">
+                  <label class="form-label">Legal Name</label>
+                  <input type="text" class="form-input" value="${escapeHtml(state.tenantName || 'My Business')}" readonly>
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Tenant ID</label>
+                  <input type="text" class="form-input" value="${escapeHtml(state.tenantId)}" readonly style="font-family: monospace; font-size: 12px;">
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                  <div class="form-group">
+                    <label class="form-label">Base Currency</label>
+                    <input type="text" class="form-input" value="${escapeHtml(state.currency || getTenantCurrency())}" readonly>
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label">Default Country</label>
+                    <input type="text" class="form-input" value="${escapeHtml(state.countryCode || 'US')}" readonly>
+                  </div>
+                </div>
               </div>
-              <div style="margin-bottom: 12px; font-size: 13px; color: var(--text-secondary);">
-                Active enterprise subscription with multi-branch allocation and unrestricted POS checkout registers.
-              </div>
-              <div class="table-responsive">
-                <table class="data-table">
-                  <thead>
-                    <tr>
-                      <th>Quota Resource</th>
-                      <th>Entitlement Limit</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr><td>Max Store Branches</td><td><strong>${entRes.maxBranches}</strong></td></tr>
-                    <tr><td>Max Warehouses</td><td><strong>${entRes.maxWarehouses}</strong></td></tr>
-                    <tr><td>Max Team Members</td><td><strong>${entRes.maxUsers}</strong></td></tr>
-                    <tr><td>Max Product SKUs</td><td><strong>${entRes.maxSkus}</strong></td></tr>
-                  </tbody>
-                </table>
+
+              <div class="card">
+                <div class="card-title">
+                  <span>Subscription Plan</span>
+                  <span class="badge-pill badge-green">${entRes.planCode} (${entRes.status})</span>
+                </div>
+                <div style="margin-bottom: 12px; font-size: 13px; color: var(--text-secondary);">
+                  Active enterprise subscription with multi-branch allocation and unrestricted POS checkout registers.
+                </div>
+                <div class="table-responsive">
+                  <table class="data-table">
+                    <thead>
+                      <tr>
+                        <th>Quota Resource</th>
+                        <th>Entitlement Limit</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr><td>Max Store Branches</td><td><strong>${entRes.maxBranches}</strong></td></tr>
+                      <tr><td>Max Warehouses</td><td><strong>${entRes.maxWarehouses}</strong></td></tr>
+                      <tr><td>Max Team Members</td><td><strong>${entRes.maxUsers}</strong></td></tr>
+                      <tr><td>Max Product SKUs</td><td><strong>${entRes.maxSkus}</strong></td></tr>
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           </div>
 
-          <!-- Barcode & Scanner Configuration System (BUG-031 & BUG-032 Modern Redesign) -->
-          <div style="margin-top: 24px;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
+          <!-- Tab 2: Hardware Scanners & Input Engines -->
+          <div id="orgTabBarcodes" style="display: ${activeTab === 'barcodes' ? 'block' : 'none'};">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 8px;">
               <div>
-                <h2 style="font-size: 18px; font-weight: 700; color: var(--text-primary); margin: 0;">Barcode &amp; Dual-Mode POS Scanning System</h2>
-                <div style="font-size: 13px; color: var(--text-secondary); margin-top: 2px;">
-                  Configure physical handheld USB/Bluetooth barcode scanners, camera scanning, collision-free internal generation, and checkout automation.
+                <h2 style="font-size: 18px; font-weight: 700; color: var(--text-primary); margin: 0;">Physical Handheld &amp; Camera Scanners</h2>
+                <div style="font-size: 13px; color: var(--text-secondary); margin-top: 2px;">Configure keystroke wedges, continuous mobile camera scanning, and direct WebHID connections.</div>
+              </div>
+              <button class="btn btn-primary" id="btnSaveBarcodeSettings" onclick="saveTenantBarcodeSettings()">Save Settings</button>
+            </div>
+
+            <div class="card" style="margin: 0; max-width: 720px;">
+              <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
+                <span>Hardware Scanners &amp; Input Engines</span>
+                <span class="badge-pill badge-blue">Input Engine</span>
+              </div>
+              <div>
+                <div class="switch-group">
+                  <label class="modern-switch">
+                    <input type="checkbox" id="settingHwScanner" ${barcodeSettings.hardwareScannerEnabled !== false ? 'checked' : ''}>
+                    <span class="modern-slider"></span>
+                  </label>
+                  <div style="flex: 1;">
+                    <div style="font-weight: 600; font-size: 13px;">Hardware Scanner Wedge (USB / BT)</div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">
+                      Listens for rapid keystroke bursts from physical handheld laser/CCD scanners in POS Checkout.
+                    </div>
+                  </div>
+                </div>
+
+                <div class="switch-group">
+                  <label class="modern-switch">
+                    <input type="checkbox" id="settingCamScanner" ${barcodeSettings.cameraScannerEnabled !== false ? 'checked' : ''}>
+                    <span class="modern-slider"></span>
+                  </label>
+                  <div style="flex: 1;">
+                    <div style="font-weight: 600; font-size: 13px;">HTML5 Continuous Camera Scanner</div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">
+                      Continuous mobile &amp; tablet camera scanning with laser reticle and cooldown debouncing.
+                    </div>
+                  </div>
+                </div>
+
+                <div style="margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-subtle); display: flex; flex-direction: column; gap: 8px;">
+                  <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span style="font-size: 12px; font-weight: 600; color: var(--text-secondary);">Direct WebHID Engine:</span>
+                    <span class="badge-pill badge-green" id="webhidStatusBadge">Available</span>
+                  </div>
+                  <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="openHardwareScannerGuideModal()" style="font-size: 11px;">📖 Setup Guide</button>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="connectWebHidScanner()" style="font-size: 11px;">🔌 Pair WebHID Device</button>
+                  </div>
                 </div>
               </div>
-              <button class="btn btn-primary" id="btnSaveBarcodeSettings" onclick="saveTenantBarcodeSettings()">Save Barcode Settings</button>
+            </div>
+          </div>
+
+          <!-- Tab 3: POS Checkout Automation -->
+          <div id="orgTabPos" style="display: ${activeTab === 'pos' ? 'block' : 'none'};">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 8px;">
+              <div>
+                <h2 style="font-size: 18px; font-weight: 700; color: var(--text-primary); margin: 0;">POS Checkout Automation Behaviors</h2>
+                <div style="font-size: 13px; color: var(--text-secondary); margin-top: 2px;">Control instant cart placement, quantity incrementing, and scanning audio feedback.</div>
+              </div>
+              <button class="btn btn-primary" onclick="saveTenantBarcodeSettings()">Save Settings</button>
+            </div>
+
+            <div class="card" style="margin: 0; max-width: 720px;">
+              <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
+                <span>Cart Automation Rules</span>
+                <span class="badge-pill badge-green">Automation</span>
+              </div>
+              <div>
+                <div class="switch-group">
+                  <label class="modern-switch">
+                    <input type="checkbox" id="settingAutoCart" ${barcodeSettings.autoAddToCart !== false ? 'checked' : ''}>
+                    <span class="modern-slider"></span>
+                  </label>
+                  <div style="flex: 1;">
+                    <div style="font-weight: 600; font-size: 13px;">Auto Add-to-Cart on Scan</div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">
+                      Immediately places recognized product into the active cashier register cart.
+                    </div>
+                  </div>
+                </div>
+
+                <div class="switch-group">
+                  <label class="modern-switch">
+                    <input type="checkbox" id="settingIncDup" ${barcodeSettings.incrementOnDuplicate !== false ? 'checked' : ''}>
+                    <span class="modern-slider"></span>
+                  </label>
+                  <div style="flex: 1;">
+                    <div style="font-weight: 600; font-size: 13px;">Increment Quantity on Duplicate Scan</div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">
+                      Repeated scans of the same product increment its line quantity by 1 automatically.
+                    </div>
+                  </div>
+                </div>
+
+                <div style="margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-subtle); font-size: 12px; color: var(--text-secondary);">
+                  Manual product catalog selection and search bar always remain available simultaneously with barcode scanning.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Tab 4: Internal Generator & Test Console -->
+          <div id="orgTabGenerator" style="display: ${activeTab === 'generator' ? 'block' : 'none'};">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 8px;">
+              <div>
+                <h2 style="font-size: 18px; font-weight: 700; color: var(--text-primary); margin: 0;">Barcode Generation &amp; Hardware Diagnostics</h2>
+                <div style="font-size: 13px; color: var(--text-secondary); margin-top: 2px;">Collision-free internal barcode generator and real-time hardware transmission tester.</div>
+              </div>
+              <button class="btn btn-primary" id="btnSaveBarcodeSettingsBottom" onclick="saveTenantBarcodeSettings()">Save Settings</button>
             </div>
 
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px;">
-              <!-- Card 1: Hardware Scanners & POS Input Engines -->
-              <div class="card" style="margin: 0; display: flex; flex-direction: column;">
-                <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
-                  <span>Hardware Scanners &amp; Input Engines</span>
-                  <span class="badge-pill badge-blue">Input Engine</span>
-                </div>
-                <div style="flex: 1;">
-                  <div class="switch-group">
-                    <label class="modern-switch">
-                      <input type="checkbox" id="settingHwScanner" ${barcodeSettings.hardwareScannerEnabled !== false ? 'checked' : ''}>
-                      <span class="modern-slider"></span>
-                    </label>
-                    <div style="flex: 1;">
-                      <div style="font-weight: 600; font-size: 13px;">Hardware Scanner Wedge (USB / BT)</div>
-                      <div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">
-                        Listens for rapid keystroke bursts from physical handheld laser/CCD scanners in POS Checkout.
-                      </div>
-                    </div>
-                  </div>
-
-                  <div class="switch-group">
-                    <label class="modern-switch">
-                      <input type="checkbox" id="settingCamScanner" ${barcodeSettings.cameraScannerEnabled !== false ? 'checked' : ''}>
-                      <span class="modern-slider"></span>
-                    </label>
-                    <div style="flex: 1;">
-                      <div style="font-weight: 600; font-size: 13px;">HTML5 Continuous Camera Scanner</div>
-                      <div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">
-                        Continuous mobile &amp; tablet camera scanning with laser reticle and cooldown debouncing.
-                      </div>
-                    </div>
-                  </div>
-
-                  <div style="margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-subtle); display: flex; flex-direction: column; gap: 8px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                      <span style="font-size: 12px; font-weight: 600; color: var(--text-secondary);">Direct WebHID Engine:</span>
-                      <span class="badge-pill badge-green" id="webhidStatusBadge">Available</span>
-                    </div>
-                    <div style="display: flex; gap: 6px; flex-wrap: wrap;">
-                      <button type="button" class="btn btn-secondary btn-sm" onclick="openHardwareScannerGuideModal()" style="font-size: 11px;">📖 Setup Guide</button>
-                      <button type="button" class="btn btn-secondary btn-sm" onclick="connectWebHidScanner()" style="font-size: 11px;">🔌 Pair WebHID Device</button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Card 2: POS Checkout Behaviors -->
-              <div class="card" style="margin: 0; display: flex; flex-direction: column;">
-                <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
-                  <span>POS Checkout Behaviors</span>
-                  <span class="badge-pill badge-green">Automation</span>
-                </div>
-                <div style="flex: 1;">
-                  <div class="switch-group">
-                    <label class="modern-switch">
-                      <input type="checkbox" id="settingAutoCart" ${barcodeSettings.autoAddToCart !== false ? 'checked' : ''}>
-                      <span class="modern-slider"></span>
-                    </label>
-                    <div style="flex: 1;">
-                      <div style="font-weight: 600; font-size: 13px;">Auto Add-to-Cart on Scan</div>
-                      <div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">
-                        Immediately places recognized product into the active cashier register cart.
-                      </div>
-                    </div>
-                  </div>
-
-                  <div class="switch-group">
-                    <label class="modern-switch">
-                      <input type="checkbox" id="settingIncDup" ${barcodeSettings.incrementOnDuplicate !== false ? 'checked' : ''}>
-                      <span class="modern-slider"></span>
-                    </label>
-                    <div style="flex: 1;">
-                      <div style="font-weight: 600; font-size: 13px;">Increment Quantity on Duplicate Scan</div>
-                      <div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">
-                        Repeated scans of the same product increment its line quantity by 1 automatically.
-                      </div>
-                    </div>
-                  </div>
-
-                  <div style="margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-subtle); font-size: 12px; color: var(--text-secondary);">
-                    Manual product catalog selection and search bar always remain available simultaneously with barcode scanning.
-                  </div>
-                </div>
-              </div>
-
               <!-- Card 3: Internal SKU & Barcode Generator -->
               <div class="card" style="margin: 0; display: flex; flex-direction: column;">
                 <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
@@ -10172,7 +10752,7 @@
                 </div>
               </div>
 
-              <!-- Card 4: Interactive Hardware Scanner Test Console (BUG-031) -->
+              <!-- Card 4: Interactive Hardware Scanner Test Console -->
               <div class="card" style="margin: 0; display: flex; flex-direction: column;" id="scannerTestConsoleCard">
                 <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
                   <span>Hardware Scanner Test Console</span>
@@ -10207,16 +10787,12 @@
                 </div>
               </div>
             </div>
-
-            <div style="margin-top: 16px; display: flex; justify-content: flex-end;">
-              <button class="btn btn-primary" id="btnSaveBarcodeSettingsBottom" onclick="saveTenantBarcodeSettings()">Save Barcode Settings</button>
-            </div>
           </div>
 
-          <!-- HRM, Attendance & Payroll Settings (Phase 7.1) -->
+          <!-- Tab 5: HRM, Attendance & Payroll Settings (Phase 7.1) -->
           ${isModuleEnabled('hrm') ? `
-          <div style="margin-top: 28px;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
+          <div id="orgTabPayroll" style="display: ${activeTab === 'payroll' ? 'block' : 'none'};">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 8px;">
               <div>
                 <h2 style="font-size: 18px; font-weight: 700; color: var(--text-primary); margin: 0;">Payroll, Attendance &amp; Proration Policy (Phase 7.1)</h2>
                 <div style="font-size: 13px; color: var(--text-secondary); margin-top: 2px;">
@@ -10313,6 +10889,11 @@
       } catch (err) {
         container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load settings: ${err.message}</div>`;
       }
+    }
+
+    function switchOrgSettingsTab(tabName) {
+      state.orgSettingsActiveTab = tabName;
+      renderOrgSettingsView();
     }
 
     function updateBarcodePrefixPreview(val) {
@@ -10566,6 +11147,7 @@
                         <th>Initial Qty</th>
                         <th>Current Qty</th>
                         <th>Unit Cost (${escapeHtml(getTenantCurrency())})</th>
+                        <th>Selling Price (${escapeHtml(getTenantCurrency())})</th>
                         <th>Expiry Status</th>
                         <th>Batch Status</th>
                         <th>Actions</th>
@@ -10591,6 +11173,7 @@
                             <td>${formatQty(b.initialQuantity)}</td>
                             <td><strong>${formatQty(b.currentQuantity)}</strong></td>
                             <td>${formatTenantMoney(b.unitCost)}</td>
+                            <td>${b.sellingPrice != null ? formatTenantMoney(b.sellingPrice) : '<span style="color: var(--text-secondary); font-style: italic;">Default</span>'}</td>
                             <td>${expBadge}</td>
                             <td>${statusBadge}</td>
                             <td>
@@ -10642,6 +11225,10 @@
                         <div class="detail-row">
                           <span class="detail-label">Unit Cost</span>
                           <span class="detail-value">${formatTenantMoney(b.unitCost)}</span>
+                        </div>
+                        <div class="detail-row">
+                          <span class="detail-label">Selling Price</span>
+                          <span class="detail-value">${b.sellingPrice != null ? formatTenantMoney(b.sellingPrice) : 'Default'}</span>
                         </div>
                         <div class="detail-row">
                           <span class="detail-label">Received</span>
@@ -10716,23 +11303,27 @@
           </div>
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
             <div class="form-group">
-              <label class="form-label">Initial Quantity</label>
-              <input type="number" step="1" min="1" class="form-input" id="newBatchQty" value="100" required>
+              <label class="form-label">Initial Quantity *</label>
+              <input type="number" step="any" min="0.001" class="form-input" id="newBatchQty" value="100" required>
             </div>
             <div class="form-group">
-              <label class="form-label">Unit Cost (${escapeHtml(getTenantCurrency())})</label>
+              <label class="form-label">Unit Cost (${escapeHtml(getTenantCurrency())}) *</label>
               <input type="number" step="${getCurrencyInputStep()}" min="0" class="form-input" id="newBatchUnitCost" value="${getCurrencyDefaultCost()}" required>
             </div>
           </div>
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
             <div class="form-group">
-              <label class="form-label">Received Date</label>
-              <input type="date" class="form-input" id="newBatchReceivedDate" value="${today}" required>
+              <label class="form-label">Batch Selling Price (${escapeHtml(getTenantCurrency())})</label>
+              <input type="number" step="${getCurrencyInputStep()}" min="0" class="form-input" id="newBatchSellingPrice" placeholder="Product default if blank">
             </div>
             <div class="form-group">
-              <label class="form-label">Expiry Date (Optional)</label>
-              <input type="date" class="form-input" id="newBatchExpiryDate" value="${nextYear}">
+              <label class="form-label">Received Date *</label>
+              <input type="date" class="form-input" id="newBatchReceivedDate" value="${today}" required>
             </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Expiry Date (Optional / FEFO)</label>
+            <input type="date" class="form-input" id="newBatchExpiryDate" value="${nextYear}">
           </div>
           <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px;">
             <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
@@ -10751,6 +11342,7 @@
         }
 
         try {
+          const sellingPriceRaw = document.getElementById('newBatchSellingPrice')?.value?.trim();
           const payload = {
             branchId: state.branchId,
             warehouseId: state.warehouseId,
@@ -10758,6 +11350,7 @@
             batchNumber: document.getElementById('newBatchNumber').value.trim(),
             initialQuantity: document.getElementById('newBatchQty').value,
             unitCost: parseFloat(document.getElementById('newBatchUnitCost').value).toFixed(4),
+            sellingPrice: sellingPriceRaw ? parseFloat(sellingPriceRaw).toFixed(4) : undefined,
             receivedDate: document.getElementById('newBatchReceivedDate').value,
             expiryDate: document.getElementById('newBatchExpiryDate').value || null
           };
@@ -11525,7 +12118,7 @@
           </div>
           <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px;">
             <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-            <button type="submit" class="btn btn-primary">Start Session</button>
+            <button type="submit" id="btnStartStocktakeSession" class="btn btn-primary">Start Session</button>
           </div>
         </form>
       `;
@@ -11533,6 +12126,12 @@
       openModal(html);
       document.getElementById('newStocktakeForm').onsubmit = async (e) => {
         e.preventDefault();
+        const submitBtn = document.getElementById('btnStartStocktakeSession');
+        if (submitBtn) {
+          submitBtn.disabled = true;
+          submitBtn.textContent = 'Starting Session...';
+        }
+
         try {
           const payload = {
             branchId: state.branchId,
@@ -11551,6 +12150,10 @@
           renderStocktakesView();
         } catch (err) {
           showToast(`Error initiating stocktake: ${err.message}`, 'error');
+          if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Start Session';
+          }
         }
       };
     }
@@ -11564,65 +12167,123 @@
           <div style="font-size: 18px; font-weight: 700; margin-bottom: 8px;">Record Physical Counts (${session.countNumber})</div>
           <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px;">Enter the verified on-hand quantity for each item below.</div>
           <form id="countEntryForm">
-            <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
-              <table class="data-table">
-                <thead>
-                  <tr>
-                    <th>SKU</th>
-                    <th>Product</th>
-                    <th>Expected</th>
-                    <th>Counted Qty</th>
-                    <th>Variance</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${lines.map(l => `
+            <!-- Desktop Table View -->
+            <div class="desktop-table-container">
+              <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+                <table class="data-table">
+                  <thead>
                     <tr>
-                      <td><strong>${l.productSku}</strong></td>
-                      <td>${l.productName}</td>
-                      <td>${formatQty(l.expectedQty)}</td>
-                      <td>
-                        <input type="number" step="1" min="0" class="form-input count-input" data-prod-id="${l.productId}" data-expected="${l.expectedQty}" value="${l.countedQty !== null ? formatQty(l.countedQty) : formatQty(l.expectedQty)}" style="width: 100px; padding: 4px 8px;">
-                      </td>
-                      <td class="variance-cell" data-prod-id="${l.productId}">
-                        <strong>${l.varianceQty !== null ? formatQty(l.varianceQty) : '0'}</strong>
-                      </td>
+                      <th>SKU</th>
+                      <th>Product</th>
+                      <th>Expected</th>
+                      <th>Counted Qty</th>
+                      <th>Variance</th>
                     </tr>
-                  `).join('')}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    ${lines.map(l => `
+                      <tr>
+                        <td><strong>${escapeHtml(l.productSku)}</strong></td>
+                        <td>${escapeHtml(l.productName)}</td>
+                        <td>${formatQty(l.expectedQty)}</td>
+                        <td>
+                          <input type="number" step="any" min="0" class="form-input count-input" data-prod-id="${l.productId}" data-expected="${l.expectedQty}" value="${l.countedQty !== null ? formatQty(l.countedQty) : formatQty(l.expectedQty)}" style="width: 110px; padding: 4px 8px;">
+                        </td>
+                        <td class="variance-cell" data-prod-id="${l.productId}">
+                          <strong>${l.varianceQty !== null ? formatQty(l.varianceQty) : '0'}</strong>
+                        </td>
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+              </div>
             </div>
+
+            <!-- Mobile Touch Card View (BUG-064) -->
+            <div class="mobile-cards-container" style="max-height: 420px; overflow-y: auto; padding-right: 4px;">
+              ${lines.map(l => {
+                const diff = (l.countedQty !== null ? parseFloat(l.countedQty) : parseFloat(l.expectedQty)) - parseFloat(l.expectedQty);
+                return `
+                  <div class="entity-card" style="margin-bottom: 10px; padding: 12px;">
+                    <div class="entity-card-header">
+                      <span class="entity-card-code"><strong>${escapeHtml(l.productSku)}</strong></span>
+                      <span class="mobile-variance-badge badge-pill ${diff < 0 ? 'badge-red' : diff > 0 ? 'badge-green' : ''}" data-prod-id="${l.productId}">
+                        Variance: ${diff >= 0 ? '+' : ''}${diff.toFixed(0)}
+                      </span>
+                    </div>
+                    <div class="entity-card-title" style="margin-bottom: 8px;">${escapeHtml(l.productName)}</div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; background: var(--bg-primary); padding: 8px 12px; border-radius: 6px;">
+                      <div>
+                        <div style="font-size: 11px; color: var(--text-secondary); text-transform: uppercase;">Expected</div>
+                        <div style="font-weight: 700; font-size: 15px;">${formatQty(l.expectedQty)}</div>
+                      </div>
+                      <div style="flex: 1; max-width: 140px;">
+                        <label style="font-size: 11px; color: var(--text-secondary); text-transform: uppercase; display: block; margin-bottom: 2px;">Counted Qty</label>
+                        <input type="number" step="any" min="0" class="form-input count-input" data-prod-id="${l.productId}" data-expected="${l.expectedQty}" value="${l.countedQty !== null ? formatQty(l.countedQty) : formatQty(l.expectedQty)}" style="font-size: 16px; font-weight: 700; padding: 6px 10px; text-align: center;">
+                      </div>
+                    </div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+
             <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px;">
               <button type="button" class="btn btn-secondary" onclick="closeModal()">Close</button>
-              <button type="submit" class="btn btn-primary">Save Physical Counts</button>
+              <button type="submit" id="btnSaveStockCounts" class="btn btn-primary">Save Physical Counts</button>
             </div>
           </form>
         `;
 
         openModal(html);
 
-        // Dynamic live variance update
+        // Dynamic live variance update for both desktop & mobile views
         document.querySelectorAll('.count-input').forEach(input => {
           input.oninput = (e) => {
+            const prodId = e.target.getAttribute('data-prod-id');
             const exp = parseFloat(e.target.getAttribute('data-expected') || '0');
             const counted = parseFloat(e.target.value || '0');
             const diff = counted - exp;
-            const cell = document.querySelector(`.variance-cell[data-prod-id="${e.target.getAttribute('data-prod-id')}"]`);
+
+            // Sync other inputs for same product (e.g. mobile <-> desktop)
+            document.querySelectorAll(`.count-input[data-prod-id="${prodId}"]`).forEach(other => {
+              if (other !== e.target) other.value = e.target.value;
+            });
+
+            // Update desktop table cell
+            const cell = document.querySelector(`.variance-cell[data-prod-id="${prodId}"]`);
             if (cell) {
               cell.innerHTML = `<strong style="color: ${diff < 0 ? 'var(--status-danger)' : diff > 0 ? 'var(--status-success)' : 'inherit'}">${diff >= 0 ? '+' : ''}${diff.toFixed(0)}</strong>`;
+            }
+
+            // Update mobile badge
+            const badge = document.querySelector(`.mobile-variance-badge[data-prod-id="${prodId}"]`);
+            if (badge) {
+              badge.className = `mobile-variance-badge badge-pill ${diff < 0 ? 'badge-red' : diff > 0 ? 'badge-green' : ''}`;
+              badge.textContent = `Variance: ${diff >= 0 ? '+' : ''}${diff.toFixed(0)}`;
             }
           };
         });
 
         document.getElementById('countEntryForm').onsubmit = async (e) => {
           e.preventDefault();
+          const submitBtn = document.getElementById('btnSaveStockCounts');
+          if (submitBtn) {
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Saving Counts...';
+          }
+
           try {
             const linesPayload = [];
+            const seenProds = new Set();
             document.querySelectorAll('.count-input').forEach(input => {
-              linesPayload.push({
-                productId: input.getAttribute('data-prod-id'),
-                countedQty: parseFloat(input.value || '0').toFixed(6)
-              });
+              const pId = input.getAttribute('data-prod-id');
+              if (!seenProds.has(pId)) {
+                seenProds.add(pId);
+                linesPayload.push({
+                  productId: pId,
+                  countedQty: parseFloat(input.value || '0').toFixed(6)
+                });
+              }
             });
 
             await apiFetch(`/v1/inventory/stocktakes/${sessionId}/counts`, {
@@ -11635,6 +12296,10 @@
             renderStocktakesView();
           } catch (err) {
             showToast(`Error saving counts: ${err.message}`, 'error');
+            if (submitBtn) {
+              submitBtn.disabled = false;
+              submitBtn.textContent = 'Save Physical Counts';
+            }
           }
         };
       } catch (err) {
@@ -18134,21 +18799,37 @@
       if (btn) { btn.disabled = true; btn.innerText = 'Saving...'; }
 
       try {
+        let savedCust = null;
         if (customerId) {
-          await apiFetch(`/v1/customers/${customerId}`, {
+          savedCust = await apiFetch(`/v1/customers/${customerId}`, {
             method: 'PATCH',
             body: JSON.stringify(payload)
           });
           showToast('Customer updated successfully', 'success');
         } else {
-          await apiFetch('/v1/customers', {
+          savedCust = await apiFetch('/v1/customers', {
             method: 'POST',
             body: JSON.stringify(payload)
           });
           showToast('Customer registered successfully', 'success');
         }
         closeModal();
-        renderCustomersView();
+
+        // If currently in POS Checkout, return to checkout drawer with customer preselected (D1)
+        if (state.currentView === 'pos-checkout') {
+          try {
+            const res = await apiFetch('/v1/customers?limit=100', { silent: true });
+            state.cachedCustomers = res?.items || [];
+            if (savedCust?.id) {
+              state.selectedCheckoutCustomerId = savedCust.id;
+            }
+            openPaymentDrawer();
+          } catch (e) {
+            renderPosCheckoutView();
+          }
+        } else {
+          renderCustomersView();
+        }
       } catch (err) {
         showToast(err.message, 'error');
         if (btn) { btn.disabled = false; btn.innerText = customerId ? 'Save Changes' : 'Create Customer'; }
@@ -19354,7 +20035,7 @@
           <div class="view-header">
             <div>
               <h1 class="view-title">Team &amp; Staff Accounts</h1>
-              <div class="view-subtitle">Manage organization staff logins, issue secure invitations, assign roles, and link employee profiles</div>
+              <div class="view-subtitle">Manage organization staff logins, issue secure invitations, assign roles, and configure location scopes</div>
             </div>
             <div style="display: flex; gap: 8px;">
               <button class="btn btn-primary" id="btnOpenInviteStaff" onclick="openInviteStaffModal()">+ Invite Staff Member</button>
@@ -19378,11 +20059,13 @@
               <div class="kpi-value" style="color: var(--accent-primary);">${pendingInvCount}</div>
               <div class="kpi-trend" style="color: var(--text-secondary);">Awaiting activation</div>
             </div>
+            ${isModuleEnabled('hrm') ? `
             <div class="kpi-card">
               <div class="kpi-label">Linked to Employee</div>
               <div class="kpi-value" style="color: var(--status-info);">${linkedCount}</div>
               <div class="kpi-trend" style="color: var(--text-secondary);">HRM self-service active</div>
             </div>
+            ` : ''}
           </div>
 
           <!-- Section Tabs -->
@@ -19426,7 +20109,7 @@
                     <th style="min-width: 150px;">Email</th>
                     <th style="min-width: 90px;">Status</th>
                     <th style="min-width: 160px;">Assigned Roles</th>
-                    <th style="min-width: 180px;">Linked Employee</th>
+                    ${isModuleEnabled('hrm') ? '<th style="min-width: 180px;">Linked Employee</th>' : ''}
                     <th style="min-width: 160px;">Location Access</th>
                     <th style="text-align: right; min-width: 220px;">Actions</th>
                   </tr>
@@ -19460,7 +20143,7 @@
                         <td style="font-size: 12px; color: var(--text-secondary);">${escapeHtml(m.email)}</td>
                         <td>${statusBadge}</td>
                         <td>${roleBadges}</td>
-                        <td>${linkedBadge}</td>
+                        ${isModuleEnabled('hrm') ? `<td>${linkedBadge}</td>` : ''}
                         <td>${scopeBadge}</td>
                         <td style="text-align: right; white-space: nowrap;">
                           <div style="display: inline-flex; gap: 6px;">
@@ -19505,10 +20188,12 @@
                     ${(m.roles || []).map(r => escapeHtml(r.name || r.code)).join(', ') || 'None'}
                   </div>
 
+                  ${isModuleEnabled('hrm') ? `
                   <div style="font-size: 12px; margin-bottom: 10px;">
                     <span style="color: var(--text-secondary);">Employee:</span>
                     ${m.linkedEmployee ? `${escapeHtml(m.linkedEmployee.employeeCode)} - ${escapeHtml(m.linkedEmployee.displayName)}` : 'Unlinked'}
                   </div>
+                  ` : ''}
 
                   <div style="display: flex; gap: 6px; flex-wrap: wrap; border-top: 1px solid var(--border-subtle); padding-top: 10px;">
                     <button class="btn btn-secondary btn-sm" style="flex: 1;" onclick="openAssignMemberRolesModal('${m.id}')">Roles</button>
@@ -19552,7 +20237,7 @@
                   <tr>
                     <th style="min-width: 170px;">Invited Email</th>
                     <th style="min-width: 100px;">Assigned Role</th>
-                    <th style="min-width: 160px;">Linked Employee</th>
+                    ${isModuleEnabled('hrm') ? '<th style="min-width: 160px;">Linked Employee</th>' : ''}
                     <th style="min-width: 150px;">Invitation Code</th>
                     <th style="min-width: 90px;">Status</th>
                     <th style="min-width: 110px;">Sent Date</th>
@@ -19578,7 +20263,7 @@
                         <td>
                           <span class="badge-pill badge-blue" style="font-size: 11px;">${escapeHtml(i.roleCode)}</span>
                         </td>
-                        <td>${employeeText}</td>
+                        ${isModuleEnabled('hrm') ? `<td>${employeeText}</td>` : ''}
                         <td>
                           ${i.invitationCode && i.status === 'PENDING' ? `
                             <div style="display: inline-flex; align-items: center; gap: 6px;">
@@ -19624,7 +20309,7 @@
                     <span class="badge-pill ${statusClass}" style="font-size: 11px;">${escapeHtml(i.status)}</span>
                   </div>
                   <div style="font-size: 12px; margin-bottom: 4px;">Role: <span class="badge-pill badge-blue" style="font-size: 10px;">${escapeHtml(i.roleCode)}</span></div>
-                  <div style="font-size: 12px; margin-bottom: 8px;">Employee: ${i.employeeName ? escapeHtml(i.employeeName) : 'Not linked'}</div>
+                  ${isModuleEnabled('hrm') ? `<div style="font-size: 12px; margin-bottom: 8px;">Employee: ${i.employeeName ? escapeHtml(i.employeeName) : 'Not linked'}</div>` : ''}
                   
                   ${i.invitationCode && i.status === 'PENDING' ? `
                     <div style="margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; background: var(--surface-bg); padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border-subtle);">
@@ -20072,8 +20757,9 @@
         setAppInitPhase(APP_INIT_STATES.READY);
         updateTopbarContext();
         showToast('Your staff account has been activated! Welcome to NexStock.', 'success');
-        window.location.hash = '#dashboard';
-        renderView('dashboard');
+        const defaultView = resolveDefaultLandingView();
+        window.location.hash = '#' + defaultView;
+        renderView(defaultView);
       } catch (err) {
         if (alertEl) {
           alertEl.innerText = err.message || 'Failed to activate staff account.';
@@ -21196,7 +21882,8 @@
 
           // Only re-navigate if we have not already rendered the view via cached fast-path
           if (!hasCachedMembership || state.activeView === 'welcome') {
-            const targetRoute = state.pendingTargetView || getRouteFromLocation() || 'dashboard';
+            const locRoute = getRouteFromLocation();
+            const targetRoute = state.pendingTargetView || (locRoute && canAccessView(locRoute) ? locRoute : resolveDefaultLandingView());
             state.pendingTargetView = null;
             if (!AUTH_VIEWS.includes(targetRoute)) {
               setAppInitPhase(APP_INIT_STATES.LOADING_DASHBOARD, targetRoute === 'dashboard' ? 'Loading dashboard...' : 'Loading NexStock...');

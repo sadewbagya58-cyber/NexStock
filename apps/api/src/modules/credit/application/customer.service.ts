@@ -18,7 +18,41 @@ export async function createCustomer(
   trx: TenantTransactionContext,
   input: CreateCustomerRequest,
 ): Promise<CustomerResponse> {
-  await assertAuthorized(trx, { permission: 'crm:customer:manage' });
+  // Allow crm:customer:manage or frontline cashiers with pos:sale:create + crm:customer:read
+  try {
+    await assertAuthorized(trx, { permission: 'crm:customer:manage' });
+  } catch {
+    await assertAuthorized(trx, { permission: 'crm:customer:read' });
+    await assertAuthorized(trx, { permission: 'pos:sale:create' });
+  }
+
+  // Canonical address resolution
+  let resolvedAddress = input.address?.trim() || null;
+  if (!resolvedAddress) {
+    const parts = [
+      input.addressLine1?.trim(),
+      input.addressCity?.trim(),
+      input.addressPostalCode?.trim(),
+    ].filter(Boolean);
+    if (parts.length > 0) {
+      resolvedAddress = parts.join(', ');
+    }
+  }
+
+  // Canonical notes / company name resolution
+  const noteParts = [
+    input.companyName?.trim() ? `Company: ${input.companyName.trim()}` : null,
+    input.notes?.trim() || null,
+  ].filter(Boolean);
+  const resolvedNotes = noteParts.length > 0 ? noteParts.join('\n') : null;
+
+  // Status resolution
+  let resolvedStatus: 'ACTIVE' | 'INACTIVE' | 'ARCHIVED' = 'ACTIVE';
+  if (input.status) {
+    resolvedStatus = input.status;
+  } else if (input.isActive === false) {
+    resolvedStatus = 'INACTIVE';
+  }
 
   // Generate sequential customer number: CUST-XXXXX
   const countRes = await trx.db
@@ -39,10 +73,10 @@ export async function createCustomer(
       name: input.name.trim(),
       email: input.email?.trim() || null,
       phone: input.phone?.trim() || null,
-      address: input.address?.trim() || null,
+      address: resolvedAddress,
       tax_id: input.taxId?.trim() || null,
-      notes: input.notes?.trim() || null,
-      status: 'ACTIVE',
+      notes: resolvedNotes,
+      status: resolvedStatus,
     })
     .returningAll()
     .executeTakeFirstOrThrow();
@@ -252,10 +286,35 @@ export async function updateCustomer(
   if (input.name !== undefined) updateValues['name'] = input.name.trim();
   if (input.email !== undefined) updateValues['email'] = input.email?.trim() || null;
   if (input.phone !== undefined) updateValues['phone'] = input.phone?.trim() || null;
-  if (input.address !== undefined) updateValues['address'] = input.address?.trim() || null;
+  
+  if (input.address !== undefined) {
+    updateValues['address'] = input.address?.trim() || null;
+  } else if (input.addressLine1 !== undefined || input.addressCity !== undefined || input.addressPostalCode !== undefined) {
+    const parts = [
+      input.addressLine1?.trim(),
+      input.addressCity?.trim(),
+      input.addressPostalCode?.trim(),
+    ].filter(Boolean);
+    updateValues['address'] = parts.length > 0 ? parts.join(', ') : null;
+  }
+
   if (input.taxId !== undefined) updateValues['tax_id'] = input.taxId?.trim() || null;
-  if (input.notes !== undefined) updateValues['notes'] = input.notes?.trim() || null;
-  if (input.status !== undefined) updateValues['status'] = input.status;
+  
+  if (input.notes !== undefined) {
+    const noteParts = [
+      input.companyName?.trim() ? `Company: ${input.companyName.trim()}` : null,
+      input.notes?.trim() || null,
+    ].filter(Boolean);
+    updateValues['notes'] = noteParts.length > 0 ? noteParts.join('\n') : null;
+  } else if (input.companyName !== undefined) {
+    updateValues['notes'] = input.companyName?.trim() ? `Company: ${input.companyName.trim()}` : null;
+  }
+
+  if (input.status !== undefined) {
+    updateValues['status'] = input.status;
+  } else if (input.isActive !== undefined) {
+    updateValues['status'] = input.isActive ? 'ACTIVE' : 'INACTIVE';
+  }
 
   const row = await trx.db
     .updateTable('customers')

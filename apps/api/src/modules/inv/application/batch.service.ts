@@ -86,6 +86,14 @@ function mapBatchRow(
       String(row.unit_cost),
       row.currency_code || baseCurrency,
     ).toDecimalString(),
+    ...(row.selling_price != null
+      ? {
+          sellingPrice: Money.fromDecimalString(
+            String(row.selling_price),
+            row.currency_code || baseCurrency,
+          ).toDecimalString(),
+        }
+      : {}),
     currencyCode: (row.currency_code || baseCurrency) as CurrencyCode,
     expiryStatus: calculateBatchExpiryStatus(expiryDateStr),
     quarantineReason: row.quarantine_reason,
@@ -312,6 +320,9 @@ export async function createBatch(
       initial_quantity: initialQty.toDecimalString(),
       current_quantity: Quantity.zero().toDecimalString(),
       unit_cost: unitCostMoney.toDecimalString(),
+      selling_price: input.sellingPrice
+        ? Money.fromDecimalString(input.sellingPrice, currency).toDecimalString()
+        : null,
       currency_code: currency,
       quarantine_reason: null,
       created_at: now,

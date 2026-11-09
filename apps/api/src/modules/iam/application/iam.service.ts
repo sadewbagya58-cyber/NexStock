@@ -698,14 +698,29 @@ export async function listRoles(
 ): Promise<RoleSummaryResponse[]> {
   await assertAuthorized(trx, { permission: 'iam:member:read' });
 
-  const [roleRows, memberAssignments, rolePermRows] = await Promise.all([
-    trx.db
+  let roleRows = await trx.db
+    .selectFrom('roles')
+    .selectAll()
+    .where('tenant_id', '=', trx.tenantId)
+    .orderBy('is_system_role', 'desc')
+    .orderBy('name', 'asc')
+    .execute();
+
+  const missingSystemRole = Object.keys(SYSTEM_ROLE_DEFINITIONS).some(
+    (code) => !roleRows.some((r) => r.code === code),
+  );
+  if (missingSystemRole) {
+    await seedDefaultSystemRoles(trx);
+    roleRows = await trx.db
       .selectFrom('roles')
       .selectAll()
       .where('tenant_id', '=', trx.tenantId)
       .orderBy('is_system_role', 'desc')
       .orderBy('name', 'asc')
-      .execute(),
+      .execute();
+  }
+
+  const [memberAssignments, rolePermRows] = await Promise.all([
     trx.db
       .selectFrom('member_role_assignments')
       .select(['role_id'])
@@ -1680,12 +1695,22 @@ export async function createStaffInvitation(
   }
 
   // 3. Verify role exists in tenant
-  const role = await trx.db
+  let role = await trx.db
     .selectFrom('roles')
     .select(['id', 'code', 'name'])
     .where('tenant_id', '=', trx.tenantId)
     .where('code', '=', roleCode)
     .executeTakeFirst();
+
+  if (!role && roleCode in SYSTEM_ROLE_DEFINITIONS) {
+    await seedDefaultSystemRoles(trx);
+    role = await trx.db
+      .selectFrom('roles')
+      .select(['id', 'code', 'name'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('code', '=', roleCode)
+      .executeTakeFirst();
+  }
 
   if (!role) {
     throw new AppError({
@@ -2760,12 +2785,22 @@ export async function acceptStaffInvitation(
       }
 
       // C. Role assignment
-      const targetRole = await trx.db
+      let targetRole = await trx.db
         .selectFrom('roles')
         .select(['id', 'code'])
         .where('tenant_id', '=', trx.tenantId)
         .where('code', '=', invitation.role_code)
         .executeTakeFirst();
+
+      if (!targetRole && invitation.role_code in SYSTEM_ROLE_DEFINITIONS) {
+        await seedDefaultSystemRoles(trx);
+        targetRole = await trx.db
+          .selectFrom('roles')
+          .select(['id', 'code'])
+          .where('tenant_id', '=', trx.tenantId)
+          .where('code', '=', invitation.role_code)
+          .executeTakeFirst();
+      }
 
       if (targetRole) {
         const existingRoleAssignment = await trx.db

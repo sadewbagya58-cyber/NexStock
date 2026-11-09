@@ -40,6 +40,7 @@ function mapCategoryRow(row: {
   parent_id: string | null;
   name: string;
   description: string | null;
+  color?: string | null;
   status: 'ACTIVE' | 'ARCHIVED';
   sync_version: string | number;
   created_at: Date | string;
@@ -52,6 +53,7 @@ function mapCategoryRow(row: {
     parentId: row.parent_id,
     name: row.name,
     description: row.description,
+    color: row.color ?? '#6366f1',
     status: row.status,
     syncVersion: Number(row.sync_version),
     createdAt: new Date(row.created_at).toISOString(),
@@ -193,6 +195,7 @@ export async function createCategory(
 
   const categoryId = generateUuidV7();
   const description = input.description?.trim() ?? null;
+  const color = input.color?.trim() || '#6366f1';
   const now = new Date();
 
   await trx.db
@@ -203,6 +206,7 @@ export async function createCategory(
       parent_id: parentId,
       name,
       description,
+      color,
       status: 'ACTIVE',
       sync_version: 1,
       created_at: now,
@@ -215,7 +219,7 @@ export async function createCategory(
     action: 'CAT_CATEGORY_CREATED',
     resourceType: 'CATEGORY',
     resourceId: categoryId,
-    metadata: { name, parentId },
+    metadata: { name, parentId, color },
   });
 
   await enqueueOutboxEvent(trx, {
@@ -231,6 +235,7 @@ export async function createCategory(
     parentId,
     name,
     description,
+    color,
     status: 'ACTIVE',
     syncVersion: 1,
     createdAt: now.toISOString(),
@@ -325,6 +330,10 @@ export async function updateCategory(
     input.description !== undefined
       ? (input.description?.trim() ?? null)
       : existing.description;
+  const nextColor =
+    input.color !== undefined
+      ? (input.color?.trim() || '#6366f1')
+      : (existing.color ?? '#6366f1');
   const nextSyncVersion = Number(existing.sync_version) + 1;
   const now = new Date();
 
@@ -333,6 +342,7 @@ export async function updateCategory(
     .set({
       name: nextName,
       description: nextDescription,
+      color: nextColor,
       parent_id: nextParentId,
       sync_version: nextSyncVersion,
       updated_at: now,
@@ -350,6 +360,7 @@ export async function updateCategory(
       nextName,
       previousParentId: existing.parent_id,
       nextParentId,
+      color: nextColor,
     },
   });
 
@@ -359,6 +370,7 @@ export async function updateCategory(
     parentId: nextParentId,
     name: nextName,
     description: nextDescription,
+    color: nextColor,
     status: existing.status,
     syncVersion: nextSyncVersion,
     createdAt: new Date(existing.created_at).toISOString(),

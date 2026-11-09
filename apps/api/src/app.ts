@@ -18,6 +18,7 @@ import {
   CreateEmployeeRequestSchema,
   CreateExchangeRateRequestSchema,
   CreatePayrollRunRequestSchema,
+  CreatePosRegisterRequestSchema,
   CreatePosSaleRequestSchema,
   CreatePosShiftAdjustmentRequestSchema,
   CreateProductBarcodeRequestSchema,
@@ -53,6 +54,7 @@ import {
   ListCategoriesQuerySchema,
   ListInventoryBalancesQuerySchema,
   ListPosRegistersQuerySchema,
+  ListPosShiftsQuerySchema,
   ListProductsQuerySchema,
   ListSalesQuerySchema,
   ListSerialsQuerySchema,
@@ -321,12 +323,14 @@ import {
 import {
   checkoutSale,
   closePosShift,
+  createPosRegister,
   createPosShiftAdjustment,
   getActivePosShift,
   getReceiptData,
   getSaleById,
   getSalesSummary,
   listAuthorizedRegisters,
+  listPosShifts,
   listSales,
   openPosShift,
   searchPosProducts,
@@ -4515,6 +4519,41 @@ export async function buildApp(
     },
   );
 
+  // 1a. Create POS Register
+  app.post(
+    '/v1/pos/registers',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        body: CreatePosRegisterRequestSchema,
+        response: {
+          201: PosRegisterSummaryResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      const register = await withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => createPosRegister(trx, request.body),
+      );
+
+      reply.code(201).send(register);
+    },
+  );
+
   // 1b. Update POS Register
   app.patch(
     '/v1/pos/registers/:registerId',
@@ -4667,6 +4706,37 @@ export async function buildApp(
       }
 
       reply.code(200).send(shift);
+    },
+  );
+
+  // 4a. List POS Shifts (Shift History)
+  app.get(
+    '/v1/pos/shifts',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        querystring: ListPosShiftsQuerySchema,
+        response: {
+          200: Type.Array(PosShiftResponseSchema),
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => listPosShifts(trx, request.query),
+      );
     },
   );
 

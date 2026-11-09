@@ -336,6 +336,7 @@ export interface CategoriesTable {
   parent_id: string | null;
   name: string;
   description: string | null;
+  color: ColumnType<string | null, string | null | undefined, string | null | undefined>;
   status: Generated<'ACTIVE' | 'ARCHIVED'>;
   sync_version: Generated<string | number>;
   created_at: Generated<Date>;
@@ -634,6 +635,7 @@ export interface InventoryBatchesTable {
   initial_quantity: string;
   current_quantity: Generated<string>;
   unit_cost: Generated<string>;
+  selling_price: ColumnType<string | null, string | number | null | undefined, string | number | null | undefined>;
   currency_code: string;
   quarantine_reason: string | null;
   created_at: Generated<Date>;

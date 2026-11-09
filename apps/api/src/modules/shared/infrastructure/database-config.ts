@@ -578,6 +578,13 @@ export function loadPhase72StaffInvitationCodeRedesignMigrationSql(): string {
   return sqlText;
 }
 
+export function loadPhase7CategoryColorAndStaffRoleMigrationSql(): string {
+  const filename = '0022_category_color_and_staff_role.sql';
+  const sqlText = readFileSync(resolve(migrationsDir, filename), 'utf-8');
+  assertPostgresMigrationSqlCompatible(sqlText, filename);
+  return sqlText;
+}
+
 export function getOrderedPostgresMigrations(): readonly PostgresMigrationSpec[] {
   return [
     {
@@ -726,6 +733,13 @@ export function getOrderedPostgresMigrations(): readonly PostgresMigrationSpec[]
       name: '0021_phase72_staff_invitation_code_redesign',
       filename: '0021_phase72_staff_invitation_code_redesign.sql',
       sql: loadPhase72StaffInvitationCodeRedesignMigrationSql(),
+    },
+    {
+      dialect: 'postgres',
+      version: 22,
+      name: '0022_category_color_and_staff_role',
+      filename: '0022_category_color_and_staff_role.sql',
+      sql: loadPhase7CategoryColorAndStaffRoleMigrationSql(),
     },
   ];
 }

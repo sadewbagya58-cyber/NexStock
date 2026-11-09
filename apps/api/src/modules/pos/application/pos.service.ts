@@ -1,8 +1,10 @@
 import {
   type ClosePosShiftRequest,
+  type CreatePosRegisterRequest,
   type CreatePosSaleRequest,
   type CreatePosShiftAdjustmentRequest,
   type ListPosRegistersQuery,
+  type ListPosShiftsQuery,
   type ListSalesQuery,
   type OpenPosShiftRequest,
   type PosProductItemResponse,
@@ -71,6 +73,122 @@ export async function listAuthorizedRegisters(
     name: r.name,
     isActive: r.is_active,
   }));
+}
+
+export async function createPosRegister(
+  trx: TenantTransactionContext,
+  input: CreatePosRegisterRequest,
+): Promise<PosRegisterSummaryResponse> {
+  await assertAuthorized(trx, {
+    permission: 'org:register:manage',
+    branchId: input.branchId,
+  });
+
+  await assertSubscriptionEntitlement(trx, { requireWriteAccess: true });
+
+  const subRow = await trx.db
+    .selectFrom('tenant_subscriptions')
+    .innerJoin('subscription_plans', 'subscription_plans.id', 'tenant_subscriptions.plan_id')
+    .select(['subscription_plans.max_registers as max_registers'])
+    .where('tenant_subscriptions.tenant_id', '=', trx.tenantId)
+    .executeTakeFirst();
+
+  if (subRow && subRow.max_registers !== null) {
+    const countRow = await trx.db
+      .selectFrom('pos_registers')
+      .select(sql<number>`count(*)::int`.as('count'))
+      .where('tenant_id', '=', trx.tenantId)
+      .executeTakeFirst();
+    const currentCount = Number(countRow?.count ?? 0);
+    if (currentCount >= Number(subRow.max_registers)) {
+      throw new AppError({
+        statusCode: 403,
+        errorCode: 'SUB_PLAN_LIMIT_REACHED',
+        title: 'Register Limit Reached',
+        detail: `Your organization has reached the maximum register limit (${subRow.max_registers}) for your subscription plan.`,
+      });
+    }
+  }
+
+  const normalizedCode = input.code.trim().toUpperCase();
+  const duplicate = await trx.db
+    .selectFrom('pos_registers')
+    .select(['id'])
+    .where('tenant_id', '=', trx.tenantId)
+    .where('code', '=', normalizedCode)
+    .executeTakeFirst();
+
+  if (duplicate) {
+    throw new AppError({
+      statusCode: 409,
+      errorCode: 'POS_REGISTER_CODE_EXISTS',
+      title: 'Register Code Already Exists',
+      detail: `A POS register with code "${normalizedCode}" already exists in this organization.`,
+    });
+  }
+
+  const branch = await trx.db
+    .selectFrom('branches')
+    .select(['id', 'default_warehouse_id'])
+    .where('tenant_id', '=', trx.tenantId)
+    .where('id', '=', input.branchId)
+    .executeTakeFirst();
+
+  if (!branch) {
+    throw new AppError({
+      statusCode: 404,
+      errorCode: 'ORG_BRANCH_NOT_FOUND',
+      title: 'Branch Not Found',
+      detail: `Branch "${input.branchId}" does not exist.`,
+    });
+  }
+
+  const warehouseId = input.warehouseId ?? branch.default_warehouse_id;
+  if (!warehouseId) {
+    throw new AppError({
+      statusCode: 400,
+      errorCode: 'ERR_VALIDATION_FAILED',
+      title: 'Warehouse Required',
+      detail: 'An assigned warehouse is required for POS register inventory deduction.',
+    });
+  }
+
+  const newId = generateUuidV7();
+  const inserted = await trx.db
+    .insertInto('pos_registers')
+    .values({
+      id: newId,
+      tenant_id: trx.tenantId,
+      branch_id: input.branchId,
+      warehouse_id: warehouseId,
+      code: normalizedCode,
+      name: input.name.trim(),
+      is_active: input.isActive ?? true,
+      created_at: new Date(),
+    })
+    .returningAll()
+    .executeTakeFirstOrThrow();
+
+  await appendAuditLog(trx, {
+    action: 'pos:register:create',
+    resourceType: 'pos_registers',
+    resourceId: newId,
+    metadata: {
+      code: inserted.code,
+      name: inserted.name,
+      branchId: inserted.branch_id,
+      warehouseId: inserted.warehouse_id,
+    },
+  });
+
+  return {
+    id: inserted.id,
+    branchId: inserted.branch_id,
+    warehouseId: inserted.warehouse_id,
+    code: inserted.code,
+    name: inserted.name,
+    isActive: inserted.is_active,
+  };
 }
 
 // ============================================================================
@@ -202,12 +320,20 @@ export async function openPosShift(
     },
   });
 
+  const openerUser = await trx.db
+    .selectFrom('users')
+    .select(['full_name', 'email'])
+    .where('id', '=', shiftRow.opened_by_user_id)
+    .executeTakeFirst();
+
   return {
     id: shiftRow.id,
     branchId: shiftRow.branch_id,
     registerId: shiftRow.register_id,
     openedByUserId: shiftRow.opened_by_user_id,
+    openedByUserName: openerUser?.full_name ?? openerUser?.email ?? 'Unknown Cashier',
     closedByUserId: shiftRow.closed_by_user_id,
+    closedByUserName: null,
     currencyCode: shiftRow.currency_code,
     openingCashFloat: Money.fromDecimalString(
       shiftRow.opening_cash_float,
@@ -239,6 +365,10 @@ export async function openPosShift(
       ? (shiftRow.closed_at instanceof Date ? shiftRow.closed_at : new Date(shiftRow.closed_at)).toISOString()
       : null,
     notes: shiftRow.notes,
+    isOwnShift: true,
+    openedByOtherCashier: false,
+    adminOverride: false,
+    overrideReason: null,
   };
 }
 
@@ -406,7 +536,12 @@ export async function closePosShift(
 
   // Shift ownership enforcement:
   // Only the cashier who opened the shift or an authorized manager/admin may close it.
-  if (shift.opened_by_user_id !== trx.userId) {
+  // Shift ownership enforcement:
+  // Only the cashier who opened the shift or an authorized manager/admin may close it.
+  const isAdminOverride = shift.opened_by_user_id !== trx.userId;
+  let overrideReason: string | undefined = undefined;
+
+  if (isAdminOverride) {
     const authCtx = await resolveMemberAuthorizationContext(trx);
     const isManagerOrAdmin =
       authCtx.roleCodes.includes('TENANT_OWNER') ||
@@ -424,6 +559,21 @@ export async function closePosShift(
           'Only the cashier who opened this shift or an authorized manager may close it.',
       });
     }
+
+    const effectiveReason =
+      input.overrideReason?.trim() ||
+      (input.notes && input.notes.trim().length >= 3 ? input.notes.trim() : undefined);
+
+    if (!effectiveReason || effectiveReason.length < 3) {
+      throw new AppError({
+        statusCode: 400,
+        errorCode: 'ERR_VALIDATION_FAILED',
+        title: 'Override Reason Required',
+        detail:
+          'A valid override reason (at least 3 characters) is mandatory when closing another cashier\'s shift.',
+      });
+    }
+    overrideReason = effectiveReason;
   }
 
   await assertSubscriptionEntitlement(trx, { requireWriteAccess: true });
@@ -432,6 +582,20 @@ export async function closePosShift(
     ...shift,
     counted_closing_cash: input.countedClosingCash,
   });
+
+  const metadata = (shift.metadata_json && typeof shift.metadata_json === 'object')
+    ? { ...(shift.metadata_json as Record<string, unknown>) }
+    : {};
+
+  if (isAdminOverride) {
+    metadata.adminOverride = true;
+    metadata.overrideReason = overrideReason;
+    metadata.closedByUserId = trx.userId;
+  }
+
+  const finalNotes = isAdminOverride && overrideReason
+    ? (input.notes?.trim() ? `${input.notes.trim()} (Override: ${overrideReason})` : `Admin Override: ${overrideReason}`)
+    : (input.notes?.trim() ?? shift.notes);
 
   const updatedShift = await trx.db
     .updateTable('pos_shifts')
@@ -442,7 +606,8 @@ export async function closePosShift(
       expected_closing_cash: recon.expectedClosingCash,
       counted_closing_cash: recon.countedClosingCash,
       cash_variance: recon.cashVariance,
-      notes: input.notes?.trim() ?? shift.notes,
+      notes: finalNotes,
+      metadata_json: JSON.stringify(metadata),
     })
     .where('tenant_id', '=', trx.tenantId)
     .where('id', '=', shiftId)
@@ -457,6 +622,10 @@ export async function closePosShift(
       expectedClosingCash: recon.expectedClosingCash,
       countedClosingCash: recon.countedClosingCash,
       variance: recon.cashVariance,
+      adminOverride: isAdminOverride,
+      overrideReason: overrideReason ?? null,
+      closedByUserId: trx.userId,
+      openedByUserId: shift.opened_by_user_id,
     },
   });
 
@@ -470,15 +639,31 @@ export async function closePosShift(
       expectedClosingCash: recon.expectedClosingCash,
       countedClosingCash: recon.countedClosingCash,
       cashVariance: recon.cashVariance,
+      adminOverride: isAdminOverride,
     },
   });
+
+  const [openerUser, closerUser] = await Promise.all([
+    trx.db
+      .selectFrom('users')
+      .select(['full_name', 'email'])
+      .where('id', '=', updatedShift.opened_by_user_id)
+      .executeTakeFirst(),
+    trx.db
+      .selectFrom('users')
+      .select(['full_name', 'email'])
+      .where('id', '=', trx.userId)
+      .executeTakeFirst(),
+  ]);
 
   return {
     id: updatedShift.id,
     branchId: updatedShift.branch_id,
     registerId: updatedShift.register_id,
     openedByUserId: updatedShift.opened_by_user_id,
+    openedByUserName: openerUser?.full_name ?? openerUser?.email ?? 'Unknown Cashier',
     closedByUserId: updatedShift.closed_by_user_id,
+    closedByUserName: closerUser?.full_name ?? closerUser?.email ?? 'Unknown',
     currencyCode: updatedShift.currency_code,
     openingCashFloat: recon.openingCashFloat,
     cashSales: recon.cashSales,
@@ -494,6 +679,10 @@ export async function closePosShift(
       ? (updatedShift.closed_at instanceof Date ? updatedShift.closed_at : new Date(updatedShift.closed_at)).toISOString()
       : null,
     notes: updatedShift.notes,
+    isOwnShift: !isAdminOverride,
+    openedByOtherCashier: isAdminOverride,
+    adminOverride: isAdminOverride,
+    overrideReason: overrideReason ?? null,
   };
 }
 
@@ -579,6 +768,21 @@ export async function getActivePosShift(
     canViewFinancials = isManagerOrAdmin;
   }
 
+  const [openerUser, closerUser] = await Promise.all([
+    trx.db
+      .selectFrom('users')
+      .select(['full_name', 'email'])
+      .where('id', '=', shiftRow.opened_by_user_id)
+      .executeTakeFirst(),
+    shiftRow.closed_by_user_id
+      ? trx.db
+          .selectFrom('users')
+          .select(['full_name', 'email'])
+          .where('id', '=', shiftRow.closed_by_user_id)
+          .executeTakeFirst()
+      : null,
+  ]);
+
   const recon = canViewFinancials
     ? await calculateShiftReconciliation(trx, shiftRow)
     : {
@@ -592,12 +796,18 @@ export async function getActivePosShift(
         cashVariance: null,
       };
 
+  const meta = (shiftRow.metadata_json && typeof shiftRow.metadata_json === 'object')
+    ? (shiftRow.metadata_json as Record<string, unknown>)
+    : {};
+
   return {
     id: shiftRow.id,
     branchId: shiftRow.branch_id,
     registerId: shiftRow.register_id,
     openedByUserId: shiftRow.opened_by_user_id,
+    openedByUserName: openerUser?.full_name ?? openerUser?.email ?? 'Unknown Cashier',
     closedByUserId: shiftRow.closed_by_user_id,
+    closedByUserName: closerUser?.full_name ?? closerUser?.email ?? null,
     currencyCode: shiftRow.currency_code,
     openingCashFloat: recon.openingCashFloat,
     cashSales: recon.cashSales,
@@ -614,8 +824,107 @@ export async function getActivePosShift(
       : null,
     notes: shiftRow.notes,
     isOwnShift: isShiftOwner,
-    openedByOtherCashier: !isShiftOwner && !canViewFinancials,
+    openedByOtherCashier: !isShiftOwner,
+    adminOverride: Boolean(meta.adminOverride),
+    overrideReason: (meta.overrideReason as string) ?? null,
   };
+}
+
+export async function listPosShifts(
+  trx: TenantTransactionContext,
+  query: ListPosShiftsQuery,
+): Promise<PosShiftResponse[]> {
+  const authCtx = await resolveMemberAuthorizationContext(trx);
+  const isManagerOrAdmin =
+    authCtx.roleCodes.includes('TENANT_OWNER') ||
+    authCtx.roleCodes.includes('ORG_ADMIN') ||
+    authCtx.roleCodes.includes('BRANCH_MANAGER') ||
+    authCtx.permissions.has('org:branch:manage') ||
+    authCtx.permissions.has('iam:member:manage');
+
+  let baseQuery = trx.db
+    .selectFrom('pos_shifts')
+    .leftJoin('users as opener', 'opener.id', 'pos_shifts.opened_by_user_id')
+    .leftJoin('users as closer', 'closer.id', 'pos_shifts.closed_by_user_id')
+    .select([
+      'pos_shifts.id',
+      'pos_shifts.branch_id',
+      'pos_shifts.register_id',
+      'pos_shifts.opened_by_user_id',
+      'pos_shifts.closed_by_user_id',
+      'pos_shifts.currency_code',
+      'pos_shifts.opening_cash_float',
+      'pos_shifts.expected_closing_cash',
+      'pos_shifts.counted_closing_cash',
+      'pos_shifts.cash_variance',
+      'pos_shifts.status',
+      'pos_shifts.opened_at',
+      'pos_shifts.closed_at',
+      'pos_shifts.notes',
+      'pos_shifts.metadata_json',
+      'opener.full_name as opener_name',
+      'opener.email as opener_email',
+      'closer.full_name as closer_name',
+      'closer.email as closer_email',
+    ])
+    .where('pos_shifts.tenant_id', '=', trx.tenantId);
+
+  if (!isManagerOrAdmin) {
+    baseQuery = baseQuery.where('pos_shifts.opened_by_user_id', '=', trx.userId);
+  }
+
+  if (query.registerId) {
+    baseQuery = baseQuery.where('pos_shifts.register_id', '=', query.registerId);
+  }
+
+  if (query.status && query.status !== 'ALL') {
+    baseQuery = baseQuery.where('pos_shifts.status', '=', query.status);
+  }
+
+  const limit = Number(query.limit ?? 50);
+  baseQuery = baseQuery.orderBy('pos_shifts.opened_at', 'desc').limit(limit);
+
+  if (query.offset !== undefined && query.offset !== null) {
+    baseQuery = baseQuery.offset(Number(query.offset));
+  }
+
+  const rows = await baseQuery.execute();
+
+  return rows.map((row) => {
+    const isShiftOwner = row.opened_by_user_id === trx.userId;
+    const meta = (row.metadata_json && typeof row.metadata_json === 'object')
+      ? (row.metadata_json as Record<string, unknown>)
+      : {};
+
+    return {
+      id: row.id,
+      branchId: row.branch_id,
+      registerId: row.register_id,
+      openedByUserId: row.opened_by_user_id,
+      openedByUserName: row.opener_name ?? row.opener_email ?? 'Unknown Cashier',
+      closedByUserId: row.closed_by_user_id,
+      closedByUserName: row.closer_name ?? row.closer_email ?? (row.closed_by_user_id ? 'Unknown' : null),
+      currencyCode: row.currency_code,
+      openingCashFloat: Money.fromDecimalString(row.opening_cash_float, row.currency_code).toDecimalString(),
+      expectedClosingCash: Money.fromDecimalString(row.expected_closing_cash, row.currency_code).toDecimalString(),
+      countedClosingCash: row.counted_closing_cash
+        ? Money.fromDecimalString(row.counted_closing_cash, row.currency_code).toDecimalString()
+        : null,
+      cashVariance: row.cash_variance
+        ? Money.fromDecimalString(row.cash_variance, row.currency_code).toDecimalString()
+        : null,
+      status: row.status,
+      openedAt: (row.opened_at instanceof Date ? row.opened_at : new Date(row.opened_at)).toISOString(),
+      closedAt: row.closed_at
+        ? (row.closed_at instanceof Date ? row.closed_at : new Date(row.closed_at)).toISOString()
+        : null,
+      notes: row.notes,
+      isOwnShift: isShiftOwner,
+      openedByOtherCashier: !isShiftOwner,
+      adminOverride: Boolean(meta.adminOverride),
+      overrideReason: (meta.overrideReason as string) ?? null,
+    };
+  });
 }
 
 export async function createPosShiftAdjustment(
