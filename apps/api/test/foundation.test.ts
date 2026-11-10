@@ -345,6 +345,11 @@ describe('@nexstock/api — Milestone 0 Foundation, RLS, Idempotency & Sync Inva
           name: '0022_category_color_and_staff_role',
           filename: '0022_category_color_and_staff_role.sql',
         },
+        {
+          version: 23,
+          name: '0023_phase72_membership_revocation_lifecycle',
+          filename: '0023_phase72_membership_revocation_lifecycle.sql',
+        },
       ]);
     });
 
@@ -425,6 +430,7 @@ describe('@nexstock/api — Milestone 0 Foundation, RLS, Idempotency & Sync Inva
         '0020_phase72_staff_invitations.sql',
         '0021_phase72_staff_invitation_code_redesign.sql',
         '0022_category_color_and_staff_role.sql',
+        '0023_phase72_membership_revocation_lifecycle.sql',
       ]);
 
       await expect(

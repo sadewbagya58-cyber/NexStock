@@ -271,7 +271,7 @@ export interface TenantMembershipsTable {
   id: string;
   tenant_id: string;
   user_id: string;
-  status: Generated<'INVITED' | 'ACTIVE' | 'DISABLED'>;
+  status: Generated<'INVITED' | 'ACTIVE' | 'DISABLED' | 'REVOKED'>;
   all_locations_access: Generated<boolean>;
   pin_hash: string | null;
   created_at: Generated<Date>;

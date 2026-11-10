@@ -694,6 +694,12 @@ export async function selectFefoBatches(
         String(row.unit_cost),
         row.currency_code || baseCurrency,
       ).toDecimalString(),
+      sellingPrice: row.selling_price
+        ? Money.fromDecimalString(
+            String(row.selling_price),
+            row.currency_code || baseCurrency,
+          ).toDecimalString()
+        : null,
     });
 
     totalFulfilled = totalFulfilled.add(allocQty);

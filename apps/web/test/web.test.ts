@@ -2904,12 +2904,12 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
     it('preserves Phase 7.2 Team & Staff Accounts, Roles & Permissions, and staff invitations in V1', () => {
       // 1. Team & Staff Accounts remains accessible in sidebar and routing
       expect(html).toContain("view: 'team-staff'");
-      expect(html).toContain("label: 'Team &amp; Staff Accounts'");
+      expect(html).toContain("label: 'Team & Staff Accounts'");
       expect(html).toContain("case 'team-staff': renderTeamStaffAccountsView();");
 
       // 2. Roles & Permissions remains accessible
       expect(html).toContain("view: 'roles-permissions'");
-      expect(html).toContain("label: 'Roles &amp; Permissions'");
+      expect(html).toContain("label: 'Roles & Permissions'");
       expect(html).toContain("case 'roles-permissions': renderRolesPermissionsView();");
 
       // 3. Staff invitation modal works without requiring employee linking in V1

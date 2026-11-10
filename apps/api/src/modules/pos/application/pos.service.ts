@@ -1505,9 +1505,83 @@ export async function checkoutSale(
       );
     }
 
-    // Money calculation
+    // Resolve Batch and Serial before pricing so variable batch-level pricing takes precedence
+    let batchId: string | null = lineItem.batchId ?? null;
+    let serialId: string | null = lineItem.serialId ?? null;
+    let batchSellingPrice: string | null = null;
+
+    if (
+      product.track_inventory &&
+      (product.tracking_mode === 'BATCH' ||
+        product.tracking_mode === 'BATCH_EXPIRY')
+    ) {
+      if (batchId) {
+        const explicitBatch = await trx.db
+          .selectFrom('inventory_batches')
+          .select(['id', 'selling_price', 'status'])
+          .where('tenant_id', '=', trx.tenantId)
+          .where('id', '=', batchId)
+          .executeTakeFirst();
+        if (explicitBatch?.selling_price) {
+          batchSellingPrice = String(explicitBatch.selling_price);
+        }
+      } else {
+        const fefo = await selectFefoBatches(trx, {
+          warehouseId: register.warehouse_id,
+          productId: product.id,
+          requiredQuantity: lineQty.toDecimalString(),
+        });
+        if (fefo.allocations.length > 0) {
+          batchId = fefo.allocations[0]!.batchId;
+          if (fefo.allocations[0]!.sellingPrice) {
+            batchSellingPrice = fefo.allocations[0]!.sellingPrice;
+          }
+        } else if (!input.allowNegativeStockOverride) {
+          throw new AppError({
+            statusCode: 409,
+            errorCode: 'INV_INSUFFICIENT_BATCH_STOCK',
+            title: 'No Available Batch Stock',
+            detail: `No active non-expired batch found for product "${product.sku}".`,
+          });
+        }
+      }
+    } else if (
+      product.track_inventory &&
+      product.tracking_mode === 'SERIAL'
+    ) {
+      if (!serialId && lineItem.serialNumber) {
+        const sRow = await trx.db
+          .selectFrom('inventory_serials')
+          .select(['id', 'status'])
+          .where('tenant_id', '=', trx.tenantId)
+          .where('product_id', '=', product.id)
+          .where(
+            'serial_number',
+            '=',
+            lineItem.serialNumber.trim().toUpperCase(),
+          )
+          .executeTakeFirst();
+        if (sRow) {
+          serialId = sRow.id;
+        } else {
+          throw new AppError({
+            statusCode: 404,
+            errorCode: 'INV_SERIAL_NOT_FOUND',
+            title: 'Serial Number Not Found',
+            detail: `Serial number "${lineItem.serialNumber}" not found for product "${product.sku}".`,
+          });
+        }
+      }
+    }
+
+    // Money calculation (batch-level selling price overrides product default selling price)
+    const effectiveUnitPriceStr =
+      batchSellingPrice && Number(batchSellingPrice) > 0
+        ? batchSellingPrice
+        : product.selling_price;
+
     let unitPriceMoney = Money.fromDecimalString(
-      product.selling_price,
+      effectiveUnitPriceStr,
       currencyCode,
     );
 
@@ -1577,60 +1651,6 @@ export async function checkoutSale(
     subtotalAccumulator = subtotalAccumulator.add(lineCalc.grossLineAmount);
     totalLineDiscounts = totalLineDiscounts.add(lineCalc.discountAmount);
     totalTaxes = totalTaxes.add(lineCalc.totalTaxAmount);
-
-    let batchId: string | null = lineItem.batchId ?? null;
-    let serialId: string | null = lineItem.serialId ?? null;
-
-    if (
-      product.track_inventory &&
-      (product.tracking_mode === 'BATCH' ||
-        product.tracking_mode === 'BATCH_EXPIRY')
-    ) {
-      if (!batchId) {
-        const fefo = await selectFefoBatches(trx, {
-          warehouseId: register.warehouse_id,
-          productId: product.id,
-          requiredQuantity: lineQty.toDecimalString(),
-        });
-        if (fefo.allocations.length > 0) {
-          batchId = fefo.allocations[0]!.batchId;
-        } else if (!input.allowNegativeStockOverride) {
-          throw new AppError({
-            statusCode: 409,
-            errorCode: 'INV_INSUFFICIENT_BATCH_STOCK',
-            title: 'No Available Batch Stock',
-            detail: `No active non-expired batch found for product "${product.sku}".`,
-          });
-        }
-      }
-    } else if (
-      product.track_inventory &&
-      product.tracking_mode === 'SERIAL'
-    ) {
-      if (!serialId && lineItem.serialNumber) {
-        const sRow = await trx.db
-          .selectFrom('inventory_serials')
-          .select(['id', 'status'])
-          .where('tenant_id', '=', trx.tenantId)
-          .where('product_id', '=', product.id)
-          .where(
-            'serial_number',
-            '=',
-            lineItem.serialNumber.trim().toUpperCase(),
-          )
-          .executeTakeFirst();
-        if (sRow) {
-          serialId = sRow.id;
-        } else {
-          throw new AppError({
-            statusCode: 404,
-            errorCode: 'INV_SERIAL_NOT_FOUND',
-            title: 'Serial Number Not Found',
-            detail: `Serial number "${lineItem.serialNumber}" not found for product "${product.sku}".`,
-          });
-        }
-      }
-    }
 
     processedLines.push({
       lineNumber,

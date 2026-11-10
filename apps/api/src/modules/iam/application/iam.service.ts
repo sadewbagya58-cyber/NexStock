@@ -170,13 +170,13 @@ export async function provisionTenantMember(
     readonly allLocationsAccess: boolean;
     readonly branchIds?: readonly string[] | undefined;
     readonly warehouseIds?: readonly string[] | undefined;
-    readonly status?: 'INVITED' | 'ACTIVE' | 'DISABLED' | undefined;
+    readonly status?: 'INVITED' | 'ACTIVE' | 'DISABLED' | 'REVOKED' | undefined;
   },
 ): Promise<{
   readonly membershipId: string;
   readonly userId: string;
   readonly tenantId: string;
-  readonly status: 'INVITED' | 'ACTIVE' | 'DISABLED';
+  readonly status: 'INVITED' | 'ACTIVE' | 'DISABLED' | 'REVOKED';
   readonly allLocationsAccess: boolean;
   readonly roleCodes: readonly SystemRoleCode[];
   readonly branchIds: readonly string[];
@@ -377,9 +377,11 @@ export async function resolveMemberAuthorizationContext(
     ])
     .where('tenant_memberships.tenant_id', '=', trx.tenantId)
     .where('tenant_memberships.user_id', '=', trx.userId)
+    .orderBy('tenant_memberships.updated_at', 'desc')
     .execute();
 
-  const firstRow = membershipAndRoles[0];
+  const activeRows = membershipAndRoles.filter((r) => r.status === 'ACTIVE');
+  const firstRow = activeRows[0] ?? membershipAndRoles[0];
   if (!firstRow || firstRow.status !== 'ACTIVE') {
     throw new AppError({
       statusCode: 403,
@@ -401,7 +403,8 @@ export async function resolveMemberAuthorizationContext(
     is_system_role: boolean;
   }> = [];
   const seenRoleIds = new Set<string>();
-  for (const r of membershipAndRoles) {
+  const rowsToUse = activeRows.filter((r) => r.membership_id === firstRow.membership_id);
+  for (const r of rowsToUse) {
     if (r.role_id && r.role_code && !seenRoleIds.has(r.role_id)) {
       seenRoleIds.add(r.role_id);
       assignedRoles.push({
@@ -2758,8 +2761,9 @@ export async function acceptStaffInvitation(
       }
 
       // B. Create or update tenant_memberships
+      // If user previously had a REVOKED membership, do not reactivate it - create a brand new active membership
       let membershipId: string;
-      if (existingMembership) {
+      if (existingMembership && existingMembership.status !== 'REVOKED') {
         membershipId = existingMembership.id;
         await trx.db
           .updateTable('tenant_memberships')
@@ -3042,11 +3046,34 @@ export async function revokeMemberAccess(
     .where('membership_id', '=', membershipId)
     .execute();
 
+  // Preserve membership record as REVOKED for historical audit integrity and RLS rejection
   await trx.db
-    .deleteFrom('tenant_memberships')
+    .updateTable('tenant_memberships')
+    .set({
+      status: 'REVOKED',
+      all_locations_access: false,
+      updated_at: new Date(),
+    })
     .where('tenant_id', '=', trx.tenantId)
     .where('id', '=', membershipId)
     .execute();
+
+  // Invalidate Supabase Auth sessions if admin service role is configured
+  const supabaseUrl = process.env['SUPABASE_URL'];
+  const serviceRoleKey = process.env['SUPABASE_SERVICE_ROLE_KEY'];
+  if (supabaseUrl && serviceRoleKey && serviceRoleKey !== 'SET_IN_LOCAL_ENV') {
+    try {
+      await fetch(`${supabaseUrl}/auth/v1/admin/users/${membership.user_id}/logout`, {
+        method: 'POST',
+        headers: {
+          apikey: serviceRoleKey,
+          Authorization: `Bearer ${serviceRoleKey}`,
+        },
+      });
+    } catch (err) {
+      console.warn('[Supabase Admin Session Invalidation Warning]', err);
+    }
+  }
 
   await appendAuditLog(trx, {
     action: 'iam.member.revoked',

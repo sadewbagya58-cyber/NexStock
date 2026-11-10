@@ -201,6 +201,49 @@
       font-weight: 600;
     }
 
+    .sidebar-user-footer {
+      margin-top: auto;
+      padding: 10px;
+      border-top: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: var(--surface-bg);
+      border-radius: var(--radius);
+    }
+    .sidebar-user-avatar {
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      background: var(--accent-light);
+      color: var(--accent-primary);
+      font-weight: 700;
+      font-size: 13px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .sidebar-user-info {
+      flex: 1;
+      min-width: 0;
+    }
+    .sidebar-user-name {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-primary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .sidebar-user-role {
+      font-size: 11px;
+      color: var(--text-secondary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
     .nav-link svg {
       width: 18px;
       height: 18px;
@@ -989,6 +1032,7 @@
     .toast {
       pointer-events: auto;
       word-break: break-word;
+      overflow-wrap: break-word;
       background: var(--surface-card);
       color: var(--text-primary);
       border: 1px solid var(--border-subtle);
@@ -1001,13 +1045,141 @@
       align-items: center;
       gap: 10px;
       animation: slideIn 0.2s ease;
-      max-width: 360px;
+      max-width: 440px;
+      box-sizing: border-box;
     }
     .toast.error { border-left-color: var(--status-danger); }
     .toast.success { border-left-color: var(--status-success); }
     @keyframes slideIn {
       from { transform: translateX(100%); opacity: 0; }
       to { transform: translateX(0); opacity: 1; }
+    }
+
+    /* Modern Settings 2-Column Layout (Linear/Stripe Style) */
+    .settings-layout {
+      display: flex;
+      gap: 24px;
+      align-items: flex-start;
+      margin-top: 16px;
+    }
+    .settings-sidebar {
+      width: 240px;
+      flex-shrink: 0;
+      background: var(--surface-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius);
+      padding: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .settings-nav-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      cursor: pointer;
+      border: none;
+      background: transparent;
+      width: 100%;
+      text-align: left;
+      transition: all 0.15s ease;
+      font-family: inherit;
+    }
+    .settings-nav-item:hover {
+      background: var(--bg-hover);
+      color: var(--text-primary);
+    }
+    .settings-nav-item.active {
+      background: var(--accent-subtle, rgba(99, 102, 241, 0.1));
+      color: var(--accent-primary);
+      font-weight: 600;
+    }
+    .settings-content {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .settings-save-banner {
+      display: none;
+      padding: 12px 16px;
+      border-radius: 6px;
+      font-size: 13px;
+      margin-bottom: 12px;
+      animation: slideIn 0.15s ease;
+    }
+    .settings-save-banner.info {
+      background: rgba(59, 130, 246, 0.1);
+      border: 1px solid rgba(59, 130, 246, 0.3);
+      color: #2563eb;
+    }
+    .settings-save-banner.success {
+      background: rgba(16, 185, 129, 0.1);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      color: var(--status-success);
+    }
+    .settings-save-banner.error {
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      color: var(--status-danger);
+    }
+
+    /* POS Category Section Vertical Layout */
+    .pos-category-section {
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px;
+      padding: 14px 16px;
+      margin-bottom: 16px;
+      transition: background 0.2s ease;
+    }
+    .pos-category-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    .pos-category-title-wrap {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .pos-category-color-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      display: inline-block;
+      flex-shrink: 0;
+    }
+    .pos-category-title {
+      margin: 0;
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+
+    @media (max-width: 768px) {
+      .settings-layout {
+        flex-direction: column;
+        gap: 16px;
+      }
+      .settings-sidebar {
+        width: 100%;
+        flex-direction: row;
+        overflow-x: auto;
+        padding: 6px;
+        box-sizing: border-box;
+      }
+      .settings-nav-item {
+        white-space: nowrap;
+        padding: 8px 12px;
+        font-size: 12px;
+      }
     }
 
     /* Empty States */
@@ -2177,6 +2349,7 @@
         Settings &amp; Quotas
       </a>
       </div>
+      <div class="sidebar-user-footer" id="sidebarUserFooter"></div>
     </aside>
 
     <!-- Main Content Container -->
@@ -2365,6 +2538,26 @@
       return `${baseUrl}${normalized}`;
     }
 
+    function getSoftPastelBg(colorHex) {
+      if (!colorHex || typeof colorHex !== 'string') return 'rgba(99, 102, 241, 0.06)';
+      const clean = colorHex.trim();
+      if (clean.startsWith('#')) {
+        let hex = clean.slice(1);
+        if (hex.length === 3) {
+          hex = hex.split('').map(c => c + c).join('');
+        }
+        if (hex.length === 6) {
+          const r = parseInt(hex.substring(0, 2), 16);
+          const g = parseInt(hex.substring(2, 4), 16);
+          const b = parseInt(hex.substring(4, 6), 16);
+          if (!isNaN(r) && !isNaN(g) && !isNaN(b)) {
+            return `rgba(${r}, ${g}, ${b}, 0.08)`;
+          }
+        }
+      }
+      return 'rgba(99, 102, 241, 0.06)';
+    }
+
     if (typeof window !== 'undefined') {
       window.getTenantCurrency = getTenantCurrency;
       window.getCurrencyMinorUnits = getCurrencyMinorUnits;
@@ -2374,6 +2567,7 @@
       window.formatTenantMoney = formatTenantMoney;
       window.formatCurrency = formatTenantMoney;
       window.resolveMediaUrl = resolveMediaUrl;
+      window.getSoftPastelBg = getSoftPastelBg;
     }
 
     // Stored credentials cache
@@ -3713,7 +3907,7 @@
         items: [
           {
             view: 'batches',
-            label: 'Batches &amp; Expiry',
+            label: 'Batches & Expiry',
             icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>`,
             permission: ['inv:batch:read', 'inv:batch:manage']
           },
@@ -3725,13 +3919,13 @@
           },
           {
             view: 'valuation',
-            label: 'Costing &amp; Valuation',
+            label: 'Costing & Valuation',
             icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>`,
             permission: 'inv:costing:read'
           },
           {
             view: 'stocktakes',
-            label: 'Stock Counts &amp; Stocktake',
+            label: 'Stock Counts & Stocktake',
             icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>`,
             permission: ['inv:count:read', 'inv:count:create', 'inv:count:submit', 'inv:count:approve', 'inv:count:post']
           }
@@ -3771,19 +3965,19 @@
         items: [
           {
             view: 'team-staff',
-            label: 'Team &amp; Staff Accounts',
+            label: 'Team & Staff Accounts',
             icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>`,
             permission: ['iam:member:read', 'iam:member:manage']
           },
           {
             view: 'roles-permissions',
-            label: 'Roles &amp; Permissions',
+            label: 'Roles & Permissions',
             icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>`,
             permission: 'iam:role:manage'
           },
           {
             view: 'org-settings',
-            label: 'Settings &amp; Quotas',
+            label: 'Settings & Quotas',
             icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>`,
             permission: ['org:tenant:manage', 'org:branch:manage', 'org:warehouse:manage', 'sub:subscription:read', 'sub:subscription:manage', 'i18n:settings:read', 'i18n:settings:manage']
           }
@@ -3848,6 +4042,42 @@
           renderView(view);
         };
       });
+
+      renderSidebarUserFooter();
+    }
+
+    function renderSidebarUserFooter() {
+      const footer = document.getElementById('sidebarUserFooter');
+      if (!footer) return;
+
+      const rawName = state.user?.fullName || state.fullName || state.user?.email || state.userEmail || 'Team Member';
+      const name = rawName.split('@')[0];
+
+      let roleCode = state.userRole || (state.roles && state.roles[0]) || 'STAFF';
+      const roleDisplayMap = {
+        'TENANT_OWNER': 'Owner',
+        'ORG_ADMIN': 'Administrator',
+        'BRANCH_MANAGER': 'Branch Manager',
+        'CASHIER': 'Cashier',
+        'WAREHOUSE_CLERK': 'Warehouse Clerk',
+        'PURCHASER': 'Purchaser',
+        'ACCOUNTANT': 'Accountant',
+        'STAFF': 'Staff Member'
+      };
+      const roleLabel = roleDisplayMap[roleCode] || roleCode.replace(/_/g, ' ');
+
+      const parts = name.trim().split(/\s+/).filter(Boolean);
+      const initials = parts.length > 1
+        ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+        : (name.slice(0, 2)).toUpperCase();
+
+      footer.innerHTML = `
+        <div class="sidebar-user-avatar" title="${escapeHtml(name)}">${escapeHtml(initials)}</div>
+        <div class="sidebar-user-info">
+          <div class="sidebar-user-name" title="${escapeHtml(name)}">${escapeHtml(name)}</div>
+          <div class="sidebar-user-role">${escapeHtml(roleLabel)}</div>
+        </div>
+      `;
     }
 
     async function refreshMemberPermissions() {
@@ -6520,7 +6750,7 @@
 
         const productsMap = new Map();
         if (movements.some(m => !m.productSku || !m.productName)) {
-          const prodsRes = await apiFetch('/v1/products?limit=200').catch(() => ({ data: [] }));
+          const prodsRes = await apiFetch('/v1/products?limit=100', { silent: true }).catch(() => ({ data: [] }));
           const prods = prodsRes?.data || (Array.isArray(prodsRes) ? prodsRes : []);
           for (const p of prods) {
             productsMap.set(p.id, p);
@@ -6707,7 +6937,7 @@
 
       if (!hasCached) {
         try {
-          const prodsRes = await apiFetch('/v1/products?limit=200').catch(() => ({ data: [] }));
+          const prodsRes = await apiFetch('/v1/products?limit=100', { silent: true }).catch(() => ({ data: [] }));
           const products = prodsRes.data || [];
           window._productsCache = products;
           const select = document.getElementById('moveProdId');
@@ -7016,6 +7246,8 @@
         state.shiftStatusError = shiftStatusError;
 
         let products = productsRes || [];
+        state.posCachedProducts = products;
+        state.posCachedCategories = categories;
         state.posProductsMap = new Map();
         for (const p of products) {
           if (p.id) state.posProductsMap.set(p.id, p);
@@ -7029,9 +7261,6 @@
         }
 
         const selectedCatId = state.posSelectedCategoryId || null;
-        const visibleProducts = selectedCatId
-          ? products.filter(p => p.categoryId === selectedCatId)
-          : products;
 
         if (!isCurrentViewRender('pos-checkout', renderSeq) || !container) return;
 
@@ -7082,7 +7311,7 @@
           <div class="pos-layout">
             <!-- Catalog Panel -->
             <div class="pos-catalog-panel">
-              <div style="display: flex; gap: 8px; margin-bottom: 8px; align-items: center;">
+              <div style="display: flex; gap: 8px; margin-bottom: 10px; align-items: center;">
                 <div style="position: relative; flex: 1;">
                   <input type="text" class="form-input" id="posBarcodeScannerInput" placeholder="Scan barcode or type SKU/Name and press Enter..." autofocus style="padding-right: 32px;">
                   <span style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); font-size: 14px; opacity: 0.5;">🔍</span>
@@ -7096,8 +7325,8 @@
 
               <!-- Category Quick-Selection Pills (F1) -->
               ${categories.length > 0 ? `
-                <div class="pos-category-pills" style="display: flex; gap: 8px; overflow-x: auto; padding: 4px 0 10px 0; margin-bottom: 6px;">
-                  <button class="btn btn-sm" onclick="filterPosCategory(null)" style="border-radius: 20px; font-weight: 600; white-space: nowrap; ${!selectedCatId ? 'background: var(--accent-primary); color: #fff;' : 'background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-subtle);'}">
+                <div class="pos-category-pills" id="posCategoryPillsContainer" style="display: flex; gap: 8px; flex-wrap: wrap; padding: 2px 0 12px 0; margin-bottom: 8px;">
+                  <button class="btn btn-sm pos-cat-pill ${!selectedCatId ? 'active' : ''}" data-cat-id="" data-active-bg="var(--accent-primary)" onclick="filterPosCategory(null)" style="border-radius: 20px; font-weight: 600; white-space: nowrap; ${!selectedCatId ? 'background: var(--accent-primary); color: #fff; border: 1px solid var(--accent-primary);' : 'background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-subtle);'}">
                     All Items (${products.length})
                   </button>
                   ${categories.map(cat => {
@@ -7105,50 +7334,20 @@
                     const catColor = cat.color || '#6366f1';
                     const count = products.filter(p => p.categoryId === cat.id).length;
                     return `
-                      <button class="btn btn-sm" onclick="filterPosCategory('${cat.id}')" style="border-radius: 20px; font-weight: 600; white-space: nowrap; display: flex; align-items: center; gap: 6px; ${isSel ? `background: ${escapeHtml(catColor)}; color: #fff;` : 'background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-subtle);'}">
-                        <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: ${isSel ? '#fff' : escapeHtml(catColor)};"></span>
+                      <button class="btn btn-sm pos-cat-pill ${isSel ? 'active' : ''}" data-cat-id="${cat.id}" data-active-bg="${escapeHtml(catColor)}" data-dot-color="${escapeHtml(catColor)}" onclick="filterPosCategory('${cat.id}')" style="border-radius: 20px; font-weight: 600; white-space: nowrap; display: flex; align-items: center; gap: 6px; ${isSel ? `background: ${escapeHtml(catColor)}; color: #fff; border: 1px solid ${escapeHtml(catColor)};` : 'background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-subtle);'}">
+                        <span class="pos-cat-pill-dot" style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: ${isSel ? '#fff' : escapeHtml(catColor)};"></span>
                         <span>${escapeHtml(cat.name)}</span>
-                        <span style="opacity: 0.7; font-size: 11px;">(${count})</span>
+                        <span style="opacity: 0.75; font-size: 11px;">(${count})</span>
                       </button>
                     `;
                   }).join('')}
                 </div>
               ` : ''}
 
-              ${!state.warehouseId ? `
-                <div class="card" style="text-align: center; padding: 36px 16px; color: var(--text-secondary);">
-                  <div style="font-weight: 600; color: var(--text-primary); margin-bottom: 6px;">Warehouse Location Connecting</div>
-                  <div>Syncing active branch and warehouse parameters. Please ensure your branch has an active warehouse configured.</div>
-                </div>
-              ` : `
-                <div class="pos-product-grid" id="posProductGrid">
-                  ${visibleProducts.length === 0 ? `
-                    <div style="grid-column: 1 / -1; text-align: center; padding: 40px 16px; color: var(--text-secondary);">
-                      ${selectedCatId ? 'No products in this category.' : 'No active products found in this branch catalog. Add products in the Inventory menu to begin sales.'}
-                    </div>
-                  ` : visibleProducts.map(p => {
-                    const price = p.retailPrice || p.sellingPrice || '0.0000';
-                    const resolvedImg = p.imageUrl ? resolveMediaUrl(p.imageUrl) : null;
-                    const imgUrl = resolvedImg ? escapeHtml(resolvedImg) : null;
-                    return `
-                    <div class="pos-product-card" onclick="addToCart('${p.id}', '${escapeHtml(p.sku)}', '${escapeHtml(p.name)}', '${price}', '${escapeHtml(p.baseUom)}', ${Boolean(p.trackInventory)}, '${p.availableQuantity}')">
-                      <div style="display: flex; gap: 8px; align-items: flex-start;">
-                        ${imgUrl ? `
-                          <img src="${imgUrl}" alt="${escapeHtml(p.name)}" style="width: 40px; height: 40px; border-radius: 6px; object-fit: cover; border: 1px solid var(--border-subtle); flex-shrink: 0; background: var(--bg-hover);" onerror="this.style.display='none'" />
-                        ` : ''}
-                        <div style="flex: 1; min-width: 0;">
-                          <div class="pos-product-name" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(p.name)}</div>
-                          <div class="pos-product-sku">${escapeHtml(p.sku)}</div>
-                          <div style="font-size: 11px; color: var(--text-secondary); margin-top: 2px;">
-                            ${p.trackInventory ? `Stock: <strong>${parseFloat(p.availableQuantity || '0').toFixed(0)}</strong>` : 'Service (No Stock)'}
-                          </div>
-                        </div>
-                      </div>
-                      <div class="pos-product-price" style="margin-top: 6px;">${formatTenantMoney(price)}</div>
-                    </div>
-                  `;}).join('')}
-                </div>
-              `}
+              <!-- Catalog Products Container (Top-to-Bottom Sections) -->
+              <div id="posProductSectionsContainer">
+                <!-- Rendered dynamically by renderPosProductSections() -->
+              </div>
 
               <!-- Floating Mobile Cart Pill -->
               <div class="pos-mobile-floating-cart" id="posMobileFloatingCart" onclick="switchPosMobileTab('cart')" style="display: ${state.cart.length > 0 ? 'flex' : 'none'};">
@@ -7170,7 +7369,9 @@
                     <div class="empty-state-title">Cart is empty</div>
                     <div style="font-size: 13px;">Scan a barcode or tap products from the catalog to add items.</div>
                   </div>
-                ` : state.cart.map((line, idx) => `
+                ` : state.cart.map((line, idx) => {
+                  const isDec = isDecimalUom(line.uomCode);
+                  return `
                   <div class="cart-line">
                     <div class="cart-line-info">
                       <div class="cart-line-name">${escapeHtml(line.name)}</div>
@@ -7178,14 +7379,14 @@
                     </div>
                     <div class="cart-line-controls">
                       <button class="qty-btn" onclick="updateCartQty(${idx}, -1)">-</button>
-                      <strong style="min-width: 20px; text-align: center;">${line.qty}</strong>
+                      <input type="number" step="${isDec ? '0.001' : '1'}" min="${isDec ? '0.001' : '1'}" max="${line.trackInventory ? line.availableQuantity : 9999}" value="${line.qty}" style="width: 50px; text-align: center; border: 1px solid var(--border-subtle); border-radius: 4px; padding: 2px 4px; font-weight: 600; font-size: 13px; background: var(--bg-primary); color: var(--text-primary);" onchange="setCartQty(${idx}, this.value)" />
                       <button class="qty-btn" onclick="updateCartQty(${idx}, 1)">+</button>
                     </div>
                     <div style="min-width: 65px; text-align: right; font-weight: 700; color: var(--text-primary); margin-left: 12px;">
                       ${formatTenantMoney(line.qty * (parseFloat(line.unitPrice) || 0))}
                     </div>
                   </div>
-                `).join('')}
+                `;}).join('')}
               </div>
 
               <div class="pos-cart-summary">
@@ -7217,6 +7418,9 @@
           </div>
         `;
 
+        // Render product sections immediately
+        renderPosProductSections();
+
         // Barcode Scanner Listener
         const scannerInput = document.getElementById('posBarcodeScannerInput');
         if (scannerInput) {
@@ -7236,9 +7440,179 @@
       }
     }
 
+    function renderPosProductCardsHtml(productList) {
+      if (!productList || productList.length === 0) return '';
+      return productList.map(p => {
+        const price = p.retailPrice || p.sellingPrice || '0.0000';
+        const resolvedImg = p.imageUrl ? resolveMediaUrl(p.imageUrl) : null;
+        const imgUrl = resolvedImg ? escapeHtml(resolvedImg) : null;
+        const isDec = isDecimalUom(p.baseUom);
+        const availNum = parseFloat(p.availableQuantity || '0');
+        const formattedStock = isDec ? availNum.toFixed(3) : availNum.toFixed(0);
+        return `
+          <div class="pos-product-card" onclick="addToCart('${p.id}', '${escapeHtml(p.sku)}', '${escapeHtml(p.name)}', '${price}', '${escapeHtml(p.baseUom)}', ${Boolean(p.trackInventory)}, '${p.availableQuantity}')">
+            <div style="display: flex; gap: 8px; align-items: flex-start;">
+              ${imgUrl ? `
+                <img src="${imgUrl}" alt="${escapeHtml(p.name)}" style="width: 40px; height: 40px; border-radius: 6px; object-fit: cover; border: 1px solid var(--border-subtle); flex-shrink: 0; background: var(--bg-hover);" onerror="this.style.display='none'" />
+              ` : ''}
+              <div style="flex: 1; min-width: 0;">
+                <div class="pos-product-name" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; font-size: 13px;" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</div>
+                <div class="pos-product-sku" style="font-size: 11px; color: var(--text-secondary);">${escapeHtml(p.sku)}</div>
+                <div style="font-size: 11px; color: var(--text-secondary); margin-top: 2px;">
+                  ${p.trackInventory ? `Stock: <strong>${formattedStock}</strong> ${escapeHtml(p.baseUom || '')}` : 'Service (No Stock)'}
+                </div>
+              </div>
+            </div>
+            <div class="pos-product-price" style="margin-top: 6px; font-weight: 700; color: var(--accent-primary); font-size: 14px;">${formatTenantMoney(price)}</div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderPosProductSections() {
+      const container = document.getElementById('posProductSectionsContainer');
+      if (!container) return;
+
+      if (!state.warehouseId) {
+        container.innerHTML = `
+          <div class="card" style="text-align: center; padding: 36px 16px; color: var(--text-secondary);">
+            <div style="font-weight: 600; color: var(--text-primary); margin-bottom: 6px;">Warehouse Location Connecting</div>
+            <div>Syncing active branch and warehouse parameters. Please ensure your branch has an active warehouse configured.</div>
+          </div>
+        `;
+        return;
+      }
+
+      const products = state.posCachedProducts || [];
+      const categories = state.posCachedCategories || [];
+      const selectedCatId = state.posSelectedCategoryId || null;
+
+      if (products.length === 0) {
+        container.innerHTML = `
+          <div class="card" style="text-align: center; padding: 40px 16px; color: var(--text-secondary);">
+            No active products found in this branch catalog. Add products in the Inventory menu to begin sales.
+          </div>
+        `;
+        return;
+      }
+
+      // If a specific category is selected
+      if (selectedCatId) {
+        const selectedCat = categories.find(c => c.id === selectedCatId);
+        const catProducts = products.filter(p => p.categoryId === selectedCatId);
+        const catName = selectedCat ? selectedCat.name : 'Selected Category';
+        const catColor = selectedCat?.color || '#6366f1';
+        const bg = getSoftPastelBg(catColor);
+
+        if (catProducts.length === 0) {
+          container.innerHTML = `
+            <div class="pos-category-section" style="background: ${bg};">
+              <div class="pos-category-header">
+                <div class="pos-category-title-wrap">
+                  <span class="pos-category-color-dot" style="background: ${escapeHtml(catColor)};"></span>
+                  <h3 class="pos-category-title">${escapeHtml(catName)}</h3>
+                </div>
+                <span class="badge-pill" style="font-size: 11px;">0 items</span>
+              </div>
+              <div style="text-align: center; padding: 30px 16px; color: var(--text-secondary); font-size: 13px;">
+                No products in this category.
+              </div>
+            </div>
+          `;
+          return;
+        }
+
+        container.innerHTML = `
+          <div class="pos-category-section" style="background: ${bg};">
+            <div class="pos-category-header">
+              <div class="pos-category-title-wrap">
+                <span class="pos-category-color-dot" style="background: ${escapeHtml(catColor)};"></span>
+                <h3 class="pos-category-title">${escapeHtml(catName)}</h3>
+              </div>
+              <span class="badge-pill" style="font-size: 11px;">${catProducts.length} items</span>
+            </div>
+            <div class="pos-product-grid">
+              ${renderPosProductCardsHtml(catProducts)}
+            </div>
+          </div>
+        `;
+        return;
+      }
+
+      // selectedCatId is null ("All Items"): Vertical top-to-bottom layout with soft pastel backgrounds
+      let html = '';
+      const renderedProductIds = new Set();
+
+      for (const cat of categories) {
+        const catProducts = products.filter(p => p.categoryId === cat.id);
+        if (catProducts.length > 0) {
+          catProducts.forEach(p => renderedProductIds.add(p.id));
+          const catColor = cat.color || '#6366f1';
+          const bg = getSoftPastelBg(catColor);
+          html += `
+            <div class="pos-category-section" style="background: ${bg};">
+              <div class="pos-category-header">
+                <div class="pos-category-title-wrap">
+                  <span class="pos-category-color-dot" style="background: ${escapeHtml(catColor)};"></span>
+                  <h3 class="pos-category-title">${escapeHtml(cat.name)}</h3>
+                </div>
+                <span class="badge-pill" style="font-size: 11px;">${catProducts.length} items</span>
+              </div>
+              <div class="pos-product-grid">
+                ${renderPosProductCardsHtml(catProducts)}
+              </div>
+            </div>
+          `;
+        }
+      }
+
+      // Check for uncategorized products
+      const uncategorizedProducts = products.filter(p => !p.categoryId || !renderedProductIds.has(p.id));
+      if (uncategorizedProducts.length > 0) {
+        html += `
+          <div class="pos-category-section" style="background: rgba(148, 163, 184, 0.08);">
+            <div class="pos-category-header">
+              <div class="pos-category-title-wrap">
+                <span class="pos-category-color-dot" style="background: #94a3b8;"></span>
+                <h3 class="pos-category-title">Uncategorized Items</h3>
+              </div>
+              <span class="badge-pill" style="font-size: 11px;">${uncategorizedProducts.length} items</span>
+            </div>
+            <div class="pos-product-grid">
+              ${renderPosProductCardsHtml(uncategorizedProducts)}
+            </div>
+          </div>
+        `;
+      }
+
+      container.innerHTML = html;
+    }
+
     function filterPosCategory(catId) {
       state.posSelectedCategoryId = catId || null;
-      renderPosCheckoutView();
+      const pills = document.querySelectorAll('.pos-cat-pill');
+      pills.forEach(p => {
+        const pCatId = p.getAttribute('data-cat-id');
+        const isSel = (!catId && !pCatId) || (pCatId === catId);
+        if (isSel) {
+          p.classList.add('active');
+          const activeBg = p.getAttribute('data-active-bg') || 'var(--accent-primary)';
+          p.style.background = activeBg;
+          p.style.borderColor = activeBg;
+          p.style.color = '#fff';
+          const dot = p.querySelector('.pos-cat-pill-dot');
+          if (dot) dot.style.background = '#fff';
+        } else {
+          p.classList.remove('active');
+          p.style.background = 'var(--bg-primary)';
+          p.style.borderColor = 'var(--border-subtle)';
+          p.style.color = 'var(--text-primary)';
+          const dot = p.querySelector('.pos-cat-pill-dot');
+          if (dot) dot.style.background = p.getAttribute('data-dot-color') || '#6366f1';
+        }
+      });
+      // Instant in-memory re-render of catalog container (< 5ms response time!)
+      renderPosProductSections();
     }
 
     async function executeBarcodeScan(barcodeOrSku) {
@@ -8500,8 +8874,8 @@
       const item = state.cart[index];
       if (!item) return;
       const isDec = isDecimalUom(item.uomCode);
-      let val = isDec ? parseFloat(rawVal) : parseInt(rawVal, 10);
-      if (isNaN(val) || val <= 0) val = isDec ? 0.1 : 1;
+      let val = isDec ? Math.round(parseFloat(rawVal) * 1000) / 1000 : parseInt(rawVal, 10);
+      if (isNaN(val) || val <= 0) val = isDec ? 0.001 : 1;
 
       if (item.trackInventory && val > item.availableQuantity) {
         showToast(`Quantity exceeds available stock (${item.availableQuantity} ${escapeHtml(item.uomCode)}). Adjusted to maximum available.`, 'warning');
@@ -8520,7 +8894,10 @@
     }
 
     function calculateCartSubtotal() {
-      return state.cart.reduce((acc, item) => acc + (item.qty * (parseFloat(item.unitPrice) || 0)), 0);
+      return state.cart.reduce((acc, item) => {
+        const lineTotal = Math.round(item.qty * (parseFloat(item.unitPrice) || 0) * 100) / 100;
+        return acc + lineTotal;
+      }, 0);
     }
 
     function calculateCartTax() {
@@ -8546,6 +8923,7 @@
           </div>
         ` : state.cart.map((line, idx) => {
           const isDec = isDecimalUom(line.uomCode);
+          const lineTotal = Math.round(line.qty * (parseFloat(line.unitPrice) || 0) * 100) / 100;
           return `
           <div class="cart-line">
             <div class="cart-line-info">
@@ -8554,11 +8932,11 @@
             </div>
             <div class="cart-line-controls">
               <button class="qty-btn" onclick="updateCartQty(${idx}, -1)">-</button>
-              <input type="number" step="${isDec ? 'any' : '1'}" min="${isDec ? '0.001' : '1'}" max="${line.trackInventory ? line.availableQuantity : 9999}" value="${isDec ? line.qty : line.qty}" style="width: 50px; text-align: center; border: 1px solid var(--border-subtle); border-radius: 4px; padding: 2px 4px; font-weight: 600; font-size: 13px; background: var(--bg-primary); color: var(--text-primary);" onchange="setCartQty(${idx}, this.value)" />
+              <input type="number" step="${isDec ? '0.001' : '1'}" min="${isDec ? '0.001' : '1'}" max="${line.trackInventory ? line.availableQuantity : 9999}" value="${line.qty}" style="width: 50px; text-align: center; border: 1px solid var(--border-subtle); border-radius: 4px; padding: 2px 4px; font-weight: 600; font-size: 13px; background: var(--bg-primary); color: var(--text-primary);" onchange="setCartQty(${idx}, this.value)" />
               <button class="qty-btn" onclick="updateCartQty(${idx}, 1)">+</button>
             </div>
             <div style="min-width: 65px; text-align: right; font-weight: 700; color: var(--text-primary); margin-left: 12px;">
-              ${formatTenantMoney(line.qty * (parseFloat(line.unitPrice) || 0))}
+              ${formatTenantMoney(lineTotal)}
             </div>
           </div>
         `;}).join('');
@@ -10620,7 +10998,7 @@
     async function renderOrgSettingsView() {
       const container = document.getElementById('mainContainer');
       try {
-        const [entRes, barcodeSettings, payrollSettings] = await Promise.all([
+        const [entRes, barcodeSettings, payrollSettings, branchesRes] = await Promise.all([
           apiFetch('/v1/subscriptions/entitlement').catch(() => ({
             planCode: 'GROWTH',
             status: 'ACTIVE',
@@ -10648,365 +11026,441 @@
             workplaceLatitude: null,
             workplaceLongitude: null,
             overtimeHourlyMultiplier: '1.50'
-          })) : Promise.resolve(null)
+          })) : Promise.resolve(null),
+          apiFetch('/v1/branches', { silent: true }).catch(() => ({ data: [] }))
         ]);
 
-        const activeTab = state.orgSettingsActiveTab || 'profile';
+        const branches = Array.isArray(branchesRes) ? branchesRes : (branchesRes?.data || []);
+
+        let activeTab = state.orgSettingsActiveTab || 'org';
+        if (activeTab === 'profile') activeTab = 'org';
+        if (activeTab === 'barcodes') activeTab = 'hw';
+        if (activeTab === 'pos-auto') activeTab = 'pos';
+        if (activeTab === 'generator') activeTab = 'pref';
+        if (activeTab === 'payroll') activeTab = 'hrm';
 
         container.innerHTML = `
           <div class="view-header">
             <div>
-              <h1 class="view-title">Organization Settings &amp; Subscription</h1>
-              <div class="view-subtitle">Multi-tenant account parameters, plan limits, barcode scanners, and operational configurations</div>
+              <h1 class="view-title">Settings &amp; Quotas</h1>
+              <div class="view-subtitle">Organization parameters, subscription entitlements, hardware peripherals, and operational behaviors</div>
             </div>
           </div>
 
-          <!-- Categorized Navigation Tabs (Phase E2) -->
-          <div class="org-settings-tabs" style="display: flex; gap: 8px; border-bottom: 2px solid var(--border-color); margin-bottom: 20px; overflow-x: auto; padding-bottom: 6px;">
-            <button type="button" class="btn btn-sm ${activeTab === 'profile' ? 'btn-primary' : 'btn-secondary'}" onclick="switchOrgSettingsTab('profile')">Profile &amp; Subscription</button>
-            <button type="button" class="btn btn-sm ${activeTab === 'barcodes' ? 'btn-primary' : 'btn-secondary'}" onclick="switchOrgSettingsTab('barcodes')">Hardware Scanners</button>
-            <button type="button" class="btn btn-sm ${activeTab === 'pos' ? 'btn-primary' : 'btn-secondary'}" onclick="switchOrgSettingsTab('pos')">POS Automation</button>
-            <button type="button" class="btn btn-sm ${activeTab === 'generator' ? 'btn-primary' : 'btn-secondary'}" onclick="switchOrgSettingsTab('generator')">Barcode Generator &amp; Console</button>
-            ${isModuleEnabled('hrm') ? `
-              <button type="button" class="btn btn-sm ${activeTab === 'payroll' ? 'btn-primary' : 'btn-secondary'}" onclick="switchOrgSettingsTab('payroll')">Attendance &amp; Payroll</button>
-            ` : ''}
-          </div>
+          <!-- Dynamic Status Notification Banner -->
+          <div class="settings-save-banner" id="settingsSaveBanner"></div>
 
-          <!-- Tab 1: Tenant Profile & Subscription Quotas -->
-          <div id="orgTabProfile" style="display: ${activeTab === 'profile' ? 'block' : 'none'};">
-            <div class="dashboard-split-grid">
-              <div class="card">
-                <div class="card-title">Tenant Profile</div>
-                <div class="form-group">
-                  <label class="form-label">Legal Name</label>
-                  <input type="text" class="form-input" value="${escapeHtml(state.tenantName || 'My Business')}" readonly>
-                </div>
-                <div class="form-group">
-                  <label class="form-label">Tenant ID</label>
-                  <input type="text" class="form-input" value="${escapeHtml(state.tenantId)}" readonly style="font-family: monospace; font-size: 12px;">
-                </div>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+          <!-- Modern 2-Column Settings Layout (Linear/Stripe Style) -->
+          <div class="settings-layout">
+            <!-- Left Sidebar Navigation (Desktop) / Segmented Strip (Mobile) -->
+            <aside class="settings-sidebar" id="settingsSidebarNav">
+              <button type="button" class="settings-nav-item ${activeTab === 'org' ? 'active' : ''}" data-tab="org" onclick="switchOrgSettingsTab('org')">
+                <span>🏢</span>
+                <span>Organization</span>
+              </button>
+              <button type="button" class="settings-nav-item ${activeTab === 'sub' ? 'active' : ''}" data-tab="sub" onclick="switchOrgSettingsTab('sub')">
+                <span>💳</span>
+                <span>Subscription</span>
+              </button>
+              <button type="button" class="settings-nav-item ${activeTab === 'hw' ? 'active' : ''}" data-tab="hw" onclick="switchOrgSettingsTab('hw')">
+                <span>📟</span>
+                <span>Hardware</span>
+              </button>
+              <button type="button" class="settings-nav-item ${activeTab === 'pos' ? 'active' : ''}" data-tab="pos" onclick="switchOrgSettingsTab('pos')">
+                <span>⚡</span>
+                <span>POS Automation</span>
+              </button>
+              <button type="button" class="settings-nav-item ${activeTab === 'pref' ? 'active' : ''}" data-tab="pref" onclick="switchOrgSettingsTab('pref')">
+                <span>⚙️</span>
+                <span>Preferences</span>
+              </button>
+              ${isModuleEnabled('hrm') ? `
+                <button type="button" class="settings-nav-item ${activeTab === 'hrm' ? 'active' : ''}" data-tab="hrm" onclick="switchOrgSettingsTab('hrm')">
+                  <span>👥</span>
+                  <span>Attendance &amp; Payroll</span>
+                </button>
+              ` : ''}
+            </aside>
+
+            <!-- Right Content Panels -->
+            <main class="settings-content">
+              <!-- Category 1: Organization -->
+              <div class="settings-tab-panel" id="orgTab_org" data-tab="org" style="display: ${activeTab === 'org' ? 'block' : 'none'};">
+                <div class="card" style="margin-bottom: 16px;">
+                  <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
+                    <span>Business Profile</span>
+                    <span class="badge-pill badge-blue">Tenant Configuration</span>
+                  </div>
                   <div class="form-group">
-                    <label class="form-label">Base Currency</label>
-                    <input type="text" class="form-input" value="${escapeHtml(state.currency || getTenantCurrency())}" readonly>
+                    <label class="form-label">Legal Organization Name</label>
+                    <input type="text" class="form-input" value="${escapeHtml(state.tenantName || 'My Business')}" readonly>
                   </div>
                   <div class="form-group">
-                    <label class="form-label">Default Country</label>
-                    <input type="text" class="form-input" value="${escapeHtml(state.countryCode || 'US')}" readonly>
+                    <label class="form-label">Tenant ID</label>
+                    <input type="text" class="form-input" value="${escapeHtml(state.tenantId)}" readonly style="font-family: monospace; font-size: 12px;">
                   </div>
-                </div>
-              </div>
-
-              <div class="card">
-                <div class="card-title">
-                  <span>Subscription Plan</span>
-                  <span class="badge-pill badge-green">${entRes.planCode} (${entRes.status})</span>
-                </div>
-                <div style="margin-bottom: 12px; font-size: 13px; color: var(--text-secondary);">
-                  Active enterprise subscription with multi-branch allocation and unrestricted POS checkout registers.
-                </div>
-                <div class="table-responsive">
-                  <table class="data-table">
-                    <thead>
-                      <tr>
-                        <th>Quota Resource</th>
-                        <th>Entitlement Limit</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr><td>Max Store Branches</td><td><strong>${entRes.maxBranches}</strong></td></tr>
-                      <tr><td>Max Warehouses</td><td><strong>${entRes.maxWarehouses}</strong></td></tr>
-                      <tr><td>Max Team Members</td><td><strong>${entRes.maxUsers}</strong></td></tr>
-                      <tr><td>Max Product SKUs</td><td><strong>${entRes.maxSkus}</strong></td></tr>
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Tab 2: Hardware Scanners & Input Engines -->
-          <div id="orgTabBarcodes" style="display: ${activeTab === 'barcodes' ? 'block' : 'none'};">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 8px;">
-              <div>
-                <h2 style="font-size: 18px; font-weight: 700; color: var(--text-primary); margin: 0;">Physical Handheld &amp; Camera Scanners</h2>
-                <div style="font-size: 13px; color: var(--text-secondary); margin-top: 2px;">Configure keystroke wedges, continuous mobile camera scanning, and direct WebHID connections.</div>
-              </div>
-              <button class="btn btn-primary" id="btnSaveBarcodeSettings" onclick="saveTenantBarcodeSettings()">Save Settings</button>
-            </div>
-
-            <div class="card" style="margin: 0; max-width: 720px;">
-              <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
-                <span>Hardware Scanners &amp; Input Engines</span>
-                <span class="badge-pill badge-blue">Input Engine</span>
-              </div>
-              <div>
-                <div class="switch-group">
-                  <label class="modern-switch">
-                    <input type="checkbox" id="settingHwScanner" ${barcodeSettings.hardwareScannerEnabled !== false ? 'checked' : ''}>
-                    <span class="modern-slider"></span>
-                  </label>
-                  <div style="flex: 1;">
-                    <div style="font-weight: 600; font-size: 13px;">Hardware Scanner Wedge (USB / BT)</div>
-                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">
-                      Listens for rapid keystroke bursts from physical handheld laser/CCD scanners in POS Checkout.
+                  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                    <div class="form-group" style="margin-bottom: 0;">
+                      <label class="form-label">Base Currency</label>
+                      <input type="text" class="form-input" value="${escapeHtml(state.currency || getTenantCurrency())}" readonly>
+                    </div>
+                    <div class="form-group" style="margin-bottom: 0;">
+                      <label class="form-label">Default Country</label>
+                      <input type="text" class="form-input" value="${escapeHtml(state.countryCode || 'US')}" readonly>
                     </div>
                   </div>
                 </div>
 
-                <div class="switch-group">
-                  <label class="modern-switch">
-                    <input type="checkbox" id="settingCamScanner" ${barcodeSettings.cameraScannerEnabled !== false ? 'checked' : ''}>
-                    <span class="modern-slider"></span>
-                  </label>
-                  <div style="flex: 1;">
-                    <div style="font-weight: 600; font-size: 13px;">HTML5 Continuous Camera Scanner</div>
-                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">
-                      Continuous mobile &amp; tablet camera scanning with laser reticle and cooldown debouncing.
+                <div class="card" style="margin-bottom: 0;">
+                  <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
+                    <span>Active Branches (${branches.length})</span>
+                    <span class="badge-pill badge-green">Operational</span>
+                  </div>
+                  <div class="table-responsive">
+                    <table class="data-table">
+                      <thead>
+                        <tr>
+                          <th>Branch Code</th>
+                          <th>Branch Name</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        ${branches.length === 0 ? `
+                          <tr><td colspan="3" style="text-align: center; color: var(--text-secondary);">No branches configured.</td></tr>
+                        ` : branches.map(b => `
+                          <tr>
+                            <td><code>${escapeHtml(b.code || 'MAIN')}</code></td>
+                            <td><strong>${escapeHtml(b.name || 'Main Branch')}</strong></td>
+                            <td><span class="badge-pill badge-green">Active</span></td>
+                          </tr>
+                        `).join('')}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Category 2: Subscription -->
+              <div class="settings-tab-panel" id="orgTab_sub" data-tab="sub" style="display: ${activeTab === 'sub' ? 'block' : 'none'};">
+                <div class="card" style="margin-bottom: 16px;">
+                  <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
+                    <span>Subscription Plan</span>
+                    <span class="badge-pill badge-green">${entRes.planCode} (${entRes.status})</span>
+                  </div>
+                  <div style="margin-bottom: 14px; font-size: 13px; color: var(--text-secondary);">
+                    Active enterprise subscription with multi-branch allocation and unrestricted POS checkout registers.
+                  </div>
+                  <div class="table-responsive">
+                    <table class="data-table">
+                      <thead>
+                        <tr>
+                          <th>Quota Resource</th>
+                          <th>Entitlement Limit</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr><td>Max Store Branches</td><td><strong>${entRes.maxBranches}</strong></td></tr>
+                        <tr><td>Max Warehouses</td><td><strong>${entRes.maxWarehouses}</strong></td></tr>
+                        <tr><td>Max Team Members</td><td><strong>${entRes.maxUsers}</strong></td></tr>
+                        <tr><td>Max Product SKUs</td><td><strong>${entRes.maxSkus}</strong></td></tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Category 3: Hardware -->
+              <div class="settings-tab-panel" id="orgTab_hw" data-tab="hw" style="display: ${activeTab === 'hw' ? 'block' : 'none'};">
+                <div class="card" style="margin-bottom: 0;">
+                  <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                      <span>Hardware Scanners &amp; Input Engines</span>
+                      <div style="font-size: 12px; font-weight: normal; color: var(--text-secondary); margin-top: 2px;">Configure keystroke wedges, mobile cameras, and WebHID connections</div>
+                    </div>
+                    <button class="btn btn-primary btn-sm btn-save-settings" onclick="saveTenantBarcodeSettings()">Save Settings</button>
+                  </div>
+                  <div>
+                    <div class="switch-group">
+                      <label class="modern-switch">
+                        <input type="checkbox" id="settingHwScanner" ${barcodeSettings.hardwareScannerEnabled !== false ? 'checked' : ''}>
+                        <span class="modern-slider"></span>
+                      </label>
+                      <div style="flex: 1;">
+                        <div style="font-weight: 600; font-size: 13px;">Hardware Scanner Wedge (USB / BT)</div>
+                        <div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">
+                          Listens for rapid keystroke bursts from physical handheld laser/CCD scanners in POS Checkout.
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="switch-group">
+                      <label class="modern-switch">
+                        <input type="checkbox" id="settingCamScanner" ${barcodeSettings.cameraScannerEnabled !== false ? 'checked' : ''}>
+                        <span class="modern-slider"></span>
+                      </label>
+                      <div style="flex: 1;">
+                        <div style="font-weight: 600; font-size: 13px;">HTML5 Continuous Camera Scanner</div>
+                        <div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">
+                          Continuous mobile &amp; tablet camera scanning with laser reticle and cooldown debouncing.
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style="margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-subtle); display: flex; flex-direction: column; gap: 8px;">
+                      <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-size: 12px; font-weight: 600; color: var(--text-secondary);">Direct WebHID Engine:</span>
+                        <span class="badge-pill badge-green" id="webhidStatusBadge">Available</span>
+                      </div>
+                      <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="openHardwareScannerGuideModal()" style="font-size: 11px;">📖 Setup Guide</button>
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="connectWebHidScanner()" style="font-size: 11px;">🔌 Pair WebHID Device</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Category 4: POS Automation -->
+              <div class="settings-tab-panel" id="orgTab_pos" data-tab="pos" style="display: ${activeTab === 'pos' ? 'block' : 'none'};">
+                <div class="card" style="margin-bottom: 0;">
+                  <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                      <span>POS Checkout Behaviors</span>
+                      <div style="font-size: 12px; font-weight: normal; color: var(--text-secondary); margin-top: 2px;">Control instant cart placement, quantity incrementing, and audio chime</div>
+                    </div>
+                    <button class="btn btn-primary btn-sm btn-save-settings" onclick="saveTenantBarcodeSettings()">Save Settings</button>
+                  </div>
+                  <div>
+                    <div class="switch-group">
+                      <label class="modern-switch">
+                        <input type="checkbox" id="settingAutoCart" ${barcodeSettings.autoAddToCart !== false ? 'checked' : ''}>
+                        <span class="modern-slider"></span>
+                      </label>
+                      <div style="flex: 1;">
+                        <div style="font-weight: 600; font-size: 13px;">Auto Add-to-Cart on Scan</div>
+                        <div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">
+                          Immediately places recognized product into the active cashier register cart.
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="switch-group">
+                      <label class="modern-switch">
+                        <input type="checkbox" id="settingIncDup" ${barcodeSettings.incrementOnDuplicate !== false ? 'checked' : ''}>
+                        <span class="modern-slider"></span>
+                      </label>
+                      <div style="flex: 1;">
+                        <div style="font-weight: 600; font-size: 13px;">Increment Quantity on Duplicate Scan</div>
+                        <div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">
+                          Repeated scans of the same product increment its line quantity automatically.
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style="margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-subtle); font-size: 12px; color: var(--text-secondary);">
+                      🔊 Audio chime scan feedback is active by default. Manual product catalog selection and search bar always remain available simultaneously with barcode scanning.
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Category 5: Preferences & Barcodes -->
+              <div class="settings-tab-panel" id="orgTab_pref" data-tab="pref" style="display: ${activeTab === 'pref' ? 'block' : 'none'};">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 8px;">
+                  <div>
+                    <h2 style="font-size: 16px; font-weight: 700; color: var(--text-primary); margin: 0;">Preferences, Barcode Generation &amp; Diagnostics</h2>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">Internal SKU prefix generator, currency precision, and hardware transmission tester</div>
+                  </div>
+                  <button class="btn btn-primary btn-sm btn-save-settings" onclick="saveTenantBarcodeSettings()">Save Settings</button>
+                </div>
+
+                <div class="card" style="margin-bottom: 16px;">
+                  <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
+                    <span>Currency &amp; Numeric Precision</span>
+                    <span class="badge-pill badge-blue">Formatting</span>
+                  </div>
+                  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px;">
+                    <div>
+                      <div style="font-size: 11px; color: var(--text-secondary); text-transform: uppercase; font-weight: 600;">Active Currency</div>
+                      <div style="font-size: 16px; font-weight: 700; color: var(--text-primary); margin-top: 4px;">${escapeHtml(getTenantCurrency())}</div>
+                    </div>
+                    <div>
+                      <div style="font-size: 11px; color: var(--text-secondary); text-transform: uppercase; font-weight: 600;">Monetary Minor Units</div>
+                      <div style="font-size: 16px; font-weight: 700; color: var(--text-primary); margin-top: 4px;">${getCurrencyMinorUnits()} decimals</div>
+                    </div>
+                    <div>
+                      <div style="font-size: 11px; color: var(--text-secondary); text-transform: uppercase; font-weight: 600;">Decimal UoM Precision</div>
+                      <div style="font-size: 16px; font-weight: 700; color: var(--text-primary); margin-top: 4px;">Up to 3 decimals (KG, L, M)</div>
                     </div>
                   </div>
                 </div>
 
-                <div style="margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-subtle); display: flex; flex-direction: column; gap: 8px;">
-                  <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <span style="font-size: 12px; font-weight: 600; color: var(--text-secondary);">Direct WebHID Engine:</span>
-                    <span class="badge-pill badge-green" id="webhidStatusBadge">Available</span>
-                  </div>
-                  <div style="display: flex; gap: 6px; flex-wrap: wrap;">
-                    <button type="button" class="btn btn-secondary btn-sm" onclick="openHardwareScannerGuideModal()" style="font-size: 11px;">📖 Setup Guide</button>
-                    <button type="button" class="btn btn-secondary btn-sm" onclick="connectWebHidScanner()" style="font-size: 11px;">🔌 Pair WebHID Device</button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Tab 3: POS Checkout Automation -->
-          <div id="orgTabPos" style="display: ${activeTab === 'pos' ? 'block' : 'none'};">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 8px;">
-              <div>
-                <h2 style="font-size: 18px; font-weight: 700; color: var(--text-primary); margin: 0;">POS Checkout Automation Behaviors</h2>
-                <div style="font-size: 13px; color: var(--text-secondary); margin-top: 2px;">Control instant cart placement, quantity incrementing, and scanning audio feedback.</div>
-              </div>
-              <button class="btn btn-primary" onclick="saveTenantBarcodeSettings()">Save Settings</button>
-            </div>
-
-            <div class="card" style="margin: 0; max-width: 720px;">
-              <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
-                <span>POS Checkout Behaviors</span>
-                <span class="badge-pill badge-green">Automation</span>
-              </div>
-              <div>
-                <div class="switch-group">
-                  <label class="modern-switch">
-                    <input type="checkbox" id="settingAutoCart" ${barcodeSettings.autoAddToCart !== false ? 'checked' : ''}>
-                    <span class="modern-slider"></span>
-                  </label>
-                  <div style="flex: 1;">
-                    <div style="font-weight: 600; font-size: 13px;">Auto Add-to-Cart on Scan</div>
-                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">
-                      Immediately places recognized product into the active cashier register cart.
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px;">
+                  <!-- Internal Barcode Generator Card -->
+                  <div class="card" style="margin: 0; display: flex; flex-direction: column;">
+                    <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
+                      <span>Internal SKU &amp; Barcode Generator</span>
+                      <span class="badge-pill badge-blue">Generator</span>
                     </div>
-                  </div>
-                </div>
-
-                <div class="switch-group">
-                  <label class="modern-switch">
-                    <input type="checkbox" id="settingIncDup" ${barcodeSettings.incrementOnDuplicate !== false ? 'checked' : ''}>
-                    <span class="modern-slider"></span>
-                  </label>
-                  <div style="flex: 1;">
-                    <div style="font-weight: 600; font-size: 13px;">Increment Quantity on Duplicate Scan</div>
-                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">
-                      Repeated scans of the same product increment its line quantity by 1 automatically.
-                    </div>
-                  </div>
-                </div>
-
-                <div style="margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-subtle); font-size: 12px; color: var(--text-secondary);">
-                  Manual product catalog selection and search bar always remain available simultaneously with barcode scanning.
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Tab 4: Internal Generator & Test Console -->
-          <div id="orgTabGenerator" style="display: ${activeTab === 'generator' ? 'block' : 'none'};">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 8px;">
-              <div>
-                <h2 style="font-size: 18px; font-weight: 700; color: var(--text-primary); margin: 0;">Barcode Generation &amp; Hardware Diagnostics</h2>
-                <div style="font-size: 13px; color: var(--text-secondary); margin-top: 2px;">Collision-free internal barcode generator and real-time hardware transmission tester.</div>
-              </div>
-              <button class="btn btn-primary" id="btnSaveBarcodeSettingsBottom" onclick="saveTenantBarcodeSettings()">Save Settings</button>
-            </div>
-
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px;">
-              <!-- Card 3: Internal SKU & Barcode Generator -->
-              <div class="card" style="margin: 0; display: flex; flex-direction: column;">
-                <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
-                  <span>Internal SKU &amp; Barcode Generator</span>
-                  <span class="badge-pill badge-blue">Generator</span>
-                </div>
-                <div style="flex: 1;">
-                  <div class="switch-group">
-                    <label class="modern-switch">
-                      <input type="checkbox" id="settingInternalGen" ${barcodeSettings.internalGenerationEnabled !== false ? 'checked' : ''}>
-                      <span class="modern-slider"></span>
-                    </label>
                     <div style="flex: 1;">
-                      <div style="font-weight: 600; font-size: 13px;">Internal Collision-Free Generator</div>
-                      <div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">
-                        Provides 1-click unique barcode creation across Code 128, Code 39, and GS1 EAN formats.
+                      <div class="switch-group">
+                        <label class="modern-switch">
+                          <input type="checkbox" id="settingInternalGen" ${barcodeSettings.internalGenerationEnabled !== false ? 'checked' : ''}>
+                          <span class="modern-slider"></span>
+                        </label>
+                        <div style="flex: 1;">
+                          <div style="font-weight: 600; font-size: 13px;">Internal Collision-Free Generator</div>
+                          <div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">
+                            Provides 1-click unique barcode creation across Code 128, Code 39, and GS1 EAN formats.
+                          </div>
+                        </div>
+                      </div>
+
+                      <div class="form-group" style="margin-top: 14px; margin-bottom: 0;">
+                        <label class="form-label">Internal Barcode Prefix</label>
+                        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                          <input type="text" class="form-input" id="settingPrefix" value="${escapeHtml(barcodeSettings.internalPrefix || 'NB')}" maxlength="8" style="width: 120px;" oninput="updateBarcodePrefixPreview(this.value)">
+                          <span id="barcodePrefixSamplePill" class="badge-pill badge-blue" style="font-size: 12px; font-family: monospace;">Example: ${(barcodeSettings.internalPrefix || 'NB').toUpperCase()}-10000000001</span>
+                        </div>
+                        <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">
+                          Prefix applied when creating unique internal barcodes for private-label inventory.
+                        </div>
                       </div>
                     </div>
                   </div>
 
-                  <div class="form-group" style="margin-top: 14px; margin-bottom: 0;">
-                    <label class="form-label">Internal Barcode Prefix</label>
-                    <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-                      <input type="text" class="form-input" id="settingPrefix" value="${escapeHtml(barcodeSettings.internalPrefix || 'NB')}" maxlength="8" style="width: 120px;" oninput="updateBarcodePrefixPreview(this.value)">
-                      <span id="barcodePrefixSamplePill" class="badge-pill badge-blue" style="font-size: 12px; font-family: monospace;">Example: ${(barcodeSettings.internalPrefix || 'NB').toUpperCase()}-10000000001</span>
+                  <!-- Interactive Hardware Scanner Test Console Card -->
+                  <div class="card" style="margin: 0; display: flex; flex-direction: column;" id="scannerTestConsoleCard">
+                    <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
+                      <span>Hardware Scanner Test Console</span>
+                      <span class="badge-pill badge-blue" id="testScannerStatusPill">Ready for Scan</span>
                     </div>
-                    <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">
-                      Prefix applied when creating unique internal barcodes for private-label inventory.
-                    </div>
-                  </div>
-                </div>
-              </div>
+                    <div style="flex: 1; display: flex; flex-direction: column; gap: 10px;">
+                      <div class="form-group" style="margin-bottom: 0;">
+                        <div style="display: flex; gap: 6px;">
+                          <input type="text" class="form-input" id="hardwareScannerTestInput" placeholder="Click here and scan any barcode with physical scanner..." style="font-size: 12px;">
+                          <button type="button" class="btn btn-secondary btn-sm" onclick="resetScannerTestConsole()">Clear</button>
+                        </div>
+                      </div>
 
-              <!-- Card 4: Interactive Hardware Scanner Test Console -->
-              <div class="card" style="margin: 0; display: flex; flex-direction: column;" id="scannerTestConsoleCard">
-                <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
-                  <span>Hardware Scanner Test Console</span>
-                  <span class="badge-pill badge-blue" id="testScannerStatusPill">Ready for Scan</span>
-                </div>
-                <div style="flex: 1; display: flex; flex-direction: column; gap: 10px;">
-                  <div class="form-group" style="margin-bottom: 0;">
-                    <div style="display: flex; gap: 6px;">
-                      <input type="text" class="form-input" id="hardwareScannerTestInput" placeholder="Click here and scan any barcode with physical scanner..." style="font-size: 12px;">
-                      <button type="button" class="btn btn-secondary btn-sm" onclick="resetScannerTestConsole()">Clear</button>
-                    </div>
-                  </div>
-
-                  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
-                    <div class="scanner-stat-card">
-                      <div class="scanner-stat-label">Decoded Barcode</div>
-                      <div class="scanner-stat-value" id="testScannerCodeVal">—</div>
-                    </div>
-                    <div class="scanner-stat-card">
-                      <div class="scanner-stat-label">Inferred Symbology</div>
-                      <div class="scanner-stat-value" id="testScannerSymbologyVal" style="font-size: 12px;">—</div>
-                    </div>
-                    <div class="scanner-stat-card">
-                      <div class="scanner-stat-label">Burst Duration</div>
-                      <div class="scanner-stat-value" id="testScannerDurationVal">—</div>
-                    </div>
-                    <div class="scanner-stat-card">
-                      <div class="scanner-stat-label">Transmission Speed</div>
-                      <div class="scanner-stat-value" id="testScannerRateVal" style="font-size: 12px;">—</div>
+                      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                        <div class="scanner-stat-card">
+                          <div class="scanner-stat-label">Decoded Barcode</div>
+                          <div class="scanner-stat-value" id="testScannerCodeVal">—</div>
+                        </div>
+                        <div class="scanner-stat-card">
+                          <div class="scanner-stat-label">Inferred Symbology</div>
+                          <div class="scanner-stat-value" id="testScannerSymbologyVal" style="font-size: 12px;">—</div>
+                        </div>
+                        <div class="scanner-stat-card">
+                          <div class="scanner-stat-label">Burst Duration</div>
+                          <div class="scanner-stat-value" id="testScannerDurationVal">—</div>
+                        </div>
+                        <div class="scanner-stat-card">
+                          <div class="scanner-stat-label">Transmission Speed</div>
+                          <div class="scanner-stat-value" id="testScannerRateVal" style="font-size: 12px;">—</div>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
               </div>
-            </div>
-          </div>
 
-          <!-- Tab 5: HRM, Attendance & Payroll Settings (Phase 7.1) -->
-          ${isModuleEnabled('hrm') ? `
-          <div id="orgTabPayroll" style="display: ${activeTab === 'payroll' ? 'block' : 'none'};">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 8px;">
-              <div>
-                <h2 style="font-size: 18px; font-weight: 700; color: var(--text-primary); margin: 0;">Payroll, Attendance &amp; Proration Policy (Phase 7.1)</h2>
-                <div style="font-size: 13px; color: var(--text-secondary); margin-top: 2px;">
-                  Configure statutory salary proration rules (BUG-051), allowance policies, and GPS geofenced attendance verification.
-                </div>
-              </div>
-              <button class="btn btn-primary" id="btnSavePayrollSettings" onclick="saveOrgPayrollSettings()">Save Payroll Settings</button>
-            </div>
-
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px;">
-              <!-- Proration & Allowances Policy Card -->
-              <div class="card" style="margin: 0;">
-                <div class="card-title">
-                  <span>Salary Proration Rules (BUG-051)</span>
-                  <span class="badge-pill badge-green">Proration Engine</span>
-                </div>
-                <div class="form-group">
-                  <label class="form-label">Default Proration Mode *</label>
-                  <select class="form-select" id="settingProrationMode">
-                    <option value="CALENDAR_DAYS" ${(payrollSettings?.prorationMethod === 'CALENDAR_DAYS' || payrollSettings?.defaultProrationRule === 'CALENDAR_DAYS') ? 'selected' : ''}>Calendar Days Based (Standard)</option>
-                    <option value="WORKING_DAYS" ${(payrollSettings?.prorationMethod === 'WORKING_DAYS' || payrollSettings?.prorationMethod === 'SCHEDULED_WORKING_DAYS' || payrollSettings?.defaultProrationRule === 'SCHEDULED_WORKING_DAYS') ? 'selected' : ''}>Scheduled Working Days (Shift-based)</option>
-                    <option value="FIXED_30_DAYS" ${(payrollSettings?.prorationMethod === 'FIXED_30_DAYS' || payrollSettings?.defaultProrationRule === 'FIXED_30_DAYS') ? 'selected' : ''}>Fixed 30-Day Commercial Month</option>
-                  </select>
-                  <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">
-                    Determines divisor and multiplier when employees join mid-cycle or take unpaid leave.
-                  </div>
-                </div>
-
-                <div class="form-group">
-                  <label class="form-label">Allowance Proration Policy *</label>
-                  <select class="form-select" id="settingAllowancePolicy">
-                    <option value="PRORATE" ${(payrollSettings?.allowanceProrationPolicy === 'PRORATE' || payrollSettings?.allowanceProrationPolicy === 'PRORATE_ALL') ? 'selected' : ''}>Prorate All Eligible Allowances</option>
-                    <option value="FULL" ${(payrollSettings?.allowanceProrationPolicy === 'FULL' || payrollSettings?.allowanceProrationPolicy === 'BASIC_ONLY') ? 'selected' : ''}>Prorate Basic Salary Only (Allowances Full)</option>
-                  </select>
-                </div>
-
-                <div class="form-group">
-                  <label class="form-label">Overtime Hourly Multiplier</label>
-                  <input type="number" step="0.1" class="form-input" id="settingOtMultiplier" value="${payrollSettings?.overtimeHourlyMultiplier || '1.50'}">
-                </div>
-              </div>
-
-              <!-- GPS Geofence Attendance Card -->
-              <div class="card" style="margin: 0;">
-                <div class="card-title">
-                  <span>GPS Geofenced Timekeeping</span>
-                  <span class="badge-pill badge-blue">Location Verification</span>
-                </div>
-
-                <div class="switch-group" style="margin-bottom: 14px;">
-                  <label class="modern-switch">
-                    <input type="checkbox" id="settingGpsAttendance" ${payrollSettings?.gpsAttendanceEnabled ? 'checked' : ''}>
-                    <span class="modern-slider"></span>
-                  </label>
-                  <div style="flex: 1;">
-                    <div style="font-weight: 600; font-size: 13px;">Require GPS Verification on Check-in</div>
+              ${isModuleEnabled('hrm') ? `
+              <!-- Category 6: HRM, Attendance & Payroll Settings (Phase 7.1) -->
+              <div class="settings-tab-panel" id="orgTab_hrm" data-tab="hrm" style="display: ${activeTab === 'hrm' ? 'block' : 'none'};">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 8px;">
+                  <div>
+                    <h2 style="font-size: 16px; font-weight: 700; color: var(--text-primary); margin: 0;">Payroll, Attendance &amp; Proration Policy (Phase 7.1)</h2>
                     <div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">
-                      Rejects check-in attempts outside workplace coordinates radius.
+                      Configure statutory salary proration rules (BUG-051), allowance policies, and GPS geofenced attendance verification.
+                    </div>
+                  </div>
+                  <button class="btn btn-primary btn-sm btn-save-settings" id="btnSavePayrollSettings" onclick="saveOrgPayrollSettings()">Save Payroll Settings</button>
+                </div>
+
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px;">
+                  <!-- Proration & Allowances Policy Card -->
+                  <div class="card" style="margin: 0;">
+                    <div class="card-title">
+                      <span>Salary Proration Rules (BUG-051)</span>
+                      <span class="badge-pill badge-green">Proration Engine</span>
+                    </div>
+                    <div class="form-group">
+                      <label class="form-label">Default Proration Mode *</label>
+                      <select class="form-select" id="settingProrationMode">
+                        <option value="CALENDAR_DAYS" ${(payrollSettings?.prorationMethod === 'CALENDAR_DAYS' || payrollSettings?.defaultProrationRule === 'CALENDAR_DAYS') ? 'selected' : ''}>Calendar Days Based (Standard)</option>
+                        <option value="WORKING_DAYS" ${(payrollSettings?.prorationMethod === 'WORKING_DAYS' || payrollSettings?.prorationMethod === 'SCHEDULED_WORKING_DAYS' || payrollSettings?.defaultProrationRule === 'SCHEDULED_WORKING_DAYS') ? 'selected' : ''}>Scheduled Working Days (Shift-based)</option>
+                        <option value="FIXED_30_DAYS" ${(payrollSettings?.prorationMethod === 'FIXED_30_DAYS' || payrollSettings?.defaultProrationRule === 'FIXED_30_DAYS') ? 'selected' : ''}>Fixed 30-Day Commercial Month</option>
+                      </select>
+                      <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">
+                        Determines divisor and multiplier when employees join mid-cycle or take unpaid leave.
+                      </div>
+                    </div>
+
+                    <div class="form-group">
+                      <label class="form-label">Allowance Proration Policy *</label>
+                      <select class="form-select" id="settingAllowancePolicy">
+                        <option value="PRORATE" ${(payrollSettings?.allowanceProrationPolicy === 'PRORATE' || payrollSettings?.allowanceProrationPolicy === 'PRORATE_ALL') ? 'selected' : ''}>Prorate All Eligible Allowances</option>
+                        <option value="FULL" ${(payrollSettings?.allowanceProrationPolicy === 'FULL' || payrollSettings?.allowanceProrationPolicy === 'BASIC_ONLY') ? 'selected' : ''}>Prorate Basic Salary Only (Allowances Full)</option>
+                      </select>
+                    </div>
+
+                    <div class="form-group" style="margin-bottom: 0;">
+                      <label class="form-label">Overtime Hourly Multiplier</label>
+                      <input type="number" step="0.1" class="form-input" id="settingOtMultiplier" value="${payrollSettings?.overtimeHourlyMultiplier || '1.50'}">
+                    </div>
+                  </div>
+
+                  <!-- GPS Geofence Attendance Card -->
+                  <div class="card" style="margin: 0;">
+                    <div class="card-title">
+                      <span>GPS Geofenced Timekeeping</span>
+                      <span class="badge-pill badge-blue">Location Verification</span>
+                    </div>
+
+                    <div class="switch-group" style="margin-bottom: 14px;">
+                      <label class="modern-switch">
+                        <input type="checkbox" id="settingGpsAttendance" ${payrollSettings?.gpsAttendanceEnabled ? 'checked' : ''}>
+                        <span class="modern-slider"></span>
+                      </label>
+                      <div style="flex: 1;">
+                        <div style="font-weight: 600; font-size: 13px;">Require GPS Verification on Check-in</div>
+                        <div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">
+                          Rejects check-in attempts outside workplace coordinates radius.
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                      <div class="form-group">
+                        <label class="form-label">Workplace Latitude</label>
+                        <input type="number" step="0.000001" class="form-input" id="settingWorkplaceLat" value="${payrollSettings?.workplaceLatitude ?? ''}" placeholder="e.g. 6.927079">
+                      </div>
+                      <div class="form-group">
+                        <label class="form-label">Workplace Longitude</label>
+                        <input type="number" step="0.000001" class="form-input" id="settingWorkplaceLon" value="${payrollSettings?.workplaceLongitude ?? ''}" placeholder="e.g. 79.861244">
+                      </div>
+                    </div>
+
+                    <div style="margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                      <button type="button" class="btn btn-secondary btn-sm" id="btnUseCurrentLocation" onclick="captureWorkplaceCurrentLocation(this)">
+                        📍 Use Current Location
+                      </button>
+                      <span id="currentLocationStatus" style="font-size: 12px; color: var(--text-secondary);"></span>
+                    </div>
+
+                    <div class="form-group" style="margin-bottom: 0;">
+                      <label class="form-label">Allowed Geofence Radius (Meters)</label>
+                      <input type="number" class="form-input" id="settingGeofenceRadius" value="${payrollSettings?.geofenceRadiusMeters ?? 200}" placeholder="200">
                     </div>
                   </div>
                 </div>
-
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-                  <div class="form-group">
-                    <label class="form-label">Workplace Latitude</label>
-                    <input type="number" step="0.000001" class="form-input" id="settingWorkplaceLat" value="${payrollSettings?.workplaceLatitude ?? ''}" placeholder="e.g. 6.927079">
-                  </div>
-                  <div class="form-group">
-                    <label class="form-label">Workplace Longitude</label>
-                    <input type="number" step="0.000001" class="form-input" id="settingWorkplaceLon" value="${payrollSettings?.workplaceLongitude ?? ''}" placeholder="e.g. 79.861244">
-                  </div>
-                </div>
-
-                <div style="margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
-                  <button type="button" class="btn btn-secondary btn-sm" id="btnUseCurrentLocation" onclick="captureWorkplaceCurrentLocation(this)">
-                    📍 Use Current Location
-                  </button>
-                  <span id="currentLocationStatus" style="font-size: 12px; color: var(--text-secondary);"></span>
-                </div>
-
-                <div class="form-group">
-                  <label class="form-label">Allowed Geofence Radius (Meters)</label>
-                  <input type="number" class="form-input" id="settingGeofenceRadius" value="${payrollSettings?.geofenceRadiusMeters ?? 200}" placeholder="200">
-                </div>
               </div>
-            </div>
-
-            <div style="margin-top: 16px; display: flex; justify-content: flex-end;">
-              <button class="btn btn-primary" id="btnSavePayrollSettingsBottom" onclick="saveOrgPayrollSettings()">Save Payroll Settings</button>
-            </div>
+              ` : ''}
+            </main>
           </div>
-          ` : ''}
         `;
       } catch (err) {
         container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load settings: ${err.message}</div>`;
@@ -11014,8 +11468,30 @@
     }
 
     function switchOrgSettingsTab(tabName) {
-      state.orgSettingsActiveTab = tabName;
-      renderOrgSettingsView();
+      let cleanTab = tabName;
+      if (cleanTab === 'profile') cleanTab = 'org';
+      if (cleanTab === 'barcodes') cleanTab = 'hw';
+      if (cleanTab === 'pos-auto') cleanTab = 'pos';
+      if (cleanTab === 'generator') cleanTab = 'pref';
+      if (cleanTab === 'payroll') cleanTab = 'hrm';
+      state.orgSettingsActiveTab = cleanTab;
+
+      // Fast client-side tab switching without re-fetching network requests (< 2ms)
+      const navItems = document.querySelectorAll('.settings-nav-item');
+      navItems.forEach(item => {
+        const itemTab = item.getAttribute('data-tab');
+        if (itemTab === cleanTab) {
+          item.classList.add('active');
+        } else {
+          item.classList.remove('active');
+        }
+      });
+
+      const panels = document.querySelectorAll('.settings-tab-panel');
+      panels.forEach(panel => {
+        const panelTab = panel.getAttribute('data-tab');
+        panel.style.display = panelTab === cleanTab ? 'block' : 'none';
+      });
     }
 
     function updateBarcodePrefixPreview(val) {
@@ -11027,21 +11503,24 @@
     }
 
     async function saveTenantBarcodeSettings() {
-      const btn1 = document.getElementById('btnSaveBarcodeSettings');
-      const btn2 = document.getElementById('btnSaveBarcodeSettingsBottom');
-      [btn1, btn2].forEach(b => {
-        if (b) {
-          b.disabled = true;
-          b.textContent = 'Saving...';
-        }
+      const banner = document.getElementById('settingsSaveBanner');
+      if (banner) {
+        banner.style.display = 'block';
+        banner.className = 'settings-save-banner info';
+        banner.innerHTML = '<strong>Saving...</strong> Updating operational parameters...';
+      }
+      const saveBtns = document.querySelectorAll('.btn-save-settings');
+      saveBtns.forEach(b => {
+        b.disabled = true;
+        b.textContent = 'Saving...';
       });
 
       const payload = {
-        hardwareScannerEnabled: document.getElementById('settingHwScanner').checked,
-        cameraScannerEnabled: document.getElementById('settingCamScanner').checked,
-        internalGenerationEnabled: document.getElementById('settingInternalGen').checked,
-        autoAddToCart: document.getElementById('settingAutoCart').checked,
-        incrementOnDuplicate: document.getElementById('settingIncDup').checked,
+        hardwareScannerEnabled: document.getElementById('settingHwScanner')?.checked ?? true,
+        cameraScannerEnabled: document.getElementById('settingCamScanner')?.checked ?? true,
+        internalGenerationEnabled: document.getElementById('settingInternalGen')?.checked ?? true,
+        autoAddToCart: document.getElementById('settingAutoCart')?.checked ?? true,
+        incrementOnDuplicate: document.getElementById('settingIncDup')?.checked ?? true,
         internalPrefix: (document.getElementById('settingPrefix')?.value || 'NB').trim().toUpperCase(),
       };
 
@@ -11050,14 +11529,22 @@
           method: 'PUT',
           body: JSON.stringify(payload)
         });
-        showToast('Barcode settings updated successfully', 'success');
+        showToast('Settings saved successfully', 'success');
+        if (banner) {
+          banner.className = 'settings-save-banner success';
+          banner.innerHTML = '<strong>Saved!</strong> Settings updated successfully.';
+          setTimeout(() => { if (banner) banner.style.display = 'none'; }, 4000);
+        }
       } catch (err) {
+        showToast(err.message || 'Failed to save settings', 'error');
+        if (banner) {
+          banner.className = 'settings-save-banner error';
+          banner.innerHTML = `<strong>Save Failed:</strong> ${escapeHtml(err.message)}`;
+        }
       } finally {
-        [btn1, btn2].forEach(b => {
-          if (b) {
-            b.disabled = false;
-            b.textContent = 'Save Barcode Settings';
-          }
+        saveBtns.forEach(b => {
+          b.disabled = false;
+          b.textContent = 'Save Settings';
         });
       }
     }
@@ -11144,6 +11631,12 @@
     }
 
     async function saveOrgPayrollSettings() {
+      const banner = document.getElementById('settingsSaveBanner');
+      if (banner) {
+        banner.style.display = 'block';
+        banner.className = 'settings-save-banner info';
+        banner.innerHTML = '<strong>Saving...</strong> Updating payroll and attendance configuration...';
+      }
       const btn1 = document.getElementById('btnSavePayrollSettings');
       const btn2 = document.getElementById('btnSavePayrollSettingsBottom');
       [btn1, btn2].forEach(b => {
@@ -11184,8 +11677,17 @@
         });
 
         showToast('Payroll & attendance settings saved successfully', 'success');
+        if (banner) {
+          banner.className = 'settings-save-banner success';
+          banner.innerHTML = '<strong>Saved!</strong> Payroll &amp; attendance settings saved successfully.';
+          setTimeout(() => { if (banner) banner.style.display = 'none'; }, 4000);
+        }
       } catch (err) {
         showToast(err.message || 'Failed to save settings', 'error');
+        if (banner) {
+          banner.className = 'settings-save-banner error';
+          banner.innerHTML = `<strong>Save Failed:</strong> ${escapeHtml(err.message)}`;
+        }
       } finally {
         [btn1, btn2].forEach(b => {
           if (b) {
@@ -12281,6 +12783,12 @@
     }
 
     async function openCountEntryModal(sessionId) {
+      openModal(`
+        <div style="padding: 40px; text-align: center; color: var(--text-secondary);">
+          <div class="spinner-sm" style="display:inline-block; margin-bottom: 12px;"></div>
+          <div style="font-weight: 600;">Loading physical count sheet...</div>
+        </div>
+      `);
       try {
         const session = await apiFetch(`/v1/inventory/stocktakes/${sessionId}`);
         const lines = session.lines || [];
@@ -12426,6 +12934,7 @@
         };
       } catch (err) {
         showToast(`Failed to open count entry: ${err.message}`, 'error');
+        closeModal();
       }
     }
 
@@ -12441,42 +12950,85 @@
     }
 
     async function openReviewStocktakeModal(sessionId) {
+      openModal(`
+        <div style="padding: 40px; text-align: center; color: var(--text-secondary);">
+          <div class="spinner-sm" style="display:inline-block; margin-bottom: 12px;"></div>
+          <div style="font-weight: 600;">Loading stocktake for review...</div>
+        </div>
+      `);
       try {
         const session = await apiFetch(`/v1/inventory/stocktakes/${sessionId}`);
         const lines = session.lines || [];
 
         const html = `
-          <div style="font-size: 18px; font-weight: 700; margin-bottom: 8px;">Supervisor Review: ${session.countNumber}</div>
+          <div style="font-size: 18px; font-weight: 700; margin-bottom: 8px;">Supervisor Review: ${escapeHtml(session.countNumber)}</div>
           <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px;">
             Total lines: <strong>${session.totalLinesCount}</strong> | Discrepancies: <strong style="color: var(--status-warning);">${session.discrepantLinesCount}</strong> | Net Variance: <strong>${formatTenantMoney(session.totalVarianceValue)}</strong>
           </div>
-          <div class="table-responsive" style="max-height: 350px; overflow-y: auto;">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th>SKU</th>
-                  <th>Product</th>
-                  <th>Expected</th>
-                  <th>Counted</th>
-                  <th>Variance Qty</th>
-                  <th>Variance Value (${escapeHtml(getTenantCurrency())})</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${lines.map(l => `
+
+          <!-- Desktop Table View -->
+          <div class="desktop-table-container">
+            <div class="table-responsive" style="max-height: 350px; overflow-y: auto;">
+              <table class="data-table">
+                <thead>
                   <tr>
-                    <td><strong>${l.productSku}</strong></td>
-                    <td>${l.productName}</td>
-                    <td>${formatQty(l.expectedQty)}</td>
-                    <td>${formatQty(l.countedQty)}</td>
-                    <td><strong style="color: ${parseFloat(l.varianceQty || '0') < 0 ? 'var(--status-danger)' : parseFloat(l.varianceQty || '0') > 0 ? 'var(--status-success)' : 'inherit'};">${formatQty(l.varianceQty)}</strong></td>
-                    <td>${formatTenantMoney(l.varianceValue)}</td>
+                    <th>SKU</th>
+                    <th>Product</th>
+                    <th>Expected</th>
+                    <th>Counted</th>
+                    <th>Variance Qty</th>
+                    <th>Variance Value (${escapeHtml(getTenantCurrency())})</th>
                   </tr>
-                `).join('')}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  ${lines.map(l => `
+                    <tr>
+                      <td><strong>${escapeHtml(l.productSku)}</strong></td>
+                      <td>${escapeHtml(l.productName)}</td>
+                      <td>${formatQty(l.expectedQty)}</td>
+                      <td>${formatQty(l.countedQty)}</td>
+                      <td><strong style="color: ${parseFloat(l.varianceQty || '0') < 0 ? 'var(--status-danger)' : parseFloat(l.varianceQty || '0') > 0 ? 'var(--status-success)' : 'inherit'};">${formatQty(l.varianceQty)}</strong></td>
+                      <td>${formatTenantMoney(l.varianceValue)}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
           </div>
-          <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px;">
+
+          <!-- Mobile Responsive Review Cards (BUG-072: No forced horizontal scrolling) -->
+          <div class="mobile-cards-container" style="max-height: 380px; overflow-y: auto; padding-right: 4px;">
+            ${lines.map(l => {
+              const varQty = parseFloat(l.varianceQty || '0');
+              return `
+                <div class="entity-card" style="margin-bottom: 10px; padding: 12px;">
+                  <div class="entity-card-header" style="margin-bottom: 6px;">
+                    <span class="entity-card-code"><strong>${escapeHtml(l.productSku)}</strong></span>
+                    <span class="badge-pill ${varQty < 0 ? 'badge-red' : varQty > 0 ? 'badge-green' : ''}">
+                      Variance: ${varQty >= 0 ? '+' : ''}${formatQty(l.varianceQty)}
+                    </span>
+                  </div>
+                  <div class="entity-card-title" style="margin-bottom: 8px; font-size: 14px;">${escapeHtml(l.productName)}</div>
+                  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; background: var(--bg-primary); padding: 8px 12px; border-radius: 6px; font-size: 13px;">
+                    <div>
+                      <div style="font-size: 11px; color: var(--text-secondary); text-transform: uppercase;">Expected</div>
+                      <div style="font-weight: 600;">${formatQty(l.expectedQty)}</div>
+                    </div>
+                    <div>
+                      <div style="font-size: 11px; color: var(--text-secondary); text-transform: uppercase;">Counted</div>
+                      <div style="font-weight: 600;">${formatQty(l.countedQty)}</div>
+                    </div>
+                    <div style="grid-column: 1 / -1; border-top: 1px solid var(--border-subtle); padding-top: 6px; display: flex; justify-content: space-between; align-items: center;">
+                      <span style="font-size: 12px; color: var(--text-secondary);">Variance Value:</span>
+                      <strong style="color: ${varQty < 0 ? 'var(--status-danger)' : varQty > 0 ? 'var(--status-success)' : 'inherit'};">${formatTenantMoney(l.varianceValue)}</strong>
+                    </div>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+
+          <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; flex-wrap: wrap;">
             <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
             <button type="button" class="btn btn-danger" onclick="reviewAction('${sessionId}', 'REJECT')">Reject Count</button>
             <button type="button" class="btn btn-primary" onclick="reviewAction('${sessionId}', 'APPROVE')">Approve Count</button>
@@ -12485,6 +13037,7 @@
         openModal(html);
       } catch (err) {
         showToast(`Failed to open review: ${err.message}`, 'error');
+        closeModal();
       }
     }
 
@@ -12520,41 +13073,82 @@
     }
 
     async function openViewStocktakeDetailsModal(sessionId) {
+      openModal(`
+        <div style="padding: 40px; text-align: center; color: var(--text-secondary);">
+          <div class="spinner-sm" style="display:inline-block; margin-bottom: 12px;"></div>
+          <div style="font-weight: 600;">Loading stocktake details...</div>
+        </div>
+      `);
       try {
         const session = await apiFetch(`/v1/inventory/stocktakes/${sessionId}`);
         const lines = session.lines || [];
 
         const html = `
-          <div style="font-size: 18px; font-weight: 700; margin-bottom: 8px;">Stocktake Details: ${session.countNumber}</div>
+          <div style="font-size: 18px; font-weight: 700; margin-bottom: 8px;">Stocktake Details: ${escapeHtml(session.countNumber)}</div>
           <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px;">
-            Status: <span class="badge-pill badge-green">${session.status}</span> | Total Variance: <strong>${formatTenantMoney(session.totalVarianceValue)}</strong>
+            Status: <span class="badge-pill badge-green">${escapeHtml(session.status)}</span> | Total Variance: <strong>${formatTenantMoney(session.totalVarianceValue)}</strong>
           </div>
-          <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th>SKU</th>
-                  <th>Product</th>
-                  <th>Expected</th>
-                  <th>Counted</th>
-                  <th>Variance</th>
-                  <th>Ledger Adjustment</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${lines.map(l => `
+
+          <!-- Desktop Table View -->
+          <div class="desktop-table-container">
+            <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+              <table class="data-table">
+                <thead>
                   <tr>
-                    <td><strong>${l.productSku}</strong></td>
-                    <td>${l.productName}</td>
-                    <td>${formatQty(l.expectedQty)}</td>
-                    <td>${formatQty(l.countedQty)}</td>
-                    <td><strong>${formatQty(l.varianceQty)}</strong></td>
-                    <td>${l.adjustmentMovementId ? `<span class="badge-pill badge-green">Posted</span>` : '—'}</td>
+                    <th>SKU</th>
+                    <th>Product</th>
+                    <th>Expected</th>
+                    <th>Counted</th>
+                    <th>Variance</th>
+                    <th>Ledger Adjustment</th>
                   </tr>
-                `).join('')}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  ${lines.map(l => `
+                    <tr>
+                      <td><strong>${escapeHtml(l.productSku)}</strong></td>
+                      <td>${escapeHtml(l.productName)}</td>
+                      <td>${formatQty(l.expectedQty)}</td>
+                      <td>${formatQty(l.countedQty)}</td>
+                      <td><strong>${formatQty(l.varianceQty)}</strong></td>
+                      <td>${l.adjustmentMovementId ? `<span class="badge-pill badge-green">Posted</span>` : '—'}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
           </div>
+
+          <!-- Mobile Responsive Detail Cards (BUG-073: No table overflow on mobile) -->
+          <div class="mobile-cards-container" style="max-height: 400px; overflow-y: auto; padding-right: 4px;">
+            ${lines.map(l => {
+              const varQty = parseFloat(l.varianceQty || '0');
+              return `
+                <div class="entity-card" style="margin-bottom: 10px; padding: 12px;">
+                  <div class="entity-card-header" style="margin-bottom: 6px;">
+                    <span class="entity-card-code"><strong>${escapeHtml(l.productSku)}</strong></span>
+                    ${l.adjustmentMovementId ? `<span class="badge-pill badge-green">Posted</span>` : `<span class="badge-pill badge-gray">Unposted</span>`}
+                  </div>
+                  <div class="entity-card-title" style="margin-bottom: 8px; font-size: 14px;">${escapeHtml(l.productName)}</div>
+                  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; background: var(--bg-primary); padding: 8px 12px; border-radius: 6px; font-size: 13px;">
+                    <div>
+                      <div style="font-size: 11px; color: var(--text-secondary); text-transform: uppercase;">Expected</div>
+                      <div style="font-weight: 600;">${formatQty(l.expectedQty)}</div>
+                    </div>
+                    <div>
+                      <div style="font-size: 11px; color: var(--text-secondary); text-transform: uppercase;">Counted</div>
+                      <div style="font-weight: 600;">${formatQty(l.countedQty)}</div>
+                    </div>
+                    <div style="grid-column: 1 / -1; border-top: 1px solid var(--border-subtle); padding-top: 6px; display: flex; justify-content: space-between; align-items: center;">
+                      <span style="font-size: 12px; color: var(--text-secondary);">Variance:</span>
+                      <strong style="color: ${varQty < 0 ? 'var(--status-danger)' : varQty > 0 ? 'var(--status-success)' : 'inherit'};">${varQty >= 0 ? '+' : ''}${formatQty(l.varianceQty)}</strong>
+                    </div>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+
           <div style="display: flex; justify-content: flex-end; margin-top: 16px;">
             <button class="btn btn-secondary" onclick="closeModal()">Close</button>
           </div>
@@ -12562,6 +13156,7 @@
         openModal(html);
       } catch (err) {
         showToast(`Failed to load details: ${err.message}`, 'error');
+        closeModal();
       }
     }
 

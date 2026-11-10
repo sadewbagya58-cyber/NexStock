@@ -491,8 +491,8 @@ export const RecordLifecycleStatusSchema = Type.Union([
 export type RecordLifecycleStatus = Static<typeof RecordLifecycleStatusSchema>;
 
 export const PaginationLimitQueryParamSchema = Type.Union([
-  Type.Integer({ minimum: 1, maximum: 100 }),
-  Type.String({ pattern: '^(?:[1-9]\\d?|100)$' }),
+  Type.Integer({ minimum: 1, maximum: 250 }),
+  Type.String({ pattern: '^(?:[1-9]\\d?|1\\d{2}|2[0-4]\\d|250)$' }),
 ]);
 export type PaginationLimitQueryParam = Static<
   typeof PaginationLimitQueryParamSchema
@@ -1746,6 +1746,7 @@ export const FefoBatchAllocationSchema = Type.Object({
   availableQty: DecimalQuantityStringSchema,
   allocatedQty: DecimalQuantityStringSchema,
   unitCost: DecimalMoneyStringSchema,
+  sellingPrice: Type.Optional(Type.Union([DecimalMoneyStringSchema, Type.Null()])),
 });
 export type FefoBatchAllocation = Static<typeof FefoBatchAllocationSchema>;
 

@@ -544,8 +544,8 @@ describe('@nexstock/api — Production Remediation & Master Feature Verification
     expect(shiftRes.statusCode).toBe(201);
     const activeShiftId = shiftRes.json().id;
 
-    // 3. Execute Split Payment sale: 2 units of Milk (2 * 450 = 900 LKR)
-    // 400 LKR Cash + 500 LKR Credit
+    // 3. Execute Split Payment sale: 2 units of Milk (2 * 480 = 960 LKR from batch selling price)
+    // 400 LKR Cash + 560 LKR Credit
     const saleRes = await app.inject({
       method: 'POST',
       url: '/v1/pos/sales',
@@ -574,8 +574,8 @@ describe('@nexstock/api — Production Remediation & Master Feature Verification
           },
           {
             paymentMethod: 'CREDIT',
-            amount: '500.0000',
-            tenderedAmount: '500.0000',
+            amount: '560.0000',
+            tenderedAmount: '560.0000',
           },
         ],
       },
@@ -583,7 +583,7 @@ describe('@nexstock/api — Production Remediation & Master Feature Verification
 
     expect(saleRes.statusCode).toBe(201);
     const sale = saleRes.json();
-    expect(sale.grandTotal).toBe('900.0000');
+    expect(sale.grandTotal).toBe('960.0000');
     expect(sale.invoiceNumber).toBeDefined();
 
     // Verify payments recorded on receipt/sale
@@ -604,9 +604,9 @@ describe('@nexstock/api — Production Remediation & Master Feature Verification
     expect(cashPay).toBeDefined();
     expect(cashPay.amount).toBe('400.0000');
     expect(creditPay).toBeDefined();
-    expect(creditPay.amount).toBe('500.0000');
+    expect(creditPay.amount).toBe('560.0000');
 
-    // 4. Verify Customer Credit account balance increased by 500
+    // 4. Verify Customer Credit account balance increased by 560
     const custAccountRes = await app.inject({
       method: 'GET',
       url: `/v1/credit/accounts?customerId=${encodeURIComponent(customerId)}`,
@@ -617,7 +617,7 @@ describe('@nexstock/api — Production Remediation & Master Feature Verification
     });
     expect(custAccountRes.statusCode).toBe(200);
     const account = custAccountRes.json().items[0];
-    expect(parseFloat(account.currentBalance)).toBe(500);
-    expect(parseFloat(account.availableCredit)).toBe(9500);
+    expect(parseFloat(account.currentBalance)).toBe(560);
+    expect(parseFloat(account.availableCredit)).toBe(9440);
   });
 });

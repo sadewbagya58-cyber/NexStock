@@ -585,6 +585,13 @@ export function loadPhase7CategoryColorAndStaffRoleMigrationSql(): string {
   return sqlText;
 }
 
+export function loadPhase72MembershipRevocationLifecycleMigrationSql(): string {
+  const filename = '0023_phase72_membership_revocation_lifecycle.sql';
+  const sqlText = readFileSync(resolve(migrationsDir, filename), 'utf-8');
+  assertPostgresMigrationSqlCompatible(sqlText, filename);
+  return sqlText;
+}
+
 export function getOrderedPostgresMigrations(): readonly PostgresMigrationSpec[] {
   return [
     {
@@ -740,6 +747,13 @@ export function getOrderedPostgresMigrations(): readonly PostgresMigrationSpec[]
       name: '0022_category_color_and_staff_role',
       filename: '0022_category_color_and_staff_role.sql',
       sql: loadPhase7CategoryColorAndStaffRoleMigrationSql(),
+    },
+    {
+      dialect: 'postgres',
+      version: 23,
+      name: '0023_phase72_membership_revocation_lifecycle',
+      filename: '0023_phase72_membership_revocation_lifecycle.sql',
+      sql: loadPhase72MembershipRevocationLifecycleMigrationSql(),
     },
   ];
 }
