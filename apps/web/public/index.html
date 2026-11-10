@@ -3273,7 +3273,7 @@
     // Phase 5.0 Authentication & Session Management
     // =========================================================================
 
-    const AUTH_VIEWS = ['welcome', 'login', 'signup', 'forgot-password', 'onboard-business', 'tenant-select', 'accept-invitation'];
+    const AUTH_VIEWS = ['welcome', 'login', 'signup', 'forgot-password', 'onboard-business', 'tenant-select', 'accept-invitation', 'membership-restricted'];
 
     // Background non-blocking hydration for fallback warehouse & POS register (BUG-048)
     async function hydrateTenantLocationContext(targetTenantId) {
@@ -4149,7 +4149,7 @@
       if (isAuthView) {
         if (sidebar) sidebar.style.display = 'none';
         if (topbarContext) topbarContext.style.display = 'none';
-        if (viewName === 'onboard-business' || viewName === 'tenant-select') {
+        if (viewName === 'onboard-business' || viewName === 'tenant-select' || viewName === 'membership-restricted') {
           if (topbarAuthActions) {
             topbarAuthActions.style.display = 'flex';
             topbarAuthActions.innerHTML = `
@@ -4204,6 +4204,7 @@
         case 'forgot-password': renderForgotPasswordView(); break;
         case 'onboard-business': renderOnboardBusinessView(); break;
         case 'tenant-select': renderTenantSelectView(); break;
+        case 'membership-restricted': renderMembershipRestrictedView(); break;
         case 'dashboard': renderDashboardView(); break;
         case 'products': renderProductsView(); break;
         case 'categories': renderCategoriesView(); break;
@@ -4632,10 +4633,15 @@
 
         showToast('Signed in successfully!', 'success');
 
+        const activeMemberships = (state.memberships || []).filter(m => m.membershipStatus === 'ACTIVE' || (!m.membershipStatus && m.status === 'ACTIVE'));
+
         if (state.memberships.length === 0) {
           renderView('onboard-business');
-        } else if (state.memberships.length === 1) {
-          await selectActiveTenant(state.memberships[0]);
+        } else if (activeMemberships.length === 0) {
+          state.restrictedMembership = state.memberships[0];
+          renderView('membership-restricted');
+        } else if (activeMemberships.length === 1) {
+          await selectActiveTenant(activeMemberships[0]);
           renderView(resolveDefaultLandingView());
         } else {
           renderView('tenant-select');
@@ -5201,6 +5207,55 @@
         showToast(`Switched to business: ${match.tenantName}`, 'info');
         renderView(resolveDefaultLandingView());
       }
+    }
+
+    function renderMembershipRestrictedView(membershipParam) {
+      const container = document.getElementById('mainContainer');
+      const membership = membershipParam || state.restrictedMembership || (state.memberships || [])[0] || {};
+      const status = membership.membershipStatus || membership.status || 'REVOKED';
+      const tenantName = membership.businessName || membership.tenantName || 'Organization';
+      const otherMemberships = (state.memberships || []).filter(m => m.tenantId !== membership.tenantId && (m.membershipStatus === 'ACTIVE' || (!m.membershipStatus && m.status === 'ACTIVE')));
+
+      let title = 'Organization Access Restricted';
+      let icon = '🔒';
+      let description = `Your membership in <strong>${escapeHtml(tenantName)}</strong> is currently inactive.`;
+
+      if (status === 'REVOKED') {
+        title = 'Membership Revoked';
+        icon = '🚫';
+        description = `Your membership access in <strong>${escapeHtml(tenantName)}</strong> has been revoked. If you need to regain access, please contact your organization administrator to receive a new invitation.`;
+      } else if (status === 'SUSPENDED') {
+        title = 'Account Suspended';
+        icon = '⏸️';
+        description = `Your account in <strong>${escapeHtml(tenantName)}</strong> is currently suspended.${membership.suspensionReason ? `<br><br><strong>Reason:</strong> ${escapeHtml(membership.suspensionReason)}` : ''}<br><br>Please contact your administrator for assistance.`;
+      } else if (status === 'DEACTIVATED' || status === 'DISABLED') {
+        title = 'Account Deactivated';
+        icon = '⚠️';
+        description = `Your account in <strong>${escapeHtml(tenantName)}</strong> has been deactivated by an administrator. Please reach out to your organization administrator if you believe this is in error.`;
+      }
+
+      container.innerHTML = `
+        <div class="auth-wrapper">
+          <div class="auth-card" style="text-align: center; max-width: 480px;">
+            <div style="font-size: 48px; margin-bottom: 16px;">${icon}</div>
+            <h2 style="font-size: 20px; font-weight: 700; margin-bottom: 12px; color: var(--text-primary);">${escapeHtml(title)}</h2>
+            <div style="font-size: 14px; color: var(--text-secondary); line-height: 1.6; margin-bottom: 24px;">
+              ${description}
+            </div>
+
+            <div style="display: flex; flex-direction: column; gap: 10px;">
+              ${otherMemberships.length > 0 ? `
+                <button class="btn btn-primary" onclick="renderView('tenant-select')" style="width: 100%; justify-content: center; padding: 10px;">
+                  Switch to Another Business (${otherMemberships.length})
+                </button>
+              ` : ''}
+              <button class="btn btn-secondary" onclick="handleSignOut()" style="width: 100%; justify-content: center; padding: 10px;">
+                Sign Out
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
     }
 
     // =========================================================================
@@ -6190,14 +6245,24 @@
           body: JSON.stringify(patchPayload)
         });
 
-        // Update local cached product immediately (BUG-019)
+        // Update local cached product immediately (BUG-019 & BUG-077)
         const cachedP = (state.cachedProducts || []).find(x => x.id === productId);
         if (cachedP) {
           cachedP.name = name;
           cachedP.sku = sku;
+          cachedP.categoryId = categoryId;
           if (barcode !== undefined && barcode !== null) cachedP.primaryBarcode = barcode;
           if (imageAction === 'remove') cachedP.imageUrl = null;
           else if (imageAction === 'replace' && newImageUrl) cachedP.imageUrl = newImageUrl;
+        }
+
+        const posP = (state.posCachedProducts || []).find(x => x.id === productId);
+        if (posP) {
+          posP.name = name;
+          posP.sku = sku;
+          posP.categoryId = categoryId;
+          const matchedCat = (state.posCachedCategories || []).find(c => c.id === categoryId);
+          posP.categoryName = matchedCat ? matchedCat.name : null;
         }
 
         showToast(`Product "${name}" updated successfully`, 'success');
@@ -7332,7 +7397,7 @@
                   ${categories.map(cat => {
                     const isSel = selectedCatId === cat.id;
                     const catColor = cat.color || '#6366f1';
-                    const count = products.filter(p => p.categoryId === cat.id).length;
+                    const count = products.filter(p => p.categoryId === cat.id || (p.categoryName && cat.name && p.categoryName.toLowerCase().trim() === cat.name.toLowerCase().trim())).length;
                     return `
                       <button class="btn btn-sm pos-cat-pill ${isSel ? 'active' : ''}" data-cat-id="${cat.id}" data-active-bg="${escapeHtml(catColor)}" data-dot-color="${escapeHtml(catColor)}" onclick="filterPosCategory('${cat.id}')" style="border-radius: 20px; font-weight: 600; white-space: nowrap; display: flex; align-items: center; gap: 6px; ${isSel ? `background: ${escapeHtml(catColor)}; color: #fff; border: 1px solid ${escapeHtml(catColor)};` : 'background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-subtle);'}">
                         <span class="pos-cat-pill-dot" style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: ${isSel ? '#fff' : escapeHtml(catColor)};"></span>
@@ -7496,10 +7561,17 @@
         return;
       }
 
+      const matchesCat = (p, cat) => {
+        if (!p || !cat) return false;
+        if (p.categoryId && p.categoryId === cat.id) return true;
+        if (p.categoryName && cat.name && p.categoryName.toLowerCase().trim() === cat.name.toLowerCase().trim()) return true;
+        return false;
+      };
+
       // If a specific category is selected
       if (selectedCatId) {
         const selectedCat = categories.find(c => c.id === selectedCatId);
-        const catProducts = products.filter(p => p.categoryId === selectedCatId);
+        const catProducts = products.filter(p => matchesCat(p, selectedCat));
         const catName = selectedCat ? selectedCat.name : 'Selected Category';
         const catColor = selectedCat?.color || '#6366f1';
         const bg = getSoftPastelBg(catColor);
@@ -7544,7 +7616,7 @@
       const renderedProductIds = new Set();
 
       for (const cat of categories) {
-        const catProducts = products.filter(p => p.categoryId === cat.id);
+        const catProducts = products.filter(p => matchesCat(p, cat));
         if (catProducts.length > 0) {
           catProducts.forEach(p => renderedProductIds.add(p.id));
           const catColor = cat.color || '#6366f1';
@@ -7566,8 +7638,8 @@
         }
       }
 
-      // Check for uncategorized products
-      const uncategorizedProducts = products.filter(p => !p.categoryId || !renderedProductIds.has(p.id));
+      // Check for uncategorized products (only those not matched to any existing category)
+      const uncategorizedProducts = products.filter(p => !renderedProductIds.has(p.id));
       if (uncategorizedProducts.length > 0) {
         html += `
           <div class="pos-category-section" style="background: rgba(148, 163, 184, 0.08);">
@@ -20743,7 +20815,9 @@
         window._employeesCache = employees;
 
         const activeCount = members.filter(m => m.status === 'ACTIVE').length;
-        const disabledCount = members.filter(m => m.status === 'DISABLED').length;
+        const deactivatedCount = members.filter(m => m.status === 'DEACTIVATED' || m.status === 'DISABLED').length;
+        const suspendedCount = members.filter(m => m.status === 'SUSPENDED').length;
+        const revokedCount = members.filter(m => m.status === 'REVOKED').length;
         const pendingInvCount = invitations.filter(i => i.status === 'PENDING').length;
         const linkedCount = members.filter(m => Boolean(m.linkedEmployee)).length;
         const activeTab = state.teamStaffTab || 'members';
@@ -20764,12 +20838,17 @@
             <div class="kpi-card">
               <div class="kpi-label">Total Members</div>
               <div class="kpi-value">${members.length}</div>
-              <div class="kpi-trend" style="color: var(--text-secondary);">${activeCount} active &bull; ${disabledCount} disabled</div>
+              <div class="kpi-trend" style="color: var(--text-secondary);">${activeCount} active &bull; ${deactivatedCount + suspendedCount} inactive &bull; ${revokedCount} revoked</div>
             </div>
             <div class="kpi-card">
               <div class="kpi-label">Active Staff</div>
               <div class="kpi-value" style="color: var(--status-success);">${activeCount}</div>
               <div class="kpi-trend" style="color: var(--text-secondary);">With sign-in access</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Deactivated / Suspended</div>
+              <div class="kpi-value" style="color: var(--status-warning);">${deactivatedCount + suspendedCount}</div>
+              <div class="kpi-trend" style="color: var(--text-secondary);">${deactivatedCount} deactivated &bull; ${suspendedCount} suspended</div>
             </div>
             <div class="kpi-card">
               <div class="kpi-label">Pending Invitations</div>
@@ -20788,7 +20867,7 @@
           <!-- Section Tabs -->
           <div style="display: flex; gap: 8px; border-bottom: 1px solid var(--border-subtle); margin-bottom: 20px; flex-wrap: wrap;">
             <button class="btn btn-sm ${activeTab === 'members' ? 'btn-primary' : 'btn-secondary'}" onclick="switchTeamStaffTab('members')">
-              Active &amp; Disabled Members (${members.length})
+              Team Members (${members.length})
             </button>
             <button class="btn btn-sm ${activeTab === 'invitations' ? 'btn-primary' : 'btn-secondary'}" onclick="switchTeamStaffTab('invitations')">
               Pending &amp; Historical Invitations (${invitations.length})
@@ -20846,7 +20925,11 @@
 
                     const statusBadge = m.status === 'ACTIVE'
                       ? '<span class="badge-pill badge-green" style="font-size: 11px;">ACTIVE</span>'
-                      : '<span class="badge-pill badge-red" style="font-size: 11px;">DISABLED</span>';
+                      : (m.status === 'SUSPENDED'
+                        ? `<span class="badge-pill" style="font-size: 11px; background: rgba(249, 115, 22, 0.15); color: #ea580c; border: 1px solid rgba(249, 115, 22, 0.3);" title="${escapeHtml(m.suspensionReason || 'Temporarily suspended')}">SUSPENDED</span>`
+                        : (m.status === 'REVOKED'
+                          ? '<span class="badge-pill badge-red" style="font-size: 11px;">REVOKED</span>'
+                          : '<span class="badge-pill badge-yellow" style="font-size: 11px;">DEACTIVATED</span>'));
 
                     const scopeBadge = m.allLocationsAccess
                       ? '<span class="badge-pill badge-green" style="font-size: 11px;">All Locations</span>'
@@ -20863,18 +20946,25 @@
                         ${isModuleEnabled('hrm') ? `<td>${linkedBadge}</td>` : ''}
                         <td>${scopeBadge}</td>
                         <td style="text-align: right; white-space: nowrap;">
-                          <div style="display: inline-flex; gap: 6px;">
-                            <button class="btn btn-secondary btn-sm" onclick="openAssignMemberRolesModal('${m.id}')" title="Configure roles">Roles</button>
-                            <button class="btn btn-secondary btn-sm" onclick="openEditMemberLocationScopeModal('${m.id}')" title="Configure location scope">Scope</button>
+                          <div style="display: inline-flex; gap: 6px; align-items: center;">
                             ${!isOwner ? `
                               ${m.status === 'ACTIVE' ? `
-                                <button class="btn btn-secondary btn-sm" style="color: var(--status-warning);" onclick="toggleMemberStatus('${m.id}', 'DISABLED')" title="Deactivate staff account">Deactivate</button>
+                                <button class="btn btn-secondary btn-sm" onclick="openAssignMemberRolesModal('${m.id}')" title="Configure roles">Roles</button>
+                                <button class="btn btn-secondary btn-sm" onclick="openEditMemberLocationScopeModal('${m.id}')" title="Configure location scope">Scope</button>
+                                <button class="btn btn-secondary btn-sm" style="color: var(--status-warning);" onclick="toggleMemberStatus('${m.id}', 'DEACTIVATED')" title="Deactivate staff account">Deactivate</button>
+                                <button class="btn btn-secondary btn-sm" style="color: #ea580c;" onclick="openSuspendMemberModal('${m.id}', '${escapeHtml(m.fullName || m.email)}')" title="Suspend staff account">Suspend</button>
+                                <button class="btn btn-secondary btn-sm" style="color: var(--status-danger);" onclick="confirmRevokeMember('${m.id}', '${escapeHtml(m.fullName || m.email)}')" title="Revoke access permanently">Revoke</button>
+                              ` : (m.status === 'SUSPENDED' ? `
+                                <button class="btn btn-secondary btn-sm" style="color: var(--status-success);" onclick="toggleMemberStatus('${m.id}', 'ACTIVE')" title="Unsuspend staff account">Unsuspend</button>
+                                <button class="btn btn-secondary btn-sm" style="color: var(--status-danger);" onclick="confirmRevokeMember('${m.id}', '${escapeHtml(m.fullName || m.email)}')" title="Revoke access permanently">Revoke</button>
+                              ` : (m.status === 'REVOKED' ? `
+                                <button class="btn btn-primary btn-sm" onclick="openInviteStaffModal('${escapeHtml(m.email)}')" title="Send new invitation to re-invite this user">Send New Invitation</button>
                               ` : `
-                                <button class="btn btn-secondary btn-sm" style="color: var(--status-success);" onclick="toggleMemberStatus('${m.id}', 'ACTIVE')" title="Reactivate staff account">Activate</button>
-                              `}
-                              <button class="btn btn-secondary btn-sm" style="color: var(--status-danger);" onclick="confirmRevokeMember('${m.id}', '${escapeHtml(m.fullName || m.email)}')" title="Revoke access">Revoke</button>
+                                <button class="btn btn-secondary btn-sm" style="color: var(--status-success);" onclick="toggleMemberStatus('${m.id}', 'ACTIVE')" title="Reactivate staff account">Reactivate</button>
+                                <button class="btn btn-secondary btn-sm" style="color: var(--status-danger);" onclick="confirmRevokeMember('${m.id}', '${escapeHtml(m.fullName || m.email)}')" title="Revoke access permanently">Revoke</button>
+                              `))}
                             ` : `
-                              <span class="badge-pill badge-yellow" style="font-size: 10px;">Primary Owner</span>
+                              <span class="badge-pill badge-yellow" style="font-size: 11px; font-weight: 600;">👑 Owner (Protected)</span>
                             `}
                           </div>
                         </td>
@@ -20897,7 +20987,7 @@
                       <div style="font-weight: 600; font-size: 14px;">${escapeHtml(m.fullName || 'User')}</div>
                       <div style="font-size: 12px; color: var(--text-secondary);">${escapeHtml(m.email)}</div>
                     </div>
-                    <span class="badge-pill ${m.status === 'ACTIVE' ? 'badge-green' : 'badge-red'}" style="font-size: 11px;">${escapeHtml(m.status)}</span>
+                    <span class="badge-pill ${m.status === 'ACTIVE' ? 'badge-green' : (m.status === 'SUSPENDED' ? 'badge-yellow' : (m.status === 'REVOKED' ? 'badge-red' : 'badge-yellow'))}" style="font-size: 11px;">${escapeHtml(m.status)}</span>
                   </div>
 
                   <div style="font-size: 12px; margin-bottom: 6px;">
@@ -20913,16 +21003,25 @@
                   ` : ''}
 
                   <div style="display: flex; gap: 6px; flex-wrap: wrap; border-top: 1px solid var(--border-subtle); padding-top: 10px;">
-                    <button class="btn btn-secondary btn-sm" style="flex: 1;" onclick="openAssignMemberRolesModal('${m.id}')">Roles</button>
-                    <button class="btn btn-secondary btn-sm" style="flex: 1;" onclick="openEditMemberLocationScopeModal('${m.id}')">Scope</button>
                     ${!isOwner ? `
                       ${m.status === 'ACTIVE' ? `
-                        <button class="btn btn-secondary btn-sm" style="flex: 1; color: var(--status-warning);" onclick="toggleMemberStatus('${m.id}', 'DISABLED')">Deactivate</button>
+                        <button class="btn btn-secondary btn-sm" style="flex: 1;" onclick="openAssignMemberRolesModal('${m.id}')">Roles</button>
+                        <button class="btn btn-secondary btn-sm" style="flex: 1;" onclick="openEditMemberLocationScopeModal('${m.id}')">Scope</button>
+                        <button class="btn btn-secondary btn-sm" style="flex: 1; color: var(--status-warning);" onclick="toggleMemberStatus('${m.id}', 'DEACTIVATED')">Deactivate</button>
+                        <button class="btn btn-secondary btn-sm" style="flex: 1; color: #ea580c;" onclick="openSuspendMemberModal('${m.id}', '${escapeHtml(m.fullName || m.email)}')">Suspend</button>
+                        <button class="btn btn-secondary btn-sm" style="flex: 1; color: var(--status-danger);" onclick="confirmRevokeMember('${m.id}', '${escapeHtml(m.fullName || m.email)}')">Revoke</button>
+                      ` : (m.status === 'SUSPENDED' ? `
+                        <button class="btn btn-secondary btn-sm" style="flex: 1; color: var(--status-success);" onclick="toggleMemberStatus('${m.id}', 'ACTIVE')">Unsuspend</button>
+                        <button class="btn btn-secondary btn-sm" style="flex: 1; color: var(--status-danger);" onclick="confirmRevokeMember('${m.id}', '${escapeHtml(m.fullName || m.email)}')">Revoke</button>
+                      ` : (m.status === 'REVOKED' ? `
+                        <button class="btn btn-primary btn-sm" style="flex: 1;" onclick="openInviteStaffModal('${escapeHtml(m.email)}')">Send New Invitation</button>
                       ` : `
-                        <button class="btn btn-secondary btn-sm" style="flex: 1; color: var(--status-success);" onclick="toggleMemberStatus('${m.id}', 'ACTIVE')">Activate</button>
-                      `}
-                      <button class="btn btn-secondary btn-sm" style="flex: 1; color: var(--status-danger);" onclick="confirmRevokeMember('${m.id}', '${escapeHtml(m.fullName || m.email)}')">Revoke</button>
-                    ` : ''}
+                        <button class="btn btn-secondary btn-sm" style="flex: 1; color: var(--status-success);" onclick="toggleMemberStatus('${m.id}', 'ACTIVE')">Reactivate</button>
+                        <button class="btn btn-secondary btn-sm" style="flex: 1; color: var(--status-danger);" onclick="confirmRevokeMember('${m.id}', '${escapeHtml(m.fullName || m.email)}')">Revoke</button>
+                      `))}
+                    ` : `
+                      <span class="badge-pill badge-yellow" style="font-size: 11px; font-weight: 600; width: 100%; text-align: center;">👑 Owner (Protected)</span>
+                    `}
                   </div>
                 </div>
               `;
@@ -21071,6 +21170,7 @@
 
     // Modal: Invite Staff Member
     async function openInviteStaffModal() {
+      const prefillEmail = arguments[0] || '';
       let employees = [];
       if (isModuleEnabled('hrm')) {
         employees = window._employeesCache || [];
@@ -21096,7 +21196,7 @@
 
           <div class="form-group" style="margin-bottom: 14px;">
             <label class="form-label">Staff Email Address *</label>
-            <input type="email" class="form-input" id="inviteStaffEmail" placeholder="staff.member@company.com" required>
+            <input type="email" class="form-input" id="inviteStaffEmail" placeholder="staff.member@company.com" value="${escapeHtml(prefillEmail || '')}" required>
             <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">Owner email cannot be used for staff invitations.</div>
           </div>
 
@@ -21251,7 +21351,7 @@
     }
 
     async function toggleMemberStatus(membershipId, status) {
-      const actionText = status === 'DISABLED' ? 'deactivate' : 'reactivate';
+      const actionText = (status === 'DEACTIVATED' || status === 'DISABLED') ? 'deactivate' : (status === 'SUSPENDED' ? 'suspend' : 'reactivate');
       if (!confirm(`Are you sure you want to ${actionText} this staff member account?`)) return;
 
       try {
@@ -21259,10 +21359,56 @@
           method: 'PATCH',
           body: JSON.stringify({ status })
         });
-        showToast(`Staff member account ${status === 'DISABLED' ? 'deactivated' : 'activated'} successfully.`, 'success');
+        showToast(`Staff member account ${actionText}d successfully.`, 'success');
         renderTeamStaffAccountsView();
       } catch (err) {
         showToast(err.message || `Failed to update member status`, 'error');
+      }
+    }
+
+    function openSuspendMemberModal(membershipId, memberName) {
+      openModal({
+        title: 'Suspend Staff Member',
+        maxWidth: '480px',
+        bodyHtml: `
+          <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px; line-height: 1.4;">
+            Temporarily suspend access for <strong>${escapeHtml(memberName)}</strong>. They will be immediately blocked from signing in or performing operations in this organization until unsuspended.
+          </div>
+          <div class="form-group" style="margin-bottom: 16px;">
+            <label class="form-label">Suspension Reason *</label>
+            <textarea class="form-input" id="suspendMemberReasonInput" rows="3" placeholder="Provide a detailed reason for the temporary suspension (at least 3 characters)..." required style="resize: vertical;"></textarea>
+            <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">This reason will be logged in the audit trail and displayed to the member.</div>
+          </div>
+        `,
+        footerHtml: `
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-primary" id="btnConfirmSuspendMember" style="background: #ea580c; border-color: #ea580c;" onclick="submitSuspendMemberForm('${membershipId}')">Suspend Account</button>
+        `
+      });
+    }
+
+    async function submitSuspendMemberForm(membershipId) {
+      const reasonInput = document.getElementById('suspendMemberReasonInput');
+      const reason = reasonInput?.value?.trim();
+      if (!reason || reason.length < 3) {
+        showToast('Please provide a valid suspension reason (at least 3 characters).', 'error');
+        return;
+      }
+
+      const btn = document.getElementById('btnConfirmSuspendMember');
+      if (btn) { btn.disabled = true; btn.textContent = 'Suspending...'; }
+
+      try {
+        await apiFetch(`/v1/iam/members/${membershipId}/status`, {
+          method: 'PATCH',
+          body: JSON.stringify({ status: 'SUSPENDED', reason })
+        });
+        showToast('Staff member account suspended successfully.', 'success');
+        closeModal();
+        renderTeamStaffAccountsView();
+      } catch (err) {
+        showToast(err.message || 'Failed to suspend member account', 'error');
+        if (btn) { btn.disabled = false; btn.textContent = 'Suspend Account'; }
       }
     }
 
@@ -22595,6 +22741,8 @@
           state.isInitializing = false;
           state._isInitRunning = false;
 
+          const activeMemberships = (state.memberships || []).filter(m => m.membershipStatus === 'ACTIVE' || (!m.membershipStatus && m.status === 'ACTIVE'));
+
           if (state.memberships.length === 0) {
             setAppInitPhase(APP_INIT_STATES.READY);
             renderView('onboard-business');
@@ -22602,8 +22750,16 @@
             return;
           }
 
+          if (activeMemberships.length === 0) {
+            setAppInitPhase(APP_INIT_STATES.READY);
+            state.restrictedMembership = state.memberships[0];
+            renderView('membership-restricted');
+            window._appPerf.mark('fully_ready');
+            return;
+          }
+
           const savedTenantId = localStorage.getItem('nexstock_active_tenant_id');
-          const activeMembership = state.memberships.find(m => m.tenantId === savedTenantId) || state.memberships[0];
+          const activeMembership = activeMemberships.find(m => m.tenantId === savedTenantId) || activeMemberships[0];
           await selectActiveTenant(activeMembership);
           updateTopbarContext();
 

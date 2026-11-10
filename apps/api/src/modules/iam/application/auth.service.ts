@@ -685,8 +685,8 @@ export async function getUserProfileAndMemberships(
   traceId: string,
 ): Promise<UserMeResponse> {
   return withUserTransaction(db, { userId, traceId }, async (trx) => {
-    // 1. Fetch user record and active memberships in parallel
-    const [userRow, membershipRows] = await Promise.all([
+    // 1. Fetch user record and all memberships in parallel (deduplicating by tenant_id)
+    const [userRow, rawMembershipRows] = await Promise.all([
       trx
         .selectFrom('users')
         .select(['id', 'email', 'full_name'])
@@ -707,9 +707,21 @@ export async function getUserProfileAndMemberships(
           'tenants.status as tenant_status',
         ])
         .where('tenant_memberships.user_id', '=', userId)
-        .where('tenant_memberships.status', '=', 'ACTIVE')
+        .orderBy('tenant_memberships.created_at', 'desc')
         .execute(),
     ]);
+
+    // Deduplicate by tenant_id: ACTIVE membership takes precedence over non-active/revoked
+    const membershipByTenant = new Map<string, (typeof rawMembershipRows)[number]>();
+    for (const m of rawMembershipRows) {
+      const existing = membershipByTenant.get(m.tenant_id);
+      if (!existing) {
+        membershipByTenant.set(m.tenant_id, m);
+      } else if (existing.membership_status !== 'ACTIVE' && m.membership_status === 'ACTIVE') {
+        membershipByTenant.set(m.tenant_id, m);
+      }
+    }
+    const membershipRows = Array.from(membershipByTenant.values());
 
     const user: AuthUserSummary = {
       id: userRow?.id ?? userId,
@@ -880,6 +892,7 @@ export async function getUserProfileAndMemberships(
         slug: m.slug,
         baseCurrency: m.base_currency,
         status: m.tenant_status,
+        membershipStatus: m.membership_status,
         role: roleCodes[0] ?? 'MEMBER',
         roles: roleCodes,
         permissions: Array.from(permissions),

@@ -2152,7 +2152,7 @@ export async function buildApp(
           updateMemberStatus(
             trx,
             request.params.membershipId,
-            request.body.status,
+            request.body,
           ),
       );
     },

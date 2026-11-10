@@ -271,9 +271,10 @@ export interface TenantMembershipsTable {
   id: string;
   tenant_id: string;
   user_id: string;
-  status: Generated<'INVITED' | 'ACTIVE' | 'DISABLED' | 'REVOKED'>;
+  status: Generated<'INVITED' | 'ACTIVE' | 'DISABLED' | 'DEACTIVATED' | 'SUSPENDED' | 'REVOKED'>;
   all_locations_access: Generated<boolean>;
   pin_hash: string | null;
+  suspension_reason: string | null;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
 }

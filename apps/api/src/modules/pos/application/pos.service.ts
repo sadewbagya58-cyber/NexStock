@@ -1169,6 +1169,7 @@ export async function searchPosProducts(
       'products.tracking_mode as tracking_mode',
       'products.valuation_method as valuation_method',
       'products.image_url as image_url',
+      'products.category_id as category_id',
       'categories.name as category_name',
       'inventory_balances.qty_on_hand as qty_on_hand',
       'inventory_balances.qty_reserved as qty_reserved',
@@ -1289,6 +1290,7 @@ export async function searchPosProducts(
       trackInventory: r.track_inventory,
       availableQuantity: availableQtyStr,
       barcodes: barcodesByProduct.get(r.product_id) ?? [],
+      categoryId: r.category_id ?? null,
       categoryName: r.category_name ?? null,
       imageUrl: r.image_url ?? null,
     };

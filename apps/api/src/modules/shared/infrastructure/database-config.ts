@@ -592,6 +592,13 @@ export function loadPhase72MembershipRevocationLifecycleMigrationSql(): string {
   return sqlText;
 }
 
+export function loadMembershipLifecycleDeactivatedSuspendedMigrationSql(): string {
+  const filename = '0024_membership_lifecycle_deactivated_suspended.sql';
+  const sqlText = readFileSync(resolve(migrationsDir, filename), 'utf-8');
+  assertPostgresMigrationSqlCompatible(sqlText, filename);
+  return sqlText;
+}
+
 export function getOrderedPostgresMigrations(): readonly PostgresMigrationSpec[] {
   return [
     {
@@ -754,6 +761,13 @@ export function getOrderedPostgresMigrations(): readonly PostgresMigrationSpec[]
       name: '0023_phase72_membership_revocation_lifecycle',
       filename: '0023_phase72_membership_revocation_lifecycle.sql',
       sql: loadPhase72MembershipRevocationLifecycleMigrationSql(),
+    },
+    {
+      dialect: 'postgres',
+      version: 24,
+      name: '0024_membership_lifecycle_deactivated_suspended',
+      filename: '0024_membership_lifecycle_deactivated_suspended.sql',
+      sql: loadMembershipLifecycleDeactivatedSuspendedMigrationSql(),
     },
   ];
 }

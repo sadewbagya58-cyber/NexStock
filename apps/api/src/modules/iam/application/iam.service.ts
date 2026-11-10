@@ -13,6 +13,7 @@ import type {
   RoleSummaryResponse,
   StaffInvitationResponse,
   UpdateMemberLocationScopesRequest,
+  UpdateMemberStatusRequest,
   UpdateRoleRequest,
   ValidateInvitationCodeRequest,
   ValidateInvitationResponse,
@@ -383,6 +384,30 @@ export async function resolveMemberAuthorizationContext(
   const activeRows = membershipAndRoles.filter((r) => r.status === 'ACTIVE');
   const firstRow = activeRows[0] ?? membershipAndRoles[0];
   if (!firstRow || firstRow.status !== 'ACTIVE') {
+    if (firstRow?.status === 'DEACTIVATED') {
+      throw new AppError({
+        statusCode: 403,
+        errorCode: 'IAM_MEMBERSHIP_DEACTIVATED',
+        title: 'Membership Deactivated',
+        detail: 'Your access to this organization has been deactivated. Please contact your organization administrator.',
+      });
+    }
+    if (firstRow?.status === 'SUSPENDED') {
+      throw new AppError({
+        statusCode: 403,
+        errorCode: 'IAM_MEMBERSHIP_SUSPENDED',
+        title: 'Membership Suspended',
+        detail: 'Your access to this organization has been temporarily suspended. Please contact your organization administrator.',
+      });
+    }
+    if (firstRow?.status === 'REVOKED') {
+      throw new AppError({
+        statusCode: 403,
+        errorCode: 'IAM_MEMBERSHIP_REVOKED',
+        title: 'Membership Revoked',
+        detail: 'Your membership in this organization has been revoked.',
+      });
+    }
     throw new AppError({
       statusCode: 403,
       errorCode: 'IAM_TENANT_MEMBERSHIP_REQUIRED',
@@ -1114,6 +1139,7 @@ export async function listMembers(
         'users.email as email',
         'users.full_name as full_name',
         'tenant_memberships.status as status',
+        'tenant_memberships.suspension_reason as suspension_reason',
         'tenant_memberships.all_locations_access as all_locations_access',
         'tenant_memberships.created_at as created_at',
       ])
@@ -1205,7 +1231,8 @@ export async function listMembers(
     userId: m.user_id,
     email: m.email,
     fullName: m.full_name,
-    status: m.status as 'INVITED' | 'ACTIVE' | 'DISABLED',
+    status: m.status as 'INVITED' | 'ACTIVE' | 'DEACTIVATED' | 'SUSPENDED' | 'REVOKED' | 'DISABLED',
+    suspensionReason: m.suspension_reason ?? null,
     allLocationsAccess: Boolean(m.all_locations_access),
     roles: roleMap.get(m.membership_id) ?? [],
     locationScopes: scopeMap.get(m.membership_id) ?? { branchIds: [], warehouseIds: [] },
@@ -1744,22 +1771,32 @@ export async function createStaffInvitation(
     });
   }
 
-  // 5. Check no existing ACTIVE membership with this email
-  const existingActiveMember = await trx.db
+  // 5. Check no existing non-revoked membership with this email
+  const existingNonRevoked = await trx.db
     .selectFrom('tenant_memberships')
     .innerJoin('users', 'users.id', 'tenant_memberships.user_id')
     .select(['tenant_memberships.id', 'tenant_memberships.status'])
     .where('tenant_memberships.tenant_id', '=', trx.tenantId)
     .where('users.email', '=', normalizedEmail)
+    .where('tenant_memberships.status', '!=', 'REVOKED')
     .executeTakeFirst();
 
-  if (existingActiveMember && existingActiveMember.status === 'ACTIVE') {
-    throw new AppError({
-      statusCode: 409,
-      errorCode: 'IAM_USER_ALREADY_MEMBER',
-      title: 'User Already a Member',
-      detail: `A user with email "${input.email}" is already an active member of this organization.`,
-    });
+  if (existingNonRevoked) {
+    if (existingNonRevoked.status === 'ACTIVE') {
+      throw new AppError({
+        statusCode: 409,
+        errorCode: 'IAM_USER_ALREADY_MEMBER',
+        title: 'User Already a Member',
+        detail: `A user with email "${input.email}" is already an active member of this organization.`,
+      });
+    } else {
+      throw new AppError({
+        statusCode: 409,
+        errorCode: 'IAM_USER_ALREADY_MEMBER',
+        title: 'User Already a Member',
+        detail: `A user with email "${input.email}" is already a member of this organization (${existingNonRevoked.status}). Please reactivate or unsuspend their membership instead.`,
+      });
+    }
   }
 
   // 6. Check no active PENDING invitation for this email
@@ -2297,6 +2334,12 @@ export async function validateStaffInvitation(
     }
   }
 
+  const existingUser = await db
+    .selectFrom('users')
+    .select(['id'])
+    .where('email', '=', invitation.email.toLowerCase().trim())
+    .executeTakeFirst();
+
   return {
     valid: true,
     email: invitation.email,
@@ -2305,6 +2348,7 @@ export async function validateStaffInvitation(
     tenantId: invitation.tenant_id,
     tenantName: invitation.tenant_name,
     employeeName: invitation.employee_name,
+    isExistingUser: Boolean(existingUser),
     ...(cleanCode.length === 4 ? { invitationCode: cleanCode } : {}),
   };
 }
@@ -2727,12 +2771,15 @@ export async function acceptStaffInvitation(
     { tenantId: invitation.tenant_id, userId, traceId: currentTraceId },
     async (trx) => {
       // A. Quota check
-      const existingMembership = await trx.db
+      const existingMemberships = await trx.db
         .selectFrom('tenant_memberships')
         .select(['id', 'status'])
         .where('tenant_id', '=', trx.tenantId)
         .where('user_id', '=', userId)
-        .executeTakeFirst();
+        .execute();
+
+      const existingActiveMembership = existingMemberships.find((m) => m.status === 'ACTIVE');
+      const existingInactiveMembership = existingMemberships.find((m) => m.status !== 'REVOKED');
 
       const activeMembers = await trx.db
         .selectFrom('tenant_memberships')
@@ -2748,7 +2795,7 @@ export async function acceptStaffInvitation(
         .where('tenant_subscriptions.tenant_id', '=', trx.tenantId)
         .executeTakeFirst();
 
-      const isNewActive = !existingMembership || existingMembership.status !== 'ACTIVE';
+      const isNewActive = !existingActiveMembership;
       const projectedCount = isNewActive ? activeMembers.length + 1 : activeMembers.length;
 
       if (plan?.max_users != null && projectedCount > plan.max_users) {
@@ -2762,13 +2809,15 @@ export async function acceptStaffInvitation(
 
       // B. Create or update tenant_memberships
       // If user previously had a REVOKED membership, do not reactivate it - create a brand new active membership
+      // If user had a DEACTIVATED or SUSPENDED membership, update it to ACTIVE
       let membershipId: string;
-      if (existingMembership && existingMembership.status !== 'REVOKED') {
-        membershipId = existingMembership.id;
+      if (existingInactiveMembership) {
+        membershipId = existingInactiveMembership.id;
         await trx.db
           .updateTable('tenant_memberships')
           .set({
             status: 'ACTIVE',
+            suspension_reason: null,
             updated_at: new Date(),
           })
           .where('tenant_id', '=', trx.tenantId)
@@ -2783,6 +2832,7 @@ export async function acceptStaffInvitation(
             tenant_id: trx.tenantId,
             user_id: userId,
             status: 'ACTIVE',
+            suspension_reason: null,
             all_locations_access: false,
           })
           .execute();
@@ -2916,9 +2966,17 @@ export async function acceptStaffInvitation(
 export async function updateMemberStatus(
   trx: TenantTransactionContext,
   membershipId: string,
-  status: 'ACTIVE' | 'DISABLED',
+  input: UpdateMemberStatusRequest | string,
 ): Promise<MemberSummaryResponse> {
   await assertAuthorized(trx, { permission: 'iam:member:manage' });
+
+  const targetStatus = (typeof input === 'string' ? input : input.status) as
+    | 'ACTIVE'
+    | 'DEACTIVATED'
+    | 'SUSPENDED'
+    | 'REVOKED'
+    | 'DISABLED';
+  const reason = (typeof input === 'object' && input ? input.reason : undefined)?.trim();
 
   const membership = await trx.db
     .selectFrom('tenant_memberships')
@@ -2936,7 +2994,7 @@ export async function updateMemberStatus(
     });
   }
 
-  // Prevent disabling tenant owner
+  // Prevent disabling / suspending / revoking tenant owner
   const roles = await trx.db
     .selectFrom('member_role_assignments')
     .innerJoin('roles', 'roles.id', 'member_role_assignments.role_id')
@@ -2946,24 +3004,143 @@ export async function updateMemberStatus(
     .execute();
 
   const isOwner = roles.some((r) => r.code === 'TENANT_OWNER');
-  if (isOwner && status === 'DISABLED') {
+  if (isOwner && targetStatus !== 'ACTIVE') {
+    if (targetStatus === 'REVOKED') {
+      throw new AppError({
+        statusCode: 400,
+        errorCode: 'IAM_CANNOT_REVOKE_OWNER',
+        title: 'Cannot Revoke Owner Account',
+        detail: 'The Organization Owner access cannot be revoked.',
+      });
+    }
     throw new AppError({
       statusCode: 400,
       errorCode: 'IAM_CANNOT_DISABLE_OWNER',
       title: 'Cannot Disable Owner Account',
-      detail: 'The Organization Owner account cannot be deactivated.',
+      detail: 'The Organization Owner account cannot be deactivated or suspended.',
     });
   }
 
-  await trx.db
-    .updateTable('tenant_memberships')
-    .set({
-      status,
-      updated_at: new Date(),
-    })
-    .where('tenant_id', '=', trx.tenantId)
-    .where('id', '=', membershipId)
-    .execute();
+  const currentStatus = membership.status;
+
+  // Cannot transition out of REVOKED via updateMemberStatus
+  if (currentStatus === 'REVOKED') {
+    throw new AppError({
+      statusCode: 400,
+      errorCode: 'IAM_INVALID_MEMBERSHIP_TRANSITION',
+      title: 'Invalid Membership Transition',
+      detail: 'Revoked memberships cannot be directly reactivated. Send a new invitation to re-invite this user.',
+    });
+  }
+
+  if (targetStatus === 'REVOKED') {
+    await revokeMemberAccess(trx, membershipId);
+    trx._trxCache?.clear();
+    const allMembers = await listMembers(trx);
+    const updated = allMembers.find((m) => m.id === membershipId);
+    return updated!;
+  }
+
+  if (targetStatus === 'SUSPENDED') {
+    if (currentStatus !== 'ACTIVE') {
+      throw new AppError({
+        statusCode: 400,
+        errorCode: 'IAM_INVALID_MEMBERSHIP_TRANSITION',
+        title: 'Invalid Membership Transition',
+        detail: `Cannot suspend a membership that is currently "${currentStatus}". Only ACTIVE members can be suspended.`,
+      });
+    }
+    if (!reason || reason.length < 3) {
+      throw new AppError({
+        statusCode: 400,
+        errorCode: 'IAM_SUSPENSION_REASON_REQUIRED',
+        title: 'Suspension Reason Required',
+        detail: 'A valid reason (at least 3 characters) is required to suspend a member account.',
+      });
+    }
+
+    await trx.db
+      .updateTable('tenant_memberships')
+      .set({
+        status: 'SUSPENDED',
+        suspension_reason: reason,
+        updated_at: new Date(),
+      })
+      .where('tenant_id', '=', trx.tenantId)
+      .where('id', '=', membershipId)
+      .execute();
+  } else if (targetStatus === 'DEACTIVATED' || targetStatus === 'DISABLED') {
+    if (currentStatus !== 'ACTIVE') {
+      throw new AppError({
+        statusCode: 400,
+        errorCode: 'IAM_INVALID_MEMBERSHIP_TRANSITION',
+        title: 'Invalid Membership Transition',
+        detail: `Cannot deactivate a membership that is currently "${currentStatus}". Only ACTIVE members can be deactivated.`,
+      });
+    }
+
+    await trx.db
+      .updateTable('tenant_memberships')
+      .set({
+        status: targetStatus === 'DISABLED' ? 'DISABLED' : 'DEACTIVATED',
+        suspension_reason: null,
+        updated_at: new Date(),
+      })
+      .where('tenant_id', '=', trx.tenantId)
+      .where('id', '=', membershipId)
+      .execute();
+  } else if (targetStatus === 'ACTIVE') {
+    if (currentStatus === 'ACTIVE') {
+      throw new AppError({
+        statusCode: 400,
+        errorCode: 'IAM_INVALID_MEMBERSHIP_TRANSITION',
+        title: 'Already Active',
+        detail: 'This member is already active.',
+      });
+    }
+
+    // Check user quota before reactivating
+    const activeMembers = await trx.db
+      .selectFrom('tenant_memberships')
+      .select(['id'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('status', '=', 'ACTIVE')
+      .execute();
+
+    const plan = await trx.db
+      .selectFrom('tenant_subscriptions')
+      .innerJoin('subscription_plans', 'subscription_plans.id', 'tenant_subscriptions.plan_id')
+      .select(['subscription_plans.max_users'])
+      .where('tenant_subscriptions.tenant_id', '=', trx.tenantId)
+      .executeTakeFirst();
+
+    if (plan?.max_users != null && activeMembers.length + 1 > plan.max_users) {
+      throw new AppError({
+        statusCode: 403,
+        errorCode: 'SUB_QUOTA_EXCEEDED',
+        title: 'Subscription Quota Exceeded',
+        detail: `Your organization has reached the maximum user limit (${plan.max_users}) allowed by your subscription plan.`,
+      });
+    }
+
+    await trx.db
+      .updateTable('tenant_memberships')
+      .set({
+        status: 'ACTIVE',
+        suspension_reason: null,
+        updated_at: new Date(),
+      })
+      .where('tenant_id', '=', trx.tenantId)
+      .where('id', '=', membershipId)
+      .execute();
+  } else {
+    throw new AppError({
+      statusCode: 400,
+      errorCode: 'IAM_INVALID_MEMBERSHIP_STATUS',
+      title: 'Invalid Membership Status',
+      detail: `Status "${targetStatus}" is not recognized.`,
+    });
+  }
 
   await appendAuditLog(trx, {
     action: 'iam.member.status_updated',
@@ -2971,11 +3148,13 @@ export async function updateMemberStatus(
     resourceId: membershipId,
     metadata: {
       userId: membership.user_id,
-      previousStatus: membership.status,
-      newStatus: status,
+      previousStatus: currentStatus,
+      newStatus: targetStatus,
+      reason: reason ?? null,
     },
   });
 
+  trx._trxCache?.clear();
   const allMembers = await listMembers(trx);
   const updated = allMembers.find((m) => m.id === membershipId);
   return updated!;
@@ -3051,6 +3230,7 @@ export async function revokeMemberAccess(
     .updateTable('tenant_memberships')
     .set({
       status: 'REVOKED',
+      suspension_reason: null,
       all_locations_access: false,
       updated_at: new Date(),
     })

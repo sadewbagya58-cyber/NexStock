@@ -216,6 +216,12 @@ export const ErrorCodeSchema = Type.Union([
   Type.Literal('IAM_INVITATION_EXPIRED'),
   Type.Literal('IAM_CANNOT_DISABLE_OWNER'),
   Type.Literal('IAM_CANNOT_REVOKE_OWNER'),
+  Type.Literal('IAM_MEMBERSHIP_DEACTIVATED'),
+  Type.Literal('IAM_MEMBERSHIP_SUSPENDED'),
+  Type.Literal('IAM_MEMBERSHIP_REVOKED'),
+  Type.Literal('IAM_INVALID_MEMBERSHIP_TRANSITION'),
+  Type.Literal('IAM_SUSPENSION_REASON_REQUIRED'),
+  Type.Literal('IAM_INVALID_MEMBERSHIP_STATUS'),
   Type.Literal('ERR_INTERNAL_SERVER_ERROR'),
 ]);
 export type ErrorCode = Static<typeof ErrorCodeSchema>;
@@ -1418,6 +1424,7 @@ export const PosProductItemResponseSchema = Type.Object({
   trackInventory: Type.Boolean(),
   availableQuantity: DecimalQuantityStringSchema,
   barcodes: Type.Array(Type.String()),
+  categoryId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
   categoryName: Type.Union([Type.String(), Type.Null()]),
   imageUrl: Type.Optional(Type.Union([Type.String(), Type.Null()])),
 });
@@ -2053,6 +2060,7 @@ export const TenantMembershipSummarySchema = Type.Object({
   slug: Type.String(),
   baseCurrency: CurrencyCodeSchema,
   status: Type.String(),
+  membershipStatus: Type.Optional(Type.String()),
   role: Type.String(),
   roles: Type.Optional(Type.Array(Type.String())),
   permissions: Type.Optional(Type.Array(Type.String())),
@@ -2778,11 +2786,19 @@ export const MemberSummaryResponseSchema = Type.Object({
   userId: UuidSchema,
   email: Type.String(),
   fullName: Type.String(),
-  status: Type.Union([Type.Literal('INVITED'), Type.Literal('ACTIVE'), Type.Literal('DISABLED')]),
+  status: Type.Union([
+    Type.Literal('INVITED'),
+    Type.Literal('ACTIVE'),
+    Type.Literal('DEACTIVATED'),
+    Type.Literal('SUSPENDED'),
+    Type.Literal('REVOKED'),
+    Type.Literal('DISABLED'),
+  ]),
   allLocationsAccess: Type.Boolean(),
   roles: Type.Array(MemberRoleAssignmentSummarySchema),
   locationScopes: MemberLocationScopeDetailSchema,
   linkedEmployee: Type.Optional(Type.Union([MemberLinkedEmployeeSummarySchema, Type.Null()])),
+  suspensionReason: Type.Optional(Type.Union([Type.String(), Type.Null()])),
   createdAt: Type.String(),
 });
 export type MemberSummaryResponse = Static<typeof MemberSummaryResponseSchema>;
@@ -2809,7 +2825,14 @@ export type UpdateMemberLocationScopesRequest = Static<
 
 export const UpdateMemberStatusRequestSchema = Type.Object(
   {
-    status: Type.Union([Type.Literal('ACTIVE'), Type.Literal('DISABLED')]),
+    status: Type.Union([
+      Type.Literal('ACTIVE'),
+      Type.Literal('DEACTIVATED'),
+      Type.Literal('SUSPENDED'),
+      Type.Literal('REVOKED'),
+      Type.Literal('DISABLED'),
+    ]),
+    reason: Type.Optional(Type.String({ minLength: 3, maxLength: 500 })),
   },
   { additionalProperties: false },
 );
@@ -2870,6 +2893,7 @@ export const ValidateInvitationResponseSchema = Type.Object({
   tenantName: Type.String(),
   employeeName: Type.Optional(Type.Union([Type.String(), Type.Null()])),
   invitationCode: Type.Optional(Type.String()),
+  isExistingUser: Type.Optional(Type.Boolean()),
 });
 export type ValidateInvitationResponse = Static<typeof ValidateInvitationResponseSchema>;
 
