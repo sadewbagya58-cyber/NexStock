@@ -57,14 +57,52 @@ export async function createCustomerCreditAccount(
     });
   }
 
-  // 3. Load tenant credit settings for defaults if needed
+  // 3. Check if caller has permission to set/manage custom credit limits
+  let hasLimitManage = false;
+  try {
+    await assertAuthorized(trx, { permission: 'crm:limit:manage' });
+    hasLimitManage = true;
+  } catch {
+    hasLimitManage = false;
+  }
+
+  // Load tenant credit settings for defaults if needed
   const settings = await trx.db
     .selectFrom('customer_credit_settings')
     .selectAll()
     .where('tenant_id', '=', trx.tenantId)
     .executeTakeFirst();
 
-  const creditLimitStr = input.creditLimit ?? (settings ? String(settings.default_credit_limit) : '50000.0000');
+  const defaultLimitStr = settings ? String(settings.default_credit_limit) : '50000.0000';
+  const defaultLimitMoney = Money.fromDecimalString(defaultLimitStr, 'LKR');
+
+  // If cashier (lacks crm:limit:manage), they cannot set limit higher than default approved limit, nor set opening balance
+  if (!hasLimitManage) {
+    if (input.creditLimit) {
+      const requestedLimit = Money.fromDecimalString(input.creditLimit, 'LKR');
+      if (requestedLimit.compare(defaultLimitMoney) > 0) {
+        throw new AppError({
+          statusCode: 403,
+          errorCode: 'CREDIT_LIMIT_APPROVAL_REQUIRED',
+          title: 'Credit Limit Approval Required',
+          detail: `Frontline cashiers cannot approve custom credit limits exceeding the default limit of LKR ${defaultLimitMoney.toDecimalString()}. Owner or Admin approval is required.`,
+        });
+      }
+    }
+    if (input.openingBalance) {
+      const ob = Money.fromDecimalString(input.openingBalance, 'LKR');
+      if (!ob.isZero()) {
+        throw new AppError({
+          statusCode: 403,
+          errorCode: 'CREDIT_LIMIT_APPROVAL_REQUIRED',
+          title: 'Opening Balance Approval Required',
+          detail: 'Frontline cashiers cannot initialize accounts with non-zero opening balances without manager approval.',
+        });
+      }
+    }
+  }
+
+  const creditLimitStr = input.creditLimit ?? defaultLimitStr;
   const creditTerms = input.creditTerms ?? (settings ? settings.default_credit_terms : 'NET_30');
   const customTermDays = input.customTermDays ?? (settings ? settings.default_custom_days : 30);
 
@@ -327,6 +365,9 @@ export async function listCreditAccounts(
     )
     .where('customer_credit_accounts.tenant_id', '=', trx.tenantId);
 
+  if (query.customerId) {
+    baseQuery = baseQuery.where('customer_credit_accounts.customer_id', '=', query.customerId);
+  }
   if (query.status) {
     baseQuery = baseQuery.where('customer_credit_accounts.status', '=', query.status);
   }

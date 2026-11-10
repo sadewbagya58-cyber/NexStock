@@ -878,9 +878,10 @@
     }
 
     /* Print Styles (BUG-043: Enhanced Report & Receipt Printing) */
+    /* BUG-083: Customer Credit Accounts & Financial Report Print Layout */
     @page {
       size: auto;
-      margin: 12mm;
+      margin: 12mm 15mm;
     }
     @media print {
       body, html {
@@ -888,6 +889,9 @@
         padding: 0 !important;
         background: #ffffff !important;
         color: #111827 !important;
+        height: auto !important;
+        min-height: auto !important;
+        overflow: visible !important;
       }
       aside.sidebar,
       header.topbar,
@@ -899,8 +903,12 @@
       .view-header button,
       .toast-container,
       .modal-backdrop,
-      .no-print {
+      .no-print,
+      .mobile-only {
         display: none !important;
+      }
+      .desktop-only {
+        display: block !important;
       }
       main.content {
         margin: 0 !important;
@@ -912,11 +920,22 @@
         border: 1px solid #d1d5db !important;
         box-shadow: none !important;
         background: #ffffff !important;
-        page-break-inside: avoid;
+        page-break-inside: auto !important;
       }
-      .data-table th, .data-table td {
+      table {
+        width: 100% !important;
+        border-collapse: collapse !important;
+      }
+      thead {
+        display: table-header-group !important;
+      }
+      tr {
+        page-break-inside: avoid !important;
+      }
+      th, td, .data-table th, .data-table td {
         border: 1px solid #e5e7eb !important;
         color: #111827 !important;
+        padding: 6px 8px !important;
       }
       #printableReceipt, #printableBarcodeLabel, #payrollReportPrintArea, #payslipPrintArea, #printableExpenseReport {
         page-break-inside: avoid !important;
@@ -939,6 +958,33 @@
       #payslipPrintArea {
         padding: 20px !important;
         max-width: 680px !important;
+      }
+    }
+
+    /* Responsive Display & Tab Helpers (BUG-079 & BUG-082) */
+    .mobile-only {
+      display: none;
+    }
+    .desktop-only {
+      display: block;
+    }
+    @media (max-width: 768px) {
+      .mobile-only {
+        display: block !important;
+      }
+      .desktop-only {
+        display: none !important;
+      }
+      .credit-modal-tabs {
+        overflow-x: auto !important;
+        white-space: nowrap !important;
+        -webkit-overflow-scrolling: touch !important;
+        display: flex !important;
+        gap: 6px !important;
+        padding-bottom: 6px !important;
+      }
+      .credit-modal-tabs button {
+        flex-shrink: 0 !important;
       }
     }
 
@@ -3394,6 +3440,144 @@
 
       // Resolve linked employee profile asynchronously for self-service portal (BUG-059)
       resolveLinkedEmployee();
+
+      // Initialize Global Real-Time Event & Cross-Tab Synchronization (BUG-071)
+      initRealtimeSync();
+    }
+
+    // Global Real-Time Event Synchronization Engine (BUG-071)
+    let realtimeEventSource = null;
+    let realtimeBroadcastChannel = null;
+    let realtimePollTimer = null;
+    let lastRealtimeEventId = null;
+
+    function initRealtimeSync() {
+      if (!state.tenantId || !state.token) return;
+
+      // 1. Cross-tab BroadcastChannel for zero-latency local tab synchronization
+      if (typeof BroadcastChannel !== 'undefined' && !realtimeBroadcastChannel) {
+        try {
+          realtimeBroadcastChannel = new BroadcastChannel('nexstock_sync');
+          realtimeBroadcastChannel.onmessage = (event) => {
+            const msg = event.data;
+            if (!msg || msg.tenantId !== state.tenantId) return;
+            handleRealtimeEvent(msg.type, msg.data || msg);
+          };
+        } catch (e) {
+          console.warn('BroadcastChannel not initialized:', e);
+        }
+      }
+
+      // 2. Server-Sent Events (SSE) stream for multi-device & multi-cashier cloud sync
+      if (typeof EventSource !== 'undefined') {
+        if (realtimeEventSource) {
+          try { realtimeEventSource.close(); } catch {}
+          realtimeEventSource = null;
+        }
+
+        try {
+          const sseUrl = `${state.apiBaseUrl}/v1/realtime/events?token=${encodeURIComponent(state.token)}&tenantId=${encodeURIComponent(state.tenantId)}${state.branchId ? `&branchId=${encodeURIComponent(state.branchId)}` : ''}`;
+          realtimeEventSource = new EventSource(sseUrl);
+
+          realtimeEventSource.onopen = () => {
+            const syncEl = document.getElementById('topbarSyncStatus');
+            if (syncEl) {
+              syncEl.innerText = '● Live Sync';
+              syncEl.className = 'badge-pill badge-green';
+            }
+          };
+
+          realtimeEventSource.onmessage = (e) => {
+            try {
+              const eventPayload = JSON.parse(e.data);
+              if (eventPayload.id) lastRealtimeEventId = eventPayload.id;
+              if (eventPayload.eventType) {
+                handleRealtimeEvent(eventPayload.eventType, eventPayload.data);
+              }
+            } catch (err) {
+              console.warn('Error parsing realtime SSE payload:', err);
+            }
+          };
+
+          realtimeEventSource.onerror = () => {
+            const syncEl = document.getElementById('topbarSyncStatus');
+            if (syncEl) {
+              syncEl.innerText = '● Connecting...';
+              syncEl.className = 'badge-pill badge-yellow';
+            }
+            startRealtimePollingFallback();
+          };
+        } catch (e) {
+          console.warn('SSE connection initialization failed, activating polling fallback:', e);
+          startRealtimePollingFallback();
+        }
+      } else {
+        startRealtimePollingFallback();
+      }
+    }
+
+    function startRealtimePollingFallback() {
+      if (realtimePollTimer) return;
+      realtimePollTimer = setInterval(async () => {
+        if (!state.tenantId || !state.token) return;
+        try {
+          let url = `/v1/realtime/poll?tenantId=${encodeURIComponent(state.tenantId)}`;
+          if (lastRealtimeEventId) url += `&lastEventId=${encodeURIComponent(lastRealtimeEventId)}`;
+          if (state.branchId) url += `&branchId=${encodeURIComponent(state.branchId)}`;
+          const res = await apiFetch(url, { silent: true });
+          if (res && Array.isArray(res.events)) {
+            for (const ev of res.events) {
+              lastRealtimeEventId = ev.id;
+              handleRealtimeEvent(ev.eventType, ev.data);
+            }
+          }
+        } catch {}
+      }, 5000);
+    }
+
+    function cleanupRealtimeSync() {
+      if (realtimeEventSource) {
+        try { realtimeEventSource.close(); } catch {}
+        realtimeEventSource = null;
+      }
+      if (realtimeBroadcastChannel) {
+        try { realtimeBroadcastChannel.close(); } catch {}
+        realtimeBroadcastChannel = null;
+      }
+      if (realtimePollTimer) {
+        clearInterval(realtimePollTimer);
+        realtimePollTimer = null;
+      }
+    }
+
+    function handleRealtimeEvent(type, data) {
+      if (!data) return;
+
+      if (type === 'STOCK_CHANGED') {
+        // Optimistically update POS products cache if matching products are in payload
+        if (Array.isArray(data.lines) && Array.isArray(state.posCachedProducts)) {
+          let hasUpdated = false;
+          for (const line of data.lines) {
+            const prod = state.posCachedProducts.find(p => p.id === line.productId);
+            if (prod && prod.availableQuantity != null && line.quantity != null) {
+              prod.availableQuantity = Math.max(0, parseFloat(prod.availableQuantity) - parseFloat(line.quantity)).toString();
+              hasUpdated = true;
+            }
+          }
+          if (hasUpdated && state.activeView === 'pos' && typeof renderPosProductSections === 'function') {
+            renderPosProductSections();
+          }
+        }
+      } else if (type === 'CREDIT_ACCOUNT_CHANGED') {
+        if (state.activeView === 'credit-accounts' && typeof renderCreditAccountsView === 'function') {
+          renderCreditAccountsView();
+        } else if (state.activeView === 'customers' && typeof renderCustomersView === 'function') {
+          renderCustomersView();
+        }
+        if (state.selectedCheckoutCustomerId && data.customerId === state.selectedCheckoutCustomerId) {
+          onSelectCheckoutCustomer(state.selectedCheckoutCustomerId);
+        }
+      }
     }
 
     // Fetch Subscription Features & Entitlements (V1 Entitlement Gating & V2 Premium Readiness)
@@ -3448,6 +3632,9 @@
           closePosCameraScannerModal();
         }
       } catch {}
+
+      // Terminate real-time event listeners and polling
+      cleanupRealtimeSync();
 
       // Synchronously reset state
       state.token = '';
@@ -9291,11 +9478,16 @@
       const details = document.getElementById('creditAccountStatusDetails');
       const splitNotice = document.getElementById('splitCreditStatusNotice');
       const nameInput = document.getElementById('payCustomerName');
+      const paySelect = document.getElementById('payMethod');
 
       if (!customerId) {
         if (badge) badge.innerHTML = '';
         if (details) details.innerHTML = 'Please select a registered customer with an active credit account to bill on credit.';
         if (splitNotice) splitNotice.innerHTML = 'Select a customer profile above to unlock partial credit charging.';
+        if (paySelect && (paySelect.value === 'CREDIT' || paySelect.value === 'SPLIT_CASH_CREDIT')) {
+          paySelect.value = 'CASH';
+          togglePaymentInputs();
+        }
         return;
       }
 
@@ -9308,13 +9500,34 @@
 
       try {
         const accountsRes = await apiFetch(`/v1/credit/accounts?customerId=${encodeURIComponent(customerId)}`);
-        const account = accountsRes?.items?.[0] || null;
+        const account = (accountsRes?.items && accountsRes.items.length > 0) ? accountsRes.items[0] : null;
         state.selectedCustomerCreditAccount = account;
 
         if (!account) {
-          if (badge) badge.innerHTML = '<span style="color: var(--status-warning);">⚠️ No Credit Account found for this customer</span>';
-          if (details) details.innerHTML = '<div style="color: var(--status-warning);">This customer does not have a credit account. Sales cannot be charged on credit.</div>';
-          if (splitNotice) splitNotice.innerHTML = '<span style="color: var(--status-warning);">⚠️ Customer has no active credit account.</span>';
+          if (badge) badge.innerHTML = '<span class="badge" style="background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--text-secondary); font-size: 11px;">NO CREDIT ACCOUNT</span>';
+          if (details) {
+            details.innerHTML = `
+              <div style="background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.25); border-radius: 6px; padding: 10px 12px; margin-top: 6px;">
+                <div style="color: var(--status-warning); font-weight: 600; font-size: 13px; display: flex; align-items: center; gap: 6px;">
+                  <span>⚠️</span> Customer Has No Credit Account
+                </div>
+                <div style="color: var(--text-secondary); font-size: 12px; margin-top: 4px;">
+                  This customer is not enrolled in a credit facility. Credit and split-credit checkout cannot be processed.
+                </div>
+                ${hasPermission('crm:credit:create') ? `
+                  <button type="button" class="btn btn-secondary btn-sm" style="margin-top: 8px;" onclick="openCreateCreditAccountModal('${customerId}')">
+                    + Open Credit Account
+                  </button>
+                ` : ''}
+              </div>
+            `;
+          }
+          if (splitNotice) splitNotice.innerHTML = '<span style="color: var(--status-warning);">⚠️ Customer has no active credit account. Select Cash or Card.</span>';
+          if (paySelect && (paySelect.value === 'CREDIT' || paySelect.value === 'SPLIT_CASH_CREDIT')) {
+            showToast('Selected customer has no credit account. Switched to Cash.', 'warning');
+            paySelect.value = 'CASH';
+            togglePaymentInputs();
+          }
           return;
         }
 
@@ -9325,21 +9538,27 @@
 
         if (badge) {
           badge.innerHTML = `
-            <span style="font-weight: 600; color: ${isGood ? 'var(--status-success)' : 'var(--status-danger)'};">
+            <span class="badge ${isGood ? 'badge-success' : 'badge-danger'}" style="font-size: 11px;">
               ${escapeHtml(account.status)}
-            </span> | Limit: ${limitStr} | Available: <strong>${availStr}</strong>
+            </span>
+            <span style="font-size: 12px; margin-left: 6px;">
+              Limit: <strong>${limitStr}</strong> | Avail: <strong style="color: ${parseFloat(account.availableCredit) > 0 ? 'var(--status-success)' : 'var(--status-danger)'};">${availStr}</strong>
+            </span>
           `;
         }
 
         if (details) {
           details.innerHTML = `
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 4px;">
-              <div>Account #: <strong>${escapeHtml(account.accountNumber)}</strong></div>
-              <div>Status: <span class="badge ${isGood ? 'badge-success' : 'badge-danger'}">${escapeHtml(account.status)}</span></div>
-              <div>Credit Limit: <strong>${limitStr}</strong></div>
-              <div>Current Balance: <strong>${balStr}</strong></div>
-              <div style="grid-column: span 2; padding: 6px; background: var(--bg-surface); border-radius: 4px; margin-top: 4px;">
-                Available Credit: <strong style="color: ${parseFloat(account.availableCredit) > 0 ? 'var(--status-success)' : 'var(--status-danger)'};">${availStr}</strong>
+            <div style="background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 6px; padding: 10px 12px; margin-top: 6px;">
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 12px;">
+                <div>Account #: <strong style="font-family: monospace;">${escapeHtml(account.accountNumber)}</strong></div>
+                <div>Status: <span class="badge ${isGood ? 'badge-success' : 'badge-danger'}">${escapeHtml(account.status)}</span></div>
+                <div>Credit Limit: <strong>${limitStr}</strong></div>
+                <div>Current Balance: <strong style="color: ${parseFloat(account.currentBalance) > 0 ? 'var(--status-danger)' : 'var(--text-secondary)'};">${balStr}</strong></div>
+                <div style="grid-column: span 2; padding: 6px 8px; background: var(--bg-primary); border-radius: 4px; margin-top: 4px; display: flex; justify-content: space-between; align-items: center;">
+                  <span>Live Available Credit:</span>
+                  <strong style="font-size: 13px; color: ${parseFloat(account.availableCredit) > 0 ? 'var(--status-success)' : 'var(--status-danger)'};">${availStr}</strong>
+                </div>
               </div>
             </div>
           `;
@@ -9348,9 +9567,15 @@
         if (splitNotice) {
           splitNotice.innerHTML = `Available Credit: <strong style="color: ${parseFloat(account.availableCredit) > 0 ? 'var(--status-success)' : 'var(--status-danger)'};">${availStr}</strong> (Limit: ${limitStr})`;
         }
+
+        if (!isGood && paySelect && (paySelect.value === 'CREDIT' || paySelect.value === 'SPLIT_CASH_CREDIT')) {
+          showToast(`Customer credit account is ${account.status}. Switched to Cash.`, 'warning');
+          paySelect.value = 'CASH';
+          togglePaymentInputs();
+        }
       } catch (err) {
-        if (badge) badge.innerHTML = '<span style="color: var(--status-danger);">Failed to verify credit account</span>';
-        if (details) details.innerHTML = `<span style="color: var(--status-danger);">${escapeHtml(err.message)}</span>`;
+        if (badge) badge.innerHTML = '<span style="color: var(--status-danger); font-size: 11px;">⚠️ Failed to verify credit</span>';
+        if (details) details.innerHTML = `<span style="color: var(--status-danger); font-size: 12px;">${escapeHtml(err.message)}</span>`;
       }
     }
 
@@ -9632,8 +9857,78 @@
         state.activeCheckoutKey = null;
         state.cart = [];
         renderPosCartPanel();
+
+        // Optimistically decrement local product stock for immediate UI responsiveness (BUG-070 & BUG-071)
+        if (Array.isArray(sale.lines)) {
+          for (const line of sale.lines) {
+            const prod = (state.posCachedProducts || []).find(p => p.id === line.productId);
+            if (prod && prod.availableQuantity != null && line.quantity != null) {
+              prod.availableQuantity = Math.max(0, parseFloat(prod.availableQuantity) - parseFloat(line.quantity)).toString();
+            }
+          }
+          if (typeof renderPosProductSections === 'function') {
+            renderPosProductSections();
+          }
+        }
+
+        // Broadcast real-time stock and credit changes to other tabs
+        if (typeof BroadcastChannel !== 'undefined') {
+          try {
+            const bc = new BroadcastChannel('nexstock_sync');
+            bc.postMessage({
+              type: 'STOCK_CHANGED',
+              tenantId: state.tenantId,
+              branchId: state.branchId,
+              saleId: sale.id,
+              invoiceNumber: sale.invoiceNumber,
+              lines: (sale.lines || []).map(l => ({ productId: l.productId, quantity: l.quantity }))
+            });
+            if (state.selectedCheckoutCustomerId) {
+              bc.postMessage({
+                type: 'CREDIT_ACCOUNT_CHANGED',
+                tenantId: state.tenantId,
+                branchId: state.branchId,
+                customerId: state.selectedCheckoutCustomerId
+              });
+            }
+            bc.close();
+          } catch {}
+        }
+
+        // Construct receipt data immediately from checkout response (eliminates network delay & limbo state)
+        const receiptData = {
+          invoiceNumber: sale.invoiceNumber,
+          businessName: state.tenantName || 'NexStock Retail',
+          branchName: state.branchName || 'Main Store',
+          registerCode: state.registerCode || 'REG-01',
+          cashierName: state.fullName || 'Cashier',
+          formattedTimestamp: new Date(sale.createdAt || Date.now()).toLocaleString(),
+          customerName: sale.customerName || (state.selectedCheckoutCustomerId ? (state.cachedCustomers?.find(c => c.id === state.selectedCheckoutCustomerId)?.name || null) : null),
+          currencyCode: sale.currencyCode || getTenantCurrency(),
+          currency: sale.currencyCode || getTenantCurrency(),
+          subtotalAmount: sale.subtotalAmount,
+          taxAmount: sale.taxAmount,
+          grandTotal: sale.grandTotal,
+          totalPaid: sale.totalPaid,
+          changeGiven: sale.changeGiven,
+          lines: (sale.lines || []).map(l => ({
+            name: l.productName,
+            quantity: l.quantity,
+            unitPrice: l.unitPrice,
+            lineTotal: l.lineTotal
+          })),
+          payments: (sale.payments || []).map(p => ({
+            method: p.paymentMethod,
+            paymentMethod: p.paymentMethod,
+            amount: p.amount,
+            tenderedAmount: p.tenderedAmount,
+            changeAmount: p.changeAmount
+          })),
+          notes: 'Thank you for your business!'
+        };
+        cachedReceipts.set(sale.id, receiptData);
         closeModal();
-        openReceiptModal(sale.id);
+        openReceiptModal(sale.id, receiptData);
       } catch (err) {
         const errDetail = err.detail || err.message || 'Payment processing failed';
         showToast(`Checkout failed: ${errDetail}`, 'error');
@@ -9823,22 +10118,39 @@
       printHtmlDocument(printableHtml, pageStyles);
     }
 
-    // Receipt Modal & Printing (BUG-010 & BUG-028)
+    // Receipt Modal & Printing (BUG-010, BUG-028 & BUG-070)
     async function openReceiptModal(saleId) {
-      if (activeReceiptFetches.has(saleId)) return;
+      const preloadedReceipt = arguments[1] || null;
+      if (preloadedReceipt) {
+        cachedReceipts.set(saleId, preloadedReceipt);
+      }
+
+      let receipt = cachedReceipts.get(saleId);
 
       const btns = [
         document.getElementById(`btnReceipt-${saleId}`),
         document.getElementById(`btnReceiptMobile-${saleId}`)
       ].filter(Boolean);
 
-      let receipt = cachedReceipts.get(saleId);
-
       if (!receipt) {
-        // Immediate visual feedback on the button
+        if (activeReceiptFetches.has(saleId)) return;
+
+        // Immediate visual feedback on the triggering button if present
         btns.forEach(b => {
           b.disabled = true;
           b.innerHTML = '<span class="spinner-sm"></span> Loading receipt...';
+        });
+
+        // Open receipt modal immediately with loading skeleton to eliminate blank limbo states (BUG-070)
+        openModal({
+          title: 'Sales Receipt',
+          bodyHtml: `
+            <div style="padding: 40px 20px; text-align: center;">
+              <div class="spinner-sm" style="display:inline-block; width: 32px; height: 32px; border-width: 3px; margin-bottom: 12px;"></div>
+              <div style="font-weight: 600; color: var(--text-primary); font-size: 14px;">Loading receipt details...</div>
+            </div>
+          `,
+          maxWidth: '440px'
         });
 
         activeReceiptFetches.add(saleId);
@@ -9850,6 +10162,7 @@
           }
         } catch (err) {
           showToast(`Failed to load receipt: ${err.message}`, 'error');
+          closeModal();
           return;
         } finally {
           activeReceiptFetches.delete(saleId);
@@ -19266,7 +19579,7 @@
             <button class="btn btn-secondary" onclick="state.customerFilters.search=''; state.customerFilters.status=''; renderCustomersView();">Reset</button>
           </div>
 
-          <!-- Customer List Table -->
+          <!-- Customer List Section (BUG-079: Desktop Table & Mobile Responsive Cards) -->
           <div class="card" style="padding: 0; overflow: hidden;">
             ${customers.length === 0 ? `
               <div style="padding: 40px; text-align: center; color: var(--text-secondary);">
@@ -19274,70 +19587,149 @@
                 <button class="btn btn-primary btn-sm" style="margin-top: 12px;" onclick="openCustomerModal()">+ Add Customer</button>
               </div>
             ` : `
-              <table class="table" style="font-size: 13px; margin: 0;">
-                <thead>
-                  <tr>
-                    <th>Customer #</th>
-                    <th>Name / Business</th>
-                    <th>Contact Info</th>
-                    <th>City</th>
-                    <th>Credit Account</th>
-                    <th class="text-right">Credit Limit</th>
-                    <th class="text-right">Balance</th>
-                    <th>Status</th>
-                    <th class="text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${customers.map(c => {
-                    const acc = accountMap.get(c.id);
-                    return `
-                      <tr>
-                        <td><strong style="font-family: monospace; color: var(--accent-primary);">${escapeHtml(c.customerNumber)}</strong></td>
-                        <td>
-                          <div style="font-weight: 600;">${escapeHtml(c.name)}</div>
-                          ${c.companyName ? `<div style="font-size: 11px; color: var(--text-secondary);">${escapeHtml(c.companyName)}</div>` : ''}
-                        </td>
-                        <td>
-                          <div>${escapeHtml(c.phone || '—')}</div>
-                          ${c.email ? `<div style="font-size: 11px; color: var(--text-secondary);">${escapeHtml(c.email)}</div>` : ''}
-                        </td>
-                        <td>${escapeHtml(c.addressCity || '—')}</td>
-                        <td>
+              <!-- Desktop Table View -->
+              <div class="table-responsive desktop-only">
+                <table class="table" style="font-size: 13px; margin: 0;">
+                  <thead>
+                    <tr>
+                      <th>Customer #</th>
+                      <th>Name / Business</th>
+                      <th>Contact Info</th>
+                      <th>City</th>
+                      <th>Credit Account</th>
+                      <th class="text-right">Credit Limit</th>
+                      <th class="text-right">Balance</th>
+                      <th>Status</th>
+                      <th class="text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${customers.map(c => {
+                      const acc = accountMap.get(c.id);
+                      return `
+                        <tr>
+                          <td><strong style="font-family: monospace; color: var(--accent-primary);">${escapeHtml(c.customerNumber)}</strong></td>
+                          <td>
+                            <div style="font-weight: 600;">${escapeHtml(c.name)}</div>
+                            ${c.companyName ? `<div style="font-size: 11px; color: var(--text-secondary);">${escapeHtml(c.companyName)}</div>` : ''}
+                          </td>
+                          <td>
+                            <div>${escapeHtml(c.phone || '—')}</div>
+                            ${c.email ? `<div style="font-size: 11px; color: var(--text-secondary);">${escapeHtml(c.email)}</div>` : ''}
+                          </td>
+                          <td>${escapeHtml(c.addressCity || '—')}</td>
+                          <td>
+                            ${acc ? `
+                              <span class="badge ${acc.status === 'ACTIVE' ? 'badge-success' : 'badge-warning'}">
+                                ${escapeHtml(acc.status)}
+                              </span>
+                            ` : `
+                              <span class="badge" style="background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--text-secondary); font-size: 11px;">No Account</span>
+                            `}
+                          </td>
+                          <td class="text-right" style="font-weight: 600; font-variant-numeric: tabular-nums;">
+                            ${acc ? formatTenantMoney(acc.creditLimit, 'LKR') : '—'}
+                          </td>
+                          <td class="text-right" style="font-weight: 700; font-variant-numeric: tabular-nums; color: ${acc && parseFloat(acc.currentBalance) > 0 ? 'var(--status-danger)' : 'var(--text-secondary)'};">
+                            ${acc ? formatTenantMoney(acc.currentBalance, 'LKR') : '—'}
+                          </td>
+                          <td>
+                            <span class="badge ${c.isActive ? 'badge-success' : 'badge-secondary'}">
+                              ${c.isActive ? 'ACTIVE' : 'INACTIVE'}
+                            </span>
+                          </td>
+                          <td class="text-right">
+                            <div style="display: flex; gap: 6px; justify-content: flex-end;">
+                              <button class="btn btn-secondary btn-sm" onclick="openCustomerModal('${c.id}')" title="Edit Customer Details">Edit</button>
+                              ${acc ? `
+                                <button class="btn btn-secondary btn-sm" onclick="openCreditAccountDetailsModal('${acc.id}')" title="Manage Credit Account">Credit</button>
+                              ` : `
+                                <button class="btn btn-primary btn-sm" onclick="openCreateCreditAccountModal('${c.id}')" title="Open New Credit Account">+ Credit</button>
+                              `}
+                            </div>
+                          </td>
+                        </tr>
+                      `;
+                    }).join('')}
+                  </tbody>
+                </table>
+              </div>
+
+              <!-- Mobile Responsive Customer Cards (BUG-079) -->
+              <div class="mobile-only" style="padding: 12px; display: flex; flex-direction: column; gap: 10px;">
+                ${customers.map(c => {
+                  const acc = accountMap.get(c.id);
+                  const initials = c.name ? c.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() : 'CU';
+                  return `
+                    <div class="card" style="padding: 14px; border: 1px solid var(--border-subtle); margin-bottom: 0;">
+                      <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                          <div style="width: 38px; height: 38px; border-radius: 50%; background: var(--bg-surface); border: 1px solid var(--border-subtle); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 13px; color: var(--accent-primary);">
+                            ${escapeHtml(initials)}
+                          </div>
+                          <div>
+                            <div style="font-weight: 700; font-size: 14px; color: var(--text-primary);">${escapeHtml(c.name)}</div>
+                            <div style="font-size: 11px; color: var(--text-secondary); font-family: monospace;">${escapeHtml(c.customerNumber)} ${c.companyName ? `&bull; ${escapeHtml(c.companyName)}` : ''}</div>
+                          </div>
+                        </div>
+                        <span class="badge ${c.isActive ? 'badge-success' : 'badge-secondary'}">
+                          ${c.isActive ? 'ACTIVE' : 'INACTIVE'}
+                        </span>
+                      </div>
+
+                      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 12px; margin-top: 10px; padding: 8px 10px; background: var(--bg-surface); border-radius: 6px;">
+                        <div>Phone: <strong>${escapeHtml(c.phone || '—')}</strong></div>
+                        <div>City: <strong>${escapeHtml(c.addressCity || '—')}</strong></div>
+                        ${c.email ? `<div style="grid-column: span 2; font-size: 11px; color: var(--text-secondary);">${escapeHtml(c.email)}</div>` : ''}
+                      </div>
+
+                      <!-- Credit Overview Strip -->
+                      <div style="margin-top: 10px; padding: 10px 12px; border-radius: 6px; background: var(--bg-primary); border: 1px solid var(--border-subtle);">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                          <span style="font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--text-secondary);">Credit Facility</span>
                           ${acc ? `
-                            <span class="badge ${acc.status === 'ACTIVE' ? 'badge-success' : 'badge-warning'}">
+                            <span class="badge ${acc.status === 'ACTIVE' ? 'badge-success' : 'badge-warning'}" style="font-size: 10px;">
                               ${escapeHtml(acc.status)}
                             </span>
                           ` : `
-                            <span style="font-size: 11px; color: var(--text-secondary); font-style: italic;">No Account</span>
+                            <span class="badge" style="background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--text-secondary); font-size: 10px;">
+                              NO CREDIT ACCOUNT
+                            </span>
                           `}
-                        </td>
-                        <td class="text-right" style="font-weight: 600; font-variant-numeric: tabular-nums;">
-                          ${acc ? formatTenantMoney(acc.creditLimit, 'LKR') : '—'}
-                        </td>
-                        <td class="text-right" style="font-weight: 700; font-variant-numeric: tabular-nums; color: ${acc && parseFloat(acc.currentBalance) > 0 ? 'var(--status-danger)' : 'var(--text-secondary)'};">
-                          ${acc ? formatTenantMoney(acc.currentBalance, 'LKR') : '—'}
-                        </td>
-                        <td>
-                          <span class="badge ${c.isActive ? 'badge-success' : 'badge-secondary'}">
-                            ${c.isActive ? 'ACTIVE' : 'INACTIVE'}
-                          </span>
-                        </td>
-                        <td class="text-right">
-                          <div style="display: flex; gap: 6px; justify-content: flex-end;">
-                            <button class="btn btn-secondary btn-sm" onclick="openCustomerModal('${c.id}')" title="Edit Customer Details">Edit</button>
-                            ${acc ? `
-                              <button class="btn btn-secondary btn-sm" onclick="openCreditAccountDetailsModal('${acc.id}')" title="Manage Credit Account">Credit</button>
-                            ` : `
-                              <button class="btn btn-primary btn-sm" onclick="openCreateCreditAccountModal('${c.id}')" title="Open New Credit Account">+ Credit</button>
-                            `}
+                        </div>
+
+                        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; text-align: center;">
+                          <div>
+                            <div style="font-size: 10px; color: var(--text-secondary);">Limit</div>
+                            <div style="font-weight: 700; font-size: 12px;">${acc ? formatTenantMoney(acc.creditLimit, 'LKR') : '—'}</div>
                           </div>
-                        </td>
-                      </tr>
-                    `;
-                  }).join('')}
-                </tbody>
-              </table>
+                          <div>
+                            <div style="font-size: 10px; color: var(--status-danger);">Outstanding</div>
+                            <div style="font-weight: 700; font-size: 12px; color: ${acc && parseFloat(acc.currentBalance) > 0 ? 'var(--status-danger)' : 'var(--text-secondary)'};">
+                              ${acc ? formatTenantMoney(acc.currentBalance, 'LKR') : '0.00'}
+                            </div>
+                          </div>
+                          <div>
+                            <div style="font-size: 10px; color: var(--status-success);">Available</div>
+                            <div style="font-weight: 700; font-size: 12px; color: var(--status-success);">
+                              ${acc ? formatTenantMoney(acc.availableCredit, 'LKR') : '—'}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div style="display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px;">
+                        <button class="btn btn-secondary btn-sm" onclick="openCustomerModal('${c.id}')">Edit</button>
+                        ${acc ? `
+                          <button class="btn btn-secondary btn-sm" onclick="openCreditAccountDetailsModal('${acc.id}')">Manage Credit</button>
+                        ` : `
+                          <button class="btn btn-primary btn-sm" onclick="openCreateCreditAccountModal('${c.id}')">+ Credit Account</button>
+                        `}
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
             `}
           </div>
         `;
@@ -19376,6 +19768,7 @@
             <div style="display: flex; gap: 8px; flex-wrap: wrap;">
               <button class="btn btn-secondary" onclick="renderView('credit-dashboard')">&larr; Dashboard</button>
               <button class="btn btn-secondary" onclick="renderView('customers')">👥 Customers</button>
+              <button class="btn btn-secondary" onclick="window.print()" title="Print Credit Accounts Report">🖨️ Print / PDF</button>
               <button class="btn btn-primary" onclick="openCreateCreditAccountModal()">+ Open Credit Account</button>
             </div>
           </div>
@@ -19408,7 +19801,7 @@
             <button class="btn btn-secondary" onclick="state.creditFilters.search=''; state.creditFilters.status=''; state.creditFilters.risk=''; renderCreditAccountsView();">Reset</button>
           </div>
 
-          <!-- Accounts Table -->
+          <!-- Accounts Section (Desktop Table & Mobile Responsive Cards) -->
           <div class="card" style="padding: 0; overflow: hidden;">
             ${accounts.length === 0 ? `
               <div style="padding: 40px; text-align: center; color: var(--text-secondary);">
@@ -19416,56 +19809,110 @@
                 <button class="btn btn-primary btn-sm" style="margin-top: 12px;" onclick="openCreateCreditAccountModal()">+ Open Credit Account</button>
               </div>
             ` : `
-              <table class="table" style="font-size: 13px; margin: 0;">
-                <thead>
-                  <tr>
-                    <th>Account #</th>
-                    <th>Customer Name</th>
-                    <th>Terms</th>
-                    <th class="text-right">Credit Limit</th>
-                    <th class="text-right">Current Balance</th>
-                    <th class="text-right">Available Credit</th>
-                    <th>Risk Class</th>
-                    <th>Status</th>
-                    <th class="text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${accounts.map(acc => {
-                    const isGood = acc.status === 'ACTIVE';
-                    const riskBadge = acc.riskClassification === 'LOW_RISK' ? 'badge-success' : acc.riskClassification === 'MEDIUM_RISK' ? 'badge-warning' : 'badge-danger';
-                    return `
-                      <tr>
-                        <td><strong style="font-family: monospace; color: var(--accent-primary);">${escapeHtml(acc.accountNumber)}</strong></td>
-                        <td>
-                          <div style="font-weight: 600;">${escapeHtml(acc.customerName)}</div>
-                          <div style="font-size: 11px; color: var(--text-secondary);">${escapeHtml(acc.customerNumber)}</div>
-                        </td>
-                        <td><span class="badge badge-secondary">${escapeHtml(acc.creditTerms)}</span></td>
-                        <td class="text-right" style="font-weight: 600; font-variant-numeric: tabular-nums;">${formatTenantMoney(acc.creditLimit, 'LKR')}</td>
-                        <td class="text-right" style="font-weight: 700; font-variant-numeric: tabular-nums; color: ${parseFloat(acc.currentBalance) > 0 ? 'var(--status-danger)' : 'var(--text-secondary)'};">
-                          ${formatTenantMoney(acc.currentBalance, 'LKR')}
-                        </td>
-                        <td class="text-right" style="font-weight: 700; font-variant-numeric: tabular-nums; color: var(--status-success);">
-                          ${formatTenantMoney(acc.availableCredit, 'LKR')}
-                        </td>
-                        <td><span class="badge ${riskBadge}">${escapeHtml(acc.riskClassification)}</span></td>
-                        <td>
-                          <span class="badge ${isGood ? 'badge-success' : acc.status === 'ON_HOLD' ? 'badge-warning' : 'badge-danger'}">
+              <!-- Desktop Table View -->
+              <div class="table-responsive desktop-only">
+                <table class="table" style="font-size: 13px; margin: 0;">
+                  <thead>
+                    <tr>
+                      <th>Account #</th>
+                      <th>Customer Name</th>
+                      <th>Terms</th>
+                      <th class="text-right">Credit Limit</th>
+                      <th class="text-right">Current Balance</th>
+                      <th class="text-right">Available Credit</th>
+                      <th>Risk Class</th>
+                      <th>Status</th>
+                      <th class="text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${accounts.map(acc => {
+                      const isGood = acc.status === 'ACTIVE';
+                      const riskBadge = acc.riskClassification === 'LOW_RISK' ? 'badge-success' : acc.riskClassification === 'MEDIUM_RISK' ? 'badge-warning' : 'badge-danger';
+                      return `
+                        <tr>
+                          <td><strong style="font-family: monospace; color: var(--accent-primary);">${escapeHtml(acc.accountNumber)}</strong></td>
+                          <td>
+                            <div style="font-weight: 600;">${escapeHtml(acc.customerName)}</div>
+                            <div style="font-size: 11px; color: var(--text-secondary);">${escapeHtml(acc.customerNumber)}</div>
+                          </td>
+                          <td><span class="badge badge-secondary">${escapeHtml(acc.creditTerms)}</span></td>
+                          <td class="text-right" style="font-weight: 600; font-variant-numeric: tabular-nums;">${formatTenantMoney(acc.creditLimit, 'LKR')}</td>
+                          <td class="text-right" style="font-weight: 700; font-variant-numeric: tabular-nums; color: ${parseFloat(acc.currentBalance) > 0 ? 'var(--status-danger)' : 'var(--text-secondary)'};">
+                            ${formatTenantMoney(acc.currentBalance, 'LKR')}
+                          </td>
+                          <td class="text-right" style="font-weight: 700; font-variant-numeric: tabular-nums; color: var(--status-success);">
+                            ${formatTenantMoney(acc.availableCredit, 'LKR')}
+                          </td>
+                          <td><span class="badge ${riskBadge}">${escapeHtml(acc.riskClassification)}</span></td>
+                          <td>
+                            <span class="badge ${isGood ? 'badge-success' : acc.status === 'ON_HOLD' ? 'badge-warning' : 'badge-danger'}">
+                              ${escapeHtml(acc.status)}
+                            </span>
+                          </td>
+                          <td class="text-right">
+                            <div style="display: flex; gap: 6px; justify-content: flex-end;">
+                              <button class="btn btn-primary btn-sm" onclick="openCreditAccountDetailsModal('${acc.id}')">Manage</button>
+                              <button class="btn btn-secondary btn-sm" onclick="openRecordCreditPaymentModal('${acc.id}')" title="Record Payment">Pay</button>
+                            </div>
+                          </td>
+                        </tr>
+                      `;
+                    }).join('')}
+                  </tbody>
+                </table>
+              </div>
+
+              <!-- Mobile Card View -->
+              <div class="mobile-only" style="padding: 12px; display: flex; flex-direction: column; gap: 10px;">
+                ${accounts.map(acc => {
+                  const isGood = acc.status === 'ACTIVE';
+                  const riskBadge = acc.riskClassification === 'LOW_RISK' ? 'badge-success' : acc.riskClassification === 'MEDIUM_RISK' ? 'badge-warning' : 'badge-danger';
+                  return `
+                    <div class="card" style="padding: 14px; border: 1px solid var(--border-subtle); margin-bottom: 0;">
+                      <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                        <div>
+                          <strong style="font-family: monospace; font-size: 13px; color: var(--accent-primary);">${escapeHtml(acc.accountNumber)}</strong>
+                          <div style="font-weight: 700; font-size: 14px; margin-top: 2px;">${escapeHtml(acc.customerName)}</div>
+                          <div style="font-size: 11px; color: var(--text-secondary);">${escapeHtml(acc.customerNumber)} &bull; ${escapeHtml(acc.creditTerms)}</div>
+                        </div>
+                        <div style="text-align: right;">
+                          <span class="badge ${isGood ? 'badge-success' : acc.status === 'ON_HOLD' ? 'badge-warning' : 'badge-danger'}" style="font-size: 11px;">
                             ${escapeHtml(acc.status)}
                           </span>
-                        </td>
-                        <td class="text-right">
-                          <div style="display: flex; gap: 6px; justify-content: flex-end;">
-                            <button class="btn btn-primary btn-sm" onclick="openCreditAccountDetailsModal('${acc.id}')">Manage</button>
-                            <button class="btn btn-secondary btn-sm" onclick="openRecordCreditPaymentModal('${acc.id}')" title="Record Payment">Pay</button>
+                          <div style="margin-top: 4px;">
+                            <span class="badge ${riskBadge}" style="font-size: 10px;">${escapeHtml(acc.riskClassification)}</span>
                           </div>
-                        </td>
-                      </tr>
-                    `;
-                  }).join('')}
-                </tbody>
-              </table>
+                        </div>
+                      </div>
+
+                      <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; text-align: center; margin-top: 12px; padding: 10px; background: var(--bg-surface); border-radius: 6px;">
+                        <div>
+                          <div style="font-size: 10px; color: var(--text-secondary);">Credit Limit</div>
+                          <div style="font-weight: 700; font-size: 12px;">${formatTenantMoney(acc.creditLimit, 'LKR')}</div>
+                        </div>
+                        <div>
+                          <div style="font-size: 10px; color: var(--status-danger);">Outstanding</div>
+                          <div style="font-weight: 700; font-size: 12px; color: ${parseFloat(acc.currentBalance) > 0 ? 'var(--status-danger)' : 'var(--text-secondary)'};">
+                            ${formatTenantMoney(acc.currentBalance, 'LKR')}
+                          </div>
+                        </div>
+                        <div>
+                          <div style="font-size: 10px; color: var(--status-success);">Available</div>
+                          <div style="font-weight: 700; font-size: 12px; color: var(--status-success);">
+                            ${formatTenantMoney(acc.availableCredit, 'LKR')}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div style="display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px;">
+                        <button class="btn btn-primary btn-sm" onclick="openCreditAccountDetailsModal('${acc.id}')">Manage</button>
+                        <button class="btn btn-secondary btn-sm" onclick="openRecordCreditPaymentModal('${acc.id}')">Pay</button>
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
             `}
           </div>
         `;
@@ -19628,6 +20075,7 @@
     async function openCreateCreditAccountModal(preselectedCustomerId = null) {
       const targetCustId = (typeof preselectedCustomerId === 'string' && preselectedCustomerId) ? preselectedCustomerId : null;
       const currency = getTenantCurrency();
+      const canManageLimit = hasPermission('crm:limit:manage');
 
       try {
         let customers = state.cachedCustomers || [];
@@ -19656,8 +20104,9 @@
 
             <div class="form-row-2col">
               <div class="form-group">
-                <label class="form-label">Approved Credit Limit (${currency}) *</label>
-                <input type="number" step="0.01" min="0" class="form-input" id="newAccLimit" value="50000.00" required>
+                <label class="form-label">Approved Credit Limit (${currency}) * ${!canManageLimit ? '<span style="font-size:11px; font-weight:normal; color:var(--text-secondary);">(Locked to standard default)</span>' : ''}</label>
+                <input type="number" step="0.01" min="0" class="form-input" id="newAccLimit" value="50000.00" ${!canManageLimit ? 'readonly style="background:var(--bg-surface); opacity:0.85;"' : ''} required>
+                ${!canManageLimit ? '<div style="font-size: 11px; color: var(--accent-primary); margin-top: 4px;">ℹ️ Cashier Mode: Accounts are initialized with the standard default approved limit (50,000.00). Custom credit limits require Credit Manager authorization.</div>' : ''}
               </div>
               <div class="form-group">
                 <label class="form-label">Payment Terms *</label>
@@ -19677,9 +20126,11 @@
             </div>
 
             <div class="form-group">
-              <label class="form-label">Opening Debit Balance (${currency}, Optional)</label>
-              <input type="number" step="0.01" min="0" class="form-input" id="newAccOpeningBalance" value="0.00" placeholder="0.00">
-              <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">Initial outstanding balance carried over from legacy receivables ledger.</div>
+              <label class="form-label">Opening Debit Balance (${currency}, Optional) ${!canManageLimit ? '<span style="font-size:11px; font-weight:normal; color:var(--text-secondary);">(Locked to 0.00)</span>' : ''}</label>
+              <input type="number" step="0.01" min="0" class="form-input" id="newAccOpeningBalance" value="0.00" placeholder="0.00" ${!canManageLimit ? 'readonly style="background:var(--bg-surface); opacity:0.85;"' : ''}>
+              <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">
+                ${canManageLimit ? 'Initial outstanding balance carried over from legacy receivables ledger.' : 'Setting non-zero legacy opening balances requires Credit Manager authorization.'}
+              </div>
             </div>
           `,
           footerHtml: `
@@ -19699,21 +20150,22 @@
         showToast('Please select a customer', 'error');
         return;
       }
-      const limitVal = parseFloat(document.getElementById('newAccLimit')?.value || '0');
+      const canManageLimit = hasPermission('crm:limit:manage');
+      const limitVal = parseFloat(document.getElementById('newAccLimit')?.value || '50000.00');
       if (isNaN(limitVal) || limitVal < 0) {
         showToast('Please enter a valid credit limit', 'error');
         return;
       }
       const creditTerms = document.getElementById('newAccTerms')?.value || 'NET_30';
       const customTermDays = creditTerms === 'CUSTOM' ? parseInt(document.getElementById('newAccCustomDays')?.value || '30', 10) : undefined;
-      const initialBalance = parseFloat(document.getElementById('newAccOpeningBalance')?.value || '0');
+      const initialBalance = canManageLimit ? parseFloat(document.getElementById('newAccOpeningBalance')?.value || '0') : 0;
 
       const payload = {
         customerId,
         creditLimit: limitVal.toFixed(4),
         creditTerms,
         customTermDays,
-        initialBalance: !isNaN(initialBalance) && initialBalance > 0 ? initialBalance.toFixed(4) : undefined
+        initialBalance: (!isNaN(initialBalance) && initialBalance > 0) ? initialBalance.toFixed(4) : undefined
       };
 
       const btn = document.getElementById('btnSubmitCreateAccount');
@@ -19748,11 +20200,17 @@
           apiFetch(`/v1/credit/accounts/${accountId}/collections`).catch(() => ({ items: [] }))
         ]);
 
-        const transactions = txRes?.items || [];
-        const payments = payRes?.items || [];
-        const collections = colRes?.items || [];
+        const transactions = Array.isArray(txRes) ? txRes : (txRes?.items || []);
+        const payments = Array.isArray(payRes) ? payRes : (payRes?.items || []);
+        const collections = Array.isArray(colRes) ? colRes : (colRes?.items || []);
 
         const isGood = acc.status === 'ACTIVE';
+
+        // Role-based action permissions (Cashier Credit Access Policy)
+        const canAdjustLimit = hasPermission('crm:limit:manage');
+        const canManageStatus = hasPermission('crm:credit:manage') || hasPermission('crm:credit:hold');
+        const canWriteoff = hasPermission('crm:writeoff:approve');
+        const canManualTx = hasPermission('crm:credit:manage') || hasPermission('crm:limit:manage');
 
         const bodyHtml = `
           <div style="background: var(--bg-primary); padding: 14px 16px; border-radius: 8px; margin-bottom: 16px;">
@@ -19773,8 +20231,8 @@
               </div>
             </div>
 
-            <!-- Balances Row -->
-            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-subtle);">
+            <!-- Balances Grid (BUG-082) -->
+            <div class="credit-balances-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-subtle);">
               <div>
                 <div style="font-size: 10px; font-weight: 700; text-transform: uppercase; color: var(--text-secondary);">Approved Credit Limit</div>
                 <div style="font-size: 16px; font-weight: 800; color: var(--text-primary); font-variant-numeric: tabular-nums;">${formatTenantMoney(acc.creditLimit, 'LKR')}</div>
@@ -19790,23 +20248,27 @@
             </div>
           </div>
 
-          <!-- Tabs Header -->
-          <div style="display: flex; gap: 4px; border-bottom: 2px solid var(--border-subtle); margin-bottom: 16px;">
-            <button class="btn ${activeTab === 'overview' ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="openCreditAccountDetailsModal('${accountId}', 'overview')">Overview &amp; Limits</button>
-            <button class="btn ${activeTab === 'ledger' ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="openCreditAccountDetailsModal('${accountId}', 'ledger')">Ledger (${transactions.length})</button>
-            <button class="btn ${activeTab === 'payments' ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="openCreditAccountDetailsModal('${accountId}', 'payments')">Payments (${payments.length})</button>
-            <button class="btn ${activeTab === 'collections' ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="openCreditAccountDetailsModal('${accountId}', 'collections')">Collections &amp; Aging</button>
-            <button class="btn ${activeTab === 'statement' ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="openCreditAccountDetailsModal('${accountId}', 'statement')">Customer Statement</button>
+          <!-- Mobile Horizontal Scroll Tabs Header (BUG-082) -->
+          <div class="credit-modal-tabs" style="display: flex; gap: 6px; overflow-x: auto; white-space: nowrap; -webkit-overflow-scrolling: touch; border-bottom: 2px solid var(--border-subtle); margin-bottom: 16px; padding-bottom: 6px;">
+            <button class="btn ${activeTab === 'overview' ? 'btn-primary' : 'btn-secondary'} btn-sm" style="flex-shrink: 0;" onclick="openCreditAccountDetailsModal('${accountId}', 'overview')">Overview &amp; Limits</button>
+            <button class="btn ${activeTab === 'ledger' ? 'btn-primary' : 'btn-secondary'} btn-sm" style="flex-shrink: 0;" onclick="openCreditAccountDetailsModal('${accountId}', 'ledger')">Ledger (${transactions.length})</button>
+            <button class="btn ${activeTab === 'payments' ? 'btn-primary' : 'btn-secondary'} btn-sm" style="flex-shrink: 0;" onclick="openCreditAccountDetailsModal('${accountId}', 'payments')">Payments (${payments.length})</button>
+            <button class="btn ${activeTab === 'collections' ? 'btn-primary' : 'btn-secondary'} btn-sm" style="flex-shrink: 0;" onclick="openCreditAccountDetailsModal('${accountId}', 'collections')">Collections &amp; Aging</button>
+            <button class="btn ${activeTab === 'statement' ? 'btn-primary' : 'btn-secondary'} btn-sm" style="flex-shrink: 0;" onclick="openCreditAccountDetailsModal('${accountId}', 'statement')">Customer Statement</button>
           </div>
 
           <!-- Tab Content -->
           <div id="creditModalTabContent">
             ${activeTab === 'overview' ? `
-              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
                 <h4 style="margin: 0; font-size: 14px; font-weight: 700;">Account Actions &amp; Controls</h4>
                 <div style="display: flex; gap: 8px;">
-                  <button class="btn btn-secondary btn-sm" onclick="openAdjustCreditLimitModal('${accountId}')">Adjust Credit Limit</button>
-                  <button class="btn btn-secondary btn-sm" onclick="openChangeCreditStatusModal('${accountId}')">Change Status</button>
+                  ${canAdjustLimit ? `
+                    <button class="btn btn-secondary btn-sm" onclick="openAdjustCreditLimitModal('${accountId}')">Adjust Credit Limit</button>
+                  ` : ''}
+                  ${canManageStatus ? `
+                    <button class="btn btn-secondary btn-sm" onclick="openChangeCreditStatusModal('${accountId}')">Change Status</button>
+                  ` : ''}
                 </div>
               </div>
 
@@ -19826,49 +20288,60 @@
                 <button class="btn btn-secondary btn-sm" onclick="loadLimitHistory('${accountId}')">Load Limit History</button>
               </div>
             ` : activeTab === 'ledger' ? `
-              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
                 <h4 style="margin: 0; font-size: 14px; font-weight: 700;">Receivables Ledger Transactions</h4>
-                <button class="btn btn-primary btn-sm" onclick="openManualCreditTransactionModal('${accountId}')">+ Manual Transaction</button>
+                ${canManualTx ? `
+                  <button class="btn btn-primary btn-sm" onclick="openManualCreditTransactionModal('${accountId}')">+ Manual Transaction</button>
+                ` : ''}
               </div>
 
               ${transactions.length === 0 ? `
                 <div style="text-align: center; padding: 30px; color: var(--text-secondary);">No ledger transactions recorded for this account.</div>
               ` : `
-                <table class="table" style="font-size: 12px; margin: 0;">
-                  <thead>
-                    <tr>
-                      <th>Date</th>
-                      <th>Ref</th>
-                      <th>Type</th>
-                      <th>Description</th>
-                      <th class="text-right">Debit (+)</th>
-                      <th class="text-right">Credit (-)</th>
-                      <th class="text-right">Running Balance</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    ${transactions.map(tx => `
+                <div class="table-responsive">
+                  <table class="table" style="font-size: 12px; margin: 0;">
+                    <thead>
                       <tr>
-                        <td>${new Date(tx.createdAt).toLocaleDateString()}</td>
-                        <td><strong style="font-family: monospace;">${escapeHtml(tx.transactionReference)}</strong></td>
-                        <td><span class="badge badge-secondary">${escapeHtml(tx.transactionType)}</span></td>
-                        <td>${escapeHtml(tx.description || tx.notes || '—')}</td>
-                        <td class="text-right" style="color: ${parseFloat(tx.debitAmount) > 0 ? 'var(--status-danger)' : 'var(--text-secondary)'}; font-weight: 600;">
-                          ${parseFloat(tx.debitAmount) > 0 ? formatTenantMoney(tx.debitAmount, 'LKR') : '—'}
-                        </td>
-                        <td class="text-right" style="color: ${parseFloat(tx.creditAmount) > 0 ? 'var(--status-success)' : 'var(--text-secondary)'}; font-weight: 600;">
-                          ${parseFloat(tx.creditAmount) > 0 ? formatTenantMoney(tx.creditAmount, 'LKR') : '—'}
-                        </td>
-                        <td class="text-right" style="font-weight: 700; font-variant-numeric: tabular-nums;">
-                          ${formatTenantMoney(tx.runningBalance, 'LKR')}
-                        </td>
+                        <th>Date</th>
+                        <th>Ref</th>
+                        <th>Type</th>
+                        <th>Description</th>
+                        <th class="text-right">Debit (+)</th>
+                        <th class="text-right">Credit (-)</th>
+                        <th class="text-right">Running Balance</th>
                       </tr>
-                    `).join('')}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      ${transactions.map(tx => {
+                        const isDebit = tx.entryDirection === 'DEBIT';
+                        const isCredit = tx.entryDirection === 'CREDIT';
+                        const debitDisplay = isDebit ? formatTenantMoney(tx.amount, 'LKR') : '—';
+                        const creditDisplay = isCredit ? formatTenantMoney(tx.amount, 'LKR') : '—';
+                        const balanceDisplay = formatTenantMoney(tx.balanceAfter != null ? tx.balanceAfter : (tx.runningBalance || '0'), 'LKR');
+                        return `
+                          <tr>
+                            <td>${tx.transactionDate || (tx.createdAt ? new Date(tx.createdAt).toLocaleDateString() : '—')}</td>
+                            <td><strong style="font-family: monospace;">${escapeHtml(tx.transactionReference)}</strong></td>
+                            <td><span class="badge badge-secondary">${escapeHtml(tx.transactionType)}</span></td>
+                            <td>${escapeHtml(tx.description || tx.notes || '—')}</td>
+                            <td class="text-right" style="color: ${isDebit ? 'var(--status-danger)' : 'var(--text-secondary)'}; font-weight: 600;">
+                              ${debitDisplay}
+                            </td>
+                            <td class="text-right" style="color: ${isCredit ? 'var(--status-success)' : 'var(--text-secondary)'}; font-weight: 600;">
+                              ${creditDisplay}
+                            </td>
+                            <td class="text-right" style="font-weight: 700; font-variant-numeric: tabular-nums;">
+                              ${balanceDisplay}
+                            </td>
+                          </tr>
+                        `;
+                      }).join('')}
+                    </tbody>
+                  </table>
+                </div>
               `}
             ` : activeTab === 'payments' ? `
-              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
                 <h4 style="margin: 0; font-size: 14px; font-weight: 700;">Customer Payment Records</h4>
                 <button class="btn btn-primary btn-sm" onclick="openRecordCreditPaymentModal('${accountId}')">+ Record Payment</button>
               </div>
@@ -19876,44 +20349,52 @@
               ${payments.length === 0 ? `
                 <div style="text-align: center; padding: 30px; color: var(--text-secondary);">No payments received yet.</div>
               ` : `
-                <table class="table" style="font-size: 12px; margin: 0;">
-                  <thead>
-                    <tr>
-                      <th>Payment Ref</th>
-                      <th>Date</th>
-                      <th>Method</th>
-                      <th class="text-right">Paid Amount</th>
-                      <th class="text-right">Unallocated</th>
-                      <th>Status</th>
-                      <th class="text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    ${payments.map(p => `
+                <div class="table-responsive">
+                  <table class="table" style="font-size: 12px; margin: 0;">
+                    <thead>
                       <tr>
-                        <td><strong style="font-family: monospace;">${escapeHtml(p.paymentReference)}</strong></td>
-                        <td>${p.paymentDate}</td>
-                        <td><span class="badge badge-secondary">${escapeHtml(p.paymentMethod)}</span></td>
-                        <td class="text-right" style="font-weight: 700; color: var(--status-success);">${formatTenantMoney(p.amount, 'LKR')}</td>
-                        <td class="text-right" style="color: var(--accent-primary);">${formatTenantMoney(p.unallocatedAmount, 'LKR')}</td>
-                        <td><span class="badge ${p.status === 'POSTED' ? 'badge-success' : 'badge-danger'}">${escapeHtml(p.status)}</span></td>
-                        <td class="text-right">
-                          <button class="btn btn-secondary btn-sm" onclick="printCreditPaymentReceipt('${p.id}')">Receipt</button>
-                          ${p.status === 'POSTED' ? `
-                            <button class="btn btn-danger btn-sm" onclick="reverseCreditPayment('${p.id}', '${accountId}')">Reverse</button>
-                          ` : ''}
-                        </td>
+                        <th>Payment Ref</th>
+                        <th>Date</th>
+                        <th>Method</th>
+                        <th class="text-right">Paid Amount</th>
+                        <th class="text-right">Unallocated</th>
+                        <th>Status</th>
+                        <th class="text-right">Actions</th>
                       </tr>
-                    `).join('')}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      ${payments.map(p => {
+                        const isCompleted = p.status === 'POSTED' || p.status === 'COMPLETED';
+                        const payDate = p.paymentDate || (p.createdAt ? new Date(p.createdAt).toLocaleDateString() : '—');
+                        return `
+                          <tr>
+                            <td><strong style="font-family: monospace;">${escapeHtml(p.paymentReference)}</strong></td>
+                            <td>${payDate}</td>
+                            <td><span class="badge badge-secondary">${escapeHtml(p.paymentMethod)}</span></td>
+                            <td class="text-right" style="font-weight: 700; color: var(--status-success);">${formatTenantMoney(p.amount, 'LKR')}</td>
+                            <td class="text-right" style="color: var(--accent-primary);">${formatTenantMoney(p.unallocatedAmount, 'LKR')}</td>
+                            <td><span class="badge ${isCompleted ? 'badge-success' : 'badge-danger'}">${escapeHtml(p.status)}</span></td>
+                            <td class="text-right">
+                              <button class="btn btn-secondary btn-sm" onclick="printCreditPaymentReceipt('${p.id}')">Receipt</button>
+                              ${(isCompleted && canManageStatus) ? `
+                                <button class="btn btn-danger btn-sm" onclick="reverseCreditPayment('${p.id}', '${accountId}')">Reverse</button>
+                              ` : ''}
+                            </td>
+                          </tr>
+                        `;
+                      }).join('')}
+                    </tbody>
+                  </table>
+                </div>
               `}
             ` : activeTab === 'collections' ? `
-              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
                 <h4 style="margin: 0; font-size: 14px; font-weight: 700;">Collection Follow-Ups &amp; Bad Debt</h4>
                 <div style="display: flex; gap: 8px;">
                   <button class="btn btn-secondary btn-sm" onclick="openCollectionModal('${accountId}')">+ Log Follow-Up</button>
-                  <button class="btn btn-danger btn-sm" onclick="openWriteoffModal('${accountId}')">+ Write Off Bad Debt</button>
+                  ${canWriteoff ? `
+                    <button class="btn btn-danger btn-sm" onclick="openWriteoffModal('${accountId}')">+ Write Off Bad Debt</button>
+                  ` : ''}
                 </div>
               </div>
 
@@ -19939,8 +20420,8 @@
               `}
             ` : `
               <!-- Statement View -->
-              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
-                <div style="display: flex; gap: 8px; align-items: center;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 8px;">
+                <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
                   <input type="date" class="form-input" id="stmtStartDate" value="${new Date(new Date().setMonth(new Date().getMonth() - 1)).toISOString().slice(0, 10)}" style="font-size: 12px; width: 140px;">
                   <span>to</span>
                   <input type="date" class="form-input" id="stmtEndDate" value="${new Date().toISOString().slice(0, 10)}" style="font-size: 12px; width: 140px;">
@@ -19974,36 +20455,38 @@
       container.innerHTML = '<span class="spinner-sm"></span> Loading limit audit...';
       try {
         const res = await apiFetch(`/v1/credit/accounts/${accountId}/limit-history`);
-        const items = res?.items || [];
+        const items = Array.isArray(res) ? res : (res?.items || []);
         if (items.length === 0) {
           container.innerHTML = '<div style="color: var(--text-secondary); font-size: 12px;">No limit changes recorded.</div>';
           return;
         }
         container.innerHTML = `
-          <table class="table" style="font-size: 11px; margin: 0;">
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Change Type</th>
-                <th class="text-right">Prev Limit</th>
-                <th class="text-right">New Limit</th>
-                <th>Reason</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${items.map(h => `
+          <div class="table-responsive">
+            <table class="table" style="font-size: 11px; margin: 0;">
+              <thead>
                 <tr>
-                  <td>${h.effectiveDate || new Date(h.createdAt).toLocaleDateString()}</td>
-                  <td><span class="badge badge-secondary">${escapeHtml(h.changeType)}</span></td>
-                  <td class="text-right">${formatTenantMoney(h.previousLimit, 'LKR')}</td>
-                  <td class="text-right" style="font-weight: 700;">${formatTenantMoney(h.newLimit, 'LKR')}</td>
-                  <td>${escapeHtml(h.reason || '—')}</td>
-                  <td><span class="badge ${h.approvalStatus === 'APPROVED' ? 'badge-success' : 'badge-warning'}">${escapeHtml(h.approvalStatus)}</span></td>
+                  <th>Date</th>
+                  <th>Change Type</th>
+                  <th class="text-right">Prev Limit</th>
+                  <th class="text-right">New Limit</th>
+                  <th>Reason</th>
+                  <th>Status</th>
                 </tr>
-              `).join('')}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                ${items.map(h => `
+                  <tr>
+                    <td>${h.effectiveDate || new Date(h.createdAt).toLocaleDateString()}</td>
+                    <td><span class="badge badge-secondary">${escapeHtml(h.changeType)}</span></td>
+                    <td class="text-right">${formatTenantMoney(h.previousLimit, 'LKR')}</td>
+                    <td class="text-right" style="font-weight: 700;">${formatTenantMoney(h.newLimit, 'LKR')}</td>
+                    <td>${escapeHtml(h.reason || '—')}</td>
+                    <td><span class="badge ${h.approvalStatus === 'APPROVED' ? 'badge-success' : 'badge-warning'}">${escapeHtml(h.approvalStatus)}</span></td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
         `;
       } catch (err) {
         container.innerHTML = `<div style="color: var(--status-danger); font-size: 12px;">${escapeHtml(err.message)}</div>`;

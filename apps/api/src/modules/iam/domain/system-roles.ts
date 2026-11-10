@@ -383,6 +383,7 @@ export const SYSTEM_ROLE_DEFINITIONS: Readonly<
       'inv:serial:read',
       'crm:customer:read',
       'crm:credit:read',
+      'crm:credit:create',
       'crm:sale:create',
       'crm:payment:create',
       'crm:ledger:read',

@@ -193,6 +193,8 @@ import {
   CreateManualCreditTransactionRequestSchema,
   ListCreditTransactionsQuerySchema,
   CustomerCreditPaymentResponseSchema,
+  CustomerCreditPaymentListResponseSchema,
+  ListCreditPaymentsQuerySchema,
   RecordCustomerCreditPaymentRequestSchema,
   ReverseCustomerCreditPaymentRequestSchema,
   AllocateUnappliedPaymentRequestSchema,
@@ -420,6 +422,7 @@ import {
   listCreditTransactions,
   recordCustomerCreditPayment,
   reverseCustomerCreditPayment,
+  listCreditPayments,
   allocateUnappliedPayment,
   getPaymentReceipt,
   getOrInitCreditSettings,
@@ -448,6 +451,8 @@ import {
   sanitizeLogMessage,
   type TenantTransactionContext,
   withTenantTransaction,
+  realtimeEventHub,
+  type RealtimeEventPayload,
 } from './modules/shared/index.js';
 import {
   type SubscriptionPlanCode,
@@ -7756,6 +7761,71 @@ export async function buildApp(
     },
   );
 
+  // Alias routes for limit and limit-history (BUG-081)
+  app.post(
+    '/v1/credit/accounts/:accountId/limit',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ accountId: UuidSchema }),
+        body: ManageCreditLimitRequestSchema,
+        response: {
+          200: CustomerCreditAccountResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => manageCreditLimit(trx, request.params.accountId, request.body),
+      );
+    },
+  );
+
+  app.get(
+    '/v1/credit/accounts/:accountId/limit-history',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ accountId: UuidSchema }),
+        response: {
+          200: Type.Array(CreditLimitHistoryResponseSchema),
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => listCreditLimitHistory(trx, request.params.accountId),
+      );
+    },
+  );
+
   app.get(
     '/v1/credit/accounts/:accountId/aging',
     {
@@ -7854,6 +7924,41 @@ export async function buildApp(
   );
 
   app.get(
+    '/v1/credit/accounts/:accountId/transactions',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ accountId: UuidSchema }),
+        querystring: ListCreditTransactionsQuerySchema,
+        response: {
+          200: CustomerCreditTransactionListResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          listCreditTransactions(trx, {
+            ...request.query,
+            accountId: request.params.accountId,
+          }),
+      );
+    },
+  );
+
+  app.get(
     '/v1/credit/transactions/:transactionId',
     {
       schema: {
@@ -7916,6 +8021,71 @@ export async function buildApp(
         (trx) => recordCustomerCreditPayment(trx, request.body),
       );
       return reply.status(201).send(pay);
+    },
+  );
+
+  app.get(
+    '/v1/credit/payments',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        querystring: ListCreditPaymentsQuerySchema,
+        response: {
+          200: CustomerCreditPaymentListResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => listCreditPayments(trx, request.query),
+      );
+    },
+  );
+
+  app.get(
+    '/v1/credit/accounts/:accountId/payments',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ accountId: UuidSchema }),
+        querystring: ListCreditPaymentsQuerySchema,
+        response: {
+          200: CustomerCreditPaymentListResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          listCreditPayments(trx, {
+            ...request.query,
+            accountId: request.params.accountId,
+          }),
+      );
     },
   );
 
@@ -8391,6 +8561,98 @@ export async function buildApp(
             request.query.endDate,
           ),
       );
+    },
+  );
+
+  // --------------------------------------------------------------------------
+  // Realtime Data Synchronization Engine (BUG-071)
+  // --------------------------------------------------------------------------
+  app.get(
+    '/v1/realtime/events',
+    async (request, reply) => {
+      const authHeader = request.headers.authorization;
+      const queryToken = (request.query as { token?: string })?.token;
+      const rawToken = authHeader || (queryToken ? `Bearer ${queryToken}` : null);
+      if (!rawToken) {
+        return reply.status(401).send({ error: 'Missing authorization' });
+      }
+
+      let principal;
+      try {
+        principal = await verifySupabaseJwt(rawToken, jwksProvider, jwtOptions);
+      } catch {
+        return reply.status(401).send({ error: 'Invalid authentication token' });
+      }
+
+      const tenantId =
+        (request.headers['x-tenant-id'] as string) ||
+        (request.query as { tenantId?: string })?.tenantId;
+      if (!tenantId) {
+        return reply.status(400).send({ error: 'x-tenant-id required' });
+      }
+
+      const branchId = (request.query as { branchId?: string })?.branchId || null;
+
+      reply.raw.setHeader('Content-Type', 'text/event-stream');
+      reply.raw.setHeader('Cache-Control', 'no-cache, no-transform');
+      reply.raw.setHeader('Connection', 'keep-alive');
+      reply.raw.setHeader('X-Accel-Buffering', 'no');
+      if (reply.raw.flushHeaders) {
+        reply.raw.flushHeaders();
+      }
+
+      reply.raw.write(
+        `event: connected\ndata: ${JSON.stringify({
+          status: 'connected',
+          tenantId,
+          userId: principal.userId,
+          timestamp: new Date().toISOString(),
+        })}\n\n`,
+      );
+
+      const onEvent = (event: RealtimeEventPayload) => {
+        if (event.tenantId !== tenantId) return;
+        if (branchId && event.branchId && event.branchId !== branchId) return;
+        reply.raw.write(`event: ${event.eventType}\ndata: ${JSON.stringify(event)}\n\n`);
+      };
+
+      const channel = `tenant:${tenantId}`;
+      realtimeEventHub.on(channel, onEvent);
+
+      const pingInterval = setInterval(() => {
+        try {
+          reply.raw.write(`: ping ${Date.now()}\n\n`);
+        } catch {
+          clearInterval(pingInterval);
+          realtimeEventHub.off(channel, onEvent);
+        }
+      }, 20000);
+
+      request.raw.on('close', () => {
+        clearInterval(pingInterval);
+        realtimeEventHub.off(channel, onEvent);
+      });
+    },
+  );
+
+  app.get(
+    '/v1/realtime/poll',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        querystring: Type.Object({
+          since: Type.Optional(Type.Integer({ minimum: 0 })),
+          branchId: Type.Optional(UuidSchema),
+        }),
+      },
+    },
+    async (request) => {
+      await verifySupabaseJwt(request.headers.authorization, jwksProvider, jwtOptions);
+      const tenantId = request.headers['x-tenant-id'];
+      const sinceEpoch = (request.query as { since?: number })?.since || 0;
+      const branchId = (request.query as { branchId?: string })?.branchId || null;
+      const events = realtimeEventHub.getEventsSince(tenantId, sinceEpoch, branchId);
+      return { events, currentEpoch: Date.now() };
     },
   );
 

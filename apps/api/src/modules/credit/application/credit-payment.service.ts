@@ -1,6 +1,8 @@
 import {
   type AllocateUnappliedPaymentRequest,
+  type CustomerCreditPaymentListResponse,
   type CustomerCreditPaymentResponse,
+  type ListCreditPaymentsQuery,
   type PaymentReceiptResponse,
   type RecordCustomerCreditPaymentRequest,
   type ReverseCustomerCreditPaymentRequest,
@@ -13,6 +15,7 @@ import {
   type TenantTransactionContext,
   appendAuditLog,
   generateUuidV7,
+  realtimeEventHub,
 } from '../../shared/index.js';
 
 export async function recordCustomerCreditPayment(
@@ -285,6 +288,17 @@ export async function recordCustomerCreditPayment(
       amount: paymentAmountMoney.toDecimalString(),
       allocatedAmount: allocatedTotalMoney.toDecimalString(),
       unallocatedAmount: unallocatedMoney.toDecimalString(),
+    },
+  });
+
+  realtimeEventHub.publish({
+    tenantId: trx.tenantId,
+    branchId: input.branchId ?? account.branch_id,
+    eventType: 'CREDIT_ACCOUNT_CHANGED',
+    data: {
+      accountId: account.id,
+      customerId: account.customer_id,
+      amount: paymentAmountMoney.toDecimalString(),
     },
   });
 
@@ -796,5 +810,88 @@ export async function getPaymentReceipt(
       transactionDate: String(a.transaction_date).slice(0, 10),
       allocatedAmount: String(a.amount),
     })),
+  };
+}
+
+export async function listCreditPayments(
+  trx: TenantTransactionContext,
+  query: ListCreditPaymentsQuery,
+): Promise<CustomerCreditPaymentListResponse> {
+  await assertAuthorized(trx, { permission: 'crm:credit:read' });
+
+  const limit = query.limit ?? 50;
+  const offset = query.offset ?? 0;
+
+  let baseQuery = trx.db
+    .selectFrom('customer_credit_payments')
+    .innerJoin('customers', (join) =>
+      join
+        .onRef('customer_credit_payments.tenant_id', '=', 'customers.tenant_id')
+        .onRef('customer_credit_payments.customer_id', '=', 'customers.id'),
+    )
+    .where('customer_credit_payments.tenant_id', '=', trx.tenantId);
+
+  if (query.accountId) {
+    baseQuery = baseQuery.where('customer_credit_payments.account_id', '=', query.accountId);
+  }
+  if (query.customerId) {
+    baseQuery = baseQuery.where('customer_credit_payments.customer_id', '=', query.customerId);
+  }
+
+  const countRow = await baseQuery
+    .select(sql<number>`count(*)::int`.as('total'))
+    .executeTakeFirst();
+  const total = countRow?.total ?? 0;
+
+  const rows = await baseQuery
+    .select([
+      'customer_credit_payments.id',
+      'customer_credit_payments.account_id',
+      'customer_credit_payments.customer_id',
+      'customers.name as customer_name',
+      'customer_credit_payments.payment_reference',
+      'customer_credit_payments.receipt_number',
+      'customer_credit_payments.amount',
+      'customer_credit_payments.allocated_amount',
+      'customer_credit_payments.unallocated_amount',
+      'customer_credit_payments.currency_code',
+      'customer_credit_payments.payment_date',
+      'customer_credit_payments.payment_method',
+      'customer_credit_payments.external_reference',
+      'customer_credit_payments.branch_id',
+      'customer_credit_payments.status',
+      'customer_credit_payments.reversal_reason',
+      'customer_credit_payments.reversed_at',
+      'customer_credit_payments.notes',
+      'customer_credit_payments.created_at',
+    ])
+    .orderBy('customer_credit_payments.created_at', 'desc')
+    .limit(limit)
+    .offset(offset)
+    .execute();
+
+  return {
+    items: rows.map((r) => ({
+      id: r.id,
+      accountId: r.account_id,
+      customerId: r.customer_id,
+      customerName: r.customer_name,
+      paymentReference: r.payment_reference,
+      receiptNumber: r.receipt_number,
+      amount: String(r.amount),
+      allocatedAmount: String(r.allocated_amount),
+      unallocatedAmount: String(r.unallocated_amount),
+      currencyCode: r.currency_code,
+      paymentDate: String(r.payment_date).slice(0, 10),
+      paymentMethod: r.payment_method,
+      externalReference: r.external_reference,
+      branchId: r.branch_id,
+      status: r.status,
+      reversalReason: r.reversal_reason,
+      reversedAt: r.reversed_at ? new Date(r.reversed_at).toISOString() : null,
+      notes: r.notes,
+      createdAt: new Date(r.created_at).toISOString(),
+    })),
+    total,
   };
 }

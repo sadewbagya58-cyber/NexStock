@@ -199,6 +199,8 @@ export const ErrorCodeSchema = Type.Union([
   Type.Literal('CREDIT_LATE_FEE_DISABLED'),
   Type.Literal('CREDIT_INVALID_STATUS_TRANSITION'),
   Type.Literal('CREDIT_CUSTOMER_REQUIRED_FOR_CREDIT_SALE'),
+  Type.Literal('CREDIT_LIMIT_APPROVAL_REQUIRED'),
+  Type.Literal('CREDIT_CASHIER_LIMIT_EXCEEDED'),
   Type.Literal('HRM_EMPLOYEE_ALREADY_LINKED'),
   Type.Literal('HRM_USER_NOT_TENANT_MEMBER'),
   Type.Literal('HRM_INVALID_STAFF_LINK'),
@@ -3679,6 +3681,7 @@ export const CustomerCreditAccountResponseSchema = Type.Object({
 export type CustomerCreditAccountResponse = Static<typeof CustomerCreditAccountResponseSchema>;
 
 export const ListCreditAccountsQuerySchema = Type.Object({
+  customerId: Type.Optional(UuidSchema),
   search: Type.Optional(Type.String()),
   status: Type.Optional(CreditAccountStatusSchema),
   risk: Type.Optional(CreditRiskClassificationSchema),
@@ -3848,6 +3851,20 @@ export const CustomerCreditPaymentResponseSchema = Type.Object({
   createdAt: IsoTimestampSchema,
 });
 export type CustomerCreditPaymentResponse = Static<typeof CustomerCreditPaymentResponseSchema>;
+
+export const ListCreditPaymentsQuerySchema = Type.Object({
+  accountId: Type.Optional(UuidSchema),
+  customerId: Type.Optional(UuidSchema),
+  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100, default: 50 })),
+  offset: Type.Optional(Type.Integer({ minimum: 0, default: 0 })),
+});
+export type ListCreditPaymentsQuery = Static<typeof ListCreditPaymentsQuerySchema>;
+
+export const CustomerCreditPaymentListResponseSchema = Type.Object({
+  items: Type.Array(CustomerCreditPaymentResponseSchema),
+  total: Type.Integer(),
+});
+export type CustomerCreditPaymentListResponse = Static<typeof CustomerCreditPaymentListResponseSchema>;
 
 export const ReverseCustomerCreditPaymentRequestSchema = Type.Object(
   {

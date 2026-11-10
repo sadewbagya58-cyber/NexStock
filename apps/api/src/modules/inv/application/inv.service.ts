@@ -37,6 +37,7 @@ import {
   appendAuditLog,
   enqueueOutboxEvent,
   generateUuidV7,
+  realtimeEventHub,
 } from '../../shared/index.js';
 import { assertSubscriptionEntitlement } from '../../sub/index.js';
 
@@ -928,6 +929,21 @@ export async function postStockMovement(
       productId: input.productId,
       qtyDelta: qtyDelta.toDecimalString(),
       balanceAfter: balanceAfter.toDecimalString(),
+    },
+  });
+
+  realtimeEventHub.publish({
+    tenantId: trx.tenantId,
+    branchId: input.branchId,
+    eventType: 'STOCK_CHANGED',
+    data: {
+      movementId,
+      branchId: input.branchId,
+      warehouseId: input.warehouseId,
+      productId: input.productId,
+      qtyDelta: qtyDelta.toDecimalString(),
+      balanceAfter: balanceAfter.toDecimalString(),
+      lines: [{ productId: input.productId, quantity: qtyDelta.abs().toDecimalString() }],
     },
   });
 

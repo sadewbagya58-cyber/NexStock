@@ -6,3 +6,4 @@ export * from './infrastructure/tenant-transaction.js';
 export * from './application/audit-outbox.service.js';
 export * from './application/idempotency.service.js';
 export * from './application/sync-batch.service.js';
+export * from './application/realtime-event-hub.js';

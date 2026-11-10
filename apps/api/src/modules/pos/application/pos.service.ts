@@ -37,6 +37,7 @@ import {
   appendAuditLog,
   enqueueOutboxEvent,
   generateUuidV7,
+  realtimeEventHub,
 } from '../../shared/index.js';
 import { assertSubscriptionEntitlement } from '../../sub/index.js';
 import { formatReceiptData } from '../domain/receipt-formatter.js';
@@ -2219,6 +2220,34 @@ export async function checkoutSale(
       cashierUserId: trx.userId,
     },
   });
+
+  realtimeEventHub.publish({
+    tenantId: trx.tenantId,
+    branchId: register.branch_id,
+    eventType: 'STOCK_CHANGED',
+    data: {
+      saleId,
+      invoiceNumber,
+      registerId: register.id,
+      warehouseId: register.warehouse_id,
+      lines: input.lines.map((l) => ({
+        productId: l.productId,
+        quantity: l.quantity,
+      })),
+    },
+  });
+
+  if (creditPayment && customerCreditAccount) {
+    realtimeEventHub.publish({
+      tenantId: trx.tenantId,
+      branchId: register.branch_id,
+      eventType: 'CREDIT_ACCOUNT_CHANGED',
+      data: {
+        accountId: customerCreditAccount.id,
+        customerId: customerCreditAccount.customer_id,
+      },
+    });
+  }
 
   return {
     id: invoiceRow.id,
