@@ -19,6 +19,16 @@ export interface FormatReceiptInput {
     discountAmount: string;
     taxAmount: string;
     lineTotal: string;
+    unitCostSnapshot?: string;
+    batchId?: string | null;
+    serialId?: string | null;
+    originalEnteredQty?: string | null;
+    originalUomCode?: string | null;
+    conversionFactorToBase?: string | null;
+    normalizedBaseQty?: string | null;
+    priceUom?: string | null;
+    pricePerPriceUom?: string | null;
+    entrySource?: string;
   }>;
   readonly subtotalAmount: string;
   readonly discountAmount: string;
@@ -71,6 +81,16 @@ export function formatReceiptData(input: FormatReceiptInput): ReceiptResponse {
       discountAmount: l.discountAmount,
       taxAmount: l.taxAmount,
       lineTotal: l.lineTotal,
+      ...(l.unitCostSnapshot !== undefined ? { unitCostSnapshot: l.unitCostSnapshot } : {}),
+      ...(l.batchId !== undefined ? { batchId: l.batchId } : {}),
+      ...(l.serialId !== undefined ? { serialId: l.serialId } : {}),
+      ...(l.originalEnteredQty !== undefined ? { originalEnteredQty: l.originalEnteredQty } : {}),
+      ...(l.originalUomCode !== undefined ? { originalUomCode: l.originalUomCode } : {}),
+      ...(l.conversionFactorToBase !== undefined ? { conversionFactorToBase: l.conversionFactorToBase } : {}),
+      ...(l.normalizedBaseQty !== undefined ? { normalizedBaseQty: l.normalizedBaseQty } : {}),
+      ...(l.priceUom !== undefined ? { priceUom: l.priceUom } : {}),
+      ...(l.pricePerPriceUom !== undefined ? { pricePerPriceUom: l.pricePerPriceUom } : {}),
+      ...(l.entrySource !== undefined ? { entrySource: l.entrySource } : {}),
     })),
     subtotalAmount: input.subtotalAmount,
     discountAmount: input.discountAmount,

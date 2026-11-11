@@ -17,16 +17,20 @@ import {
   CreateCategoryRequestSchema,
   CreateEmployeeRequestSchema,
   CreateExchangeRateRequestSchema,
+  CreateGoodsReceiptRequestSchema,
   CreatePayrollRunRequestSchema,
   CreatePosRegisterRequestSchema,
+  CreatePosReturnRequestSchema,
   CreatePosSaleRequestSchema,
   CreatePosShiftAdjustmentRequestSchema,
   CreateProductBarcodeRequestSchema,
   CreateProductRequestSchema,
+  CreatePurchaseOrderRequestSchema,
   CreateRoleRequestSchema,
   CreateSalaryStructureRequestSchema,
   CreateStocktakeSessionRequestSchema,
   CreateSupplierRequestSchema,
+  CreateSupplierReturnRequestSchema,
   CreateWarehouseRequestSchema,
   CurrencyCodeSchema,
   DecimalMoneyStringSchema,
@@ -42,6 +46,7 @@ import {
   GenerateBarcodeQuerySchema,
   GenerateBarcodeResponseSchema,
   GetActivePosShiftQuerySchema,
+  GoodsReceiptResponseSchema,
   HealthStatusResponseSchema,
   IdempotentMutationHeadersSchema,
   InventoryBalanceResponseSchema,
@@ -58,6 +63,10 @@ import {
   ListProductsQuerySchema,
   ListSalesQuerySchema,
   ListSerialsQuerySchema,
+  PosReturnResponseSchema,
+  PurchaseOrderResponseSchema,
+  SupplierReturnResponseSchema,
+  UnitOfMeasureResponseSchema,
   ListStockMovementsQuerySchema,
   ListStocktakeSessionsQuerySchema,
   ListSuppliersQuerySchema,
@@ -208,30 +217,63 @@ import {
   CustomerStatementResponseSchema,
   CreditDashboardKpisResponseSchema,
   AgingBucketSchema,
+  PricingSettingsResponseSchema,
+  UpdatePricingSettingsRequestSchema,
+  ProductPricingRuleResponseSchema,
+  UpsertProductPricingRuleRequestSchema,
+  BranchPriceOverrideResponseSchema,
+  PriceSuggestionResponseSchema,
+  CreatePriceSuggestionRequestSchema,
+  ApprovePriceSuggestionRequestSchema,
+  RejectOrDeferPriceSuggestionRequestSchema,
+  ProductPriceHistoryResponseSchema,
+  PricingAnalyticsDashboardResponseSchema,
+  SyncCatalogPricingResponseSchema,
+  PricingScopeSchema,
+  PriceSuggestionStatusSchema,
+  type UpdatePricingSettingsRequest,
+  type UpsertProductPricingRuleRequest,
+  type CreatePriceSuggestionRequest,
+  type ApprovePriceSuggestionRequest,
+  type RejectOrDeferPriceSuggestionRequest,
 } from '@nexstock/contracts';
 import { Type } from '@sinclair/typebox';
 import Fastify, { type FastifyInstance } from 'fastify';
 import type { Kysely } from 'kysely';
 import {
+  acknowledgeOrDeactivateBranchOverride,
   addProductBarcode,
+  approvePriceSuggestion,
   archiveCategory,
   archiveProduct,
   createCategory,
+  createPriceSuggestion,
   createProduct,
   deleteProductBarcode,
   generateInternalBarcode,
   getCategoryById,
+  getPricingAnalyticsDashboard,
+  getPricingSettings,
   getProductById,
   getProductMediaAsset,
+  getProductPricingRule,
+  getSyncCatalogPricingSnapshot,
   getTenantBarcodeSettings,
+  listBranchPriceOverrides,
   listCategories,
+  listPriceSuggestions,
   listProductBarcodes,
+  listProductPriceHistory,
   listProducts,
+  rejectOrDeferPriceSuggestion,
   updateCategory,
+  listUnitsOfMeasure,
+  updatePricingSettings,
   updateProduct,
   updateProductBarcode,
   updateTenantBarcodeSettings,
   uploadProductImage,
+  upsertProductPricingRule,
 } from './modules/cat/index.js';
 import {
   convertTenantCurrencyAmount,
@@ -315,23 +357,32 @@ import {
   updateWarehouse,
 } from './modules/org/index.js';
 import {
+  approvePurchaseOrder,
   archiveSupplier,
+  createPurchaseOrder,
   createSupplier,
+  createSupplierReturn,
   getSupplierById,
   linkSupplierProduct,
+  listGoodsReceipts,
+  listPurchaseOrders,
+  listSupplierReturns,
   listSuppliers,
+  postGoodsReceipt,
   updateSupplier,
 } from './modules/pur/index.js';
 import {
   checkoutSale,
   closePosShift,
   createPosRegister,
+  createPosReturn,
   createPosShiftAdjustment,
   getActivePosShift,
   getReceiptData,
   getSaleById,
   getSalesSummary,
   listAuthorizedRegisters,
+  listPosReturnsForSale,
   listPosShifts,
   listSales,
   openPosShift,
@@ -1296,6 +1347,21 @@ export async function buildApp(
                 metadata: envelope.payload,
               });
 
+              const rawCmdType = envelope.commandType as string;
+              if (
+                rawCmdType === 'PRICING_APPROVE_SUGGESTION' ||
+                rawCmdType === 'PRICING_UPDATE_GLOBAL' ||
+                envelope.payload['pricingApproval'] === true ||
+                envelope.payload['action'] === 'APPROVE_PRICE' ||
+                envelope.payload['action'] === 'UPDATE_GLOBAL_PRICE'
+              ) {
+                throw new SyncPoisonPillError(
+                  'PRICING_OFFLINE_APPROVAL_FORBIDDEN',
+                  'Price approvals must be executed online by an authorized approver.',
+                  { commandType: envelope.commandType },
+                );
+              }
+
               if (envelope.payload['simulatePoisonPill'] === true) {
                 throw new SyncPoisonPillError(
                   'INVALID_OFFLINE_COMMAND_PAYLOAD',
@@ -1320,6 +1386,41 @@ export async function buildApp(
             },
           });
         },
+      );
+    },
+  );
+
+  // 6b. Sync Approved Catalog & Branch Pricing Snapshot (Read-Only for Offline POS)
+  app.get(
+    '/v1/sync/catalog-pricing',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        querystring: Type.Object(
+          {
+            branchId: Type.Optional(UuidSchema),
+          },
+          { additionalProperties: false },
+        ),
+        response: {
+          200: SyncCatalogPricingResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => getSyncCatalogPricingSnapshot(trx, request.query),
       );
     },
   );
@@ -2796,6 +2897,35 @@ export async function buildApp(
   // Phase 2: Core Inventory — Product Management (CAT)
   // =========================================================================
 
+  app.get(
+    '/v1/uom/units',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        response: {
+          200: Type.Array(UnitOfMeasureResponseSchema),
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => listUnitsOfMeasure(trx),
+      );
+    },
+  );
+
   app.post(
     '/v1/products',
     {
@@ -3340,6 +3470,477 @@ export async function buildApp(
   );
 
   // =========================================================================
+  // Phase 4: Smart Pricing Management System (CAT / PRICE-01..PRICE-20)
+  // =========================================================================
+
+  app.get(
+    '/v1/pricing/settings',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        response: {
+          200: PricingSettingsResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => getPricingSettings(trx),
+      );
+    },
+  );
+
+  app.put(
+    '/v1/pricing/settings',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        body: UpdatePricingSettingsRequestSchema,
+        response: {
+          200: PricingSettingsResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          422: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => updatePricingSettings(trx, request.body as UpdatePricingSettingsRequest),
+      );
+    },
+  );
+
+  app.get(
+    '/v1/pricing/dashboard',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        response: {
+          200: PricingAnalyticsDashboardResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => getPricingAnalyticsDashboard(trx),
+      );
+    },
+  );
+
+  app.get(
+    '/v1/products/:productId/pricing-rule',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ productId: UuidSchema }),
+        response: {
+          200: ProductPricingRuleResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => getProductPricingRule(trx, request.params.productId),
+      );
+    },
+  );
+
+  app.put(
+    '/v1/products/:productId/pricing-rule',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ productId: UuidSchema }),
+        body: UpsertProductPricingRuleRequestSchema,
+        response: {
+          200: Type.Object({
+            rule: ProductPricingRuleResponseSchema,
+            createdSuggestion: Type.Union([PriceSuggestionResponseSchema, Type.Null()]),
+          }),
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          422: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          upsertProductPricingRule(
+            trx,
+            request.params.productId,
+            request.body as UpsertProductPricingRuleRequest,
+          ),
+      );
+    },
+  );
+
+  app.get(
+    '/v1/pricing/suggestions',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        querystring: Type.Object(
+          {
+            status: Type.Optional(PriceSuggestionStatusSchema),
+            scope: Type.Optional(PricingScopeSchema),
+            branchId: Type.Optional(UuidSchema),
+            productId: Type.Optional(UuidSchema),
+            limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
+          },
+          { additionalProperties: false },
+        ),
+        response: {
+          200: Type.Array(PriceSuggestionResponseSchema),
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => listPriceSuggestions(trx, request.query),
+      );
+    },
+  );
+
+  app.post(
+    '/v1/pricing/suggestions',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        body: CreatePriceSuggestionRequestSchema,
+        response: {
+          201: PriceSuggestionResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          422: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+      const created = await withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          createPriceSuggestion(trx, request.body as CreatePriceSuggestionRequest),
+      );
+      return reply.status(201).send(created);
+    },
+  );
+
+  app.post(
+    '/v1/pricing/suggestions/:suggestionId/approve',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ suggestionId: UuidSchema }),
+        body: Type.Optional(ApprovePriceSuggestionRequestSchema),
+        response: {
+          200: PriceSuggestionResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+          422: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          approvePriceSuggestion(
+            trx,
+            request.params.suggestionId,
+            (request.body ?? {}) as ApprovePriceSuggestionRequest,
+          ),
+      );
+    },
+  );
+
+  app.post(
+    '/v1/pricing/suggestions/:suggestionId/reject-or-defer',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ suggestionId: UuidSchema }),
+        body: RejectOrDeferPriceSuggestionRequestSchema,
+        response: {
+          200: PriceSuggestionResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          rejectOrDeferPriceSuggestion(
+            trx,
+            request.params.suggestionId,
+            request.body as RejectOrDeferPriceSuggestionRequest,
+          ),
+      );
+    },
+  );
+
+  app.get(
+    '/v1/pricing/branch-overrides',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        querystring: Type.Object(
+          {
+            branchId: Type.Optional(UuidSchema),
+            productId: Type.Optional(UuidSchema),
+            needsReviewOnly: Type.Optional(
+              Type.Union([Type.Boolean(), Type.Literal('true'), Type.Literal('false')]),
+            ),
+          },
+          { additionalProperties: false },
+        ),
+        response: {
+          200: Type.Array(BranchPriceOverrideResponseSchema),
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+      const rawNeedsReview = request.query.needsReviewOnly;
+      const needsReviewOnly =
+        rawNeedsReview === true || rawNeedsReview === 'true'
+          ? true
+          : rawNeedsReview === false || rawNeedsReview === 'false'
+            ? false
+            : undefined;
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          listBranchPriceOverrides(trx, {
+            ...(request.query.branchId !== undefined
+              ? { branchId: request.query.branchId }
+              : {}),
+            ...(request.query.productId !== undefined
+              ? { productId: request.query.productId }
+              : {}),
+            ...(needsReviewOnly !== undefined ? { needsReviewOnly } : {}),
+          }),
+      );
+    },
+  );
+
+  app.post(
+    '/v1/pricing/branch-overrides/:overrideId/acknowledge',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ overrideId: UuidSchema }),
+        response: {
+          200: BranchPriceOverrideResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          acknowledgeOrDeactivateBranchOverride(
+            trx,
+            request.params.overrideId,
+            'CLEAR_REVIEW',
+          ),
+      );
+    },
+  );
+
+  app.post(
+    '/v1/pricing/branch-overrides/:overrideId/revert',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ overrideId: UuidSchema }),
+        response: {
+          200: BranchPriceOverrideResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          acknowledgeOrDeactivateBranchOverride(
+            trx,
+            request.params.overrideId,
+            'REVERT_TO_GLOBAL',
+          ),
+      );
+    },
+  );
+
+  app.get(
+    '/v1/pricing/history',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        querystring: Type.Object(
+          {
+            productId: Type.Optional(UuidSchema),
+            branchId: Type.Optional(UuidSchema),
+            limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
+          },
+          { additionalProperties: false },
+        ),
+        response: {
+          200: Type.Array(ProductPriceHistoryResponseSchema),
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => listProductPriceHistory(trx, request.query),
+      );
+    },
+  );
+
+  // =========================================================================
   // Phase 2: Core Inventory — Supplier Management (PUR)
   // =========================================================================
 
@@ -3536,6 +4137,311 @@ export async function buildApp(
       );
 
       return reply.status(201).send(association);
+    },
+  );
+
+  // UOM-04 & UOM-07: Purchase Orders, Goods Receipts (GRN), Supplier Returns
+  app.post(
+    '/v1/purchase-orders',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        body: CreatePurchaseOrderRequestSchema,
+        response: {
+          201: PurchaseOrderResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          422: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      const po = await withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => createPurchaseOrder(trx, request.body),
+      );
+      return reply.status(201).send(po);
+    },
+  );
+
+  app.get(
+    '/v1/purchase-orders',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        querystring: Type.Object(
+          {
+            branchId: Type.Optional(UuidSchema),
+            status: Type.Optional(Type.String({ maxLength: 30 })),
+            limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
+          },
+          { additionalProperties: false },
+        ),
+        response: {
+          200: Type.Array(PurchaseOrderResponseSchema),
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => listPurchaseOrders(trx, request.query),
+      );
+    },
+  );
+
+  app.post(
+    '/v1/purchase-orders/:poId/approve',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ poId: UuidSchema }),
+        response: {
+          200: PurchaseOrderResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => approvePurchaseOrder(trx, request.params.poId),
+      );
+    },
+  );
+
+  app.post(
+    '/v1/goods-receipts',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        body: CreateGoodsReceiptRequestSchema,
+        response: {
+          201: GoodsReceiptResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+          422: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const idempotencyKey =
+        (request.headers['idempotency-key'] as string | undefined) ||
+        generateUuidV7();
+      const traceId = String(request.id);
+
+      if (request.headers['idempotency-key']) {
+        const result = await withTenantTransaction(
+          options.db,
+          { tenantId, userId: principal.userId, traceId },
+          (trx) =>
+            executeIdempotentMutation({
+              trx,
+              idempotencyKey,
+              endpoint: 'POST /v1/goods-receipts',
+              requestPayload: request.body,
+              execute: async (innerTrx) => {
+                const body = await postGoodsReceipt(
+                  innerTrx,
+                  idempotencyKey,
+                  request.body,
+                );
+                return { statusCode: 201, body };
+              },
+            }),
+        );
+        return reply
+          .status(result.statusCode as 201)
+          .header('x-idempotent-replayed', String(result.replayed))
+          .send(result.body);
+      }
+
+      const grn = await withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => postGoodsReceipt(trx, idempotencyKey, request.body),
+      );
+      return reply.status(201).send(grn);
+    },
+  );
+
+  app.get(
+    '/v1/goods-receipts',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        querystring: Type.Object(
+          {
+            branchId: Type.Optional(UuidSchema),
+            warehouseId: Type.Optional(UuidSchema),
+            limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
+          },
+          { additionalProperties: false },
+        ),
+        response: {
+          200: Type.Array(GoodsReceiptResponseSchema),
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => listGoodsReceipts(trx, request.query),
+      );
+    },
+  );
+
+  app.post(
+    '/v1/supplier-returns',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        body: CreateSupplierReturnRequestSchema,
+        response: {
+          201: SupplierReturnResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+          422: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const idempotencyKey =
+        (request.headers['idempotency-key'] as string | undefined) ||
+        generateUuidV7();
+      const traceId = String(request.id);
+
+      if (request.headers['idempotency-key']) {
+        const result = await withTenantTransaction(
+          options.db,
+          { tenantId, userId: principal.userId, traceId },
+          (trx) =>
+            executeIdempotentMutation({
+              trx,
+              idempotencyKey,
+              endpoint: 'POST /v1/supplier-returns',
+              requestPayload: request.body,
+              execute: async (innerTrx) => {
+                const body = await createSupplierReturn(
+                  innerTrx,
+                  idempotencyKey,
+                  request.body,
+                );
+                return { statusCode: 201, body };
+              },
+            }),
+        );
+        return reply
+          .status(result.statusCode as 201)
+          .header('x-idempotent-replayed', String(result.replayed))
+          .send(result.body);
+      }
+
+      const ret = await withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => createSupplierReturn(trx, idempotencyKey, request.body),
+      );
+      return reply.status(201).send(ret);
+    },
+  );
+
+  app.get(
+    '/v1/supplier-returns',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        querystring: Type.Object(
+          {
+            branchId: Type.Optional(UuidSchema),
+            limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
+          },
+          { additionalProperties: false },
+        ),
+        response: {
+          200: Type.Array(SupplierReturnResponseSchema),
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => listSupplierReturns(trx, request.query),
+      );
     },
   );
 
@@ -5050,6 +5956,108 @@ export async function buildApp(
         options.db,
         { tenantId, userId: principal.userId, traceId },
         (trx) => getReceiptData(trx, request.params.saleId),
+      );
+    },
+  );
+
+  // 11. POS Customer Returns (Partial / UOM-Aware Return & Restock)
+  app.post(
+    '/v1/pos/sales/:saleId/returns',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ saleId: UuidSchema }),
+        body: CreatePosReturnRequestSchema,
+        response: {
+          201: PosReturnResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+          422: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const idempotencyKey =
+        (request.headers['idempotency-key'] as string | undefined) ||
+        generateUuidV7();
+      const traceId = String(request.id);
+
+      if (request.headers['idempotency-key']) {
+        const result = await withTenantTransaction(
+          options.db,
+          { tenantId, userId: principal.userId, traceId },
+          (trx) =>
+            executeIdempotentMutation({
+              trx,
+              idempotencyKey,
+              endpoint: `POST /v1/pos/sales/${request.params.saleId}/returns`,
+              requestPayload: {
+                saleId: request.params.saleId,
+                body: request.body,
+              },
+              execute: async (innerTrx) => {
+                const body = await createPosReturn(
+                  innerTrx,
+                  idempotencyKey,
+                  request.params.saleId,
+                  request.body,
+                );
+                return { statusCode: 201, body };
+              },
+            }),
+        );
+        return reply
+          .status(result.statusCode as 201)
+          .header('x-idempotent-replayed', String(result.replayed))
+          .send(result.body);
+      }
+
+      const ret = await withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          createPosReturn(trx, idempotencyKey, request.params.saleId, request.body),
+      );
+      return reply.status(201).send(ret);
+    },
+  );
+
+  app.get(
+    '/v1/pos/sales/:saleId/returns',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ saleId: UuidSchema }),
+        response: {
+          200: Type.Array(PosReturnResponseSchema),
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => listPosReturnsForSale(trx, request.params.saleId),
       );
     },
   );
@@ -7994,7 +9002,11 @@ export async function buildApp(
     '/v1/credit/payments',
     {
       schema: {
-        headers: AuthenticatedTenantHeadersSchema,
+        headers: Type.Object({
+          authorization: Type.Optional(Type.String()),
+          'x-tenant-id': UuidSchema,
+          'idempotency-key': Type.Optional(UuidSchema),
+        }),
         body: RecordCustomerCreditPaymentRequestSchema,
         response: {
           201: CustomerCreditPaymentResponseSchema,
@@ -8013,7 +9025,30 @@ export async function buildApp(
         jwtOptions,
       );
       const tenantId = request.headers['x-tenant-id'];
+      const idempotencyKey = request.headers['idempotency-key'];
       const traceId = String(request.id);
+
+      if (idempotencyKey) {
+        const outcome = await withTenantTransaction(
+          options.db,
+          { tenantId, userId: principal.userId, traceId },
+          (trx) =>
+            executeIdempotentMutation({
+              trx,
+              idempotencyKey,
+              endpoint: 'POST /v1/credit/payments',
+              requestPayload: request.body,
+              execute: async (innerTrx) => {
+                const body = await recordCustomerCreditPayment(innerTrx, request.body);
+                return { statusCode: 201, body };
+              },
+            }),
+        );
+        return reply
+          .status(outcome.statusCode as 201)
+          .header('x-idempotent-replayed', String(outcome.replayed))
+          .send(outcome.body);
+      }
 
       const pay = await withTenantTransaction(
         options.db,

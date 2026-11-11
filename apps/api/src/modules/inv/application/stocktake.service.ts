@@ -824,6 +824,7 @@ export async function postStocktakeAdjustments(
         reason: `Stocktake Reconciliation (${session.count_number})`,
         referenceType: 'STOCKTAKE',
         referenceId: sessionId,
+        entrySource: 'STOCKTAKE',
         allowNegativeStockOverride: !isPositive,
         overrideReason: !isPositive
           ? `Stocktake reconciliation negative variance for ${session.count_number}`

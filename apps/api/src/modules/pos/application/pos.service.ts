@@ -3,14 +3,18 @@ import {
   type CreatePosRegisterRequest,
   type CreatePosSaleRequest,
   type CreatePosShiftAdjustmentRequest,
+  type LineEntrySource,
   type ListPosRegistersQuery,
   type ListPosShiftsQuery,
   type ListSalesQuery,
+  type MeasurementCategory,
   type OpenPosShiftRequest,
   type PosProductItemResponse,
   type PosProductSearchQuery,
   type PosRegisterSummaryResponse,
   type PosShiftResponse,
+  type ProductQtyMode,
+  type ProductUnitConversionResponse,
   type ReceiptResponse,
   type SalesInvoiceResponse,
   type SalesSummaryQuery,
@@ -24,8 +28,13 @@ import { sql } from 'kysely';
 import {
   Money,
   Quantity,
+  UomConversionError,
   calculateLinePricingAndTax,
+  computeProportionateUnitPriceAndTotal,
+  convertQuantityBetweenUoms,
+  validateDiscountAgainstPolicy,
 } from '@nexstock/domain-core';
+import { resolveBranchEffectivePriceConfig } from '../../cat/index.js';
 import {
   assertAuthorized,
   resolveMemberAuthorizationContext,
@@ -1165,6 +1174,13 @@ export async function searchPosProducts(
       'products.name as name',
       'products.product_type as product_type',
       'products.base_uom as base_uom',
+      'products.product_qty_mode as product_qty_mode',
+      'products.measurement_category as measurement_category',
+      'products.price_uom as price_uom',
+      'products.allowed_selling_uoms as allowed_selling_uoms',
+      'products.qty_decimal_precision as qty_decimal_precision',
+      'products.featured_pos as featured_pos',
+      'products.density_g_per_ml as density_g_per_ml',
       'products.selling_price as selling_price',
       'products.track_inventory as track_inventory',
       'products.tracking_mode as tracking_mode',
@@ -1180,6 +1196,12 @@ export async function searchPosProducts(
 
   if (query.categoryId) {
     dbQuery = dbQuery.where('products.category_id', '=', query.categoryId);
+  }
+  if (query.qtyMode) {
+    dbQuery = dbQuery.where('products.product_qty_mode', '=', query.qtyMode);
+  }
+  if (query.featuredOnly === 'true') {
+    dbQuery = dbQuery.where('products.featured_pos', '=', true);
   }
 
   // Exact barcode match search takes highest precedence
@@ -1253,19 +1275,80 @@ export async function searchPosProducts(
   const baseCurrency = tenant?.base_currency || 'USD';
 
   const productIds = rows.map((r) => r.product_id);
-  const barcodes = await trx.db
-    .selectFrom('product_barcodes')
-    .select(['product_id', 'barcode'])
-    .where('tenant_id', '=', trx.tenantId)
-    .where('product_id', 'in', productIds)
-    .where('is_active', '=', true)
-    .execute();
+  let targetBranchId = query.branchId ?? null;
+  if (!targetBranchId) {
+    const wh = await trx.db
+      .selectFrom('warehouses')
+      .select(['branch_id'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('id', '=', query.warehouseId)
+      .executeTakeFirst();
+    targetBranchId = wh?.branch_id ?? null;
+  }
+
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const [barcodes, unitConvRows, branchPriceRows] = await Promise.all([
+    trx.db
+      .selectFrom('product_barcodes')
+      .select(['product_id', 'barcode'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('product_id', 'in', productIds)
+      .where('is_active', '=', true)
+      .execute(),
+    trx.db
+      .selectFrom('product_unit_conversions')
+      .selectAll()
+      .where('tenant_id', '=', trx.tenantId)
+      .where('product_id', 'in', productIds)
+      .where('is_active', '=', true)
+      .orderBy('uom_code', 'asc')
+      .execute(),
+    targetBranchId
+      ? trx.db
+          .selectFrom('product_branch_prices')
+          .select(['product_id', 'selling_price', 'effective_date'])
+          .where('tenant_id', '=', trx.tenantId)
+          .where('branch_id', '=', targetBranchId)
+          .where('product_id', 'in', productIds)
+          .where('is_active', '=', true)
+          .execute()
+      : Promise.resolve([]),
+  ]);
+
+  const branchPriceByProduct = new Map<string, string>();
+  for (const bp of branchPriceRows) {
+    const eff =
+      bp.effective_date instanceof Date
+        ? bp.effective_date.toISOString().slice(0, 10)
+        : String(bp.effective_date).slice(0, 10);
+    if (eff <= todayStr) {
+      branchPriceByProduct.set(
+        bp.product_id,
+        Money.fromDecimalString(String(bp.selling_price), baseCurrency).toDecimalString(),
+      );
+    }
+  }
 
   const barcodesByProduct = new Map<string, string[]>();
   for (const b of barcodes) {
     const list = barcodesByProduct.get(b.product_id) ?? [];
     list.push(b.barcode);
     barcodesByProduct.set(b.product_id, list);
+  }
+
+  const uomsByProduct = new Map<string, ProductUnitConversionResponse[]>();
+  for (const u of unitConvRows) {
+    const list = uomsByProduct.get(u.product_id) ?? [];
+    list.push({
+      id: u.id,
+      uomCode: u.uom_code,
+      uomName: u.uom_name,
+      conversionFactorToBase: Quantity.fromDecimalString(
+        String(u.conversion_factor_to_base),
+      ).toDecimalString(),
+      isActive: u.is_active,
+    });
+    uomsByProduct.set(u.product_id, list);
   }
 
   return rows.map((r) => {
@@ -1276,7 +1359,23 @@ export async function searchPosProducts(
       availableQtyStr = onHand.subtract(reserved).toDecimalString();
     }
 
-    const priceStr = Money.fromDecimalString(r.selling_price, baseCurrency).toDecimalString();
+    const globalPriceStr = Money.fromDecimalString(r.selling_price, baseCurrency).toDecimalString();
+    const branchOverridePrice = branchPriceByProduct.get(r.product_id);
+    const priceStr = branchOverridePrice ?? globalPriceStr;
+    const rawAllowed = r.allowed_selling_uoms;
+    let parsedAllowed: string[] = [];
+    if (Array.isArray(rawAllowed)) {
+      parsedAllowed = rawAllowed.map((u) => String(u).trim().toUpperCase()).filter(Boolean);
+    } else if (typeof rawAllowed === 'string' && rawAllowed.trim().startsWith('[')) {
+      try {
+        const parsed = JSON.parse(rawAllowed) as unknown[];
+        if (Array.isArray(parsed)) {
+          parsedAllowed = parsed.map((u) => String(u).trim().toUpperCase()).filter(Boolean);
+        }
+      } catch {
+        parsedAllowed = [];
+      }
+    }
 
     return {
       id: r.product_id,
@@ -1286,7 +1385,20 @@ export async function searchPosProducts(
       trackingMode: (r.tracking_mode ?? 'NONE') as TrackingMode,
       valuationMethod: (r.valuation_method ?? 'MOVING_AVG') as ValuationMethod,
       baseUom: r.base_uom,
+      productQtyMode: (r.product_qty_mode ?? 'STANDARD') as ProductQtyMode,
+      measurementCategory: (r.measurement_category ?? null) as MeasurementCategory | null,
+      priceUom: r.price_uom ?? r.base_uom,
+      allowedSellingUoms:
+        parsedAllowed.length > 0 ? [...new Set(parsedAllowed)] : [r.base_uom],
+      qtyDecimalPrecision: r.qty_decimal_precision ?? 0,
+      featuredPos: Boolean(r.featured_pos ?? false),
+      densityGPerMl: r.density_g_per_ml
+        ? Quantity.fromDecimalString(String(r.density_g_per_ml)).toDecimalString()
+        : null,
+      unitConversions: uomsByProduct.get(r.product_id) ?? [],
       retailPrice: priceStr,
+      globalRetailPrice: globalPriceStr,
+      priceSource: branchOverridePrice ? ('BRANCH_OVERRIDE' as const) : ('GLOBAL' as const),
       sellingPrice: priceStr,
       trackInventory: r.track_inventory,
       availableQuantity: availableQtyStr,
@@ -1417,6 +1529,11 @@ export async function checkoutSale(
     readonly productName: string;
     readonly uomCode: string;
     readonly quantity: Quantity;
+    readonly conversionFactorToBase: string;
+    readonly normalizedBaseQty: Quantity;
+    readonly priceUom: string;
+    readonly pricePerPriceUom: Money;
+    readonly entrySource: LineEntrySource;
     readonly unitPrice: Money;
     readonly discountAmount: Money;
     readonly taxAmount: Money;
@@ -1484,29 +1601,43 @@ export async function checkoutSale(
     }
 
     const uomCode = (lineItem.uomCode ?? product.base_uom).trim().toUpperCase();
-    let conversionFactorToBase: Quantity | null = null;
-    if (uomCode !== product.base_uom) {
-      const conv = await trx.db
-        .selectFrom('product_unit_conversions')
-        .select(['conversion_factor_to_base'])
-        .where('tenant_id', '=', trx.tenantId)
-        .where('product_id', '=', product.id)
-        .where('uom_code', '=', uomCode)
-        .executeTakeFirst();
+    const convRows = await trx.db
+      .selectFrom('product_unit_conversions')
+      .select(['uom_code', 'conversion_factor_to_base'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('product_id', '=', product.id)
+      .where('is_active', '=', true)
+      .execute();
 
-      if (!conv) {
+    const customConversions = convRows.map((c) => ({
+      uomCode: c.uom_code,
+      conversionFactorToBase: String(c.conversion_factor_to_base),
+    }));
+
+    let convToBase: { convertedQuantity: Quantity; factorDecimal6: string };
+    try {
+      convToBase = convertQuantityBetweenUoms({
+        quantity: lineQty.toDecimalString(),
+        fromUom: uomCode,
+        toUom: product.base_uom,
+        productBaseUom: product.base_uom,
+        customConversions,
+        densityGPerMl: product.density_g_per_ml,
+      });
+    } catch (err) {
+      if (err instanceof UomConversionError) {
         throw new AppError({
           statusCode: 400,
           errorCode: 'CAT_INVALID_UOM_CONVERSION',
           title: 'Unsupported UoM',
-          detail: `Unit of measure "${uomCode}" is not configured for product "${product.sku}".`,
+          detail: err.message,
         });
       }
-
-      conversionFactorToBase = Quantity.fromDecimalString(
-        conv.conversion_factor_to_base,
-      );
+      throw err;
     }
+
+    const normalizedBaseQty = convToBase.convertedQuantity;
+    const conversionFactorToBaseStr = convToBase.factorDecimal6;
 
     // Resolve Batch and Serial before pricing so variable batch-level pricing takes precedence
     let batchId: string | null = lineItem.batchId ?? null;
@@ -1532,7 +1663,7 @@ export async function checkoutSale(
         const fefo = await selectFefoBatches(trx, {
           warehouseId: register.warehouse_id,
           productId: product.id,
-          requiredQuantity: lineQty.toDecimalString(),
+          requiredQuantity: normalizedBaseQty.toDecimalString(),
         });
         if (fefo.allocations.length > 0) {
           batchId = fefo.allocations[0]!.batchId;
@@ -1577,20 +1708,56 @@ export async function checkoutSale(
       }
     }
 
-    // Money calculation (batch-level selling price overrides product default selling price)
+    // Money calculation (Priority: Batch -> Branch Override -> Global Default)
+    const effectivePriceUom = (product.price_uom ?? product.base_uom)
+      .trim()
+      .toUpperCase();
+    const branchPriceCfg = await resolveBranchEffectivePriceConfig(trx, {
+      productId: product.id,
+      branchId: register.branch_id,
+      globalSellingPrice: product.selling_price,
+      currencyCode,
+    });
     const effectiveUnitPriceStr =
       batchSellingPrice && Number(batchSellingPrice) > 0
         ? batchSellingPrice
-        : product.selling_price;
+        : branchPriceCfg.effectivePrice;
 
-    let unitPriceMoney = Money.fromDecimalString(
+    const pricePerPriceUomMoney = Money.fromDecimalString(
       effectiveUnitPriceStr,
       currencyCode,
     );
 
-    if (conversionFactorToBase) {
-      unitPriceMoney = unitPriceMoney.multiplyByQuantity(conversionFactorToBase);
+    let propPricing: ReturnType<typeof computeProportionateUnitPriceAndTotal>;
+    try {
+      propPricing = computeProportionateUnitPriceAndTotal({
+        sellingPricePerPriceUom: pricePerPriceUomMoney.toDecimalString(),
+        priceUom: effectivePriceUom,
+        enteredQty: lineQty.toDecimalString(),
+        sellingUom: uomCode,
+        currencyCode,
+        productBaseUom: product.base_uom,
+        customConversions,
+        densityGPerMl: product.density_g_per_ml,
+      });
+    } catch (err) {
+      if (err instanceof UomConversionError) {
+        throw new AppError({
+          statusCode: 400,
+          errorCode: 'CAT_INVALID_UOM_CONVERSION',
+          title: 'Incompatible Pricing UoM',
+          detail: err.message,
+        });
+      }
+      throw err;
     }
+
+    const unitPriceMoney = propPricing.unitPriceInSellingUom;
+    const resolvedEntrySource: LineEntrySource =
+      lineItem.entrySource ??
+      ((product.product_qty_mode ?? 'STANDARD') === 'VARIABLE'
+        ? 'MANUAL_WEIGHT'
+        : 'MANUAL');
 
     let lineDiscountMoney = Money.zero(currencyCode);
     if (lineItem.discountAmount) {
@@ -1605,6 +1772,45 @@ export async function checkoutSale(
           title: 'Invalid Line Discount',
           detail: 'Line discount cannot be negative.',
         });
+      }
+      if (lineDiscountMoney.isPositive()) {
+        const qtyInPriceUomStr =
+          effectivePriceUom === product.base_uom
+            ? normalizedBaseQty.toDecimalString()
+            : effectivePriceUom === uomCode
+              ? lineQty.toDecimalString()
+              : convertQuantityBetweenUoms({
+                  quantity: lineQty.toDecimalString(),
+                  fromUom: uomCode,
+                  toUom: effectivePriceUom,
+                  productBaseUom: product.base_uom,
+                  customConversions,
+                  densityGPerMl: product.density_g_per_ml,
+                }).convertedQuantity.toDecimalString();
+
+        const policyCheck = validateDiscountAgainstPolicy({
+          grossLineTotal: propPricing.effectiveLineSubtotal.toDecimalString(),
+          discountAmount: lineDiscountMoney.toDecimalString(),
+          baseQty: qtyInPriceUomStr,
+          maxDiscountPct: branchPriceCfg.maxDiscountPct,
+          minSellingPrice: branchPriceCfg.minSellingPrice,
+          currencyCode,
+        });
+        if (!policyCheck.allowed) {
+          const isFloorViolation = policyCheck.reason?.includes('minimum selling price');
+          throw new AppError({
+            statusCode: 422,
+            errorCode: isFloorViolation
+              ? 'PRICING_MIN_PRICE_VIOLATION'
+              : 'PRICING_MAX_DISCOUNT_EXCEEDED',
+            title: isFloorViolation
+              ? 'Minimum Selling Price Floor Violation'
+              : 'Discount Exceeds Policy Limit',
+            detail:
+              policyCheck.reason ??
+              `Discount exceeds pricing policy limit for "${product.sku}".`,
+          });
+        }
       }
     }
 
@@ -1636,8 +1842,12 @@ export async function checkoutSale(
     let lineCalc;
     try {
       lineCalc = calculateLinePricingAndTax({
-        unitPrice: unitPriceMoney,
-        quantity: lineQty,
+        unitPrice:
+          uomCode === effectivePriceUom
+            ? unitPriceMoney
+            : propPricing.effectiveLineSubtotal,
+        quantity:
+          uomCode === effectivePriceUom ? lineQty : Quantity.fromInteger(1),
         lineDiscount: lineDiscountMoney,
         isTaxInclusive: false,
         taxRules: lineTaxRules,
@@ -1662,6 +1872,11 @@ export async function checkoutSale(
       productName: product.name,
       uomCode,
       quantity: lineQty,
+      conversionFactorToBase: conversionFactorToBaseStr,
+      normalizedBaseQty,
+      priceUom: effectivePriceUom,
+      pricePerPriceUom: pricePerPriceUomMoney,
+      entrySource: resolvedEntrySource,
       unitPrice: unitPriceMoney,
       discountAmount: lineCalc.discountAmount,
       taxAmount: lineCalc.totalTaxAmount,
@@ -1741,10 +1956,10 @@ export async function checkoutSale(
       if (line.trackInventory) {
         const existing = requiredQuantitiesByProduct.get(line.productId);
         if (existing) {
-          existing.qty = existing.qty.add(line.quantity);
+          existing.qty = existing.qty.add(line.normalizedBaseQty);
         } else {
           requiredQuantitiesByProduct.set(line.productId, {
-            qty: line.quantity,
+            qty: line.normalizedBaseQty,
             sku: line.sku,
             name: line.productName,
           });
@@ -1963,6 +2178,11 @@ export async function checkoutSale(
           unitCost: line.unitCostSnapshot,
           referenceType: 'POS_SALE',
           referenceId: saleId,
+          entrySource:
+            line.entrySource === 'MANUAL_WEIGHT' ||
+            line.entrySource === 'SCALE_WEIGHT'
+              ? line.entrySource
+              : 'POS_SALE',
           allowNegativeStockOverride: input.allowNegativeStockOverride ?? false,
           overrideReason: input.overrideReason ?? null,
         },
@@ -2035,6 +2255,13 @@ export async function checkoutSale(
     unitCostSnapshot?: string;
     batchId?: string | null;
     serialId?: string | null;
+    originalEnteredQty?: string | null;
+    originalUomCode?: string | null;
+    conversionFactorToBase?: string | null;
+    normalizedBaseQty?: string | null;
+    priceUom?: string | null;
+    pricePerPriceUom?: string | null;
+    entrySource?: string;
   }> = [];
 
   for (const line of processedLines) {
@@ -2059,6 +2286,13 @@ export async function checkoutSale(
         unit_cost_snapshot: line.unitCostSnapshot,
         batch_id: line.batchId ?? null,
         serial_id: line.serialId ?? null,
+        original_entered_qty: line.quantity.toDecimalString(),
+        original_uom_code: line.uomCode,
+        conversion_factor_to_base: line.conversionFactorToBase,
+        normalized_base_qty: line.normalizedBaseQty.toDecimalString(),
+        price_uom: line.priceUom,
+        price_per_price_uom: line.pricePerPriceUom.toDecimalString(),
+        entry_source: line.entrySource,
       })
       .execute();
 
@@ -2077,6 +2311,13 @@ export async function checkoutSale(
       unitCostSnapshot: line.unitCostSnapshot,
       batchId: line.batchId ?? null,
       serialId: line.serialId ?? null,
+      originalEnteredQty: line.quantity.toDecimalString(),
+      originalUomCode: line.uomCode,
+      conversionFactorToBase: line.conversionFactorToBase,
+      normalizedBaseQty: line.normalizedBaseQty.toDecimalString(),
+      priceUom: line.priceUom,
+      pricePerPriceUom: line.pricePerPriceUom.toDecimalString(),
+      entrySource: line.entrySource,
     });
   }
 
@@ -2642,6 +2883,21 @@ export async function getSaleById(
       unitCostSnapshot: l.unit_cost_snapshot,
       batchId: l.batch_id ?? null,
       serialId: l.serial_id ?? null,
+      originalEnteredQty: l.original_entered_qty
+        ? Quantity.fromDecimalString(String(l.original_entered_qty)).toDecimalString()
+        : null,
+      originalUomCode: l.original_uom_code ?? null,
+      conversionFactorToBase: l.conversion_factor_to_base
+        ? Quantity.fromDecimalString(String(l.conversion_factor_to_base)).toDecimalString()
+        : null,
+      normalizedBaseQty: l.normalized_base_qty
+        ? Quantity.fromDecimalString(String(l.normalized_base_qty)).toDecimalString()
+        : null,
+      priceUom: l.price_uom ?? null,
+      pricePerPriceUom: l.price_per_price_uom
+        ? Money.fromDecimalString(String(l.price_per_price_uom), sale.currency_code).toDecimalString()
+        : null,
+      entrySource: l.entry_source ?? 'MANUAL',
     })),
     payments: payments.map((p) => ({
       id: p.id,
@@ -2807,6 +3063,21 @@ export async function listSales(
           l.line_total,
           sale.currency_code,
         ).toDecimalString(),
+        originalEnteredQty: l.original_entered_qty
+          ? Quantity.fromDecimalString(String(l.original_entered_qty)).toDecimalString()
+          : null,
+        originalUomCode: l.original_uom_code ?? null,
+        conversionFactorToBase: l.conversion_factor_to_base
+          ? Quantity.fromDecimalString(String(l.conversion_factor_to_base)).toDecimalString()
+          : null,
+        normalizedBaseQty: l.normalized_base_qty
+          ? Quantity.fromDecimalString(String(l.normalized_base_qty)).toDecimalString()
+          : null,
+        priceUom: l.price_uom ?? null,
+        pricePerPriceUom: l.price_per_price_uom
+          ? Money.fromDecimalString(String(l.price_per_price_uom), sale.currency_code).toDecimalString()
+          : null,
+        entrySource: l.entry_source ?? 'MANUAL',
       })),
       payments: payments.map((p) => ({
         id: p.id,
@@ -2999,6 +3270,21 @@ export async function getReceiptData(
       unitCostSnapshot: l.unit_cost_snapshot,
       batchId: l.batch_id ?? null,
       serialId: l.serial_id ?? null,
+      originalEnteredQty: l.original_entered_qty
+        ? Quantity.fromDecimalString(String(l.original_entered_qty)).toDecimalString()
+        : null,
+      originalUomCode: l.original_uom_code ?? null,
+      conversionFactorToBase: l.conversion_factor_to_base
+        ? Quantity.fromDecimalString(String(l.conversion_factor_to_base)).toDecimalString()
+        : null,
+      normalizedBaseQty: l.normalized_base_qty
+        ? Quantity.fromDecimalString(String(l.normalized_base_qty)).toDecimalString()
+        : null,
+      priceUom: l.price_uom ?? null,
+      pricePerPriceUom: l.price_per_price_uom
+        ? Money.fromDecimalString(String(l.price_per_price_uom), sale.currency_code).toDecimalString()
+        : null,
+      entrySource: l.entry_source ?? 'MANUAL',
     })),
     subtotalAmount: Money.fromDecimalString(
       sale.subtotal_amount,

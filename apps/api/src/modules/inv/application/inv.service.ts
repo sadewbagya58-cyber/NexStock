@@ -14,10 +14,12 @@ import {
   Money,
   Quantity,
   QUANTITY_SCALE_FACTOR,
-  divideAndRoundBigInt,
-  applyMacReceipt,
+  UomConversionError,
   applyMacOutboundIssue,
+  applyMacReceipt,
   consumeFifoCostLayers,
+  convertQuantityBetweenUoms,
+  divideAndRoundBigInt,
   type FifoCostLayer,
 } from '@nexstock/domain-core';
 import { sql } from 'kysely';
@@ -29,6 +31,7 @@ export * from './stocktake.service.js';
 import {
   type CursorPaginatedResult,
   resolveProductForInventory,
+  triggerCostChangeSuggestionIfApplicable,
 } from '../../cat/index.js';
 import { assertAuthorized } from '../../iam/index.js';
 import {
@@ -100,6 +103,7 @@ function mapStockMovementRow(
     reversed_entry_id: string | null;
     reason: string | null;
     negative_stock_override_applied: boolean;
+    entry_source?: string | null;
     actor_user_id: string;
     idempotency_key: string;
     occurred_at: Date | string;
@@ -150,6 +154,7 @@ function mapStockMovementRow(
     reason: row.reason,
     notes: row.reason,
     negativeStockOverrideApplied: row.negative_stock_override_applied,
+    entrySource: row.entry_source ?? 'MANUAL',
     actorUserId: row.actor_user_id,
     idempotencyKey: row.idempotency_key,
     occurredAt: new Date(row.occurred_at).toISOString(),
@@ -365,17 +370,40 @@ export async function postStockMovement(
   }
 
   const uomCode = (input.uomCode ?? product.baseUom).trim().toUpperCase();
-  const conversionFactorStr = product.unitConversions.get(uomCode);
-  if (!conversionFactorStr) {
-    throw new AppError({
-      statusCode: 400,
-      errorCode: 'CAT_INVALID_UOM_CONVERSION',
-      title: 'Unsupported Unit of Measure',
-      detail: `UoM "${uomCode}" is not configured for product "${product.sku}" (baseUom: "${product.baseUom}").`,
+  const customConversions = [...product.unitConversions.entries()].map(
+    ([code, factor]) => ({
+      uomCode: code,
+      conversionFactorToBase: factor,
+    }),
+  );
+
+  let conversionFactorStr: string;
+  let qtyDelta: Quantity;
+  try {
+    const absConv = convertQuantityBetweenUoms({
+      quantity: inputQty.abs().toDecimalString(),
+      fromUom: uomCode,
+      toUom: product.baseUom,
+      productBaseUom: product.baseUom,
+      customConversions,
+      densityGPerMl: product.densityGPerMl,
     });
+    conversionFactorStr = absConv.factorDecimal6;
+    qtyDelta = inputQty.isNegative()
+      ? absConv.convertedQuantity.negate()
+      : absConv.convertedQuantity;
+  } catch (err) {
+    if (err instanceof UomConversionError) {
+      throw new AppError({
+        statusCode: 400,
+        errorCode: 'CAT_INVALID_UOM_CONVERSION',
+        title: 'Incompatible or Unsupported Unit of Measure',
+        detail: err.message,
+      });
+    }
+    throw err;
   }
 
-  const qtyDelta = inputQty.convertUsingFactor(conversionFactorStr);
   if (qtyDelta.isZero()) {
     throw new AppError({
       statusCode: 422,
@@ -384,6 +412,27 @@ export async function postStockMovement(
       detail: 'Converted base UoM quantity delta cannot be zero.',
     });
   }
+
+  const resolvedEntrySource:
+    | 'OPENING_BALANCE'
+    | 'PURCHASE_RECEIPT'
+    | 'POS_SALE'
+    | 'POS_VOID'
+    | 'CUSTOMER_RETURN'
+    | 'SUPPLIER_RETURN'
+    | 'STOCKTAKE'
+    | 'MANUAL'
+    | 'MANUAL_WEIGHT'
+    | 'SCALE_WEIGHT'
+    | 'SYSTEM_REVERSAL' =
+    input.entrySource ??
+    (input.movementType === 'OPENING_STOCK'
+      ? 'OPENING_BALANCE'
+      : input.movementType === 'CUSTOMER_RETURN_RESTOCK'
+        ? 'CUSTOMER_RETURN'
+        : input.movementType === 'SUPPLIER_RETURN'
+          ? 'SUPPLIER_RETURN'
+          : 'MANUAL');
 
   const baseCurrency = await getTenantBaseCurrency(trx);
   const unitCostMoney = Money.fromDecimalString(
@@ -708,6 +757,7 @@ export async function postStockMovement(
       reversed_entry_id: null,
       reason,
       negative_stock_override_applied: negativeStockOverrideApplied,
+      entry_source: resolvedEntrySource,
       actor_user_id: trx.userId,
       idempotency_key: idempotencyKey,
       occurred_at: occurredAt,
@@ -947,6 +997,28 @@ export async function postStockMovement(
     },
   });
 
+  if (
+    qtyDelta.isPositive() &&
+    !unitCostMoney.isZero() &&
+    input.referenceType !== 'GOODS_RECEIPT' &&
+    resolvedEntrySource !== 'CUSTOMER_RETURN' &&
+    resolvedEntrySource !== 'POS_VOID'
+  ) {
+    const prevProdCost = Money.fromDecimalString(product.purchaseCost, baseCurrency);
+    if (unitCostMoney.scaledUnits !== prevProdCost.scaledUnits) {
+      await triggerCostChangeSuggestionIfApplicable(trx, {
+        productId: input.productId,
+        oldCost: prevProdCost.toDecimalString(),
+        newCost: unitCostMoney.toDecimalString(),
+        movingAvgCost: nextMovingAvgCost.toDecimalString(),
+        sourceEventType: 'STOCK_MOVEMENT',
+        sourceEventKey: `MOVE:${movementId}`,
+        reason: `Stock movement (${input.movementType}) at ${unitCostMoney.toDecimalString()}/${product.baseUom}`,
+        scopeBranchId: input.branchId,
+      });
+    }
+  }
+
   const inserted = await trx.db
     .selectFrom('stock_ledger_entries')
     .selectAll()
@@ -1116,6 +1188,7 @@ export async function reverseStockMovement(
       reversed_entry_id: original.id,
       reason,
       negative_stock_override_applied: negativeStockOverrideApplied,
+      entry_source: input.entrySource ?? 'SYSTEM_REVERSAL',
       actor_user_id: trx.userId,
       idempotency_key: idempotencyKey,
       occurred_at: occurredAt,
@@ -1285,6 +1358,7 @@ export async function getStockMovementById(
       'stock_ledger_entries.reversed_entry_id as reversed_entry_id',
       'stock_ledger_entries.reason as reason',
       'stock_ledger_entries.negative_stock_override_applied as negative_stock_override_applied',
+      'stock_ledger_entries.entry_source as entry_source',
       'stock_ledger_entries.actor_user_id as actor_user_id',
       'stock_ledger_entries.idempotency_key as idempotency_key',
       'stock_ledger_entries.occurred_at as occurred_at',
@@ -1365,6 +1439,7 @@ export async function listStockMovements(
       'stock_ledger_entries.reversed_entry_id as reversed_entry_id',
       'stock_ledger_entries.reason as reason',
       'stock_ledger_entries.negative_stock_override_applied as negative_stock_override_applied',
+      'stock_ledger_entries.entry_source as entry_source',
       'stock_ledger_entries.actor_user_id as actor_user_id',
       'stock_ledger_entries.idempotency_key as idempotency_key',
       'stock_ledger_entries.occurred_at as occurred_at',

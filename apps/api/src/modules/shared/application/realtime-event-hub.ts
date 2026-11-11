@@ -4,6 +4,7 @@ import { EventEmitter } from 'node:events';
 export type RealtimeEventType =
   | 'STOCK_CHANGED'
   | 'PRODUCT_CHANGED'
+  | 'PRICE_CHANGED'
   | 'CATEGORY_CHANGED'
   | 'CREDIT_ACCOUNT_CHANGED'
   | 'SALE_COMPLETED'

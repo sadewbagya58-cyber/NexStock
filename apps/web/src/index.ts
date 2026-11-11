@@ -177,8 +177,10 @@ export const ALL_SPA_VIEW_IDS = [
   ...AUTH_VIEW_IDS,
   'dashboard',
   'products',
+  'pricing',
   'categories',
   'suppliers',
+  'purchasing',
   'movements',
   'balances',
   'batches',
@@ -442,3 +444,5 @@ export function normalizeApiEndpoint(endpoint: string): string {
   const leading = trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
   return leading.replace(/^\/+/, '/');
 }
+
+export * from './scale-adapter.js';

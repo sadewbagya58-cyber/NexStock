@@ -26,6 +26,10 @@ export function getCanonicalSqliteMigrations(): readonly SqliteMigrationSpec[] {
   const sql3 = readFileSync(resolve(migrationsDir, filename3), 'utf-8');
   const filename4 = '0004_local_advanced_inventory.sql';
   const sql4 = readFileSync(resolve(migrationsDir, filename4), 'utf-8');
+  const filename5 = '0005_local_uom_and_variable_products.sql';
+  const sql5 = readFileSync(resolve(migrationsDir, filename5), 'utf-8');
+  const filename6 = '0006_local_branch_pricing.sql';
+  const sql6 = readFileSync(resolve(migrationsDir, filename6), 'utf-8');
   return [
     {
       dialect: 'sqlite',
@@ -54,6 +58,20 @@ export function getCanonicalSqliteMigrations(): readonly SqliteMigrationSpec[] {
       name: '0004_local_advanced_inventory',
       filename: filename4,
       sql: sql4,
+    },
+    {
+      dialect: 'sqlite',
+      version: 5,
+      name: '0005_local_uom_and_variable_products',
+      filename: filename5,
+      sql: sql5,
+    },
+    {
+      dialect: 'sqlite',
+      version: 6,
+      name: '0006_local_branch_pricing',
+      filename: filename6,
+      sql: sql6,
     },
   ];
 }

@@ -80,7 +80,13 @@ export async function recordCustomerCreditPayment(
 
   // 2. Process Allocations
   let allocatedTotalMoney = Money.zero('LKR');
-  const validAllocations: Array<{ transactionId: string; amountMoney: Money; invoiceId: string | null }> = [];
+  const validAllocations: Array<{
+    transactionId: string;
+    transactionReference: string;
+    transactionDate: string;
+    amountMoney: Money;
+    invoiceId: string | null;
+  }> = [];
 
   if (input.allocations && input.allocations.length > 0) {
     for (const alloc of input.allocations) {
@@ -97,7 +103,7 @@ export async function recordCustomerCreditPayment(
       // Check transaction exists and has unpaid amount
       const tx = await trx.db
         .selectFrom('customer_credit_transactions')
-        .select(['id', 'unpaid_amount', 'source_reference_id', 'entry_direction'])
+        .select(['id', 'transaction_reference', 'transaction_date', 'unpaid_amount', 'source_reference_id', 'entry_direction'])
         .where('tenant_id', '=', trx.tenantId)
         .where('account_id', '=', account.id)
         .where('id', '=', alloc.transactionId)
@@ -126,6 +132,8 @@ export async function recordCustomerCreditPayment(
       allocatedTotalMoney = allocatedTotalMoney.add(allocMoney);
       validAllocations.push({
         transactionId: alloc.transactionId,
+        transactionReference: tx.transaction_reference,
+        transactionDate: String(tx.transaction_date).slice(0, 10),
         amountMoney: allocMoney,
         invoiceId: tx.source_reference_id,
       });
@@ -143,7 +151,7 @@ export async function recordCustomerCreditPayment(
     // FIFO automatic allocation across oldest unpaid debit transactions
     const unpaidTxs = await trx.db
       .selectFrom('customer_credit_transactions')
-      .select(['id', 'unpaid_amount', 'source_reference_id'])
+      .select(['id', 'transaction_reference', 'transaction_date', 'unpaid_amount', 'source_reference_id'])
       .where('tenant_id', '=', trx.tenantId)
       .where('account_id', '=', account.id)
       .where('entry_direction', '=', 'DEBIT')
@@ -162,6 +170,8 @@ export async function recordCustomerCreditPayment(
       remainingToAllocate = remainingToAllocate.subtract(allocMoney);
       validAllocations.push({
         transactionId: tx.id,
+        transactionReference: tx.transaction_reference,
+        transactionDate: String(tx.transaction_date).slice(0, 10),
         amountMoney: allocMoney,
         invoiceId: tx.source_reference_id,
       });
@@ -180,6 +190,7 @@ export async function recordCustomerCreditPayment(
   const nextSeq = (countRow?.count ?? 0) + 1;
   const payRef = `CPAY-${yearMonth}-${String(nextSeq).padStart(5, '0')}`;
   const rcpNumber = `RCP-${yearMonth}-${String(nextSeq).padStart(5, '0')}`;
+  const resolvedExternalRef = input.paymentReference?.trim() || input.externalReference?.trim() || null;
 
   const paymentId = generateUuidV7();
 
@@ -199,7 +210,7 @@ export async function recordCustomerCreditPayment(
       currency_code: 'LKR',
       payment_date: input.paymentDate ?? sql<string>`CURRENT_DATE`,
       payment_method: input.paymentMethod,
-      external_reference: input.externalReference?.trim() || null,
+      external_reference: resolvedExternalRef,
       branch_id: input.branchId ?? account.branch_id,
       received_by_user_id: trx.userId,
       status: 'COMPLETED',
@@ -284,6 +295,7 @@ export async function recordCustomerCreditPayment(
     resourceId: paymentId,
     metadata: {
       paymentReference: payRef,
+      externalReference: resolvedExternalRef,
       receiptNumber: rcpNumber,
       amount: paymentAmountMoney.toDecimalString(),
       allocatedAmount: allocatedTotalMoney.toDecimalString(),
@@ -321,6 +333,12 @@ export async function recordCustomerCreditPayment(
     reversalReason: payRow.reversal_reason,
     reversedAt: payRow.reversed_at ? (payRow.reversed_at as Date).toISOString() : null,
     notes: payRow.notes,
+    allocations: validAllocations.map((a) => ({
+      transactionId: a.transactionId,
+      transactionReference: a.transactionReference,
+      transactionDate: a.transactionDate,
+      allocatedAmount: a.amountMoney.toDecimalString(),
+    })),
     createdAt: payRow.created_at.toISOString(),
   };
 }
@@ -747,6 +765,7 @@ export async function getPaymentReceipt(
     .select([
       'customer_credit_payments.receipt_number',
       'customer_credit_payments.payment_reference',
+      'customer_credit_payments.external_reference',
       'customer_credit_payments.payment_date',
       'customers.name as customer_name',
       'customers.customer_number',
@@ -793,6 +812,7 @@ export async function getPaymentReceipt(
   return {
     receiptNumber: payment.receipt_number,
     paymentReference: payment.payment_reference,
+    externalReference: payment.external_reference,
     paymentDate: String(payment.payment_date).slice(0, 10),
     customerName: payment.customer_name,
     customerNumber: payment.customer_number,
@@ -870,6 +890,50 @@ export async function listCreditPayments(
     .offset(offset)
     .execute();
 
+  const paymentIds = rows.map((r) => r.id);
+  const allocationsByPaymentId = new Map<
+    string,
+    Array<{
+      transactionId: string;
+      transactionReference: string;
+      transactionDate: string;
+      allocatedAmount: string;
+    }>
+  >();
+
+  if (paymentIds.length > 0) {
+    const allocRows = await trx.db
+      .selectFrom('customer_credit_allocations')
+      .innerJoin('customer_credit_transactions', (join) =>
+        join
+          .onRef('customer_credit_allocations.tenant_id', '=', 'customer_credit_transactions.tenant_id')
+          .onRef('customer_credit_allocations.transaction_id', '=', 'customer_credit_transactions.id'),
+      )
+      .select([
+        'customer_credit_allocations.payment_id',
+        'customer_credit_allocations.transaction_id',
+        'customer_credit_transactions.transaction_reference',
+        'customer_credit_transactions.transaction_date',
+        'customer_credit_allocations.amount',
+      ])
+      .where('customer_credit_allocations.tenant_id', '=', trx.tenantId)
+      .where('customer_credit_allocations.payment_id', 'in', paymentIds)
+      .where('customer_credit_allocations.status', '=', 'ACTIVE')
+      .orderBy('customer_credit_transactions.transaction_date', 'asc')
+      .execute();
+
+    for (const a of allocRows) {
+      const list = allocationsByPaymentId.get(a.payment_id) ?? [];
+      list.push({
+        transactionId: a.transaction_id,
+        transactionReference: a.transaction_reference,
+        transactionDate: String(a.transaction_date).slice(0, 10),
+        allocatedAmount: String(a.amount),
+      });
+      allocationsByPaymentId.set(a.payment_id, list);
+    }
+  }
+
   return {
     items: rows.map((r) => ({
       id: r.id,
@@ -890,6 +954,7 @@ export async function listCreditPayments(
       reversalReason: r.reversal_reason,
       reversedAt: r.reversed_at ? new Date(r.reversed_at).toISOString() : null,
       notes: r.notes,
+      allocations: allocationsByPaymentId.get(r.id) ?? [],
       createdAt: new Date(r.created_at).toISOString(),
     })),
     total,

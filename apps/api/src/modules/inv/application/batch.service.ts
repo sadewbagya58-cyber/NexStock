@@ -720,3 +720,92 @@ export async function selectFefoBatches(
     allocations,
   };
 }
+
+/**
+ * Registers or resolves an existing warehouse batch during Goods Receipt without
+ * requiring standalone `inv:batch:manage` when the caller already passed `pur:grn:post`.
+ * Initializes `current_quantity = 0.000000` when newly created so the subsequent
+ * `postStockMovement` call atomically increments `current_quantity`.
+ */
+export async function ensureBatchForGoodsReceipt(
+  trx: TenantTransactionContext,
+  params: {
+    readonly productId: string;
+    readonly warehouseId: string;
+    readonly supplierId?: string | null;
+    readonly batchNumber: string;
+    readonly expiryDate?: string | null;
+    readonly receivedQtyBase: string;
+    readonly unitCostPerBaseUom: string;
+    readonly currencyCode: string;
+    readonly receivedDate?: string;
+  },
+): Promise<{ readonly batchId: string; readonly created: boolean }> {
+  const batchNumber = params.batchNumber.trim().toUpperCase();
+  if (!batchNumber) {
+    throw new AppError({
+      statusCode: 400,
+      errorCode: 'ERR_VALIDATION_FAILED',
+      title: 'Invalid Batch Number',
+      detail: 'Batch number cannot be blank.',
+    });
+  }
+
+  const existing = await trx.db
+    .selectFrom('inventory_batches')
+    .select(['id', 'initial_quantity'])
+    .where('tenant_id', '=', trx.tenantId)
+    .where('warehouse_id', '=', params.warehouseId)
+    .where('product_id', '=', params.productId)
+    .where('batch_number', '=', batchNumber)
+    .forUpdate()
+    .executeTakeFirst();
+
+  if (existing) {
+    const nextInitial = Quantity.fromDecimalString(String(existing.initial_quantity)).add(
+      Quantity.fromDecimalString(params.receivedQtyBase),
+    );
+    await trx.db
+      .updateTable('inventory_batches')
+      .set({
+        initial_quantity: nextInitial.toDecimalString(),
+        status: 'ACTIVE',
+        updated_at: new Date(),
+      })
+      .where('tenant_id', '=', trx.tenantId)
+      .where('id', '=', existing.id)
+      .execute();
+    return { batchId: existing.id, created: false };
+  }
+
+  const batchId = generateUuidV7();
+  const now = new Date();
+  await trx.db
+    .insertInto('inventory_batches')
+    .values({
+      id: batchId,
+      tenant_id: trx.tenantId,
+      product_id: params.productId,
+      warehouse_id: params.warehouseId,
+      batch_number: batchNumber,
+      supplier_id: params.supplierId ?? null,
+      status: 'ACTIVE',
+      received_date: params.receivedDate ?? now.toISOString().slice(0, 10),
+      manufacturing_date: null,
+      expiry_date: params.expiryDate ?? null,
+      initial_quantity: Quantity.fromDecimalString(params.receivedQtyBase).toDecimalString(),
+      current_quantity: Quantity.zero().toDecimalString(),
+      unit_cost: Money.fromDecimalString(
+        params.unitCostPerBaseUom,
+        params.currencyCode,
+      ).toDecimalString(),
+      selling_price: null,
+      currency_code: params.currencyCode,
+      quarantine_reason: null,
+      created_at: now,
+      updated_at: now,
+    })
+    .execute();
+
+  return { batchId, created: true };
+}

@@ -345,6 +345,18 @@ export interface CategoriesTable {
   archived_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
 }
 
+export interface UnitsOfMeasureTable {
+  code: string;
+  name: string;
+  category: 'WEIGHT' | 'VOLUME' | 'COUNT' | 'LENGTH';
+  base_unit_code: string;
+  conversion_to_base: string;
+  decimal_precision: number;
+  is_fractional: boolean;
+  is_active: boolean;
+  created_at: Generated<Date>;
+}
+
 export interface ProductsTable {
   id: string;
   tenant_id: string;
@@ -357,6 +369,14 @@ export interface ProductsTable {
   status: Generated<'ACTIVE' | 'ARCHIVED'>;
   category_id: string | null;
   base_uom: string;
+  product_qty_mode: Generated<'STANDARD' | 'VARIABLE'>;
+  measurement_category: 'WEIGHT' | 'VOLUME' | 'COUNT' | 'LENGTH' | null;
+  purchase_uom: string | null;
+  price_uom: string | null;
+  allowed_selling_uoms: Generated<unknown>;
+  qty_decimal_precision: Generated<number>;
+  featured_pos: Generated<boolean>;
+  density_g_per_ml: string | null;
   purchase_cost: string;
   selling_price: string;
   tax_group_id: string | null;
@@ -496,6 +516,19 @@ export interface StockLedgerEntriesTable {
   occurred_at: ColumnType<Date, Date | string, Date | string>;
   recorded_at: Generated<Date>;
   metadata_json: Generated<unknown>;
+  entry_source: Generated<
+    | 'OPENING_BALANCE'
+    | 'PURCHASE_RECEIPT'
+    | 'POS_SALE'
+    | 'POS_VOID'
+    | 'CUSTOMER_RETURN'
+    | 'SUPPLIER_RETURN'
+    | 'STOCKTAKE'
+    | 'MANUAL'
+    | 'MANUAL_WEIGHT'
+    | 'SCALE_WEIGHT'
+    | 'SYSTEM_REVERSAL'
+  >;
 }
 
 export interface InventoryBalancesTable {
@@ -598,6 +631,13 @@ export interface SalesInvoiceLinesTable {
   unit_cost_snapshot: Generated<string>;
   batch_id: string | null;
   serial_id: string | null;
+  original_entered_qty: string | null;
+  original_uom_code: string | null;
+  conversion_factor_to_base: string | null;
+  normalized_base_qty: string | null;
+  price_uom: string | null;
+  price_per_price_uom: string | null;
+  entry_source: Generated<'BARCODE_SCAN' | 'MANUAL' | 'MANUAL_WEIGHT' | 'SCALE_WEIGHT' | 'QUICK_PICK' | 'API'>;
   created_at: Generated<Date>;
 }
 
@@ -1393,6 +1433,262 @@ export interface TenantInvitationsTable {
   updated_at: Generated<Date>;
 }
 
+export interface PurchaseOrdersTable {
+  id: string;
+  tenant_id: string;
+  branch_id: string;
+  warehouse_id: string;
+  supplier_id: string;
+  po_number: string;
+  status: Generated<'DRAFT' | 'APPROVED' | 'PARTIALLY_RECEIVED' | 'RECEIVED' | 'CANCELLED'>;
+  currency_code: string;
+  total_amount: Generated<string>;
+  notes: string | null;
+  expected_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  created_by_user_id: string;
+  approved_by_user_id: string | null;
+  approved_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface PurchaseOrderLinesTable {
+  id: string;
+  tenant_id: string;
+  purchase_order_id: string;
+  line_number: number;
+  product_id: string;
+  ordered_uom: string;
+  ordered_qty: string;
+  conversion_factor_to_base: string;
+  normalized_base_qty: string;
+  received_base_qty: Generated<string>;
+  unit_cost: string;
+  line_total: string;
+  created_at: Generated<Date>;
+}
+
+export interface GoodsReceiptsTable {
+  id: string;
+  tenant_id: string;
+  purchase_order_id: string | null;
+  supplier_id: string;
+  branch_id: string;
+  warehouse_id: string;
+  grn_number: string;
+  status: Generated<'POSTED' | 'CANCELLED'>;
+  currency_code: string;
+  total_cost: Generated<string>;
+  notes: string | null;
+  received_by_user_id: string;
+  idempotency_key: string;
+  received_at: ColumnType<Date, Date | string, Date | string>;
+  created_at: Generated<Date>;
+}
+
+export interface GoodsReceiptLinesTable {
+  id: string;
+  tenant_id: string;
+  goods_receipt_id: string;
+  purchase_order_line_id: string | null;
+  line_number: number;
+  product_id: string;
+  received_uom: string;
+  received_qty: string;
+  conversion_factor_to_base: string;
+  normalized_base_qty: string;
+  unit_cost_per_received_uom: string;
+  unit_cost_per_base_uom: string;
+  line_total_cost: string;
+  batch_number: string | null;
+  expiry_date: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  ledger_entry_id: string | null;
+  created_at: Generated<Date>;
+}
+
+export interface SupplierReturnsTable {
+  id: string;
+  tenant_id: string;
+  supplier_id: string;
+  goods_receipt_id: string | null;
+  branch_id: string;
+  warehouse_id: string;
+  return_number: string;
+  product_id: string;
+  return_uom: string;
+  return_qty: string;
+  conversion_factor_to_base: string;
+  normalized_base_qty: string;
+  unit_cost: string;
+  total_cost: string;
+  reason: string;
+  ledger_entry_id: string | null;
+  created_by_user_id: string;
+  idempotency_key: string;
+  created_at: Generated<Date>;
+}
+
+export interface PosReturnsTable {
+  id: string;
+  tenant_id: string;
+  invoice_id: string;
+  branch_id: string;
+  warehouse_id: string;
+  return_number: string;
+  reason: string;
+  refund_method: 'CASH' | 'CARD' | 'CREDIT_ADJUSTMENT' | 'OTHER';
+  total_refund_amount: string;
+  currency_code: string;
+  created_by_user_id: string;
+  idempotency_key: string;
+  created_at: Generated<Date>;
+}
+
+export interface PosReturnLinesTable {
+  id: string;
+  tenant_id: string;
+  pos_return_id: string;
+  invoice_line_id: string;
+  product_id: string;
+  return_uom: string;
+  return_qty: string;
+  conversion_factor_to_base: string;
+  normalized_base_qty: string;
+  restock_condition: Generated<'RESELLABLE' | 'DAMAGED'>;
+  unit_price: string;
+  refund_amount: string;
+  ledger_entry_id: string | null;
+  created_at: Generated<Date>;
+}
+
+export interface PricingSettingsTable {
+  tenant_id: string;
+  default_pricing_method: Generated<'PROFIT_MARGIN' | 'COST_MARKUP'>;
+  default_target_percentage: Generated<string>;
+  default_cost_basis: Generated<'LAST_PURCHASE_COST' | 'MOVING_AVERAGE_COST' | 'HIGHEST_RECENT_COST'>;
+  default_rounding_rule: Generated<
+    'NONE' | 'NEAREST_0_01' | 'NEAREST_0_50' | 'NEAREST_1' | 'NEAREST_5' | 'NEAREST_10' | 'CEIL_0_50' | 'CEIL_1' | 'CEIL_5' | 'CEIL_10'
+  >;
+  default_min_margin_pct: Generated<string>;
+  default_max_discount_pct: Generated<string>;
+  branch_approval_policy: Generated<'OWNER_ADMIN_ONLY' | 'BRANCH_MANAGER_OWN_BRANCH'>;
+  allow_self_approval: Generated<boolean>;
+  auto_create_suggestions_on_cost_change: Generated<boolean>;
+  auto_create_suggestions_on_cost_decrease: Generated<boolean>;
+  updated_by_user_id: string | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface ProductPricingRulesTable {
+  tenant_id: string;
+  product_id: string;
+  pricing_method: Generated<'PROFIT_MARGIN' | 'COST_MARKUP'>;
+  target_percentage: Generated<string>;
+  cost_basis: Generated<'LAST_PURCHASE_COST' | 'MOVING_AVERAGE_COST' | 'HIGHEST_RECENT_COST'>;
+  rounding_rule: Generated<
+    'NONE' | 'NEAREST_0_01' | 'NEAREST_0_50' | 'NEAREST_1' | 'NEAREST_5' | 'NEAREST_10' | 'CEIL_0_50' | 'CEIL_1' | 'CEIL_5' | 'CEIL_10'
+  >;
+  min_selling_price: string | null;
+  min_margin_pct: string | null;
+  max_discount_pct: string | null;
+  suggestions_enabled: Generated<boolean>;
+  effective_date: Generated<string | Date>;
+  updated_by_user_id: string | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface ProductBranchPricesTable {
+  id: string;
+  tenant_id: string;
+  product_id: string;
+  branch_id: string;
+  selling_price: string;
+  pricing_method: Generated<'PROFIT_MARGIN' | 'COST_MARKUP'>;
+  target_percentage: string | null;
+  rounding_rule: Generated<
+    'NONE' | 'NEAREST_0_01' | 'NEAREST_0_50' | 'NEAREST_1' | 'NEAREST_5' | 'NEAREST_10' | 'CEIL_0_50' | 'CEIL_1' | 'CEIL_5' | 'CEIL_10'
+  >;
+  min_selling_price: string | null;
+  max_discount_pct: string | null;
+  effective_date: Generated<string | Date>;
+  is_active: Generated<boolean>;
+  needs_review: Generated<boolean>;
+  review_reason: string | null;
+  approved_by_user_id: string | null;
+  approved_at: Date | null;
+  sync_version: Generated<string | number>;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface PriceSuggestionsTable {
+  id: string;
+  tenant_id: string;
+  product_id: string;
+  scope: 'GLOBAL' | 'BRANCH';
+  branch_id: string | null;
+  source_event_type:
+    | 'GRN_POSTED'
+    | 'COST_EDIT'
+    | 'STOCK_MOVEMENT'
+    | 'BRANCH_PROPOSAL'
+    | 'GLOBAL_RULE_CHANGE'
+    | 'MANUAL_RECALC';
+  source_event_key: string | null;
+  cost_change_direction: 'INCREASE' | 'DECREASE' | 'UNCHANGED';
+  old_cost: string;
+  new_cost: string;
+  cost_basis: 'LAST_PURCHASE_COST' | 'MOVING_AVERAGE_COST' | 'HIGHEST_RECENT_COST';
+  current_selling_price: string;
+  suggested_selling_price: string;
+  final_approved_price: string | null;
+  pricing_method: 'PROFIT_MARGIN' | 'COST_MARKUP';
+  target_percentage: string;
+  rounding_rule:
+    | 'NONE'
+    | 'NEAREST_0_01'
+    | 'NEAREST_0_50'
+    | 'NEAREST_1'
+    | 'NEAREST_5'
+    | 'NEAREST_10'
+    | 'CEIL_0_50'
+    | 'CEIL_1'
+    | 'CEIL_5'
+    | 'CEIL_10';
+  reason: string;
+  effective_date: Generated<string | Date>;
+  status: Generated<'PENDING' | 'APPROVED' | 'MODIFIED_APPROVED' | 'REJECTED' | 'DEFERRED' | 'SUPERSEDED'>;
+  created_by_user_id: string;
+  reviewed_by_user_id: string | null;
+  review_notes: string | null;
+  deferred_until: string | Date | null;
+  created_at: Generated<Date>;
+  reviewed_at: Date | null;
+}
+
+export interface ProductPriceHistoryTable {
+  id: string;
+  tenant_id: string;
+  product_id: string;
+  scope: 'GLOBAL' | 'BRANCH';
+  branch_id: string | null;
+  suggestion_id: string | null;
+  previous_price: string;
+  new_price: string;
+  cost_snapshot: string;
+  pricing_method: 'PROFIT_MARGIN' | 'COST_MARKUP' | null;
+  target_percentage: string | null;
+  rounding_rule: string | null;
+  reason: string;
+  actor_user_id: string;
+  approver_user_id: string;
+  effective_date: Generated<string | Date>;
+  approved_at: Generated<Date>;
+  created_at: Generated<Date>;
+}
+
 export interface NexStockDatabase {
   schema_migrations: SchemaMigrationsTable;
   idempotency_keys: IdempotencyKeysTable;
@@ -1401,6 +1697,7 @@ export interface NexStockDatabase {
   sync_command_log: SyncCommandLogTable;
   sync_conflicts: SyncConflictsTable;
   currencies: CurrenciesTable;
+  units_of_measure: UnitsOfMeasureTable;
   tenants: TenantsTable;
   branches: BranchesTable;
   warehouses: WarehousesTable;
@@ -1474,4 +1771,16 @@ export interface NexStockDatabase {
   customer_credit_writeoffs: CustomerCreditWriteoffsTable;
   customer_credit_notes: CustomerCreditNotesTable;
   tenant_invitations: TenantInvitationsTable;
+  purchase_orders: PurchaseOrdersTable;
+  purchase_order_lines: PurchaseOrderLinesTable;
+  goods_receipts: GoodsReceiptsTable;
+  goods_receipt_lines: GoodsReceiptLinesTable;
+  supplier_returns: SupplierReturnsTable;
+  pos_returns: PosReturnsTable;
+  pos_return_lines: PosReturnLinesTable;
+  pricing_settings: PricingSettingsTable;
+  product_pricing_rules: ProductPricingRulesTable;
+  product_branch_prices: ProductBranchPricesTable;
+  price_suggestions: PriceSuggestionsTable;
+  product_price_history: ProductPriceHistoryTable;
 }

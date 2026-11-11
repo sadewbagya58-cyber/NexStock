@@ -110,6 +110,17 @@ export type PermissionKey =
   | 'crm:writeoff:approve'
   | 'crm:report:read'
   | 'crm:settings:manage'
+  | 'cat:uom:read'
+  | 'cat:pricing:read'
+  | 'cat:pricing:suggest'
+  | 'cat:pricing:approve_global'
+  | 'cat:pricing:approve_branch'
+  | 'cat:pricing:policy_manage'
+  | 'pur:po:read'
+  | 'pur:po:manage'
+  | 'pur:grn:post'
+  | 'pur:return:post'
+  | 'pos:sale:return'
   | 'rep:report:view'
   | 'rep:report:export';
 
@@ -125,9 +136,19 @@ export const PERMISSIONS_CATALOG: readonly PermissionItem[] = [
   { key: 'cat:category:read', module: 'Categories', action: 'View', name: 'View Categories', description: 'View product category trees and taxonomies.' },
   { key: 'cat:category:manage', module: 'Categories', action: 'Manage', name: 'Manage Categories', description: 'Create, edit, and organize product categories.' },
 
-  // 4. Suppliers
+  // 4. Suppliers & Purchasing
   { key: 'pur:supplier:read', module: 'Suppliers', action: 'View', name: 'View Suppliers', description: 'Browse supplier profiles, contacts, and linked products.' },
   { key: 'pur:supplier:manage', module: 'Suppliers', action: 'Manage', name: 'Manage Suppliers', description: 'Create and update vendor records and supply terms.' },
+  { key: 'pur:po:read', module: 'Purchasing', action: 'View', name: 'View Purchase Orders & GRNs', description: 'Browse supplier purchase orders, goods receipts, and returns.' },
+  { key: 'pur:po:manage', module: 'Purchasing', action: 'Manage', name: 'Manage Purchase Orders', description: 'Create, approve, and manage supplier purchase orders.' },
+  { key: 'pur:grn:post', module: 'Purchasing', action: 'Create', name: 'Receive Goods (GRN)', description: 'Post supplier goods receipts and update warehouse stock and costs.' },
+  { key: 'pur:return:post', module: 'Purchasing', action: 'Manage', name: 'Post Supplier Returns', description: 'Return defective or excess inventory back to suppliers.' },
+  { key: 'cat:uom:read', module: 'Products', action: 'View', name: 'View Units of Measure', description: 'Read standardized measurement units and conversion factors.' },
+  { key: 'cat:pricing:read', module: 'Pricing', action: 'View', name: 'View Smart Pricing & Margins', description: 'Inspect pricing rules, margin analytics, price suggestions, branch prices, and history.' },
+  { key: 'cat:pricing:suggest', module: 'Pricing', action: 'Create', name: 'Submit & Defer Price Suggestions', description: 'Generate or propose price suggestions and branch price override requests.' },
+  { key: 'cat:pricing:approve_global', module: 'Pricing', action: 'Approve', name: 'Approve Global Prices', description: 'Approve, edit, reject, and activate global catalog prices and pricing rules.' },
+  { key: 'cat:pricing:approve_branch', module: 'Pricing', action: 'Approve', name: 'Approve Branch Price Overrides', description: 'Approve or reject branch-specific selling prices subject to tenant policy.' },
+  { key: 'cat:pricing:policy_manage', module: 'Pricing', action: 'Manage', name: 'Configure Pricing Policies', description: 'Configure default margin/markup methods, rounding rules, and branch approval workflows.' },
 
   // 5. Stock Movements
   { key: 'inv:movement:read', module: 'Stock Movements', action: 'View', name: 'View Stock Movements', description: 'Inspect stock movement ledger history.' },
@@ -171,6 +192,7 @@ export const PERMISSIONS_CATALOG: readonly PermissionItem[] = [
   // 14. Sales History
   { key: 'pos:sale:read', module: 'Sales History', action: 'View', name: 'View Sales History', description: 'Browse completed POS invoices, tickets, and receipts.' },
   { key: 'pos:sale:void', module: 'Sales History', action: 'Delete', name: 'Void Completed Sales', description: 'Authorize supervisor voiding and return items to stock.' },
+  { key: 'pos:sale:return', module: 'Sales History', action: 'Manage', name: 'Process Customer Returns', description: 'Process partial or full POS customer returns with stock condition handling.' },
 
   // 15. Employees
   { key: 'hrm:employee:read', module: 'Employees', action: 'View', name: 'View Employee Directory', description: 'Browse staff records, contact info, and employment status.' },
@@ -311,6 +333,14 @@ export const SYSTEM_ROLE_DEFINITIONS: Readonly<
       'cat:product:manage',
       'pur:supplier:read',
       'pur:supplier:manage',
+      'pur:po:read',
+      'pur:po:manage',
+      'pur:grn:post',
+      'pur:return:post',
+      'cat:uom:read',
+      'cat:pricing:read',
+      'cat:pricing:suggest',
+      'cat:pricing:approve_branch',
       'inv:balance:read',
       'inv:movement:read',
       'inv:movement:post',
@@ -321,6 +351,7 @@ export const SYSTEM_ROLE_DEFINITIONS: Readonly<
       'pos:sale:create',
       'pos:sale:read',
       'pos:sale:void',
+      'pos:sale:return',
       'pos:payment:create',
       'inv:batch:read',
       'inv:batch:manage',
@@ -372,12 +403,14 @@ export const SYSTEM_ROLE_DEFINITIONS: Readonly<
       'i18n:settings:read',
       'cat:category:read',
       'cat:product:read',
+      'cat:uom:read',
       'inv:balance:read',
       'pos:register:read',
       'pos:shift:open',
       'pos:shift:close',
       'pos:sale:create',
       'pos:sale:read',
+      'pos:sale:return',
       'pos:payment:create',
       'inv:batch:read',
       'inv:serial:read',
@@ -402,7 +435,11 @@ export const SYSTEM_ROLE_DEFINITIONS: Readonly<
       'i18n:settings:read',
       'cat:category:read',
       'cat:product:read',
+      'cat:uom:read',
       'pur:supplier:read',
+      'pur:po:read',
+      'pur:grn:post',
+      'pur:return:post',
       'inv:balance:read',
       'inv:movement:read',
       'inv:movement:post',
@@ -427,8 +464,15 @@ export const SYSTEM_ROLE_DEFINITIONS: Readonly<
       'cat:category:manage',
       'cat:product:read',
       'cat:product:manage',
+      'cat:uom:read',
+      'cat:pricing:read',
+      'cat:pricing:suggest',
       'pur:supplier:read',
       'pur:supplier:manage',
+      'pur:po:read',
+      'pur:po:manage',
+      'pur:grn:post',
+      'pur:return:post',
       'inv:balance:read',
       'inv:movement:read',
       'inv:movement:post',
@@ -456,7 +500,10 @@ export const SYSTEM_ROLE_DEFINITIONS: Readonly<
       'i18n:tax:manage',
       'cat:category:read',
       'cat:product:read',
+      'cat:uom:read',
+      'cat:pricing:read',
       'pur:supplier:read',
+      'pur:po:read',
       'inv:balance:read',
       'inv:movement:read',
       'pos:sale:read',

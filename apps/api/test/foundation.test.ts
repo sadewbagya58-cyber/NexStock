@@ -355,6 +355,16 @@ describe('@nexstock/api — Milestone 0 Foundation, RLS, Idempotency & Sync Inva
           name: '0024_membership_lifecycle_deactivated_suspended',
           filename: '0024_membership_lifecycle_deactivated_suspended.sql',
         },
+        {
+          version: 25,
+          name: '0025_uom_foundation_and_variable_products',
+          filename: '0025_uom_foundation_and_variable_products.sql',
+        },
+        {
+          version: 26,
+          name: '0026_smart_pricing_management',
+          filename: '0026_smart_pricing_management.sql',
+        },
       ]);
     });
 
@@ -437,6 +447,8 @@ describe('@nexstock/api — Milestone 0 Foundation, RLS, Idempotency & Sync Inva
         '0022_category_color_and_staff_role.sql',
         '0023_phase72_membership_revocation_lifecycle.sql',
         '0024_membership_lifecycle_deactivated_suspended.sql',
+        '0025_uom_foundation_and_variable_products.sql',
+        '0026_smart_pricing_management.sql',
       ]);
 
       await expect(

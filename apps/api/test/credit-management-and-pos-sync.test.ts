@@ -807,4 +807,163 @@ describe('@nexstock/api — Customer Credit Management, POS Real-Time Sync & Cas
       expect(res.statusCode).toBe(403);
     });
   });
+
+  describe('BUG-081 & BUG-079/BUG-082 Backend Contracts, paymentReference & Idempotency Remediation', () => {
+    it('accepts paymentReference, enforces idempotency-key replay, and surfaces externalReference & allocations in list and receipt endpoints', async () => {
+      // 1. Check initial account state & create an unpaid credit sale on Customer 1
+      const beforeAccRes = await app.inject({
+        method: 'GET',
+        url: `/v1/credit/accounts/${customer1CreditAccountId}`,
+        headers: authHeaders(cashierToken),
+      });
+      expect(beforeAccRes.statusCode).toBe(200);
+      const beforeBalance = Number(beforeAccRes.json().currentBalance);
+
+      const saleKey = generateUuidV7();
+      const saleRes = await app.inject({
+        method: 'POST',
+        url: '/v1/pos/sales',
+        headers: authHeaders(cashierToken, { 'idempotency-key': saleKey }),
+        payload: {
+          registerId,
+          shiftId,
+          customerId: customer1Id,
+          lines: [
+            {
+              productId: testProductId,
+              quantity: '1.0000',
+              uomCode: 'BAG',
+            },
+          ],
+          payments: [
+            {
+              paymentMethod: 'CREDIT',
+              amount: '1500.0000',
+              tenderedAmount: '1500.0000',
+            },
+          ],
+        },
+      });
+      expect(saleRes.statusCode).toBe(201);
+
+      // 2. Submit Bank Transfer payment WITH paymentReference & idempotency-key
+      const idempKey = generateUuidV7();
+      const payPayload = {
+        accountId: customer1CreditAccountId,
+        amount: '1000.0000',
+        paymentMethod: 'BANK_TRANSFER',
+        paymentReference: 'SLT-FT-990011',
+        notes: 'Bank transfer verified on statement',
+      };
+
+      const payRes = await app.inject({
+        method: 'POST',
+        url: '/v1/credit/payments',
+        headers: authHeaders(cashierToken, { 'idempotency-key': idempKey }),
+        payload: payPayload,
+      });
+
+      expect(payRes.statusCode).toBe(201);
+      const payment = payRes.json();
+      expect(payment.externalReference).toBe('SLT-FT-990011');
+      expect(payment.paymentMethod).toBe('BANK_TRANSFER');
+      expect(payment.amount).toBe('1000.0000');
+      expect(Array.isArray(payment.allocations)).toBe(true);
+      expect(payment.allocations.length).toBeGreaterThan(0);
+
+      // 3. Replay exact same idempotency-key -> must NOT duplicate payment or double-deduct balance
+      const replayRes = await app.inject({
+        method: 'POST',
+        url: '/v1/credit/payments',
+        headers: authHeaders(cashierToken, { 'idempotency-key': idempKey }),
+        payload: payPayload,
+      });
+      expect([200, 201]).toContain(replayRes.statusCode);
+      expect(replayRes.headers['x-idempotent-replayed']).toBe('true');
+      expect(replayRes.json().id).toBe(payment.id);
+
+      // Verify exact balance arithmetic: beforeBalance + 1500 - 1000
+      const afterAccRes = await app.inject({
+        method: 'GET',
+        url: `/v1/credit/accounts/${customer1CreditAccountId}`,
+        headers: authHeaders(cashierToken),
+      });
+      expect(afterAccRes.statusCode).toBe(200);
+      const afterAcc = afterAccRes.json();
+      expect(Number(afterAcc.currentBalance)).toBeCloseTo(beforeBalance + 500, 4);
+      expect(Number(afterAcc.availableCredit)).toBeCloseTo(
+        Math.max(0, Number(afterAcc.creditLimit) - Number(afterAcc.currentBalance)),
+        4,
+      );
+
+      // 4. Verify list payments endpoint includes externalReference and allocations
+      const listPayRes = await app.inject({
+        method: 'GET',
+        url: `/v1/credit/accounts/${customer1CreditAccountId}/payments`,
+        headers: authHeaders(cashierToken),
+      });
+      expect(listPayRes.statusCode).toBe(200);
+      const matchedPayment = listPayRes.json().items.find((p: any) => p.id === payment.id);
+      expect(matchedPayment).toBeDefined();
+      expect(matchedPayment.externalReference).toBe('SLT-FT-990011');
+      expect(Array.isArray(matchedPayment.allocations)).toBe(true);
+      expect(matchedPayment.allocations.length).toBeGreaterThan(0);
+
+      // 5. Verify payment receipt endpoint includes externalReference and allocations
+      const receiptRes = await app.inject({
+        method: 'GET',
+        url: `/v1/credit/payments/${payment.id}/receipt`,
+        headers: authHeaders(cashierToken),
+      });
+      expect(receiptRes.statusCode).toBe(200);
+      const receipt = receiptRes.json();
+      expect(receipt.externalReference).toBe('SLT-FT-990011');
+      expect(Array.isArray(receipt.allocations)).toBe(true);
+      expect(receipt.allocations.length).toBeGreaterThan(0);
+    });
+
+    it('accepts optional payment without paymentReference while strictly rejecting truly unknown properties with 400', async () => {
+      const cashPayRes = await app.inject({
+        method: 'POST',
+        url: '/v1/credit/payments',
+        headers: authHeaders(cashierToken),
+        payload: {
+          accountId: customer1CreditAccountId,
+          amount: '100.0000',
+          paymentMethod: 'CASH',
+        },
+      });
+      expect(cashPayRes.statusCode).toBe(201);
+      expect(cashPayRes.json().externalReference).toBeNull();
+
+      const badRes = await app.inject({
+        method: 'POST',
+        url: '/v1/credit/payments',
+        headers: authHeaders(cashierToken),
+        payload: {
+          accountId: customer1CreditAccountId,
+          amount: '100.0000',
+          paymentMethod: 'CASH',
+          unexpectedExtraField: 'should-fail-validation',
+        },
+      });
+      expect(badRes.statusCode).toBe(400);
+    });
+
+    it('supports customer pagination & status filtering via /v1/customers', async () => {
+      const listRes = await app.inject({
+        method: 'GET',
+        url: '/v1/customers?limit=2&offset=0&status=ACTIVE',
+        headers: authHeaders(cashierToken),
+      });
+      expect(listRes.statusCode).toBe(200);
+      const body = listRes.json();
+      expect(Array.isArray(body.items)).toBe(true);
+      expect(body.items.length).toBeLessThanOrEqual(2);
+      expect(typeof body.total).toBe('number');
+      for (const c of body.items) {
+        expect(c.status).toBe('ACTIVE');
+      }
+    });
+  });
 });

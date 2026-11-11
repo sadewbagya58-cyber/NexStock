@@ -5,24 +5,35 @@ import type {
   CreateProductRequest,
   ListCategoriesQuery,
   ListProductsQuery,
+  MeasurementCategory,
   ProductBarcodeResponse,
+  ProductQtyMode,
   ProductResponse,
   ProductType,
   ProductUnitConversionResponse,
   RecordLifecycleStatus,
   TrackingMode,
+  UnitOfMeasureResponse,
   UpdateCategoryRequest,
   UpdateProductRequest,
   ValuationMethod,
 } from '@nexstock/contracts';
-import { Money, Quantity } from '@nexstock/domain-core';
+import {
+  CANONICAL_UOM_CATALOG,
+  Money,
+  Quantity,
+  UomConversionError,
+  resolveUomRationalFactor,
+} from '@nexstock/domain-core';
 import {
   AppError,
   type TenantTransactionContext,
   appendAuditLog,
   enqueueOutboxEvent,
   generateUuidV7,
+  realtimeEventHub,
 } from '../../shared/index.js';
+import { triggerCostChangeSuggestionIfApplicable } from './pricing.service.js';
 import { assertSubscriptionEntitlement } from '../../sub/index.js';
 import { assertAuthorized } from '../../iam/index.js';
 
@@ -603,6 +614,14 @@ type ProductRowForHydration = {
   status: RecordLifecycleStatus;
   category_id: string | null;
   base_uom: string;
+  product_qty_mode?: ProductQtyMode | null;
+  measurement_category?: MeasurementCategory | null;
+  purchase_uom?: string | null;
+  price_uom?: string | null;
+  allowed_selling_uoms?: unknown;
+  qty_decimal_precision?: number | null;
+  featured_pos?: boolean | null;
+  density_g_per_ml?: string | null;
   purchase_cost: string;
   selling_price: string;
   tax_group_id: string | null;
@@ -619,6 +638,211 @@ type ProductRowForHydration = {
   updated_at: Date | string;
   archived_at: Date | string | null;
 };
+
+function parseAllowedSellingUomsJson(
+  raw: unknown,
+  fallbackBaseUom: string,
+): string[] {
+  let list: string[] = [];
+  if (Array.isArray(raw)) {
+    list = raw.map((u) => String(u).trim().toUpperCase()).filter(Boolean);
+  } else if (typeof raw === 'string' && raw.trim().startsWith('[')) {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (Array.isArray(parsed)) {
+        list = parsed.map((u) => String(u).trim().toUpperCase()).filter(Boolean);
+      }
+    } catch {
+      list = [];
+    }
+  }
+  const deduped = [...new Set(list)];
+  return deduped.length > 0 ? deduped : [fallbackBaseUom];
+}
+
+function getDefaultAllowedSellingUoms(
+  baseUom: string,
+  qtyMode: ProductQtyMode,
+  category: MeasurementCategory | null,
+): string[] {
+  if (qtyMode !== 'VARIABLE') {
+    return [baseUom];
+  }
+  if (category === 'WEIGHT') {
+    return [...new Set([baseUom, 'KG', 'G'])];
+  }
+  if (category === 'VOLUME') {
+    return [...new Set([baseUom, 'L', 'ML'])];
+  }
+  if (category === 'LENGTH') {
+    return [...new Set([baseUom, 'M', 'CM'])];
+  }
+  return [baseUom];
+}
+
+function resolveAndValidateProductUomConfig(params: {
+  readonly baseUom: string;
+  readonly productQtyMode?: ProductQtyMode | undefined;
+  readonly measurementCategory?: MeasurementCategory | null | undefined;
+  readonly purchaseUom?: string | null | undefined;
+  readonly priceUom?: string | null | undefined;
+  readonly allowedSellingUoms?: readonly string[] | undefined;
+  readonly qtyDecimalPrecision?: number | undefined;
+  readonly featuredPos?: boolean | undefined;
+  readonly densityGPerMl?: string | null | undefined;
+  readonly customConversions: ReadonlyArray<{
+    readonly uomCode: string;
+    readonly conversionFactorToBase: string;
+  }>;
+}): {
+  readonly productQtyMode: ProductQtyMode;
+  readonly measurementCategory: MeasurementCategory | null;
+  readonly purchaseUom: string;
+  readonly priceUom: string;
+  readonly allowedSellingUoms: string[];
+  readonly qtyDecimalPrecision: number;
+  readonly featuredPos: boolean;
+  readonly densityGPerMl: string | null;
+} {
+  const baseUom = params.baseUom.trim().toUpperCase();
+  const productQtyMode: ProductQtyMode = params.productQtyMode ?? 'STANDARD';
+  const canonicalBase = CANONICAL_UOM_CATALOG[baseUom];
+
+  let normalizedDensity: string | null = null;
+  if (params.densityGPerMl !== undefined && params.densityGPerMl !== null) {
+    let parsedDensity: Quantity;
+    try {
+      parsedDensity = Quantity.fromDecimalString(params.densityGPerMl);
+    } catch {
+      throw new AppError({
+        statusCode: 400,
+        errorCode: 'CAT_INVALID_UOM_CONVERSION',
+        title: 'Invalid Product Density',
+        detail: `densityGPerMl "${params.densityGPerMl}" is not a valid positive decimal value.`,
+      });
+    }
+    if (!parsedDensity.isPositive()) {
+      throw new AppError({
+        statusCode: 400,
+        errorCode: 'CAT_INVALID_UOM_CONVERSION',
+        title: 'Invalid Product Density',
+        detail: 'densityGPerMl must be strictly greater than zero.',
+      });
+    }
+    normalizedDensity = parsedDensity.toDecimalString();
+  }
+
+  let measurementCategory: MeasurementCategory | null =
+    params.measurementCategory !== undefined
+      ? params.measurementCategory
+      : canonicalBase
+        ? canonicalBase.category
+        : null;
+
+  if (
+    params.measurementCategory &&
+    canonicalBase &&
+    canonicalBase.category !== params.measurementCategory &&
+    canonicalBase.category !== 'COUNT'
+  ) {
+    throw new AppError({
+      statusCode: 400,
+      errorCode: 'CAT_INVALID_UOM_CONVERSION',
+      title: 'Measurement Category Mismatch',
+      detail: `Base UoM "${baseUom}" belongs to ${canonicalBase.category}, not ${params.measurementCategory}.`,
+    });
+  }
+
+  if (measurementCategory === null && canonicalBase) {
+    measurementCategory = canonicalBase.category;
+  }
+
+  const purchaseUom =
+    params.purchaseUom?.trim().toUpperCase() || baseUom;
+  const priceUom = params.priceUom?.trim().toUpperCase() || baseUom;
+
+  const rawAllowed =
+    params.allowedSellingUoms && params.allowedSellingUoms.length > 0
+      ? params.allowedSellingUoms
+          .map((u) => u.trim().toUpperCase())
+          .filter(Boolean)
+      : getDefaultAllowedSellingUoms(baseUom, productQtyMode, measurementCategory);
+  const allowedSellingUoms = [...new Set(rawAllowed)];
+
+  const unitsToValidate = [...new Set([purchaseUom, priceUom, ...allowedSellingUoms])];
+  for (const unit of unitsToValidate) {
+    try {
+      resolveUomRationalFactor({
+        fromUom: unit,
+        toUom: baseUom,
+        productBaseUom: baseUom,
+        customConversions: params.customConversions,
+        densityGPerMl: normalizedDensity,
+      });
+    } catch (err) {
+      if (err instanceof UomConversionError) {
+        throw new AppError({
+          statusCode: 400,
+          errorCode: 'CAT_INVALID_UOM_CONVERSION',
+          title: 'Incompatible Unit of Measure',
+          detail: err.message,
+        });
+      }
+      throw err;
+    }
+  }
+
+  const qtyDecimalPrecision =
+    params.qtyDecimalPrecision !== undefined
+      ? params.qtyDecimalPrecision
+      : productQtyMode === 'VARIABLE'
+        ? 3
+        : 0;
+
+  return {
+    productQtyMode,
+    measurementCategory,
+    purchaseUom,
+    priceUom,
+    allowedSellingUoms,
+    qtyDecimalPrecision,
+    featuredPos: Boolean(params.featuredPos ?? false),
+    densityGPerMl: normalizedDensity,
+  };
+}
+
+export async function listUnitsOfMeasure(
+  trx: TenantTransactionContext,
+): Promise<UnitOfMeasureResponse[]> {
+  await assertAuthorized(trx, {
+    permission: 'cat:uom:read',
+  });
+
+  await assertSubscriptionEntitlement(trx, {
+    requireWriteAccess: false,
+  });
+
+  const rows = await trx.db
+    .selectFrom('units_of_measure')
+    .selectAll()
+    .where('is_active', '=', true)
+    .orderBy('category', 'asc')
+    .orderBy('code', 'asc')
+    .execute();
+
+  return rows.map((r) => ({
+    code: r.code,
+    name: r.name,
+    category: r.category,
+    baseUnitCode: r.base_unit_code,
+    conversionToBase: Quantity.fromDecimalString(
+      String(r.conversion_to_base),
+    ).toDecimalString(),
+    decimalPrecision: Number(r.decimal_precision),
+    isFractional: Boolean(r.is_fractional),
+    isActive: Boolean(r.is_active),
+  }));
+}
 
 async function hydrateProductsBatch(
   trx: TenantTransactionContext,
@@ -688,6 +912,19 @@ async function hydrateProductsBatch(
     status: row.status,
     categoryId: row.category_id,
     baseUom: row.base_uom,
+    productQtyMode: (row.product_qty_mode ?? 'STANDARD') as ProductQtyMode,
+    measurementCategory: (row.measurement_category ?? null) as MeasurementCategory | null,
+    purchaseUom: row.purchase_uom ?? row.base_uom,
+    priceUom: row.price_uom ?? row.base_uom,
+    allowedSellingUoms: parseAllowedSellingUomsJson(
+      row.allowed_selling_uoms,
+      row.base_uom,
+    ),
+    qtyDecimalPrecision: row.qty_decimal_precision ?? 0,
+    featuredPos: Boolean(row.featured_pos ?? false),
+    densityGPerMl: row.density_g_per_ml
+      ? Quantity.fromDecimalString(String(row.density_g_per_ml)).toDecimalString()
+      : null,
     purchaseCost: Money.fromDecimalString(
       String(row.purchase_cost),
       baseCurrency,
@@ -978,6 +1215,19 @@ export async function createProduct(
     }
   }
 
+  const uomConfig = resolveAndValidateProductUomConfig({
+    baseUom,
+    productQtyMode: input.productQtyMode,
+    measurementCategory: input.measurementCategory,
+    purchaseUom: input.purchaseUom,
+    priceUom: input.priceUom,
+    allowedSellingUoms: input.allowedSellingUoms,
+    qtyDecimalPrecision: input.qtyDecimalPrecision,
+    featuredPos: input.featuredPos,
+    densityGPerMl: input.densityGPerMl,
+    customConversions: normalizedConversions,
+  });
+
   const productId = generateUuidV7();
   const now = new Date();
 
@@ -994,6 +1244,14 @@ export async function createProduct(
         status: 'ACTIVE',
         category_id: categoryId,
         base_uom: baseUom,
+        product_qty_mode: uomConfig.productQtyMode,
+        measurement_category: uomConfig.measurementCategory,
+        purchase_uom: uomConfig.purchaseUom,
+        price_uom: uomConfig.priceUom,
+        allowed_selling_uoms: JSON.stringify(uomConfig.allowedSellingUoms),
+        qty_decimal_precision: uomConfig.qtyDecimalPrecision,
+        featured_pos: uomConfig.featuredPos,
+        density_g_per_ml: uomConfig.densityGPerMl,
         purchase_cost: purchaseCost,
         selling_price: sellingPrice,
         tax_group_id: taxGroupId,
@@ -1421,8 +1679,26 @@ export async function updateProduct(
     }
   }
 
+  const nextBaseUom =
+    input.baseUom !== undefined
+      ? input.baseUom.trim().toUpperCase()
+      : existing.base_uom;
+  if (!nextBaseUom) {
+    throw new AppError({
+      statusCode: 400,
+      errorCode: 'ERR_VALIDATION_FAILED',
+      title: 'Invalid Base UoM',
+      detail: 'baseUom cannot be blank.',
+    });
+  }
+
+  let nextConversionsForValidation: Array<{
+    uomCode: string;
+    conversionFactorToBase: string;
+  }> = [];
+
   if (input.unitConversions !== undefined) {
-    const seenUoms = new Set<string>([existing.base_uom]);
+    const seenUoms = new Set<string>([nextBaseUom]);
     const normalizedConversions: Array<{
       uomCode: string;
       uomName: string;
@@ -1479,7 +1755,60 @@ export async function updateProduct(
         })
         .execute();
     }
+    nextConversionsForValidation = normalizedConversions.map((c) => ({
+      uomCode: c.uomCode,
+      conversionFactorToBase: c.conversionFactorToBase,
+    }));
+  } else {
+    const existingConvRows = await trx.db
+      .selectFrom('product_unit_conversions')
+      .select(['uom_code', 'conversion_factor_to_base'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('product_id', '=', productId)
+      .where('is_active', '=', true)
+      .execute();
+    nextConversionsForValidation = existingConvRows.map((c) => ({
+      uomCode: c.uom_code,
+      conversionFactorToBase: String(c.conversion_factor_to_base),
+    }));
   }
+
+  const resolvedUomConfig = resolveAndValidateProductUomConfig({
+    baseUom: nextBaseUom,
+    productQtyMode:
+      input.productQtyMode !== undefined
+        ? input.productQtyMode
+        : ((existing.product_qty_mode ?? 'STANDARD') as ProductQtyMode),
+    measurementCategory:
+      input.measurementCategory !== undefined
+        ? input.measurementCategory
+        : ((existing.measurement_category ?? null) as MeasurementCategory | null),
+    purchaseUom:
+      input.purchaseUom !== undefined
+        ? input.purchaseUom
+        : (existing.purchase_uom ?? nextBaseUom),
+    priceUom:
+      input.priceUom !== undefined
+        ? input.priceUom
+        : (existing.price_uom ?? nextBaseUom),
+    allowedSellingUoms:
+      input.allowedSellingUoms !== undefined
+        ? input.allowedSellingUoms
+        : parseAllowedSellingUomsJson(existing.allowed_selling_uoms, nextBaseUom),
+    qtyDecimalPrecision:
+      input.qtyDecimalPrecision !== undefined
+        ? input.qtyDecimalPrecision
+        : (existing.qty_decimal_precision ?? 0),
+    featuredPos:
+      input.featuredPos !== undefined
+        ? input.featuredPos
+        : Boolean(existing.featured_pos ?? false),
+    densityGPerMl:
+      input.densityGPerMl !== undefined
+        ? input.densityGPerMl
+        : (existing.density_g_per_ml ?? null),
+    customConversions: nextConversionsForValidation,
+  });
 
   let nextPrimaryBarcode = existing.primary_barcode;
   if (
@@ -1499,7 +1828,7 @@ export async function updateProduct(
       .execute();
 
     const validUoms = new Set<string>([
-      existing.base_uom,
+      nextBaseUom,
       ...currentConversions.map((c) => c.uom_code),
     ]);
 
@@ -1517,7 +1846,7 @@ export async function updateProduct(
       barcodeEntries.push({
         barcode: nextPrimaryBarcode,
         barcodeType: 'CODE128',
-        uomCode: existing.base_uom,
+        uomCode: nextBaseUom,
         isPrimary: true,
         isActive: true,
       });
@@ -1534,7 +1863,7 @@ export async function updateProduct(
           detail: `Barcode "${code}" is invalid or duplicated.`,
         });
       }
-      const targetUom = (alt.uomCode ?? existing.base_uom)
+      const targetUom = (alt.uomCode ?? nextBaseUom)
         .trim()
         .toUpperCase();
       if (!validUoms.has(targetUom)) {
@@ -1616,6 +1945,15 @@ export async function updateProduct(
           : existing.description,
       status: nextStatus,
       category_id: nextCategoryId,
+      base_uom: nextBaseUom,
+      product_qty_mode: resolvedUomConfig.productQtyMode,
+      measurement_category: resolvedUomConfig.measurementCategory,
+      purchase_uom: resolvedUomConfig.purchaseUom,
+      price_uom: resolvedUomConfig.priceUom,
+      allowed_selling_uoms: JSON.stringify(resolvedUomConfig.allowedSellingUoms),
+      qty_decimal_precision: resolvedUomConfig.qtyDecimalPrecision,
+      featured_pos: resolvedUomConfig.featuredPos,
+      density_g_per_ml: resolvedUomConfig.densityGPerMl,
       purchase_cost: nextPurchaseCost,
       selling_price: nextSellingPrice,
       tax_group_id: nextTaxGroupId,
@@ -1661,6 +1999,73 @@ export async function updateProduct(
       nextTrackInventory,
     },
   });
+
+  const prevCostMoney = Money.fromDecimalString(String(existing.purchase_cost), 'USD');
+  const nextCostMoney = Money.fromDecimalString(nextPurchaseCost, 'USD');
+  if (prevCostMoney.scaledUnits !== nextCostMoney.scaledUnits) {
+    await triggerCostChangeSuggestionIfApplicable(trx, {
+      productId,
+      oldCost: String(existing.purchase_cost),
+      newCost: nextPurchaseCost,
+      sourceEventType: 'COST_EDIT',
+      sourceEventKey: `COST_EDIT:${productId}:${nextSyncVersion}`,
+      reason: `Product purchase cost updated (${existing.purchase_cost} -> ${nextPurchaseCost})`,
+    });
+  }
+
+  const prevPriceMoney = Money.fromDecimalString(String(existing.selling_price), 'USD');
+  const nextPriceMoney = Money.fromDecimalString(nextSellingPrice, 'USD');
+  if (prevPriceMoney.scaledUnits !== nextPriceMoney.scaledUnits) {
+    await trx.db
+      .insertInto('product_price_history')
+      .values({
+        id: generateUuidV7(),
+        tenant_id: trx.tenantId,
+        product_id: productId,
+        scope: 'GLOBAL',
+        branch_id: null,
+        suggestion_id: null,
+        previous_price: prevPriceMoney.toDecimalString(),
+        new_price: nextPriceMoney.toDecimalString(),
+        cost_snapshot: nextPurchaseCost,
+        pricing_method: null,
+        target_percentage: null,
+        rounding_rule: null,
+        reason: 'Direct catalog product selling price edit',
+        actor_user_id: trx.userId,
+        approver_user_id: trx.userId,
+        effective_date: now.toISOString().slice(0, 10),
+        approved_at: now,
+        created_at: now,
+      })
+      .execute();
+
+    await trx.db
+      .updateTable('product_branch_prices')
+      .set({
+        needs_review: true,
+        review_reason: `Global base price updated from ${prevPriceMoney.toDecimalString()} to ${nextPriceMoney.toDecimalString()}; review branch override.`,
+        updated_at: now,
+      })
+      .where('tenant_id', '=', trx.tenantId)
+      .where('product_id', '=', productId)
+      .where('is_active', '=', true)
+      .execute();
+
+    realtimeEventHub.publish({
+      tenantId: trx.tenantId,
+      branchId: null,
+      eventType: 'PRICE_CHANGED',
+      data: {
+        productId,
+        sku: nextSku,
+        scope: 'GLOBAL',
+        branchId: null,
+        previousPrice: prevPriceMoney.toDecimalString(),
+        newPrice: nextPriceMoney.toDecimalString(),
+      },
+    });
+  }
 
   const updated = await trx.db
     .selectFrom('products')
@@ -1844,6 +2249,13 @@ export async function resolveProductForInventory(
   readonly trackingMode: TrackingMode;
   readonly valuationMethod: ValuationMethod;
   readonly baseUom: string;
+  readonly productQtyMode: ProductQtyMode;
+  readonly measurementCategory: MeasurementCategory | null;
+  readonly purchaseUom: string;
+  readonly priceUom: string;
+  readonly allowedSellingUoms: readonly string[];
+  readonly qtyDecimalPrecision: number;
+  readonly densityGPerMl: string | null;
   readonly purchaseCost: string;
   readonly reorderPoint: string;
   readonly reorderQty: string;
@@ -1861,6 +2273,13 @@ export async function resolveProductForInventory(
       'tracking_mode',
       'valuation_method',
       'base_uom',
+      'product_qty_mode',
+      'measurement_category',
+      'purchase_uom',
+      'price_uom',
+      'allowed_selling_uoms',
+      'qty_decimal_precision',
+      'density_g_per_ml',
       'purchase_cost',
       'reorder_point',
       'reorder_qty',
@@ -1906,6 +2325,18 @@ export async function resolveProductForInventory(
     trackingMode: (row.tracking_mode ?? 'NONE') as TrackingMode,
     valuationMethod: (row.valuation_method ?? 'MOVING_AVG') as ValuationMethod,
     baseUom: row.base_uom,
+    productQtyMode: (row.product_qty_mode ?? 'STANDARD') as ProductQtyMode,
+    measurementCategory: (row.measurement_category ?? null) as MeasurementCategory | null,
+    purchaseUom: row.purchase_uom ?? row.base_uom,
+    priceUom: row.price_uom ?? row.base_uom,
+    allowedSellingUoms: parseAllowedSellingUomsJson(
+      row.allowed_selling_uoms,
+      row.base_uom,
+    ),
+    qtyDecimalPrecision: row.qty_decimal_precision ?? 0,
+    densityGPerMl: row.density_g_per_ml
+      ? Quantity.fromDecimalString(String(row.density_g_per_ml)).toDecimalString()
+      : null,
     purchaseCost: String(row.purchase_cost),
     reorderPoint: String(row.reorder_point),
     reorderQty: String(row.reorder_qty),

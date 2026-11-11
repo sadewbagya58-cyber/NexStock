@@ -599,6 +599,20 @@ export function loadMembershipLifecycleDeactivatedSuspendedMigrationSql(): strin
   return sqlText;
 }
 
+export function loadUomFoundationAndVariableProductsMigrationSql(): string {
+  const filename = '0025_uom_foundation_and_variable_products.sql';
+  const sqlText = readFileSync(resolve(migrationsDir, filename), 'utf-8');
+  assertPostgresMigrationSqlCompatible(sqlText, filename);
+  return sqlText;
+}
+
+export function loadSmartPricingManagementMigrationSql(): string {
+  const filename = '0026_smart_pricing_management.sql';
+  const sqlText = readFileSync(resolve(migrationsDir, filename), 'utf-8');
+  assertPostgresMigrationSqlCompatible(sqlText, filename);
+  return sqlText;
+}
+
 export function getOrderedPostgresMigrations(): readonly PostgresMigrationSpec[] {
   return [
     {
@@ -768,6 +782,20 @@ export function getOrderedPostgresMigrations(): readonly PostgresMigrationSpec[]
       name: '0024_membership_lifecycle_deactivated_suspended',
       filename: '0024_membership_lifecycle_deactivated_suspended.sql',
       sql: loadMembershipLifecycleDeactivatedSuspendedMigrationSql(),
+    },
+    {
+      dialect: 'postgres',
+      version: 25,
+      name: '0025_uom_foundation_and_variable_products',
+      filename: '0025_uom_foundation_and_variable_products.sql',
+      sql: loadUomFoundationAndVariableProductsMigrationSql(),
+    },
+    {
+      dialect: 'postgres',
+      version: 26,
+      name: '0026_smart_pricing_management',
+      filename: '0026_smart_pricing_management.sql',
+      sql: loadSmartPricingManagementMigrationSql(),
     },
   ];
 }

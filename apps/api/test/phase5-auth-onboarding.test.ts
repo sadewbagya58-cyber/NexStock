@@ -19,6 +19,7 @@ import {
 describe('Phase 5.0 — Authentication & Business Foundation Integration Suite', () => {
   let harness: TestPostgresHarness;
   let devJwksProvider: StaticJwksProvider;
+  let app: Awaited<ReturnType<typeof buildApp>>;
 
   beforeAll(async () => {
     harness = await createTestPostgresHarness();
@@ -26,18 +27,19 @@ describe('Phase 5.0 — Authentication & Business Foundation Integration Suite',
     devJwksProvider = new StaticJwksProvider({
       keys: [devKeys.publicJwk],
     });
+    app = await buildApp({
+      db: harness.db,
+      jwksProvider: devJwksProvider,
+    });
   });
 
   afterAll(async () => {
+    await app.close();
     await harness.db.destroy();
   });
 
   describe('1. User Registration (POST /v1/auth/signup)', () => {
     it('successfully registers a new user, returns token, and syncs user to public.users', async () => {
-      const app = await buildApp({
-        db: harness.db,
-        jwksProvider: devJwksProvider,
-      });
 
       const uniqueEmail = `founder_${generateUuidV7()}@testcompany.com`;
       const res = await app.inject({
@@ -68,15 +70,9 @@ describe('Phase 5.0 — Authentication & Business Foundation Integration Suite',
       expect(dbUser).toBeDefined();
       expect(dbUser?.email).toBe(uniqueEmail.toLowerCase());
       expect(dbUser?.full_name).toBe('Jane Founder');
-
-      await app.close();
     });
 
     it('rejects weak passwords shorter than 8 characters (400 AUTH_WEAK_PASSWORD)', async () => {
-      const app = await buildApp({
-        db: harness.db,
-        jwksProvider: devJwksProvider,
-      });
 
       const res = await app.inject({
         method: 'POST',
@@ -92,15 +88,9 @@ describe('Phase 5.0 — Authentication & Business Foundation Integration Suite',
       const body = res.json();
       expect(['ERR_VALIDATION_FAILED', 'AUTH_WEAK_PASSWORD']).toContain(body.errorCode);
       expect(body.detail.toLowerCase()).toContain('password');
-
-      await app.close();
     });
 
     it('rejects duplicate email registrations (409 AUTH_EMAIL_ALREADY_EXISTS)', async () => {
-      const app = await buildApp({
-        db: harness.db,
-        jwksProvider: devJwksProvider,
-      });
 
       const duplicateEmail = `duplicate_${generateUuidV7()}@test.com`;
 
@@ -131,17 +121,11 @@ describe('Phase 5.0 — Authentication & Business Foundation Integration Suite',
       const body = res2.json();
       expect(body.errorCode).toBe('AUTH_EMAIL_ALREADY_EXISTS');
       expect(body.detail).toContain('already exists');
-
-      await app.close();
     });
   });
 
   describe('2. User Login (POST /v1/auth/login)', () => {
     it('authenticates a registered user and returns token, profile, and memberships', async () => {
-      const app = await buildApp({
-        db: harness.db,
-        jwksProvider: devJwksProvider,
-      });
 
       const email = `login_user_${generateUuidV7()}@company.com`;
       const password = 'CorrectPassword123!';
@@ -174,15 +158,9 @@ describe('Phase 5.0 — Authentication & Business Foundation Integration Suite',
       expect(body.user.email).toBe(email.toLowerCase());
       expect(body.user.fullName).toBe('Login Test User');
       expect(Array.isArray(body.memberships)).toBe(true);
-
-      await app.close();
     });
 
     it('rejects invalid password or malformed credentials (401 AUTH_INVALID_CREDENTIALS)', async () => {
-      const app = await buildApp({
-        db: harness.db,
-        jwksProvider: devJwksProvider,
-      });
 
       const res = await app.inject({
         method: 'POST',
@@ -197,17 +175,11 @@ describe('Phase 5.0 — Authentication & Business Foundation Integration Suite',
       const body = res.json();
       expect(body.errorCode).toBe('AUTH_INVALID_CREDENTIALS');
       expect(body.detail).toContain('Invalid email address or password');
-
-      await app.close();
     });
   });
 
   describe('3. User Logout & Password Recovery', () => {
     it('POST /v1/auth/logout succeeds with valid Bearer token', async () => {
-      const app = await buildApp({
-        db: harness.db,
-        jwksProvider: devJwksProvider,
-      });
 
       const userId = generateUuidV7();
       const token = signDevJwt({ userId, email: 'logout@test.com' });
@@ -224,15 +196,9 @@ describe('Phase 5.0 — Authentication & Business Foundation Integration Suite',
       const body = res.json();
       expect(body.success).toBe(true);
       expect(body.message).toContain('Logged out successfully');
-
-      await app.close();
     });
 
     it('POST /v1/auth/recover returns privacy-safe success message without leaking account existence', async () => {
-      const app = await buildApp({
-        db: harness.db,
-        jwksProvider: devJwksProvider,
-      });
 
       const res = await app.inject({
         method: 'POST',
@@ -245,17 +211,11 @@ describe('Phase 5.0 — Authentication & Business Foundation Integration Suite',
       expect(res.statusCode).toBe(200);
       const body = res.json();
       expect(body.message).toContain('password recovery link has been sent');
-
-      await app.close();
     });
   });
 
   describe('4. User Profile & Discovery (GET /v1/auth/me & GET /v1/org/my-tenants)', () => {
     it('GET /v1/auth/me rejects requests without Authorization header (401)', async () => {
-      const app = await buildApp({
-        db: harness.db,
-        jwksProvider: devJwksProvider,
-      });
 
       const res = await app.inject({
         method: 'GET',
@@ -263,14 +223,9 @@ describe('Phase 5.0 — Authentication & Business Foundation Integration Suite',
       });
 
       expect(res.statusCode).toBe(401);
-      await app.close();
     });
 
     it('GET /v1/auth/me returns user profile and empty memberships for new user', async () => {
-      const app = await buildApp({
-        db: harness.db,
-        jwksProvider: devJwksProvider,
-      });
 
       const userId = generateUuidV7();
       const email = `newbie_${generateUuidV7()}@test.com`;
@@ -300,17 +255,11 @@ describe('Phase 5.0 — Authentication & Business Foundation Integration Suite',
       expect(body.user.id).toBe(userId);
       expect(body.user.email).toBe(email);
       expect(body.memberships).toEqual([]);
-
-      await app.close();
     });
   });
 
   describe('5. Atomic Business Onboarding (POST /v1/org/onboard)', () => {
     it('atomically sets up tenant, first branch, warehouse, register, owner role, and trial subscription', async () => {
-      const app = await buildApp({
-        db: harness.db,
-        jwksProvider: devJwksProvider,
-      });
 
       const founderId = generateUuidV7();
       const founderEmail = `founder_${generateUuidV7()}@myretail.com`;
@@ -444,15 +393,9 @@ describe('Phase 5.0 — Authentication & Business Foundation Integration Suite',
       expect(registersRes.statusCode).toBe(200);
       expect(registersRes.json().length).toBe(1);
       expect(registersRes.json()[0].id).toBe(body.register.id);
-
-      await app.close();
     });
 
     it('strictly isolates tenant discovery between distinct users (User A cannot see User B)', async () => {
-      const app = await buildApp({
-        db: harness.db,
-        jwksProvider: devJwksProvider,
-      });
 
       // User A
       const userAId = generateUuidV7();
@@ -519,15 +462,9 @@ describe('Phase 5.0 — Authentication & Business Foundation Integration Suite',
       expect(bodyB.length).toBe(1);
       expect(bodyB[0].tenantId).toBe(tenantB.id);
       expect(bodyB[0].businessName).toBe('Beta Dynamics Ltd');
-
-      await app.close();
     });
 
     it('supports custom branch code, country code, and timezone during onboarding', async () => {
-      const app = await buildApp({
-        db: harness.db,
-        jwksProvider: devJwksProvider,
-      });
 
       const founderId = generateUuidV7();
       const founderEmail = `founder_custom_${generateUuidV7()}@colombo.lk`;
@@ -585,15 +522,9 @@ describe('Phase 5.0 — Authentication & Business Foundation Integration Suite',
 
       expect(dbLocalization).toBeDefined();
       expect(dbLocalization?.timezone).toBe('Asia/Colombo');
-
-      await app.close();
     });
 
     it('rejects onboarding without authentication or with invalid token (401)', async () => {
-      const app = await buildApp({
-        db: harness.db,
-        jwksProvider: devJwksProvider,
-      });
 
       // No auth header
       const resNoAuth = await app.inject({
@@ -621,15 +552,9 @@ describe('Phase 5.0 — Authentication & Business Foundation Integration Suite',
         },
       });
       expect(resBadAuth.statusCode).toBe(401);
-
-      await app.close();
     });
 
     it('rejects invalid branch code or unsupported currency and ensures complete rollback', async () => {
-      const app = await buildApp({
-        db: harness.db,
-        jwksProvider: devJwksProvider,
-      });
 
       const founderId = generateUuidV7();
       const founderEmail = `founder_rollback_${generateUuidV7()}@test.com`;
@@ -701,15 +626,9 @@ describe('Phase 5.0 — Authentication & Business Foundation Integration Suite',
         .where('legal_name', '=', 'Rollback Store Branch')
         .executeTakeFirst();
       expect(tenantBranch).toBeUndefined();
-
-      await app.close();
     });
 
     it('verifies all supported currencies (LKR, KWD, BHD, JPY, EUR, USD) succeed without substitution or RLS failure', async () => {
-      const app = await buildApp({
-        db: harness.db,
-        jwksProvider: devJwksProvider,
-      });
 
       const testCurrencies = ['LKR', 'KWD', 'BHD', 'JPY', 'EUR', 'USD'] as const;
 
@@ -742,15 +661,9 @@ describe('Phase 5.0 — Authentication & Business Foundation Integration Suite',
           .executeTakeFirst();
         expect(dbTenant?.base_currency.trim()).toBe(curr);
       }
-
-      await app.close();
     });
 
     it('self-heals missing subscription record for existing valid tenant and enables inventory access', async () => {
-      const app = await buildApp({
-        db: harness.db,
-        jwksProvider: devJwksProvider,
-      });
 
       const founderId = generateUuidV7();
       const founderEmail = `founder_repair_${generateUuidV7()}@testrepair.com`;
@@ -847,15 +760,9 @@ describe('Phase 5.0 — Authentication & Business Foundation Integration Suite',
       const entBody = entRes.json();
       expect(entBody.planCode).toBe('STARTER');
       expect(entBody.status).toBe('TRIALING');
-
-      await app.close();
     });
 
     it('denies access (403) or throws 404 when querying subscription entitlement for non-existent tenant', async () => {
-      const app = await buildApp({
-        db: harness.db,
-        jwksProvider: devJwksProvider,
-      });
 
       const userId = generateUuidV7();
       const token = signDevJwt({ userId, email: 'ghost@test.com' });
@@ -881,8 +788,6 @@ describe('Phase 5.0 — Authentication & Business Foundation Integration Suite',
           async (trx) => getTenantSubscriptionEntitlement(trx),
         ),
       ).rejects.toThrow(/No subscription record found/i);
-
-      await app.close();
     });
   });
 
@@ -1026,11 +931,6 @@ describe('Phase 5.0 — Authentication & Business Foundation Integration Suite',
         expect(sanitized).toContain(':***@');
 
         // Also verify Fastify error handler logging scrubs sensitive detail
-        const app = await buildApp({
-          db: harness.db,
-          jwksProvider: devJwksProvider,
-        });
-
         // Trigger an invalid password error
         await app.inject({
           method: 'POST',
@@ -1045,8 +945,6 @@ describe('Phase 5.0 — Authentication & Business Foundation Integration Suite',
         const allLogsText = JSON.stringify({ errorLogs, warnLogs });
         expect(allLogsText).not.toContain(secretPassword);
         expect(allLogsText).not.toContain('SUPER_SECRET_DB_PASSWORD');
-
-        await app.close();
       } finally {
         console.error = originalConsoleError;
         console.warn = originalConsoleWarn;

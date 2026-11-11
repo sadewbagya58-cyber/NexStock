@@ -2947,4 +2947,144 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       expect(html).toContain('/v1/subscriptions/entitlement');
     });
   });
+
+  // ============================================================================
+  // CREDIT UX, MOBILE RESPONSIVENESS & PAYMENT REFERENCE REMEDIATION
+  // (BUG-079, BUG-081, BUG-082, BUG-085)
+  // ============================================================================
+  describe('33. Credit Dashboard, Directory, Account Modal & Payment Remediation UI', () => {
+    it('enforces BUG-085 compact KPI/Aging grids and mobile cards for Top Customer Credit Accounts', () => {
+      const html = readFileSync(resolve(WEB_ROOT, 'public/index.html'), 'utf8');
+      expect(html).toContain('class="credit-kpi-grid"');
+      expect(html).toContain('class="credit-aging-grid"');
+      expect(html).toContain('class="credit-aging-card"');
+      expect(html).toContain('id="dashboardAccountsMobileCards"');
+      expect(html).toContain('@media (max-width: 768px)');
+      expect(html).toContain('@media (max-width: 380px)');
+    });
+
+    it('enforces BUG-079 Customer & Credit Account pagination, ACTIVE status mapping, CRITICAL_RISK option, and mobile cards', () => {
+      const html = readFileSync(resolve(WEB_ROOT, 'public/index.html'), 'utf8');
+      expect(html).toContain("const isCustActive = c.status ? c.status === 'ACTIVE' : (c.isActive !== false);");
+      expect(html).toContain('<option value="CRITICAL_RISK"');
+      expect(html).toContain('id="customersMobileCards"');
+      expect(html).toContain('id="creditAccountsMobileCards"');
+      expect(html).toContain('class="card credit-filter-bar"');
+      expect(html).toContain('class="credit-pagination-bar"');
+      expect(html).toContain('class="credit-acc-code"');
+    });
+
+    it('enforces BUG-082 distinct Ledger/Payments/Collections error vs empty vs populated states and modal scroll rules', () => {
+      const html = readFileSync(resolve(WEB_ROOT, 'public/index.html'), 'utf8');
+      expect(html).toContain('data-state="error"');
+      expect(html).toContain('data-state="empty"');
+      expect(html).toContain('data-state="populated"');
+      expect(html).toContain('class="credit-balances-grid"');
+      expect(html).toContain('class="credit-mobile-card credit-ledger-card"');
+      expect(html).toContain('class="credit-mobile-card credit-payment-card"');
+      expect(html).toContain('role="tablist"');
+      expect(html).toContain('max-height: 92dvh !important;');
+    });
+
+    it('enforces BUG-081 idempotency-key submission lock, DEBIT invoice allocation filter, openingBalance, and externalReference receipts', () => {
+      const html = readFileSync(resolve(WEB_ROOT, 'public/index.html'), 'utf8');
+      expect(html).toContain("'idempotency-key': idempotencyKey");
+      expect(html).toContain('state.activeCreditPaymentKey');
+      expect(html).toContain('state.isSubmittingCreditPayment');
+      expect(html).toContain("tx.entryDirection === 'DEBIT'");
+      expect(html).toContain('!tx.isReversed');
+      expect(html).toContain("parseFloat(tx.unpaidAmount || '0') > 0");
+      expect(html).toContain('openingBalance:');
+      expect(html).toContain('receipt.externalReference');
+      expect(html).toContain('receipt.allocations');
+    });
+  });
+
+  // =========================================================================
+  // 34. Phase 3 — BUG-084 Fractional Qty, UOM-03 Product Config, UOM-04 Purchasing, UOM-05 Variable-Qty POS & UOM-07 Customer Returns
+  // =========================================================================
+  describe('34. Phase 3 UOM, Fractional Quantities, Purchasing & Variable-Qty POS', () => {
+    it('fixes BUG-084 by formatting fractional quantities without integer rounding in movements, dashboard, and stocktakes', () => {
+      const html = readFileSync(resolve(WEB_ROOT, 'public/index.html'), 'utf8');
+      expect(html).toContain('function formatQty(val, maxDecimals = 6)');
+      expect(html).toContain('formatQty(totalOnHand)');
+      expect(html).toContain('ADJUSTMENT_POSITIVE');
+      expect(html).toContain('formatQty(l.expectedQty)');
+      expect(html).toContain('formatQty(l.varianceQty)');
+      expect(html).not.toContain("parseFloat(l.expectedQty || '0').toFixed(0)");
+    });
+
+    it('implements UOM-03 Variable-Qty product configuration and optional barcode support', () => {
+      const html = readFileSync(resolve(WEB_ROOT, 'public/index.html'), 'utf8');
+      expect(html).toContain("function renderProductUomConfigHtml(prefix, product = null)");
+      expect(html).toContain("renderProductUomConfigHtml('newProd', null)");
+      expect(html).toContain("renderProductUomConfigHtml('editProd', p)");
+      expect(html).toContain('productQtyMode');
+      expect(html).toContain('allowedSellingUoms');
+      expect(html).toContain('featuredPos');
+    });
+
+    it('implements UOM-04 Purchasing & GRN navigation, modals, and UOM-07 POS Customer Returns', async () => {
+      const { ALL_SPA_VIEW_IDS } = await import('../src/index.js');
+      expect(ALL_SPA_VIEW_IDS).toContain('purchasing');
+
+      const html = readFileSync(resolve(WEB_ROOT, 'public/index.html'), 'utf8');
+      expect(html).toContain("case 'purchasing': renderPurchasingView(); break;");
+      expect(html).toContain('async function renderPurchasingView(tabOverride)');
+      expect(html).toContain('async function openCreatePoModal()');
+      expect(html).toContain('async function approvePurchaseOrder(poId)');
+      expect(html).toContain('openReceiveGrnModal');
+      expect(html).toContain('async function openSupplierReturnModal()');
+      expect(html).toContain('openPosReturnModal');
+    });
+
+    it('implements UOM-05 Variable-Qty POS Quick Pick, Weight Modal, Proportionate Totals, and Scale Hook', () => {
+      const html = readFileSync(resolve(WEB_ROOT, 'public/index.html'), 'utf8');
+      expect(html).toContain('id="posWeighedProductsSection"');
+      expect(html).toContain('function openVariableQtyPosModal(');
+      expect(html).toContain('function triggerScaleReadForModal()');
+      expect(html).toContain('window.readElectronicScaleIntoModal');
+      expect(html).toContain('function formatReceiptLineSummary(l, receiptCurr)');
+    });
+  });
+
+  describe('35. Phase 4 & 6 Smart Pricing UI, POS SSE Price Updates & Electronic Scale Runtime', () => {
+    it('registers pricing view, permission gates, navigation, and Products shortcut cleanly', async () => {
+      const { ALL_SPA_VIEW_IDS } = await import('../src/index.js');
+      expect(ALL_SPA_VIEW_IDS).toContain('pricing');
+
+      const html = readFileSync(resolve(WEB_ROOT, 'public/index.html'), 'utf8');
+      expect(html).toContain("case 'pricing': renderSmartPricingView(); break;");
+      expect(html).toContain("data-view=\"pricing\"");
+      expect(html).toContain("'cat:pricing:read'");
+      expect(html).toContain("onclick=\"renderView('pricing')\"");
+    });
+
+    it('renders Smart Pricing KPI dashboard, suggestion queue, rule config, branch review alerts, and policy governance', () => {
+      const html = readFileSync(resolve(WEB_ROOT, 'public/index.html'), 'utf8');
+      expect(html).toContain('async function renderSmartPricingView(tabOverride = null)');
+      expect(html).toContain('function renderSmartPricingSuggestionsTab(');
+      expect(html).toContain('function renderSmartPricingRulesTab(');
+      expect(html).toContain('function renderSmartPricingBranchesTab(');
+      expect(html).toContain('function renderSmartPricingHistoryTab(');
+      expect(html).toContain('function renderSmartPricingSettingsTab(');
+      expect(html).toContain('OWNER_ADMIN_ONLY');
+      expect(html).toContain('BRANCH_MANAGER_OWN_BRANCH');
+      expect(html).toContain('approvePriceSuggestionQuick');
+      expect(html).toContain('openEditApproveSuggestionModal');
+      expect(html).toContain('openRejectDeferSuggestionModal');
+      expect(html).toContain('acknowledgeBranchPriceOverride');
+      expect(html).toContain('revertBranchPriceOverride');
+    });
+
+    it('handles realtime PRICE_CHANGED SSE events on POS without altering active cart lines and exposes hardware scale modal controls', () => {
+      const html = readFileSync(resolve(WEB_ROOT, 'public/index.html'), 'utf8');
+      expect(html).toContain("'PRICE_CHANGED'");
+      expect(html).toContain("type === 'PRICE_CHANGED'");
+      expect(html).toContain("p.priceSource === 'BRANCH_OVERRIDE'");
+      expect(html).toContain('function openPosScaleSettingsModal()');
+      expect(html).toContain('window.readElectronicScaleIntoModal = async function readElectronicScaleIntoModal()');
+      expect(html).toContain("entrySource = 'SCALE_WEIGHT'");
+    });
+  });
 });
