@@ -102,6 +102,8 @@ export interface TenantsTable {
   default_timezone: Generated<string>;
   country_code: Generated<string>;
   status: Generated<TenantLifecycleStatus>;
+  shop_display_name?: string | null;
+  logo_url?: string | null;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
 }
@@ -366,6 +368,8 @@ export interface ProductsTable {
   product_type: Generated<'STANDARD' | 'SERVICE' | 'BUNDLE'>;
   tracking_mode: Generated<'NONE' | 'BATCH' | 'BATCH_EXPIRY' | 'SERIAL'>;
   valuation_method: Generated<'MOVING_AVG' | 'FIFO'>;
+  allocation_policy: Generated<'FEFO' | 'FIFO' | 'MANUAL'>;
+  require_batch_selling_price: Generated<boolean>;
   status: Generated<'ACTIVE' | 'ARCHIVED'>;
   category_id: string | null;
   base_uom: string;
@@ -486,7 +490,9 @@ export type StockMovementTypeDb =
   | 'ADJUSTMENT_NEGATIVE'
   | 'CORRECTION_REVERSAL'
   | 'CUSTOMER_RETURN_RESTOCK'
-  | 'SUPPLIER_RETURN';
+  | 'SUPPLIER_RETURN'
+  | 'TRANSFER_OUT'
+  | 'TRANSFER_IN';
 
 export interface StockLedgerEntriesTable {
   id: string;
@@ -524,6 +530,8 @@ export interface StockLedgerEntriesTable {
     | 'CUSTOMER_RETURN'
     | 'SUPPLIER_RETURN'
     | 'STOCKTAKE'
+    | 'STOCK_TRANSFER'
+    | 'UOM_CORRECTION'
     | 'MANUAL'
     | 'MANUAL_WEIGHT'
     | 'SCALE_WEIGHT'
@@ -662,21 +670,38 @@ export interface SalesPaymentsTable {
 // Phase 4 Advanced Inventory Tables (Batches, Serials, Cost Layers, Stocktakes)
 // ============================================================================
 
+export type BatchStatusDb =
+  | 'ACTIVE'
+  | 'QUARANTINED'
+  | 'EXPIRED'
+  | 'INACTIVE'
+  | 'DAMAGED'
+  | 'DEPLETED';
+
 export interface InventoryBatchesTable {
   id: string;
   tenant_id: string;
+  branch_id: ColumnType<string | null, string | null | undefined, string | null | undefined>;
   product_id: string;
   warehouse_id: string;
   batch_number: string;
   supplier_id: string | null;
-  status: Generated<'ACTIVE' | 'QUARANTINED' | 'DEPLETED'>;
+  status: Generated<BatchStatusDb>;
   received_date: ColumnType<Date, Date | string, Date | string>;
   manufacturing_date: ColumnType<Date | null, Date | string | null, Date | string | null>;
   expiry_date: ColumnType<Date | null, Date | string | null, Date | string | null>;
   initial_quantity: string;
   current_quantity: Generated<string>;
+  reserved_quantity: Generated<string>;
   unit_cost: Generated<string>;
   selling_price: ColumnType<string | null, string | number | null | undefined, string | number | null | undefined>;
+  min_selling_price: ColumnType<string | null, string | number | null | undefined, string | number | null | undefined>;
+  max_discount_pct: ColumnType<string | null, string | number | null | undefined, string | number | null | undefined>;
+  batch_pricing_mode: Generated<'EXPLICIT' | 'INHERIT_PRODUCT'>;
+  internal_barcode: ColumnType<string | null, string | null | undefined, string | null | undefined>;
+  internal_barcode_type: Generated<'CODE128' | 'GS1_128'>;
+  goods_receipt_id: ColumnType<string | null, string | null | undefined, string | null | undefined>;
+  goods_receipt_line_id: ColumnType<string | null, string | null | undefined, string | null | undefined>;
   currency_code: string;
   quarantine_reason: string | null;
   created_at: Generated<Date>;
@@ -1502,6 +1527,9 @@ export interface GoodsReceiptLinesTable {
   line_total_cost: string;
   batch_number: string | null;
   expiry_date: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  batch_id: ColumnType<string | null, string | null | undefined, string | null | undefined>;
+  manufacturing_date: ColumnType<Date | null, Date | string | null | undefined, Date | string | null | undefined>;
+  selling_price: ColumnType<string | null, string | number | null | undefined, string | number | null | undefined>;
   ledger_entry_id: string | null;
   created_at: Generated<Date>;
 }
@@ -1557,6 +1585,8 @@ export interface PosReturnLinesTable {
   restock_condition: Generated<'RESELLABLE' | 'DAMAGED'>;
   unit_price: string;
   refund_amount: string;
+  batch_id: ColumnType<string | null, string | null | undefined, string | null | undefined>;
+  serial_id: ColumnType<string | null, string | null | undefined, string | null | undefined>;
   ledger_entry_id: string | null;
   created_at: Generated<Date>;
 }
@@ -1575,6 +1605,8 @@ export interface PricingSettingsTable {
   allow_self_approval: Generated<boolean>;
   auto_create_suggestions_on_cost_change: Generated<boolean>;
   auto_create_suggestions_on_cost_decrease: Generated<boolean>;
+  batch_pricing_fallback_policy: Generated<'BLOCK_MISSING' | 'ALLOW_PRODUCT_FALLBACK'>;
+  default_batch_allocation_policy: Generated<'FEFO' | 'FIFO'>;
   updated_by_user_id: string | null;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
@@ -1627,8 +1659,9 @@ export interface PriceSuggestionsTable {
   id: string;
   tenant_id: string;
   product_id: string;
-  scope: 'GLOBAL' | 'BRANCH';
+  scope: 'GLOBAL' | 'BRANCH' | 'BATCH';
   branch_id: string | null;
+  batch_id: ColumnType<string | null, string | null | undefined, string | null | undefined>;
   source_event_type:
     | 'GRN_POSTED'
     | 'COST_EDIT'
@@ -1672,8 +1705,9 @@ export interface ProductPriceHistoryTable {
   id: string;
   tenant_id: string;
   product_id: string;
-  scope: 'GLOBAL' | 'BRANCH';
+  scope: 'GLOBAL' | 'BRANCH' | 'BATCH';
   branch_id: string | null;
+  batch_id: ColumnType<string | null, string | null | undefined, string | null | undefined>;
   suggestion_id: string | null;
   previous_price: string;
   new_price: string;
@@ -1686,6 +1720,92 @@ export interface ProductPriceHistoryTable {
   approver_user_id: string;
   effective_date: Generated<string | Date>;
   approved_at: Generated<Date>;
+  created_at: Generated<Date>;
+}
+
+export interface BatchPriceHistoryTable {
+  id: string;
+  tenant_id: string;
+  branch_id: string | null;
+  product_id: string;
+  batch_id: string;
+  previous_price: string | null;
+  new_price: string;
+  cost_snapshot: Generated<string>;
+  change_type:
+    | 'GRN_INTAKE'
+    | 'MANUAL_UPDATE'
+    | 'SMART_PRICING_APPROVAL'
+    | 'POS_OVERRIDE'
+    | 'REVERSAL';
+  suggestion_id: string | null;
+  reason: string;
+  actor_user_id: string;
+  approver_user_id: string | null;
+  created_at: Generated<Date>;
+}
+
+export type ThermalLabelFormatDb =
+  | 'THERMAL_40X30'
+  | 'THERMAL_50X30'
+  | 'THERMAL_50X40'
+  | 'THERMAL_58'
+  | 'THERMAL_80'
+  | 'A4_SHEET';
+
+export interface BatchBarcodePrintLogsTable {
+  id: string;
+  tenant_id: string;
+  branch_id: string | null;
+  product_id: string;
+  batch_id: string;
+  barcode_value: string;
+  label_format: ThermalLabelFormatDb;
+  print_quantity: number;
+  is_reprint: Generated<boolean>;
+  printed_by_user_id: string;
+  printed_at: Generated<Date>;
+}
+
+export interface StockTransfersTable {
+  id: string;
+  tenant_id: string;
+  transfer_number: string;
+  source_branch_id: string;
+  source_warehouse_id: string;
+  destination_branch_id: string;
+  destination_warehouse_id: string;
+  status: Generated<'DRAFT' | 'IN_TRANSIT' | 'RECEIVED' | 'CANCELLED'>;
+  notes: string | null;
+  created_by_user_id: string;
+  dispatched_by_user_id: string | null;
+  received_by_user_id: string | null;
+  dispatched_at: Date | null;
+  received_at: Date | null;
+  idempotency_key: string | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface StockTransferLinesTable {
+  id: string;
+  tenant_id: string;
+  transfer_id: string;
+  line_number: number;
+  product_id: string;
+  source_batch_id: string | null;
+  destination_batch_id: string | null;
+  serial_id: string | null;
+  uom_code: string;
+  requested_qty: string;
+  dispatched_qty: string | null;
+  received_qty: string | null;
+  transfer_unit_cost: Generated<string>;
+  transfer_selling_price: string | null;
+  expiry_date: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  batch_number_snapshot: string | null;
+  dispatch_ledger_entry_id: string | null;
+  receive_ledger_entry_id: string | null;
   created_at: Generated<Date>;
 }
 
@@ -1783,4 +1903,8 @@ export interface NexStockDatabase {
   product_branch_prices: ProductBranchPricesTable;
   price_suggestions: PriceSuggestionsTable;
   product_price_history: ProductPriceHistoryTable;
+  batch_price_history: BatchPriceHistoryTable;
+  batch_barcode_print_logs: BatchBarcodePrintLogsTable;
+  stock_transfers: StockTransfersTable;
+  stock_transfer_lines: StockTransferLinesTable;
 }

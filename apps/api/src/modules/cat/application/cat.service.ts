@@ -1,5 +1,6 @@
 import type {
   BarcodeType,
+  BatchAllocationPolicy,
   CategoryResponse,
   CreateCategoryRequest,
   CreateProductRequest,
@@ -14,6 +15,10 @@ import type {
   RecordLifecycleStatus,
   TrackingMode,
   UnitOfMeasureResponse,
+  UomCorrectionExecuteRequest,
+  UomCorrectionExecuteResponse,
+  UomCorrectionPreviewRequest,
+  UomCorrectionPreviewResponse,
   UpdateCategoryRequest,
   UpdateProductRequest,
   ValuationMethod,
@@ -21,8 +26,10 @@ import type {
 import {
   CANONICAL_UOM_CATALOG,
   Money,
+  QUANTITY_SCALE_FACTOR,
   Quantity,
   UomConversionError,
+  divideAndRoundBigInt,
   resolveUomRationalFactor,
 } from '@nexstock/domain-core';
 import {
@@ -628,6 +635,8 @@ type ProductRowForHydration = {
   track_inventory: boolean;
   tracking_mode?: TrackingMode | null;
   valuation_method?: ValuationMethod | null;
+  allocation_policy?: 'FEFO' | 'FIFO' | 'MANUAL' | null;
+  require_batch_selling_price?: boolean | null;
   reorder_point: string;
   reorder_qty: string;
   image_url: string | null;
@@ -948,6 +957,8 @@ async function hydrateProductsBatch(
     primaryBarcode: row.primary_barcode,
     barcodes: barcodesByProductId.get(row.id) ?? [],
     unitConversions: uomsByProductId.get(row.id) ?? [],
+    allocationPolicy: (row.allocation_policy === 'FIFO' ? 'FIFO' : 'FEFO') as BatchAllocationPolicy,
+    requireBatchSellingPrice: Boolean(row.require_batch_selling_price ?? false),
     syncVersion: Number(row.sync_version),
     createdAt: new Date(row.created_at).toISOString(),
     updatedAt: new Date(row.updated_at).toISOString(),
@@ -1258,6 +1269,8 @@ export async function createProduct(
         track_inventory: trackInventory,
         tracking_mode: input.trackingMode ?? 'NONE',
         valuation_method: input.valuationMethod ?? 'MOVING_AVG',
+        allocation_policy: input.allocationPolicy ?? 'FEFO',
+        require_batch_selling_price: input.requireBatchSellingPrice ?? false,
         reorder_point: reorderPoint,
         reorder_qty: reorderQty,
         image_url: input.imageUrl?.trim() ?? null,
@@ -1692,6 +1705,62 @@ export async function updateProduct(
     });
   }
 
+  const baseUomChanged = nextBaseUom !== existing.base_uom;
+  const measurementCategoryChanged =
+    input.measurementCategory !== undefined &&
+    input.measurementCategory !== (existing.measurement_category ?? null);
+
+  if (baseUomChanged || measurementCategoryChanged) {
+    const [hasLedger, hasBatches, hasSales, hasReceipts] = await Promise.all([
+      trx.db
+        .selectFrom('stock_ledger_entries')
+        .select(['id'])
+        .where('tenant_id', '=', trx.tenantId)
+        .where('product_id', '=', productId)
+        .limit(1)
+        .executeTakeFirst(),
+      trx.db
+        .selectFrom('inventory_batches')
+        .select(['id'])
+        .where('tenant_id', '=', trx.tenantId)
+        .where('product_id', '=', productId)
+        .limit(1)
+        .executeTakeFirst(),
+      trx.db
+        .selectFrom('sales_invoice_lines')
+        .select(['id'])
+        .where('tenant_id', '=', trx.tenantId)
+        .where('product_id', '=', productId)
+        .limit(1)
+        .executeTakeFirst(),
+      trx.db
+        .selectFrom('goods_receipt_lines')
+        .select(['id'])
+        .where('tenant_id', '=', trx.tenantId)
+        .where('product_id', '=', productId)
+        .limit(1)
+        .executeTakeFirst(),
+    ]);
+
+    if (hasLedger || hasBatches || hasSales || hasReceipts) {
+      throw new AppError({
+        statusCode: 409,
+        errorCode: 'CAT_UOM_CHANGE_REQUIRES_WIZARD',
+        title: 'UOM Change Requires Controlled Correction Wizard',
+        detail: `Product "${existing.sku}" has existing stock, batches, sales, or receipts. Direct baseUom/measurementCategory edits are blocked; use the Legacy UOM Correction Wizard (/uom-correction) to rebase balances safely.`,
+        extensions: {
+          productId,
+          currentBaseUom: existing.base_uom,
+          attemptedBaseUom: nextBaseUom,
+          hasLedger: Boolean(hasLedger),
+          hasBatches: Boolean(hasBatches),
+          hasSales: Boolean(hasSales),
+          hasReceipts: Boolean(hasReceipts),
+        },
+      });
+    }
+  }
+
   let nextConversionsForValidation: Array<{
     uomCode: string;
     conversionFactorToBase: string;
@@ -1965,6 +2034,14 @@ export async function updateProduct(
         input.valuationMethod !== undefined
           ? input.valuationMethod
           : existing.valuation_method,
+      allocation_policy:
+        input.allocationPolicy !== undefined
+          ? input.allocationPolicy
+          : (existing.allocation_policy ?? 'FEFO'),
+      require_batch_selling_price:
+        input.requireBatchSellingPrice !== undefined
+          ? input.requireBatchSellingPrice
+          : Boolean(existing.require_batch_selling_price ?? false),
       image_url:
         input.imageUrl !== undefined
           ? (input.imageUrl?.trim() ?? null)
@@ -2341,5 +2418,511 @@ export async function resolveProductForInventory(
     reorderPoint: String(row.reorder_point),
     reorderQty: String(row.reorder_qty),
     unitConversions,
+  };
+}
+
+function scaleQtyByFactor(qtyStr: string, factor: Quantity): Quantity {
+  const q = Quantity.fromDecimalString(qtyStr);
+  return Quantity.fromMicroUnits(
+    divideAndRoundBigInt(
+      q.microUnits * factor.microUnits,
+      QUANTITY_SCALE_FACTOR,
+      'HALF_EVEN',
+    ),
+  );
+}
+
+function divideMoneyByFactor(
+  moneyStr: string,
+  factor: Quantity,
+  currencyCode: string,
+): Money {
+  const m = Money.fromDecimalString(moneyStr, currencyCode);
+  return Money.fromScaledUnits(
+    divideAndRoundBigInt(
+      m.scaledUnits * QUANTITY_SCALE_FACTOR,
+      factor.microUnits,
+      'HALF_EVEN',
+    ),
+    currencyCode,
+  );
+}
+
+export async function previewLegacyUomCorrection(
+  trx: TenantTransactionContext,
+  productId: string,
+  input: UomCorrectionPreviewRequest,
+): Promise<UomCorrectionPreviewResponse> {
+  await assertAuthorized(trx, { permission: 'cat:product:manage' });
+
+  const targetBaseUom = input.targetBaseUom.trim().toUpperCase();
+  if (!targetBaseUom) {
+    throw new AppError({
+      statusCode: 400,
+      errorCode: 'ERR_VALIDATION_FAILED',
+      title: 'Invalid Target UoM',
+      detail: 'targetBaseUom cannot be blank.',
+    });
+  }
+
+  const factor = Quantity.fromDecimalString(input.conversionFactorFromOldToNew);
+  if (!factor.isPositive()) {
+    throw new AppError({
+      statusCode: 422,
+      errorCode: 'CAT_INVALID_UOM_CONVERSION',
+      title: 'Invalid Conversion Factor',
+      detail: 'conversionFactorFromOldToNew must be strictly greater than zero.',
+    });
+  }
+
+  const [product, baseCurrency, balances, batches, costLayers, ledgerRows] =
+    await Promise.all([
+      trx.db
+        .selectFrom('products')
+        .selectAll()
+        .where('tenant_id', '=', trx.tenantId)
+        .where('id', '=', productId)
+        .executeTakeFirst(),
+      getTenantBaseCurrency(trx),
+      trx.db
+        .selectFrom('inventory_balances')
+        .selectAll()
+        .where('tenant_id', '=', trx.tenantId)
+        .where('product_id', '=', productId)
+        .execute(),
+      trx.db
+        .selectFrom('inventory_batches')
+        .selectAll()
+        .where('tenant_id', '=', trx.tenantId)
+        .where('product_id', '=', productId)
+        .execute(),
+      trx.db
+        .selectFrom('inventory_cost_layers')
+        .selectAll()
+        .where('tenant_id', '=', trx.tenantId)
+        .where('product_id', '=', productId)
+        .where('status', '=', 'OPEN')
+        .execute(),
+      trx.db
+        .selectFrom('stock_ledger_entries')
+        .select(['id'])
+        .where('tenant_id', '=', trx.tenantId)
+        .where('product_id', '=', productId)
+        .execute(),
+    ]);
+
+  if (!product) {
+    throw new AppError({
+      statusCode: 404,
+      errorCode: 'ERR_NOT_FOUND',
+      title: 'Product Not Found',
+      detail: `Product "${productId}" was not found.`,
+    });
+  }
+
+  let totalOldQty = Quantity.zero();
+  let totalValuation = Money.zero(baseCurrency);
+  for (const b of balances) {
+    totalOldQty = totalOldQty.add(Quantity.fromDecimalString(String(b.qty_on_hand)));
+    totalValuation = totalValuation.add(
+      Money.fromDecimalString(String(b.total_inventory_value), baseCurrency),
+    );
+  }
+
+  const projectedNewQty = scaleQtyByFactor(totalOldQty.toDecimalString(), factor);
+  const projectedUnitCost = divideMoneyByFactor(
+    String(product.purchase_cost),
+    factor,
+    baseCurrency,
+  );
+
+  const warnings: string[] = [];
+  if (ledgerRows.length > 0) {
+    warnings.push(
+      `${ledgerRows.length} historical stock ledger entries exist and will remain immutable in the original ${product.base_uom} audit record.`,
+    );
+  }
+  if (batches.length > 0) {
+    warnings.push(
+      `${batches.length} batches will have their quantities multiplied by ${factor.toDecimalString()} and prices/costs divided by ${factor.toDecimalString()}.`,
+    );
+  }
+
+  return {
+    productId: product.id,
+    currentBaseUom: product.base_uom,
+    targetBaseUom,
+    conversionFactorFromOldToNew: factor.toDecimalString(),
+    currentTotalQtyInOldUom: totalOldQty.toDecimalString(),
+    projectedTotalQtyInNewUom: projectedNewQty.toDecimalString(),
+    currentTotalValuation: totalValuation.toDecimalString(),
+    projectedUnitCostInNewUom: projectedUnitCost.toDecimalString(),
+    affectedBalancesCount: balances.length,
+    affectedBatchesCount: batches.length,
+    affectedCostLayersCount: costLayers.length,
+    historicalLedgerEntriesCount: ledgerRows.length,
+    warnings,
+  };
+}
+
+export async function executeLegacyUomCorrection(
+  trx: TenantTransactionContext,
+  productId: string,
+  input: UomCorrectionExecuteRequest,
+): Promise<UomCorrectionExecuteResponse> {
+  await assertAuthorized(trx, { permission: 'cat:product:manage' });
+  await assertSubscriptionEntitlement(trx, { requireWriteAccess: true });
+
+  const targetBaseUom = input.targetBaseUom.trim().toUpperCase();
+  if (!targetBaseUom) {
+    throw new AppError({
+      statusCode: 400,
+      errorCode: 'ERR_VALIDATION_FAILED',
+      title: 'Invalid Target UoM',
+      detail: 'targetBaseUom cannot be blank.',
+    });
+  }
+
+  const factor = Quantity.fromDecimalString(input.conversionFactorFromOldToNew);
+  if (!factor.isPositive()) {
+    throw new AppError({
+      statusCode: 422,
+      errorCode: 'CAT_INVALID_UOM_CONVERSION',
+      title: 'Invalid Conversion Factor',
+      detail: 'conversionFactorFromOldToNew must be strictly greater than zero.',
+    });
+  }
+
+  const product = await trx.db
+    .selectFrom('products')
+    .selectAll()
+    .where('tenant_id', '=', trx.tenantId)
+    .where('id', '=', productId)
+    .forUpdate()
+    .executeTakeFirst();
+
+  if (!product) {
+    throw new AppError({
+      statusCode: 404,
+      errorCode: 'ERR_NOT_FOUND',
+      title: 'Product Not Found',
+      detail: `Product "${productId}" was not found.`,
+    });
+  }
+
+  const oldBaseUom = product.base_uom;
+  const baseCurrency = await getTenantBaseCurrency(trx);
+  const now = new Date();
+
+  const [balances, batches, costLayers, convRows] = await Promise.all([
+    trx.db
+      .selectFrom('inventory_balances')
+      .selectAll()
+      .where('tenant_id', '=', trx.tenantId)
+      .where('product_id', '=', productId)
+      .forUpdate()
+      .execute(),
+    trx.db
+      .selectFrom('inventory_batches')
+      .selectAll()
+      .where('tenant_id', '=', trx.tenantId)
+      .where('product_id', '=', productId)
+      .forUpdate()
+      .execute(),
+    trx.db
+      .selectFrom('inventory_cost_layers')
+      .selectAll()
+      .where('tenant_id', '=', trx.tenantId)
+      .where('product_id', '=', productId)
+      .where('status', '=', 'OPEN')
+      .forUpdate()
+      .execute(),
+    trx.db
+      .selectFrom('product_unit_conversions')
+      .selectAll()
+      .where('tenant_id', '=', trx.tenantId)
+      .where('product_id', '=', productId)
+      .execute(),
+  ]);
+
+  let previousTotalValuation = Money.zero(baseCurrency);
+  let newTotalValuation = Money.zero(baseCurrency);
+
+  for (const b of balances) {
+    const oldOnHand = Quantity.fromDecimalString(String(b.qty_on_hand));
+    const newOnHand = scaleQtyByFactor(String(b.qty_on_hand), factor);
+    const newReserved = scaleQtyByFactor(String(b.qty_reserved), factor);
+    const val = Money.fromDecimalString(String(b.total_inventory_value), baseCurrency);
+    previousTotalValuation = previousTotalValuation.add(val);
+    newTotalValuation = newTotalValuation.add(val);
+
+    // Recompute MAC strictly preserving total_inventory_value
+    const newMac = newOnHand.isPositive()
+      ? Money.fromScaledUnits(
+          divideAndRoundBigInt(
+            val.scaledUnits * QUANTITY_SCALE_FACTOR,
+            newOnHand.microUnits,
+            'HALF_EVEN',
+          ),
+          baseCurrency,
+        )
+      : divideMoneyByFactor(String(b.moving_avg_cost), factor, baseCurrency);
+
+    const qtyDeltaMicro = newOnHand.microUnits - oldOnHand.microUnits;
+    let nextLedgerEntryId = b.last_ledger_entry_id;
+
+    if (qtyDeltaMicro !== 0n) {
+      const ledgerId = generateUuidV7();
+      const qtyDeltaStr = Quantity.fromMicroUnits(qtyDeltaMicro).toDecimalString();
+      await trx.db
+        .insertInto('stock_ledger_entries')
+        .values({
+          id: ledgerId,
+          tenant_id: trx.tenantId,
+          branch_id: b.branch_id,
+          warehouse_id: b.warehouse_id,
+          product_id: productId,
+          supplier_id: null,
+          movement_type:
+            qtyDeltaMicro > 0n ? 'ADJUSTMENT_POSITIVE' : 'ADJUSTMENT_NEGATIVE',
+          uom_code: targetBaseUom,
+          input_qty: qtyDeltaStr,
+          conversion_factor_to_base: '1.000000',
+          qty_delta: qtyDeltaStr,
+          balance_before: oldOnHand.toDecimalString(),
+          balance_after: newOnHand.toDecimalString(),
+          unit_cost: newMac.toDecimalString(),
+          reference_type: 'UOM_CORRECTION',
+          reference_id: productId,
+          reversed_entry_id: null,
+          reason: `Legacy UOM rebase (${oldBaseUom} -> ${targetBaseUom}, factor ${factor.toDecimalString()}): ${input.reason}`,
+          negative_stock_override_applied: false,
+          actor_user_id: trx.userId,
+          idempotency_key: generateUuidV7(),
+          occurred_at: now,
+          recorded_at: now,
+          metadata_json: JSON.stringify({
+            oldBaseUom,
+            targetBaseUom,
+            conversionFactorFromOldToNew: factor.toDecimalString(),
+            oldOnHand: oldOnHand.toDecimalString(),
+            newOnHand: newOnHand.toDecimalString(),
+          }),
+        })
+        .execute();
+      nextLedgerEntryId = ledgerId;
+    }
+
+    await trx.db
+      .updateTable('inventory_balances')
+      .set({
+        uom_code: targetBaseUom,
+        qty_on_hand: newOnHand.toDecimalString(),
+        qty_reserved: newReserved.toDecimalString(),
+        moving_avg_cost: newMac.toDecimalString(),
+        total_inventory_value: val.toDecimalString(),
+        last_ledger_entry_id: nextLedgerEntryId,
+        last_movement_at: now,
+        updated_at: now,
+      })
+      .where('tenant_id', '=', trx.tenantId)
+      .where('id', '=', b.id)
+      .execute();
+  }
+
+  for (const batch of batches) {
+    const ccy = batch.currency_code || baseCurrency;
+    const newInitial = scaleQtyByFactor(String(batch.initial_quantity), factor);
+    const newCurrent = scaleQtyByFactor(String(batch.current_quantity), factor);
+    const newReserved = scaleQtyByFactor(
+      String(batch.reserved_quantity ?? '0'),
+      factor,
+    );
+    const newUnitCost = divideMoneyByFactor(String(batch.unit_cost), factor, ccy);
+    const newSellingPrice =
+      batch.selling_price != null
+        ? divideMoneyByFactor(String(batch.selling_price), factor, ccy).toDecimalString()
+        : null;
+    const newMinSellingPrice =
+      batch.min_selling_price != null
+        ? divideMoneyByFactor(
+            String(batch.min_selling_price),
+            factor,
+            ccy,
+          ).toDecimalString()
+        : null;
+
+    await trx.db
+      .updateTable('inventory_batches')
+      .set({
+        initial_quantity: newInitial.toDecimalString(),
+        current_quantity: newCurrent.toDecimalString(),
+        reserved_quantity: newReserved.toDecimalString(),
+        unit_cost: newUnitCost.toDecimalString(),
+        selling_price: newSellingPrice,
+        min_selling_price: newMinSellingPrice,
+        updated_at: now,
+      })
+      .where('tenant_id', '=', trx.tenantId)
+      .where('id', '=', batch.id)
+      .execute();
+
+    if (newSellingPrice != null) {
+      await trx.db
+        .insertInto('batch_price_history')
+        .values({
+          id: generateUuidV7(),
+          tenant_id: trx.tenantId,
+          branch_id: batch.branch_id ?? null,
+          product_id: product.id,
+          batch_id: batch.id,
+          previous_price:
+            batch.selling_price != null
+              ? Money.fromDecimalString(
+                  String(batch.selling_price),
+                  ccy,
+                ).toDecimalString()
+              : null,
+          new_price: newSellingPrice,
+          cost_snapshot: newUnitCost.toDecimalString(),
+          change_type: 'MANUAL_UPDATE',
+          suggestion_id: null,
+          reason: `Legacy UOM rebase (${oldBaseUom} -> ${targetBaseUom}, factor ${factor.toDecimalString()}): ${input.reason}`,
+          actor_user_id: trx.userId,
+          approver_user_id: trx.userId,
+          created_at: now,
+        })
+        .execute();
+    }
+  }
+
+  for (const layer of costLayers) {
+    const ccy = layer.currency_code || baseCurrency;
+    const newReceived = scaleQtyByFactor(String(layer.received_qty), factor);
+    const newRemaining = scaleQtyByFactor(String(layer.remaining_qty), factor);
+    const newLayerUnitCost = divideMoneyByFactor(
+      String(layer.unit_cost),
+      factor,
+      ccy,
+    );
+
+    await trx.db
+      .updateTable('inventory_cost_layers')
+      .set({
+        received_qty: newReceived.toDecimalString(),
+        remaining_qty: newRemaining.toDecimalString(),
+        unit_cost: newLayerUnitCost.toDecimalString(),
+        updated_at: now,
+      })
+      .where('tenant_id', '=', trx.tenantId)
+      .where('id', '=', layer.id)
+      .execute();
+  }
+
+  // Rebase custom conversions
+  for (const conv of convRows) {
+    if (conv.uom_code.toUpperCase() === targetBaseUom) {
+      await trx.db
+        .deleteFrom('product_unit_conversions')
+        .where('tenant_id', '=', trx.tenantId)
+        .where('id', '=', conv.id)
+        .execute();
+    } else {
+      const scaledFactor = scaleQtyByFactor(
+        String(conv.conversion_factor_to_base),
+        factor,
+      );
+      await trx.db
+        .updateTable('product_unit_conversions')
+        .set({
+          conversion_factor_to_base: scaledFactor.toDecimalString(),
+          updated_at: now,
+        })
+        .where('tenant_id', '=', trx.tenantId)
+        .where('id', '=', conv.id)
+        .execute();
+    }
+  }
+
+  const nextPurchaseCost = divideMoneyByFactor(
+    String(product.purchase_cost),
+    factor,
+    baseCurrency,
+  ).toDecimalString();
+  const nextSellingPrice = divideMoneyByFactor(
+    String(product.selling_price),
+    factor,
+    baseCurrency,
+  ).toDecimalString();
+  const nextReorderPoint = scaleQtyByFactor(
+    String(product.reorder_point),
+    factor,
+  ).toDecimalString();
+  const nextReorderQty = scaleQtyByFactor(
+    String(product.reorder_qty),
+    factor,
+  ).toDecimalString();
+
+  const currentAllowed = parseAllowedSellingUomsJson(
+    product.allowed_selling_uoms,
+    oldBaseUom,
+  );
+  const nextAllowed = Array.from(
+    new Set([
+      targetBaseUom,
+      ...currentAllowed.map((u) => (u === oldBaseUom ? targetBaseUom : u)),
+    ]),
+  );
+
+  await trx.db
+    .updateTable('products')
+    .set({
+      base_uom: targetBaseUom,
+      measurement_category:
+        input.targetMeasurementCategory !== undefined
+          ? input.targetMeasurementCategory
+          : product.measurement_category,
+      purchase_uom:
+        product.purchase_uom === oldBaseUom ? targetBaseUom : product.purchase_uom,
+      price_uom:
+        product.price_uom === oldBaseUom ? targetBaseUom : product.price_uom,
+      allowed_selling_uoms: JSON.stringify(nextAllowed),
+      purchase_cost: nextPurchaseCost,
+      selling_price: nextSellingPrice,
+      reorder_point: nextReorderPoint,
+      reorder_qty: nextReorderQty,
+      sync_version: Number(product.sync_version) + 1,
+      updated_at: now,
+    })
+    .where('tenant_id', '=', trx.tenantId)
+    .where('id', '=', productId)
+    .execute();
+
+  await appendAuditLog(trx, {
+    action: 'CAT_PRODUCT_UOM_CORRECTED',
+    resourceType: 'PRODUCT',
+    resourceId: productId,
+    metadata: {
+      oldBaseUom,
+      targetBaseUom,
+      conversionFactorFromOldToNew: factor.toDecimalString(),
+      rebasedBalancesCount: balances.length,
+      rebasedBatchesCount: batches.length,
+      rebasedCostLayersCount: costLayers.length,
+      previousTotalValuation: previousTotalValuation.toDecimalString(),
+      newTotalValuation: newTotalValuation.toDecimalString(),
+      reason: input.reason,
+    },
+  });
+
+  const updatedProduct = await getProductById(trx, productId);
+  return {
+    product: updatedProduct,
+    rebasedBalancesCount: balances.length,
+    rebasedBatchesCount: batches.length,
+    rebasedCostLayersCount: costLayers.length,
+    previousTotalValuation: previousTotalValuation.toDecimalString(),
+    newTotalValuation: newTotalValuation.toDecimalString(),
+    auditTrailEntryCount: 1,
   };
 }

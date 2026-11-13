@@ -688,13 +688,18 @@ export async function postGoodsReceipt(
     grandTotalCost = grandTotalCost.add(lineTotalCost);
 
     let batchId: string | null = null;
+    let resolvedBatchNumber: string | null = line.batchNumber?.trim() || null;
+    let resolvedInternalBarcode: string | null = null;
+    let lotConflictResolution: 'NONE' | 'SUFFIXED' | 'OVERRIDDEN' = 'NONE';
+    const isBatchTracked =
+      product.trackingMode === 'BATCH' || product.trackingMode === 'BATCH_EXPIRY';
+
     if (
-      product.trackingMode === 'BATCH' ||
-      product.trackingMode === 'BATCH_EXPIRY' ||
+      isBatchTracked ||
       line.batchNumber
     ) {
       if (
-        (product.trackingMode === 'BATCH' || product.trackingMode === 'BATCH_EXPIRY') &&
+        isBatchTracked &&
         !line.batchNumber?.trim()
       ) {
         throw new AppError({
@@ -716,15 +721,28 @@ export async function postGoodsReceipt(
         const batchRes = await ensureBatchForGoodsReceipt(trx, {
           productId: product.id,
           warehouseId: input.warehouseId,
+          branchId: input.branchId,
           supplierId: input.supplierId,
           batchNumber: line.batchNumber.trim(),
+          manufacturingDate: line.manufacturingDate ?? null,
           expiryDate: line.expiryDate ?? null,
           receivedQtyBase: conv.convertedQuantity.toDecimalString(),
           unitCostPerBaseUom: unitCostPerBase.toDecimalString(),
+          sellingPrice: line.sellingPrice ?? null,
+          minSellingPrice: line.minSellingPrice ?? null,
+          maxDiscountPct: line.maxDiscountPct ?? null,
+          batchPricingMode:
+            line.batchPricingMode ??
+            (line.sellingPrice != null ? 'EXPLICIT' : 'INHERIT_PRODUCT'),
           currencyCode,
           receivedDate: receivedAt.toISOString().slice(0, 10),
+          goodsReceiptId: grnId,
+          ...(line.lotConflictPolicy ? { lotConflictPolicy: line.lotConflictPolicy } : {}),
         });
         batchId = batchRes.batchId;
+        resolvedBatchNumber = batchRes.resolvedBatchNumber;
+        resolvedInternalBarcode = batchRes.internalBarcode;
+        lotConflictResolution = batchRes.lotConflictResolution;
       }
     }
 
@@ -750,36 +768,57 @@ export async function postGoodsReceipt(
       { skipPermissionCheck: true },
     );
 
-    // Update product last purchase cost (in base_uom) without modifying active selling_price
-    await trx.db
-      .updateTable('products')
-      .set({
-        purchase_cost: unitCostPerBase.toDecimalString(),
-        sync_version: Number(
-          (
-            await trx.db
-              .selectFrom('products')
-              .select(['sync_version'])
-              .where('tenant_id', '=', trx.tenantId)
-              .where('id', '=', product.id)
-              .executeTakeFirstOrThrow()
-          ).sync_version,
-        ) + 1,
-        updated_at: now,
-      })
-      .where('tenant_id', '=', trx.tenantId)
-      .where('id', '=', product.id)
-      .execute();
+    const isolateBatchCostOnBatch =
+      isBatchTracked &&
+      (product.valuationMethod === 'FIFO' || line.sellingPrice != null);
 
-    await triggerCostChangeSuggestionIfApplicable(trx, {
-      productId: product.id,
-      oldCost: product.purchaseCost,
-      newCost: unitCostPerBase.toDecimalString(),
-      sourceEventType: 'GRN_POSTED',
-      sourceEventKey: `GRN:${grnId}:${product.id}`,
-      reason: `Goods Receipt ${grnNumber} (${unitCostPerBase.toDecimalString()}/${product.baseUom})`,
-      scopeBranchId: input.branchId,
-    });
+    if (!isolateBatchCostOnBatch) {
+      // Update product last purchase cost (in base_uom) without modifying active selling_price
+      await trx.db
+        .updateTable('products')
+        .set({
+          purchase_cost: unitCostPerBase.toDecimalString(),
+          sync_version: Number(
+            (
+              await trx.db
+                .selectFrom('products')
+                .select(['sync_version'])
+                .where('tenant_id', '=', trx.tenantId)
+                .where('id', '=', product.id)
+                .executeTakeFirstOrThrow()
+            ).sync_version,
+          ) + 1,
+          updated_at: now,
+        })
+        .where('tenant_id', '=', trx.tenantId)
+        .where('id', '=', product.id)
+        .execute();
+    }
+
+    if (!isBatchTracked) {
+      await triggerCostChangeSuggestionIfApplicable(trx, {
+        productId: product.id,
+        oldCost: product.purchaseCost,
+        newCost: unitCostPerBase.toDecimalString(),
+        sourceEventType: 'GRN_POSTED',
+        sourceEventKey: `GRN:${grnId}:${product.id}`,
+        reason: `Goods Receipt ${grnNumber} (${unitCostPerBase.toDecimalString()}/${product.baseUom})`,
+        scopeBranchId: input.branchId,
+      });
+    } else if (batchId) {
+      // D-04: Batch cost stays isolated on the batch; generate BATCH-scoped suggestion only
+      await triggerCostChangeSuggestionIfApplicable(trx, {
+        productId: product.id,
+        oldCost: product.purchaseCost,
+        newCost: unitCostPerBase.toDecimalString(),
+        sourceEventType: 'GRN_POSTED',
+        sourceEventKey: `GRN:${grnId}:${product.id}:BATCH:${batchId}`,
+        reason: `Batch ${resolvedBatchNumber ?? ''} GRN ${grnNumber} (${unitCostPerBase.toDecimalString()}/${product.baseUom})`,
+        scopeBranchId: input.branchId,
+        scopeBatchId: batchId,
+        batchCurrentSellingPrice: line.sellingPrice ?? null,
+      });
+    }
 
     if (line.purchaseOrderLineId && linkedPo) {
       const poLine = await trx.db
@@ -831,8 +870,11 @@ export async function postGoodsReceipt(
         unit_cost_per_received_uom: unitCostPerReceived.toDecimalString(),
         unit_cost_per_base_uom: unitCostPerBase.toDecimalString(),
         line_total_cost: lineTotalCost.toDecimalString(),
-        batch_number: line.batchNumber?.trim() || null,
+        batch_id: batchId,
+        batch_number: resolvedBatchNumber,
+        manufacturing_date: line.manufacturingDate ?? null,
         expiry_date: line.expiryDate ?? null,
+        selling_price: line.sellingPrice ?? null,
         ledger_entry_id: ledgerRes.id,
         created_at: now,
       })
@@ -850,8 +892,13 @@ export async function postGoodsReceipt(
       unitCostPerReceivedUom: unitCostPerReceived.toDecimalString(),
       unitCostPerBaseUom: unitCostPerBase.toDecimalString(),
       lineTotalCost: lineTotalCost.toDecimalString(),
-      batchNumber: line.batchNumber?.trim() || null,
+      batchNumber: resolvedBatchNumber,
+      batchId,
+      internalBarcode: resolvedInternalBarcode,
+      manufacturingDate: line.manufacturingDate ?? null,
       expiryDate: line.expiryDate ?? null,
+      sellingPrice: line.sellingPrice ?? null,
+      lotConflictResolution,
       ledgerEntryId: ledgerRes.id,
     });
   }
@@ -1003,9 +1050,17 @@ export async function listGoodsReceipts(
       ).toDecimalString(),
       lineTotalCost: Money.fromDecimalString(String(l.line_total_cost), ccy).toDecimalString(),
       batchNumber: l.batch_number,
+      batchId: l.batch_id ?? null,
+      manufacturingDate: l.manufacturing_date
+        ? new Date(l.manufacturing_date).toISOString().slice(0, 10)
+        : null,
       expiryDate: l.expiry_date
         ? new Date(l.expiry_date).toISOString().slice(0, 10)
         : null,
+      sellingPrice:
+        l.selling_price != null
+          ? Money.fromDecimalString(String(l.selling_price), ccy).toDecimalString()
+          : null,
       ledgerEntryId: l.ledger_entry_id,
     });
     linesByGrn.set(l.goods_receipt_id, arr);

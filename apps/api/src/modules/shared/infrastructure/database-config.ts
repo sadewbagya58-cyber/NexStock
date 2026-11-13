@@ -613,6 +613,13 @@ export function loadSmartPricingManagementMigrationSql(): string {
   return sqlText;
 }
 
+export function loadBatchPricingHybridBarcodesAndTransfersMigrationSql(): string {
+  const filename = '0027_batch_pricing_hybrid_barcodes_and_transfers.sql';
+  const sqlText = readFileSync(resolve(migrationsDir, filename), 'utf-8');
+  assertPostgresMigrationSqlCompatible(sqlText, filename);
+  return sqlText;
+}
+
 export function getOrderedPostgresMigrations(): readonly PostgresMigrationSpec[] {
   return [
     {
@@ -796,6 +803,13 @@ export function getOrderedPostgresMigrations(): readonly PostgresMigrationSpec[]
       name: '0026_smart_pricing_management',
       filename: '0026_smart_pricing_management.sql',
       sql: loadSmartPricingManagementMigrationSql(),
+    },
+    {
+      dialect: 'postgres',
+      version: 27,
+      name: '0027_batch_pricing_hybrid_barcodes_and_transfers',
+      filename: '0027_batch_pricing_hybrid_barcodes_and_transfers.sql',
+      sql: loadBatchPricingHybridBarcodesAndTransfersMigrationSql(),
     },
   ];
 }

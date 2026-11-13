@@ -195,7 +195,7 @@ export async function generateInternalBarcode(
       continue;
     }
 
-    // Verify collision resistance within tenant
+    // Verify collision resistance within tenant across products, batches & serials
     const existing = await trx.db
       .selectFrom('product_barcodes')
       .select(['id'])
@@ -204,14 +204,33 @@ export async function generateInternalBarcode(
       .executeTakeFirst();
 
     if (!existing) {
-      const existingProduct = await trx.db
-        .selectFrom('products')
-        .select(['id'])
-        .where('tenant_id', '=', trx.tenantId)
-        .where('primary_barcode', '=', candidateBarcode)
-        .executeTakeFirst();
+      const [existingProduct, existingBatch, existingSerial] = await Promise.all([
+        trx.db
+          .selectFrom('products')
+          .select(['id'])
+          .where('tenant_id', '=', trx.tenantId)
+          .where((eb) =>
+            eb.or([
+              eb('primary_barcode', '=', candidateBarcode),
+              eb('sku', '=', candidateBarcode),
+            ]),
+          )
+          .executeTakeFirst(),
+        trx.db
+          .selectFrom('inventory_batches')
+          .select(['id'])
+          .where('tenant_id', '=', trx.tenantId)
+          .where('internal_barcode', '=', candidateBarcode)
+          .executeTakeFirst(),
+        trx.db
+          .selectFrom('inventory_serials')
+          .select(['id'])
+          .where('tenant_id', '=', trx.tenantId)
+          .where('serial_number', '=', candidateBarcode)
+          .executeTakeFirst(),
+      ]);
 
-      if (!existingProduct) {
+      if (!existingProduct && !existingBatch && !existingSerial) {
         break;
       }
     }
@@ -310,7 +329,6 @@ export async function addProductBarcode(
     });
   }
 
-  // Enforce tenant-scoped uniqueness
   const conflict = await trx.db
     .selectFrom('product_barcodes')
     .select(['product_id', 'barcode'])
@@ -326,6 +344,11 @@ export async function addProductBarcode(
       detail: `Barcode "${cleanBarcode}" is already assigned to a product in this organization.`,
     });
   }
+
+  // Enforce cross-table tenant-scoped uniqueness (primary barcodes, SKUs, batch barcodes, serials)
+  await assertBarcodeGloballyUniqueAcrossEntities(trx, cleanBarcode, {
+    productIdToAllowSameProductBarcode: false,
+  });
 
   const uomCode = (input.uomCode ?? product.base_uom).trim().toUpperCase();
   const isPrimary = Boolean(input.isPrimary);
@@ -792,4 +815,101 @@ export async function updateTenantBarcodeSettings(
     ...merged,
     updatedAt: now.toISOString(),
   };
+}
+
+/**
+ * Ensures a barcode candidate (product barcode, internal batch barcode, or serial)
+ * does not collide with any existing barcode/SKU/serial across products, batches, and serials
+ * within the same tenant.
+ */
+export async function assertBarcodeGloballyUniqueAcrossEntities(
+  trx: TenantTransactionContext,
+  candidate: string,
+  options?: {
+    excludeProductId?: string;
+    excludeBatchId?: string;
+    excludeSerialId?: string;
+    productIdToAllowSameProductBarcode?: boolean;
+  },
+): Promise<void> {
+  const clean = candidate.trim();
+  if (!clean) {
+    return;
+  }
+
+  let productBarcodeQuery = trx.db
+    .selectFrom('product_barcodes')
+    .select(['id', 'product_id'])
+    .where('tenant_id', '=', trx.tenantId)
+    .where('barcode', '=', clean);
+
+  if (options?.excludeProductId && options.productIdToAllowSameProductBarcode) {
+    productBarcodeQuery = productBarcodeQuery.where('product_id', '!=', options.excludeProductId);
+  }
+
+  let productPrimaryQuery = trx.db
+    .selectFrom('products')
+    .select(['id', 'sku'])
+    .where('tenant_id', '=', trx.tenantId)
+    .where((eb) =>
+      eb.or([eb('primary_barcode', '=', clean), eb('sku', '=', clean)]),
+    );
+
+  if (options?.excludeProductId) {
+    productPrimaryQuery = productPrimaryQuery.where('id', '!=', options.excludeProductId);
+  }
+
+  let batchQuery = trx.db
+    .selectFrom('inventory_batches')
+    .select(['id', 'batch_number'])
+    .where('tenant_id', '=', trx.tenantId)
+    .where('internal_barcode', '=', clean);
+
+  if (options?.excludeBatchId) {
+    batchQuery = batchQuery.where('id', '!=', options.excludeBatchId);
+  }
+
+  let serialQuery = trx.db
+    .selectFrom('inventory_serials')
+    .select(['id', 'serial_number'])
+    .where('tenant_id', '=', trx.tenantId)
+    .where('serial_number', '=', clean);
+
+  if (options?.excludeSerialId) {
+    serialQuery = serialQuery.where('id', '!=', options.excludeSerialId);
+  }
+
+  const [pb, prod, batch, serial] = await Promise.all([
+    productBarcodeQuery.executeTakeFirst(),
+    productPrimaryQuery.executeTakeFirst(),
+    batchQuery.executeTakeFirst(),
+    serialQuery.executeTakeFirst(),
+  ]);
+
+  if (pb || prod) {
+    throw new AppError({
+      statusCode: 409,
+      errorCode: 'CAT_BARCODE_COLLISION',
+      title: 'Barcode Collision Across Products',
+      detail: `Barcode "${clean}" is already assigned to a product barcode or SKU in this tenant.`,
+    });
+  }
+
+  if (batch) {
+    throw new AppError({
+      statusCode: 409,
+      errorCode: 'CAT_BARCODE_COLLISION',
+      title: 'Barcode Collision With Batch',
+      detail: `Barcode "${clean}" is already used as internal barcode for batch "${batch.batch_number}".`,
+    });
+  }
+
+  if (serial) {
+    throw new AppError({
+      statusCode: 409,
+      errorCode: 'CAT_BARCODE_COLLISION',
+      title: 'Barcode Collision With Serial',
+      detail: `Barcode "${clean}" is already assigned to serial "${serial.serial_number}".`,
+    });
+  }
 }

@@ -1,5 +1,9 @@
 import type {
   ApprovePriceSuggestionRequest,
+  BatchAllocationPolicy,
+  BatchPricingFallbackPolicy,
+  BatchPricingMode,
+  BatchStatus,
   BranchPriceOverrideResponse,
   CreatePriceSuggestionRequest,
   CurrencyCode,
@@ -17,6 +21,7 @@ import type {
   ProductPricingRuleResponse,
   RejectOrDeferPriceSuggestionRequest,
   SyncCatalogPricingResponse,
+  TrackingMode,
   UpdatePricingSettingsRequest,
   UpsertProductPricingRuleRequest,
 } from '@nexstock/contracts';
@@ -120,6 +125,14 @@ function mapPricingSettingsRow(
     autoCreateSuggestionsOnCostDecrease: Boolean(
       row.auto_create_suggestions_on_cost_decrease,
     ),
+    batchPricingFallbackPolicy:
+      (row.batch_pricing_fallback_policy as
+        | 'BLOCK_MISSING'
+        | 'ALLOW_PRODUCT_FALLBACK'
+        | undefined) ?? 'ALLOW_PRODUCT_FALLBACK',
+    defaultBatchAllocationPolicy:
+      (row.default_batch_allocation_policy as 'FEFO' | 'FIFO' | undefined) ??
+      'FEFO',
     updatedAt: new Date(row.updated_at).toISOString(),
   };
 }
@@ -201,6 +214,14 @@ export async function updatePricingSettings(
       auto_create_suggestions_on_cost_decrease:
         input.autoCreateSuggestionsOnCostDecrease ??
         Boolean(existing.auto_create_suggestions_on_cost_decrease),
+      batch_pricing_fallback_policy:
+        input.batchPricingFallbackPolicy ??
+        existing.batch_pricing_fallback_policy ??
+        'ALLOW_PRODUCT_FALLBACK',
+      default_batch_allocation_policy:
+        input.defaultBatchAllocationPolicy ??
+        existing.default_batch_allocation_policy ??
+        'FEFO',
       updated_by_user_id: trx.userId,
       updated_at: now,
     })
@@ -545,8 +566,9 @@ async function hydrateSuggestionRow(
     id: string;
     tenant_id: string;
     product_id: string;
-    scope: 'GLOBAL' | 'BRANCH';
+    scope: PricingScope;
     branch_id: string | null;
+    batch_id?: string | null;
     source_event_type: PriceSuggestionSourceEventType;
     source_event_key: string | null;
     cost_change_direction: 'INCREASE' | 'DECREASE' | 'UNCHANGED';
@@ -707,6 +729,8 @@ async function createSuggestionInternal(
     readonly productId: string;
     readonly scope: PricingScope;
     readonly branchId: string | null;
+    readonly batchId?: string | null;
+    readonly batchCurrentSellingPrice?: string | null;
     readonly sourceEventType: PriceSuggestionSourceEventType;
     readonly sourceEventKey: string | null;
     readonly oldCost: string;
@@ -749,7 +773,27 @@ async function createSuggestionInternal(
     currencyCode,
   ).toDecimalString();
 
-  if (params.scope === 'BRANCH' && params.branchId) {
+  if (params.scope === 'BATCH') {
+    if (params.batchCurrentSellingPrice) {
+      currentPriceStr = Money.fromDecimalString(
+        params.batchCurrentSellingPrice,
+        currencyCode,
+      ).toDecimalString();
+    } else if (params.batchId) {
+      const batchRow = await trx.db
+        .selectFrom('inventory_batches')
+        .select(['selling_price'])
+        .where('tenant_id', '=', trx.tenantId)
+        .where('id', '=', params.batchId)
+        .executeTakeFirst();
+      if (batchRow?.selling_price != null) {
+        currentPriceStr = Money.fromDecimalString(
+          String(batchRow.selling_price),
+          currencyCode,
+        ).toDecimalString();
+      }
+    }
+  } else if (params.scope === 'BRANCH' && params.branchId) {
     const branchRow = await trx.db
       .selectFrom('product_branch_prices')
       .select(['selling_price'])
@@ -804,7 +848,11 @@ async function createSuggestionInternal(
       tenant_id: trx.tenantId,
       product_id: params.productId,
       scope: params.scope,
-      branch_id: params.scope === 'BRANCH' ? params.branchId : null,
+      branch_id:
+        params.scope === 'BRANCH' || params.scope === 'BATCH'
+          ? params.branchId
+          : null,
+      batch_id: params.scope === 'BATCH' ? (params.batchId ?? null) : null,
       source_event_type: params.sourceEventType,
       source_event_key: params.sourceEventKey,
       cost_change_direction: direction,
@@ -848,6 +896,8 @@ export async function triggerCostChangeSuggestionIfApplicable(
     readonly sourceEventKey: string;
     readonly reason: string;
     readonly scopeBranchId?: string | null;
+    readonly scopeBatchId?: string | null;
+    readonly batchCurrentSellingPrice?: string | null;
   },
 ): Promise<PriceSuggestionResponse | null> {
   const settings = await ensureTenantPricingSettings(trx);
@@ -917,8 +967,10 @@ export async function triggerCostChangeSuggestionIfApplicable(
     return getHydratedSuggestionById(trx, existingExact.id);
   }
 
-  // Supersede older stale auto-cost PENDING GLOBAL suggestions so the queue stays clean & accurate
-  await trx.db
+  const targetScope: PricingScope = params.scopeBatchId ? 'BATCH' : 'GLOBAL';
+
+  // Supersede older stale auto-cost PENDING suggestions in matching scope
+  let supersedeQuery = trx.db
     .updateTable('price_suggestions')
     .set({
       status: 'SUPERSEDED',
@@ -927,15 +979,21 @@ export async function triggerCostChangeSuggestionIfApplicable(
     })
     .where('tenant_id', '=', trx.tenantId)
     .where('product_id', '=', params.productId)
-    .where('scope', '=', 'GLOBAL')
+    .where('scope', '=', targetScope)
     .where('status', '=', 'PENDING')
-    .where('source_event_type', 'in', ['GRN_POSTED', 'COST_EDIT', 'STOCK_MOVEMENT'])
-    .execute();
+    .where('source_event_type', 'in', ['GRN_POSTED', 'COST_EDIT', 'STOCK_MOVEMENT']);
+
+  if (params.scopeBatchId) {
+    supersedeQuery = supersedeQuery.where('batch_id', '=', params.scopeBatchId);
+  }
+  await supersedeQuery.execute();
 
   return createSuggestionInternal(trx, {
     productId: params.productId,
-    scope: 'GLOBAL',
-    branchId: null,
+    scope: targetScope,
+    branchId: params.scopeBatchId ? (params.scopeBranchId ?? null) : null,
+    batchId: params.scopeBatchId ?? null,
+    batchCurrentSellingPrice: params.batchCurrentSellingPrice ?? null,
     sourceEventType: params.sourceEventType,
     sourceEventKey: params.sourceEventKey,
     oldCost: oldCostMoney.toDecimalString(),
@@ -1252,6 +1310,62 @@ export async function approvePriceSuggestion(
       .where('product_id', '=', product.id)
       .where('is_active', '=', true)
       .execute();
+  } else if (row.scope === 'BATCH' && row.batch_id) {
+    const batchRow = await trx.db
+      .selectFrom('inventory_batches')
+      .selectAll()
+      .where('tenant_id', '=', trx.tenantId)
+      .where('id', '=', row.batch_id)
+      .forUpdate()
+      .executeTakeFirstOrThrow();
+
+    previousPriceStr =
+      batchRow.selling_price != null
+        ? Money.fromDecimalString(
+            String(batchRow.selling_price),
+            currencyCode,
+          ).toDecimalString()
+        : previousPriceStr;
+
+    await trx.db
+      .updateTable('inventory_batches')
+      .set({
+        selling_price: approvedMoney.toDecimalString(),
+        batch_pricing_mode: 'EXPLICIT',
+        updated_at: now,
+      })
+      .where('tenant_id', '=', trx.tenantId)
+      .where('id', '=', batchRow.id)
+      .execute();
+
+    await trx.db
+      .insertInto('batch_price_history')
+      .values({
+        id: generateUuidV7(),
+        tenant_id: trx.tenantId,
+        branch_id: batchRow.branch_id ?? row.branch_id ?? null,
+        product_id: product.id,
+        batch_id: batchRow.id,
+        previous_price:
+          batchRow.selling_price != null
+            ? Money.fromDecimalString(
+                String(batchRow.selling_price),
+                currencyCode,
+              ).toDecimalString()
+            : null,
+        new_price: approvedMoney.toDecimalString(),
+        cost_snapshot: Money.fromDecimalString(
+          String(batchRow.unit_cost),
+          currencyCode,
+        ).toDecimalString(),
+        change_type: 'SMART_PRICING_APPROVAL',
+        suggestion_id: row.id,
+        reason: input.reviewNotes?.trim() || row.reason,
+        actor_user_id: row.created_by_user_id ?? trx.userId,
+        approver_user_id: trx.userId,
+        created_at: now,
+      })
+      .execute();
   } else {
     const branchId = row.branch_id!;
     const existingBranchPrice = await trx.db
@@ -1341,6 +1455,7 @@ export async function approvePriceSuggestion(
       product_id: row.product_id,
       scope: row.scope,
       branch_id: row.branch_id,
+      batch_id: row.batch_id ?? null,
       suggestion_id: row.id,
       previous_price: previousPriceStr,
       new_price: approvedMoney.toDecimalString(),
@@ -2158,7 +2273,12 @@ export async function getSyncCatalogPricingSnapshot(
   await assertSubscriptionEntitlement(trx, { requireWriteAccess: false });
 
   const currencyCode = await getTenantBaseCurrency(trx);
-  const [products, rules, settings, branchOverrides] = await Promise.all([
+  const [tenantRow, products, rules, settings, branchOverrides, batches] = await Promise.all([
+    trx.db
+      .selectFrom('tenants')
+      .select(['shop_display_name', 'logo_url'])
+      .where('id', '=', trx.tenantId)
+      .executeTakeFirst(),
     trx.db
       .selectFrom('products')
       .select([
@@ -2168,6 +2288,9 @@ export async function getSyncCatalogPricingSnapshot(
         'base_uom',
         'price_uom',
         'selling_price',
+        'tracking_mode',
+        'allocation_policy',
+        'require_batch_selling_price',
         'sync_version',
       ])
       .where('tenant_id', '=', trx.tenantId)
@@ -2219,6 +2342,33 @@ export async function getSyncCatalogPricingSnapshot(
         qb.where('product_branch_prices.branch_id', '=', query.branchId!),
       )
       .execute(),
+    trx.db
+      .selectFrom('inventory_batches')
+      .select([
+        'id',
+        'product_id',
+        'branch_id',
+        'warehouse_id',
+        'batch_number',
+        'internal_barcode',
+        'expiry_date',
+        'received_date',
+        'current_quantity',
+        'reserved_quantity',
+        'unit_cost',
+        'selling_price',
+        'min_selling_price',
+        'max_discount_pct',
+        'batch_pricing_mode',
+        'status',
+      ])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('status', '=', 'ACTIVE')
+      .$if(Boolean(query.branchId), (qb) =>
+        qb.where('branch_id', '=', query.branchId!),
+      )
+      .orderBy('received_date', 'asc')
+      .execute(),
   ]);
 
   const ruleMap = new Map(rules.map((r) => [r.product_id, r]));
@@ -2229,8 +2379,19 @@ export async function getSyncCatalogPricingSnapshot(
     branchId: query.branchId ?? null,
     currencyCode,
     syncedAt: new Date().toISOString(),
+    branding: {
+      shopDisplayName: tenantRow?.shop_display_name ?? null,
+      logoUrl: tenantRow?.logo_url ?? null,
+    },
+    policies: {
+      batchPricingFallbackPolicy: ((settings.batch_pricing_fallback_policy as string | undefined) ??
+        'ALLOW_PRODUCT_FALLBACK') as BatchPricingFallbackPolicy,
+      defaultBatchAllocationPolicy: ((settings.default_batch_allocation_policy as string | undefined) ??
+        'FEFO') as BatchAllocationPolicy,
+    },
     globalPrices: products.map((p) => {
       const rule = ruleMap.get(p.id);
+      const rawPolicy = String(p.allocation_policy ?? 'FEFO');
       return {
         productId: p.id,
         sku: p.sku,
@@ -2251,6 +2412,9 @@ export async function getSyncCatalogPricingSnapshot(
           rule?.max_discount_pct !== null && rule?.max_discount_pct !== undefined
             ? formatPct2(rule.max_discount_pct)
             : defaultMaxDisc,
+        trackingMode: (p.tracking_mode ?? 'NONE') as TrackingMode,
+        allocationPolicy: (rawPolicy === 'FIFO' ? 'FIFO' : 'FEFO') as BatchAllocationPolicy,
+        requireBatchSellingPrice: Boolean(p.require_batch_selling_price ?? false),
         syncVersion: Number(p.sync_version),
       };
     }),
@@ -2293,5 +2457,36 @@ export async function getSyncCatalogPricingSnapshot(
       approvedAt: r.approved_at ? new Date(r.approved_at).toISOString() : null,
       syncVersion: Number(r.sync_version),
     })),
+    batches: batches.map((b) => {
+      const avail = Quantity.fromDecimalString(String(b.current_quantity)).subtract(
+        Quantity.fromDecimalString(String(b.reserved_quantity ?? '0.000000')),
+      );
+      return {
+        batchId: b.id,
+        productId: b.product_id,
+        branchId: b.branch_id ?? null,
+        warehouseId: b.warehouse_id,
+        batchNumber: b.batch_number,
+        internalBarcode: b.internal_barcode ?? null,
+        expiryDate: b.expiry_date ? formatDateOnly(b.expiry_date) : null,
+        receivedDate: formatDateOnly(b.received_date),
+        availableQuantity: (avail.isNegative() ? Quantity.zero() : avail).toDecimalString(),
+        unitCost: Money.fromDecimalString(String(b.unit_cost), currencyCode).toDecimalString(),
+        sellingPrice:
+          b.selling_price != null
+            ? Money.fromDecimalString(String(b.selling_price), currencyCode).toDecimalString()
+            : null,
+        minSellingPrice:
+          b.min_selling_price != null
+            ? Money.fromDecimalString(String(b.min_selling_price), currencyCode).toDecimalString()
+            : null,
+        maxDiscountPct:
+          b.max_discount_pct !== null && b.max_discount_pct !== undefined
+            ? formatPct2(b.max_discount_pct)
+            : null,
+        batchPricingMode: (b.batch_pricing_mode ?? 'EXPLICIT') as BatchPricingMode,
+        status: b.status as BatchStatus,
+      };
+    }),
   };
 }

@@ -32,6 +32,7 @@ import {
   calculateLinePricingAndTax,
   computeProportionateUnitPriceAndTotal,
   convertQuantityBetweenUoms,
+  resolveEffectiveBatchPrice,
   validateDiscountAgainstPolicy,
 } from '@nexstock/domain-core';
 import { resolveBranchEffectivePriceConfig } from '../../cat/index.js';
@@ -1500,14 +1501,48 @@ export async function checkoutSale(
     }
   }
 
-  // Tenant base currency
-  const tenant = await trx.db
-    .selectFrom('tenants')
-    .select(['base_currency', 'legal_name'])
-    .where('id', '=', trx.tenantId)
-    .executeTakeFirstOrThrow();
+  // Tenant base currency & pricing policy
+  const [tenant, warehouseRow, pricingSettingsRow] = await Promise.all([
+    trx.db
+      .selectFrom('tenants')
+      .select(['base_currency', 'legal_name'])
+      .where('id', '=', trx.tenantId)
+      .executeTakeFirstOrThrow(),
+    trx.db
+      .selectFrom('warehouses')
+      .select(['id', 'allow_negative_stock'])
+      .where('id', '=', register.warehouse_id)
+      .executeTakeFirst(),
+    trx.db
+      .selectFrom('pricing_settings')
+      .select(['batch_pricing_fallback_policy', 'default_batch_allocation_policy'])
+      .where('tenant_id', '=', trx.tenantId)
+      .executeTakeFirst(),
+  ]);
 
   const currencyCode = tenant.base_currency;
+  const allowNegative = Boolean(
+    warehouseRow?.allow_negative_stock || input.allowNegativeStockOverride,
+  );
+  const batchFallbackPolicy =
+    (pricingSettingsRow?.batch_pricing_fallback_policy as
+      | 'BLOCK_MISSING'
+      | 'ALLOW_PRODUCT_FALLBACK'
+      | undefined) ?? 'ALLOW_PRODUCT_FALLBACK';
+  const todayStr = new Date().toISOString().slice(0, 10);
+
+  let cachedIsSupervisor: boolean | null = null;
+  async function checkIsSupervisor(): Promise<boolean> {
+    if (cachedIsSupervisor !== null) return cachedIsSupervisor;
+    const authCtx = await resolveMemberAuthorizationContext(trx);
+    cachedIsSupervisor = authCtx.roleCodes.some(
+      (code) =>
+        code === 'TENANT_OWNER' ||
+        code === 'ORG_ADMIN' ||
+        code === 'BRANCH_MANAGER',
+    );
+    return cachedIsSupervisor;
+  }
 
   // Increment sequential invoice number concurrency-safely
   const nextSeq = BigInt(register.last_invoice_seq) + 1n;
@@ -1543,6 +1578,16 @@ export async function checkoutSale(
     readonly valuationMethod: string;
     readonly unitCostSnapshot: string;
     readonly batchId: string | null;
+    readonly batchNumber: string | null;
+    readonly internalBarcode: string | null;
+    readonly expiryDate: string | null;
+    readonly priceSource:
+      | 'BATCH_EXPLICIT'
+      | 'POS_MANUAL_OVERRIDE'
+      | 'PRODUCT_FALLBACK'
+      | 'BRANCH_OVERRIDE'
+      | 'GLOBAL_PRODUCT'
+      | null;
     readonly serialId: string | null;
   }> = [];
 
@@ -1552,7 +1597,6 @@ export async function checkoutSale(
 
   for (let idx = 0; idx < input.lines.length; idx++) {
     const lineItem = input.lines[idx]!;
-    const lineNumber = idx + 1;
 
     let lineQty: Quantity;
     try {
@@ -1639,76 +1683,22 @@ export async function checkoutSale(
     const normalizedBaseQty = convToBase.convertedQuantity;
     const conversionFactorToBaseStr = convToBase.factorDecimal6;
 
-    // Resolve Batch and Serial before pricing so variable batch-level pricing takes precedence
-    let batchId: string | null = lineItem.batchId ?? null;
-    let serialId: string | null = lineItem.serialId ?? null;
-    let batchSellingPrice: string | null = null;
-
-    if (
-      product.track_inventory &&
-      (product.tracking_mode === 'BATCH' ||
-        product.tracking_mode === 'BATCH_EXPIRY')
-    ) {
-      if (batchId) {
-        const explicitBatch = await trx.db
-          .selectFrom('inventory_batches')
-          .select(['id', 'selling_price', 'status'])
-          .where('tenant_id', '=', trx.tenantId)
-          .where('id', '=', batchId)
-          .executeTakeFirst();
-        if (explicitBatch?.selling_price) {
-          batchSellingPrice = String(explicitBatch.selling_price);
-        }
-      } else {
-        const fefo = await selectFefoBatches(trx, {
-          warehouseId: register.warehouse_id,
-          productId: product.id,
-          requiredQuantity: normalizedBaseQty.toDecimalString(),
+    // Verify supervisor authorization if manual selling price override is supplied
+    let isPriceOverrideAuthorized = false;
+    if (lineItem.overrideSellingPrice !== undefined && lineItem.overrideSellingPrice !== null) {
+      isPriceOverrideAuthorized = await checkIsSupervisor();
+      if (!isPriceOverrideAuthorized) {
+        throw new AppError({
+          statusCode: 403,
+          errorCode: 'POS_UNAUTHORIZED_DISCOUNT',
+          title: 'Unauthorized Price Override',
+          detail:
+            'Cashiers are not permitted to override selling prices without supervisor authorization.',
         });
-        if (fefo.allocations.length > 0) {
-          batchId = fefo.allocations[0]!.batchId;
-          if (fefo.allocations[0]!.sellingPrice) {
-            batchSellingPrice = fefo.allocations[0]!.sellingPrice;
-          }
-        } else if (!input.allowNegativeStockOverride) {
-          throw new AppError({
-            statusCode: 409,
-            errorCode: 'INV_INSUFFICIENT_BATCH_STOCK',
-            title: 'No Available Batch Stock',
-            detail: `No active non-expired batch found for product "${product.sku}".`,
-          });
-        }
-      }
-    } else if (
-      product.track_inventory &&
-      product.tracking_mode === 'SERIAL'
-    ) {
-      if (!serialId && lineItem.serialNumber) {
-        const sRow = await trx.db
-          .selectFrom('inventory_serials')
-          .select(['id', 'status'])
-          .where('tenant_id', '=', trx.tenantId)
-          .where('product_id', '=', product.id)
-          .where(
-            'serial_number',
-            '=',
-            lineItem.serialNumber.trim().toUpperCase(),
-          )
-          .executeTakeFirst();
-        if (sRow) {
-          serialId = sRow.id;
-        } else {
-          throw new AppError({
-            statusCode: 404,
-            errorCode: 'INV_SERIAL_NOT_FOUND',
-            title: 'Serial Number Not Found',
-            detail: `Serial number "${lineItem.serialNumber}" not found for product "${product.sku}".`,
-          });
-        }
       }
     }
 
-    // Money calculation (Priority: Batch -> Branch Override -> Global Default)
+    // Load branch pricing config & tax rules once per cart line
     const effectivePriceUom = (product.price_uom ?? product.base_uom)
       .trim()
       .toUpperCase();
@@ -1718,101 +1708,6 @@ export async function checkoutSale(
       globalSellingPrice: product.selling_price,
       currencyCode,
     });
-    const effectiveUnitPriceStr =
-      batchSellingPrice && Number(batchSellingPrice) > 0
-        ? batchSellingPrice
-        : branchPriceCfg.effectivePrice;
-
-    const pricePerPriceUomMoney = Money.fromDecimalString(
-      effectiveUnitPriceStr,
-      currencyCode,
-    );
-
-    let propPricing: ReturnType<typeof computeProportionateUnitPriceAndTotal>;
-    try {
-      propPricing = computeProportionateUnitPriceAndTotal({
-        sellingPricePerPriceUom: pricePerPriceUomMoney.toDecimalString(),
-        priceUom: effectivePriceUom,
-        enteredQty: lineQty.toDecimalString(),
-        sellingUom: uomCode,
-        currencyCode,
-        productBaseUom: product.base_uom,
-        customConversions,
-        densityGPerMl: product.density_g_per_ml,
-      });
-    } catch (err) {
-      if (err instanceof UomConversionError) {
-        throw new AppError({
-          statusCode: 400,
-          errorCode: 'CAT_INVALID_UOM_CONVERSION',
-          title: 'Incompatible Pricing UoM',
-          detail: err.message,
-        });
-      }
-      throw err;
-    }
-
-    const unitPriceMoney = propPricing.unitPriceInSellingUom;
-    const resolvedEntrySource: LineEntrySource =
-      lineItem.entrySource ??
-      ((product.product_qty_mode ?? 'STANDARD') === 'VARIABLE'
-        ? 'MANUAL_WEIGHT'
-        : 'MANUAL');
-
-    let lineDiscountMoney = Money.zero(currencyCode);
-    if (lineItem.discountAmount) {
-      lineDiscountMoney = Money.fromDecimalString(
-        lineItem.discountAmount,
-        currencyCode,
-      );
-      if (lineDiscountMoney.isNegative()) {
-        throw new AppError({
-          statusCode: 400,
-          errorCode: 'ERR_VALIDATION_FAILED',
-          title: 'Invalid Line Discount',
-          detail: 'Line discount cannot be negative.',
-        });
-      }
-      if (lineDiscountMoney.isPositive()) {
-        const qtyInPriceUomStr =
-          effectivePriceUom === product.base_uom
-            ? normalizedBaseQty.toDecimalString()
-            : effectivePriceUom === uomCode
-              ? lineQty.toDecimalString()
-              : convertQuantityBetweenUoms({
-                  quantity: lineQty.toDecimalString(),
-                  fromUom: uomCode,
-                  toUom: effectivePriceUom,
-                  productBaseUom: product.base_uom,
-                  customConversions,
-                  densityGPerMl: product.density_g_per_ml,
-                }).convertedQuantity.toDecimalString();
-
-        const policyCheck = validateDiscountAgainstPolicy({
-          grossLineTotal: propPricing.effectiveLineSubtotal.toDecimalString(),
-          discountAmount: lineDiscountMoney.toDecimalString(),
-          baseQty: qtyInPriceUomStr,
-          maxDiscountPct: branchPriceCfg.maxDiscountPct,
-          minSellingPrice: branchPriceCfg.minSellingPrice,
-          currencyCode,
-        });
-        if (!policyCheck.allowed) {
-          const isFloorViolation = policyCheck.reason?.includes('minimum selling price');
-          throw new AppError({
-            statusCode: 422,
-            errorCode: isFloorViolation
-              ? 'PRICING_MIN_PRICE_VIOLATION'
-              : 'PRICING_MAX_DISCOUNT_EXCEEDED',
-            title: isFloorViolation
-              ? 'Minimum Selling Price Floor Violation'
-              : 'Discount Exceeds Policy Limit',
-            detail:
-              policyCheck.reason ??
-              `Discount exceeds pricing policy limit for "${product.sku}".`,
-          });
-        }
-      }
-    }
 
     let lineTaxRules: Array<{
       taxRateId: string;
@@ -1839,55 +1734,610 @@ export async function checkoutSale(
       }));
     }
 
-    let lineCalc;
-    try {
-      lineCalc = calculateLinePricingAndTax({
-        unitPrice:
-          uomCode === effectivePriceUom
-            ? unitPriceMoney
-            : propPricing.effectiveLineSubtotal,
-        quantity:
-          uomCode === effectivePriceUom ? lineQty : Quantity.fromInteger(1),
-        lineDiscount: lineDiscountMoney,
-        isTaxInclusive: false,
-        taxRules: lineTaxRules,
-      });
-    } catch (err: unknown) {
-      throw new AppError({
-        statusCode: 400,
-        errorCode: 'ERR_VALIDATION_FAILED',
-        title: 'Line Price Calculation Error',
-        detail: (err as Error).message,
+    let serialId: string | null = lineItem.serialId ?? null;
+    if (product.track_inventory && product.tracking_mode === 'SERIAL') {
+      if (!serialId && lineItem.serialNumber) {
+        const sRow = await trx.db
+          .selectFrom('inventory_serials')
+          .select(['id', 'status'])
+          .where('tenant_id', '=', trx.tenantId)
+          .where('product_id', '=', product.id)
+          .where(
+            'serial_number',
+            '=',
+            lineItem.serialNumber.trim().toUpperCase(),
+          )
+          .executeTakeFirst();
+        if (sRow) {
+          serialId = sRow.id;
+        } else {
+          throw new AppError({
+            statusCode: 404,
+            errorCode: 'INV_SERIAL_NOT_FOUND',
+            title: 'Serial Number Not Found',
+            detail: `Serial number "${lineItem.serialNumber}" not found for product "${product.sku}".`,
+          });
+        }
+      }
+    }
+
+    type CheckoutSlice = {
+      readonly sliceQty: Quantity;
+      readonly sliceBaseQty: Quantity;
+      readonly sliceConvFactorToBase: string;
+      readonly batchId: string | null;
+      readonly batchNumber: string | null;
+      readonly internalBarcode: string | null;
+      readonly expiryDate: string | null;
+      readonly effectiveUnitPriceStr: string;
+      readonly minSellingPriceFloor: string | null;
+      readonly maxDiscountPctPolicy: string | null;
+      readonly unitCostSnapshot: string;
+      readonly priceSource:
+        | 'BATCH_EXPLICIT'
+        | 'POS_MANUAL_OVERRIDE'
+        | 'PRODUCT_FALLBACK'
+        | 'BRANCH_OVERRIDE'
+        | 'GLOBAL_PRODUCT';
+    };
+
+    const slices: CheckoutSlice[] = [];
+
+    if (
+      product.track_inventory &&
+      (product.tracking_mode === 'BATCH' ||
+        product.tracking_mode === 'BATCH_EXPIRY')
+    ) {
+      const resolveSlicePrice = (params: {
+        batchNumber: string;
+        batchSellingPrice: string | null;
+        batchMinSellingPrice: string | null;
+        batchMaxDiscountPct: string | null;
+        batchPricingMode: 'EXPLICIT' | 'INHERIT_PRODUCT';
+      }) => {
+        const priceRes = resolveEffectiveBatchPrice({
+          batchNumber: params.batchNumber,
+          batchSellingPrice: params.batchSellingPrice,
+          batchMinSellingPrice: params.batchMinSellingPrice,
+          batchMaxDiscountPct: params.batchMaxDiscountPct,
+          batchPricingMode: params.batchPricingMode,
+          productSellingPrice: product.selling_price,
+          productMinSellingPrice: null,
+          productMaxDiscountPct: null,
+          branchSellingPrice:
+            branchPriceCfg.priceSource === 'BRANCH_OVERRIDE'
+              ? branchPriceCfg.effectivePrice
+              : null,
+          branchMinSellingPrice: branchPriceCfg.minSellingPrice,
+          branchMaxDiscountPct: branchPriceCfg.maxDiscountPct,
+          fallbackPolicy: batchFallbackPolicy,
+          requireBatchSellingPrice: Boolean(product.require_batch_selling_price),
+          overrideSellingPrice: lineItem.overrideSellingPrice ?? null,
+          overrideAuthorized: isPriceOverrideAuthorized,
+          currencyCode,
+        });
+
+        if (!priceRes.ok) {
+          throw new AppError({
+            statusCode: 422,
+            errorCode:
+              priceRes.errorCode === 'BATCH_MIN_PRICE_VIOLATION'
+                ? 'POS_BATCH_MIN_PRICE_VIOLATION'
+                : 'POS_BATCH_PRICE_REQUIRED',
+            title:
+              priceRes.errorCode === 'BATCH_MIN_PRICE_VIOLATION'
+                ? 'Batch Minimum Selling Price Violation'
+                : 'Batch Selling Price Required',
+            detail: priceRes.reason,
+          });
+        }
+
+        const priceSourceMap: Record<
+          Extract<typeof priceRes, { ok: true }>['source'],
+          CheckoutSlice['priceSource']
+        > = {
+          EXPLICIT_BATCH_PRICE: 'BATCH_EXPLICIT',
+          POS_BATCH_OVERRIDE: 'POS_MANUAL_OVERRIDE',
+          BRANCH_DEFAULT_FALLBACK: 'BRANCH_OVERRIDE',
+          PRODUCT_DEFAULT_FALLBACK: 'PRODUCT_FALLBACK',
+        };
+
+        return {
+          effectiveUnitPriceStr: priceRes.resolvedPrice,
+          minSellingPriceFloor: priceRes.minSellingPrice,
+          maxDiscountPctPolicy: priceRes.maxDiscountPct,
+          priceSource: priceSourceMap[priceRes.source],
+        };
+      };
+
+      if (lineItem.batchId) {
+        // Explicit internal batch barcode lock: never replace with another batch via FEFO/FIFO
+        const explicitBatch = await trx.db
+          .selectFrom('inventory_batches')
+          .selectAll()
+          .where('tenant_id', '=', trx.tenantId)
+          .where('id', '=', lineItem.batchId)
+          .forUpdate()
+          .executeTakeFirst();
+
+        if (!explicitBatch) {
+          throw new AppError({
+            statusCode: 404,
+            errorCode: 'INV_BATCH_NOT_FOUND',
+            title: 'Batch Not Found',
+            detail: `Batch "${lineItem.batchId}" was not found.`,
+          });
+        }
+
+        if (
+          explicitBatch.product_id !== product.id ||
+          explicitBatch.warehouse_id !== register.warehouse_id
+        ) {
+          throw new AppError({
+            statusCode: 409,
+            errorCode: 'POS_BATCH_NOT_AVAILABLE',
+            title: 'Batch Not Available At Register',
+            detail: `Batch "${explicitBatch.batch_number}" does not belong to product "${product.sku}" in this warehouse.`,
+          });
+        }
+
+        const expRaw: unknown = explicitBatch.expiry_date;
+        const expiryStr = expRaw
+          ? typeof expRaw === 'string'
+            ? expRaw.slice(0, 10)
+            : (expRaw as Date).toISOString().slice(0, 10)
+          : null;
+
+        if (
+          explicitBatch.status === 'EXPIRED' ||
+          (expiryStr && expiryStr < todayStr)
+        ) {
+          throw new AppError({
+            statusCode: 409,
+            errorCode: 'POS_BATCH_EXPIRED',
+            title: 'Expired Batch Blocked',
+            detail: `Batch "${explicitBatch.batch_number}" expired on ${expiryStr ?? 'record'} and cannot be sold.`,
+          });
+        }
+
+        if (explicitBatch.status !== 'ACTIVE') {
+          throw new AppError({
+            statusCode: 409,
+            errorCode: 'POS_BATCH_NOT_AVAILABLE',
+            title: 'Batch Unavailable For Sale',
+            detail: `Batch "${explicitBatch.batch_number}" has status "${explicitBatch.status}" and cannot be sold.`,
+          });
+        }
+
+        const currentQty = Quantity.fromDecimalString(
+          String(explicitBatch.current_quantity),
+        );
+        const reservedQty = Quantity.fromDecimalString(
+          String(explicitBatch.reserved_quantity ?? '0.000000'),
+        );
+        const availableQty = currentQty.subtract(reservedQty);
+        if (!allowNegative && availableQty.compare(normalizedBaseQty) < 0) {
+          throw new AppError({
+            statusCode: 409,
+            errorCode: 'INV_INSUFFICIENT_BATCH_STOCK',
+            title: 'Insufficient Batch Stock',
+            detail: `Batch "${explicitBatch.batch_number}" has only ${availableQty.toDecimalString()} available, but ${normalizedBaseQty.toDecimalString()} was requested.`,
+          });
+        }
+
+        const resolvedPrice = resolveSlicePrice({
+          batchNumber: explicitBatch.batch_number,
+          batchSellingPrice:
+            explicitBatch.selling_price != null
+              ? Money.fromDecimalString(
+                  String(explicitBatch.selling_price),
+                  currencyCode,
+                ).toDecimalString()
+              : null,
+          batchMinSellingPrice:
+            explicitBatch.min_selling_price != null
+              ? Money.fromDecimalString(
+                  String(explicitBatch.min_selling_price),
+                  currencyCode,
+                ).toDecimalString()
+              : null,
+          batchMaxDiscountPct:
+            explicitBatch.max_discount_pct != null
+              ? String(explicitBatch.max_discount_pct)
+              : null,
+          batchPricingMode: (explicitBatch.batch_pricing_mode ?? 'EXPLICIT') as
+            | 'EXPLICIT'
+            | 'INHERIT_PRODUCT',
+        });
+
+        slices.push({
+          sliceQty: lineQty,
+          sliceBaseQty: normalizedBaseQty,
+          sliceConvFactorToBase: conversionFactorToBaseStr,
+          batchId: explicitBatch.id,
+          batchNumber: explicitBatch.batch_number,
+          internalBarcode: explicitBatch.internal_barcode ?? null,
+          expiryDate: expiryStr,
+          effectiveUnitPriceStr: resolvedPrice.effectiveUnitPriceStr,
+          minSellingPriceFloor: resolvedPrice.minSellingPriceFloor,
+          maxDiscountPctPolicy: resolvedPrice.maxDiscountPctPolicy,
+          unitCostSnapshot: Money.fromDecimalString(
+            String(explicitBatch.unit_cost),
+            currencyCode,
+          ).toDecimalString(),
+          priceSource: resolvedPrice.priceSource,
+        });
+      } else {
+        // Automatic FEFO/FIFO allocation (supports multi-batch cart splitting)
+        const fefo = await selectFefoBatches(trx, {
+          warehouseId: register.warehouse_id,
+          productId: product.id,
+          requiredQuantity: normalizedBaseQty.toDecimalString(),
+          skipPermissionCheck: true,
+        });
+
+        const unfulfilledQty = Quantity.fromDecimalString(fefo.unfulfilledQty);
+        if (
+          !allowNegative &&
+          (fefo.allocations.length === 0 || unfulfilledQty.isPositive())
+        ) {
+          throw new AppError({
+            statusCode: 409,
+            errorCode: 'INV_INSUFFICIENT_BATCH_STOCK',
+            title: 'Insufficient Batch Stock',
+            detail: `Insufficient active non-expired batch stock for product "${product.sku}": requested ${normalizedBaseQty.toDecimalString()}, available ${fefo.fulfilledQty}.`,
+          });
+        }
+
+        if (fefo.allocations.length === 0) {
+          const resolvedFallback = resolveSlicePrice({
+            batchNumber: product.sku,
+            batchSellingPrice: null,
+            batchMinSellingPrice: null,
+            batchMaxDiscountPct: null,
+            batchPricingMode: 'INHERIT_PRODUCT',
+          });
+          slices.push({
+            sliceQty: lineQty,
+            sliceBaseQty: normalizedBaseQty,
+            sliceConvFactorToBase: conversionFactorToBaseStr,
+            batchId: null,
+            batchNumber: null,
+            internalBarcode: null,
+            expiryDate: null,
+            effectiveUnitPriceStr: resolvedFallback.effectiveUnitPriceStr,
+            minSellingPriceFloor: resolvedFallback.minSellingPriceFloor,
+            maxDiscountPctPolicy: resolvedFallback.maxDiscountPctPolicy,
+            unitCostSnapshot: product.purchase_cost,
+            priceSource: resolvedFallback.priceSource,
+          });
+        } else {
+          const allocatedBatchIds = fefo.allocations.map((a) => a.batchId);
+          const batchMetaRows = await trx.db
+            .selectFrom('inventory_batches')
+            .select([
+              'id',
+              'min_selling_price',
+              'max_discount_pct',
+              'batch_pricing_mode',
+              'unit_cost',
+            ])
+            .where('tenant_id', '=', trx.tenantId)
+            .where('id', 'in', allocatedBatchIds)
+            .execute();
+          const batchMetaById = new Map(batchMetaRows.map((b) => [b.id, b]));
+
+          for (let aIdx = 0; aIdx < fefo.allocations.length; aIdx++) {
+            const alloc = fefo.allocations[aIdx]!;
+            const bMeta = batchMetaById.get(alloc.batchId);
+            const sliceBaseQty = Quantity.fromDecimalString(alloc.allocatedQty);
+
+            let sliceQty: Quantity;
+            if (fefo.allocations.length === 1 && !unfulfilledQty.isPositive()) {
+              sliceQty = lineQty;
+            } else if (uomCode === product.base_uom) {
+              sliceQty = sliceBaseQty;
+            } else {
+              sliceQty = convertQuantityBetweenUoms({
+                quantity: sliceBaseQty.toDecimalString(),
+                fromUom: product.base_uom,
+                toUom: uomCode,
+                productBaseUom: product.base_uom,
+                customConversions,
+                densityGPerMl: product.density_g_per_ml,
+              }).convertedQuantity;
+            }
+
+            const resolvedPrice = resolveSlicePrice({
+              batchNumber: alloc.batchNumber,
+              batchSellingPrice: alloc.sellingPrice ?? null,
+              batchMinSellingPrice:
+                bMeta?.min_selling_price != null
+                  ? Money.fromDecimalString(
+                      String(bMeta.min_selling_price),
+                      currencyCode,
+                    ).toDecimalString()
+                  : null,
+              batchMaxDiscountPct:
+                bMeta?.max_discount_pct != null
+                  ? String(bMeta.max_discount_pct)
+                  : null,
+              batchPricingMode: (bMeta?.batch_pricing_mode ??
+                alloc.batchPricingMode ??
+                'EXPLICIT') as 'EXPLICIT' | 'INHERIT_PRODUCT',
+            });
+
+            slices.push({
+              sliceQty,
+              sliceBaseQty,
+              sliceConvFactorToBase: conversionFactorToBaseStr,
+              batchId: alloc.batchId,
+              batchNumber: alloc.batchNumber,
+              internalBarcode: alloc.internalBarcode ?? null,
+              expiryDate: alloc.expiryDate ?? null,
+              effectiveUnitPriceStr: resolvedPrice.effectiveUnitPriceStr,
+              minSellingPriceFloor: resolvedPrice.minSellingPriceFloor,
+              maxDiscountPctPolicy: resolvedPrice.maxDiscountPctPolicy,
+              unitCostSnapshot: Money.fromDecimalString(
+                String(bMeta?.unit_cost ?? alloc.unitCost),
+                currencyCode,
+              ).toDecimalString(),
+              priceSource: resolvedPrice.priceSource,
+            });
+          }
+
+          if (unfulfilledQty.isPositive()) {
+            const extraQty =
+              uomCode === product.base_uom
+                ? unfulfilledQty
+                : convertQuantityBetweenUoms({
+                    quantity: unfulfilledQty.toDecimalString(),
+                    fromUom: product.base_uom,
+                    toUom: uomCode,
+                    productBaseUom: product.base_uom,
+                    customConversions,
+                    densityGPerMl: product.density_g_per_ml,
+                  }).convertedQuantity;
+            const resolvedFallback = resolveSlicePrice({
+              batchNumber: product.sku,
+              batchSellingPrice: null,
+              batchMinSellingPrice: null,
+              batchMaxDiscountPct: null,
+              batchPricingMode: 'INHERIT_PRODUCT',
+            });
+            slices.push({
+              sliceQty: extraQty,
+              sliceBaseQty: unfulfilledQty,
+              sliceConvFactorToBase: conversionFactorToBaseStr,
+              batchId: null,
+              batchNumber: null,
+              internalBarcode: null,
+              expiryDate: null,
+              effectiveUnitPriceStr: resolvedFallback.effectiveUnitPriceStr,
+              minSellingPriceFloor: resolvedFallback.minSellingPriceFloor,
+              maxDiscountPctPolicy: resolvedFallback.maxDiscountPctPolicy,
+              unitCostSnapshot: product.purchase_cost,
+              priceSource: resolvedFallback.priceSource,
+            });
+          }
+        }
+      }
+    } else {
+      let effectiveUnitPriceStr = branchPriceCfg.effectivePrice;
+      let resolvedPriceSource: CheckoutSlice['priceSource'] =
+        branchPriceCfg.priceSource === 'BRANCH_OVERRIDE'
+          ? 'BRANCH_OVERRIDE'
+          : 'GLOBAL_PRODUCT';
+      if (
+        isPriceOverrideAuthorized &&
+        lineItem.overrideSellingPrice !== undefined &&
+        lineItem.overrideSellingPrice !== null
+      ) {
+        const overrideMoney = Money.fromDecimalString(
+          lineItem.overrideSellingPrice,
+          currencyCode,
+        );
+        if (branchPriceCfg.minSellingPrice) {
+          const floorMoney = Money.fromDecimalString(
+            branchPriceCfg.minSellingPrice,
+            currencyCode,
+          );
+          if (overrideMoney.compare(floorMoney) < 0) {
+            throw new AppError({
+              statusCode: 422,
+              errorCode: 'POS_BATCH_MIN_PRICE_VIOLATION',
+              title: 'Minimum Selling Price Floor Violation',
+              detail: `Override price (${overrideMoney.toDecimalString()}) is below minimum selling price floor (${floorMoney.toDecimalString()}).`,
+            });
+          }
+        }
+        effectiveUnitPriceStr = overrideMoney.toDecimalString();
+        resolvedPriceSource = 'POS_MANUAL_OVERRIDE';
+      }
+
+      slices.push({
+        sliceQty: lineQty,
+        sliceBaseQty: normalizedBaseQty,
+        sliceConvFactorToBase: conversionFactorToBaseStr,
+        batchId: null,
+        batchNumber: null,
+        internalBarcode: null,
+        expiryDate: null,
+        effectiveUnitPriceStr,
+        minSellingPriceFloor: branchPriceCfg.minSellingPrice,
+        maxDiscountPctPolicy: branchPriceCfg.maxDiscountPct,
+        unitCostSnapshot: product.purchase_cost,
+        priceSource: resolvedPriceSource,
       });
     }
 
-    subtotalAccumulator = subtotalAccumulator.add(lineCalc.grossLineAmount);
-    totalLineDiscounts = totalLineDiscounts.add(lineCalc.discountAmount);
-    totalTaxes = totalTaxes.add(lineCalc.totalTaxAmount);
+    let totalRequestedDiscount = Money.zero(currencyCode);
+    if (lineItem.discountAmount) {
+      totalRequestedDiscount = Money.fromDecimalString(
+        lineItem.discountAmount,
+        currencyCode,
+      );
+      if (totalRequestedDiscount.isNegative()) {
+        throw new AppError({
+          statusCode: 400,
+          errorCode: 'ERR_VALIDATION_FAILED',
+          title: 'Invalid Line Discount',
+          detail: 'Line discount cannot be negative.',
+        });
+      }
+    }
+    let remainingDiscountToAllocate = totalRequestedDiscount;
 
-    processedLines.push({
-      lineNumber,
-      productId: product.id,
-      sku: product.sku,
-      productName: product.name,
-      uomCode,
-      quantity: lineQty,
-      conversionFactorToBase: conversionFactorToBaseStr,
-      normalizedBaseQty,
-      priceUom: effectivePriceUom,
-      pricePerPriceUom: pricePerPriceUomMoney,
-      entrySource: resolvedEntrySource,
-      unitPrice: unitPriceMoney,
-      discountAmount: lineCalc.discountAmount,
-      taxAmount: lineCalc.totalTaxAmount,
-      lineTotal: lineCalc.lineTotalWithTax,
-      trackInventory: product.track_inventory,
-      trackingMode: product.tracking_mode ?? 'NONE',
-      valuationMethod: product.valuation_method ?? 'MOVING_AVG',
-      unitCostSnapshot: product.purchase_cost,
-      batchId,
-      serialId,
-    });
+    for (let sIdx = 0; sIdx < slices.length; sIdx++) {
+      const slice = slices[sIdx]!;
+      const pricePerPriceUomMoney = Money.fromDecimalString(
+        slice.effectiveUnitPriceStr,
+        currencyCode,
+      );
+
+      let propPricing: ReturnType<typeof computeProportionateUnitPriceAndTotal>;
+      try {
+        propPricing = computeProportionateUnitPriceAndTotal({
+          sellingPricePerPriceUom: pricePerPriceUomMoney.toDecimalString(),
+          priceUom: effectivePriceUom,
+          enteredQty: slice.sliceQty.toDecimalString(),
+          sellingUom: uomCode,
+          currencyCode,
+          productBaseUom: product.base_uom,
+          customConversions,
+          densityGPerMl: product.density_g_per_ml,
+        });
+      } catch (err) {
+        if (err instanceof UomConversionError) {
+          throw new AppError({
+            statusCode: 400,
+            errorCode: 'CAT_INVALID_UOM_CONVERSION',
+            title: 'Incompatible Pricing UoM',
+            detail: err.message,
+          });
+        }
+        throw err;
+      }
+
+      const unitPriceMoney = propPricing.unitPriceInSellingUom;
+      const resolvedEntrySource: LineEntrySource =
+        lineItem.entrySource ??
+        ((product.product_qty_mode ?? 'STANDARD') === 'VARIABLE'
+          ? 'MANUAL_WEIGHT'
+          : 'MANUAL');
+
+      let lineDiscountMoney = Money.zero(currencyCode);
+      if (totalRequestedDiscount.isPositive()) {
+        if (sIdx === slices.length - 1 || slices.length === 1) {
+          lineDiscountMoney = remainingDiscountToAllocate;
+        } else if (normalizedBaseQty.microUnits > 0n) {
+          const sliceScaledDiscount =
+            (totalRequestedDiscount.scaledUnits * slice.sliceBaseQty.microUnits) /
+            normalizedBaseQty.microUnits;
+          lineDiscountMoney = Money.fromScaledUnits(
+            sliceScaledDiscount,
+            currencyCode,
+          );
+          remainingDiscountToAllocate =
+            remainingDiscountToAllocate.subtract(lineDiscountMoney);
+        }
+
+        if (lineDiscountMoney.isPositive()) {
+          const qtyInPriceUomStr =
+            effectivePriceUom === product.base_uom
+              ? slice.sliceBaseQty.toDecimalString()
+              : effectivePriceUom === uomCode
+                ? slice.sliceQty.toDecimalString()
+                : convertQuantityBetweenUoms({
+                    quantity: slice.sliceQty.toDecimalString(),
+                    fromUom: uomCode,
+                    toUom: effectivePriceUom,
+                    productBaseUom: product.base_uom,
+                    customConversions,
+                    densityGPerMl: product.density_g_per_ml,
+                  }).convertedQuantity.toDecimalString();
+
+          const policyCheck = validateDiscountAgainstPolicy({
+            grossLineTotal: propPricing.effectiveLineSubtotal.toDecimalString(),
+            discountAmount: lineDiscountMoney.toDecimalString(),
+            baseQty: qtyInPriceUomStr,
+            maxDiscountPct: slice.maxDiscountPctPolicy,
+            minSellingPrice: slice.minSellingPriceFloor,
+            currencyCode,
+          });
+          if (!policyCheck.allowed) {
+            const isFloorViolation = policyCheck.reason?.includes('minimum selling price');
+            throw new AppError({
+              statusCode: 422,
+              errorCode: isFloorViolation
+                ? 'PRICING_MIN_PRICE_VIOLATION'
+                : 'PRICING_MAX_DISCOUNT_EXCEEDED',
+              title: isFloorViolation
+                ? 'Minimum Selling Price Floor Violation'
+                : 'Discount Exceeds Policy Limit',
+              detail:
+                policyCheck.reason ??
+                `Discount exceeds pricing policy limit for "${product.sku}".`,
+            });
+          }
+        }
+      }
+
+      let lineCalc;
+      try {
+        lineCalc = calculateLinePricingAndTax({
+          unitPrice:
+            uomCode === effectivePriceUom
+              ? unitPriceMoney
+              : propPricing.effectiveLineSubtotal,
+          quantity:
+            uomCode === effectivePriceUom ? slice.sliceQty : Quantity.fromInteger(1),
+          lineDiscount: lineDiscountMoney,
+          isTaxInclusive: false,
+          taxRules: lineTaxRules,
+        });
+      } catch (err: unknown) {
+        throw new AppError({
+          statusCode: 400,
+          errorCode: 'ERR_VALIDATION_FAILED',
+          title: 'Line Price Calculation Error',
+          detail: (err as Error).message,
+        });
+      }
+
+      subtotalAccumulator = subtotalAccumulator.add(lineCalc.grossLineAmount);
+      totalLineDiscounts = totalLineDiscounts.add(lineCalc.discountAmount);
+      totalTaxes = totalTaxes.add(lineCalc.totalTaxAmount);
+
+      processedLines.push({
+        lineNumber: processedLines.length + 1,
+        productId: product.id,
+        sku: product.sku,
+        productName: product.name,
+        uomCode,
+        quantity: slice.sliceQty,
+        conversionFactorToBase: slice.sliceConvFactorToBase,
+        normalizedBaseQty: slice.sliceBaseQty,
+        priceUom: effectivePriceUom,
+        pricePerPriceUom: pricePerPriceUomMoney,
+        entrySource: resolvedEntrySource,
+        unitPrice: unitPriceMoney,
+        discountAmount: lineCalc.discountAmount,
+        taxAmount: lineCalc.totalTaxAmount,
+        lineTotal: lineCalc.lineTotalWithTax,
+        trackInventory: product.track_inventory,
+        trackingMode: product.tracking_mode ?? 'NONE',
+        valuationMethod: product.valuation_method ?? 'MOVING_AVG',
+        unitCostSnapshot: slice.unitCostSnapshot,
+        batchId: slice.batchId,
+        batchNumber: slice.batchNumber,
+        internalBarcode: slice.internalBarcode,
+        expiryDate: slice.expiryDate,
+        priceSource: slice.priceSource,
+        serialId:
+          product.tracking_mode === 'SERIAL' && sIdx === 0 ? serialId : null,
+      });
+    }
   }
 
   // Order level discount
@@ -1906,21 +2356,13 @@ export async function checkoutSale(
       });
     }
 
-    // Require OWNER or ADMIN for order-level discounts
-    const userRole = await trx.db
-      .selectFrom('member_role_assignments')
-      .innerJoin('roles', (join) =>
-        join
-          .onRef('member_role_assignments.tenant_id', '=', 'roles.tenant_id')
-          .onRef('member_role_assignments.role_id', '=', 'roles.id'),
-      )
-      .select(['roles.code'])
-      .where('member_role_assignments.tenant_id', '=', trx.tenantId)
-      .where('member_role_assignments.membership_id', '=', trx.userId)
-      .execute();
-
-    const isPrivileged = userRole.some(
-      (r) => r.code === 'OWNER' || r.code === 'ADMIN',
+    // Require TENANT_OWNER, ORG_ADMIN, or BRANCH_MANAGER for arbitrary order-level discounts (BUG-096)
+    const discountAuthCtx = await resolveMemberAuthorizationContext(trx);
+    const isPrivileged = discountAuthCtx.roleCodes.some(
+      (code) =>
+        code === 'TENANT_OWNER' ||
+        code === 'ORG_ADMIN' ||
+        code === 'BRANCH_MANAGER',
     );
     if (!isPrivileged) {
       throw new AppError({
@@ -1937,16 +2379,6 @@ export async function checkoutSale(
   const grandTotalMoney = netSubtotalMoney.add(totalTaxes);
 
   // 4b. Pre-validate available stock for all trackable items in the cart (BUG-020)
-  const warehouse = await trx.db
-    .selectFrom('warehouses')
-    .select(['id', 'allow_negative_stock'])
-    .where('id', '=', register.warehouse_id)
-    .executeTakeFirst();
-
-  const allowNegative = Boolean(
-    warehouse?.allow_negative_stock || input.allowNegativeStockOverride,
-  );
-
   if (!allowNegative) {
     const requiredQuantitiesByProduct = new Map<
       string,
@@ -2075,19 +2507,12 @@ export async function checkoutSale(
     const availableCreditMoney = Money.fromDecimalString(String(creditAcc.available_credit), currencyCode);
 
     if (creditPayAmount.compare(availableCreditMoney) > 0) {
-      const userRoles = await trx.db
-        .selectFrom('member_role_assignments')
-        .innerJoin('roles', (j) =>
-          j.onRef('member_role_assignments.tenant_id', '=', 'roles.tenant_id')
-           .onRef('member_role_assignments.role_id', '=', 'roles.id'),
-        )
-        .select(['roles.code'])
-        .where('member_role_assignments.tenant_id', '=', trx.tenantId)
-        .where('member_role_assignments.membership_id', '=', trx.userId)
-        .execute();
-
-      const canOverride = userRoles.some(
-        (r) => r.code === 'OWNER' || r.code === 'ADMIN' || r.code === 'BRANCH_MANAGER',
+      const creditAuthCtx = await resolveMemberAuthorizationContext(trx);
+      const canOverride = creditAuthCtx.roleCodes.some(
+        (code) =>
+          code === 'TENANT_OWNER' ||
+          code === 'ORG_ADMIN' ||
+          code === 'BRANCH_MANAGER',
       );
 
       if (!canOverride) {
@@ -2158,12 +2583,15 @@ export async function checkoutSale(
 
   // 5. ATOMIC INVENTORY DEDUCTIONS
   // For each trackable product, deduct stock via the established immutable ledger
+  const balanceAfterByProduct = new Map<string, string>();
+  const batchAvailableAfterByBatch = new Map<string, string>();
+
   for (const line of processedLines) {
     if (line.trackInventory) {
       const deductionQtyStr = `-${line.quantity.toDecimalString()}`;
       const lineMoveIdempotencyKey = generateUuidV7();
 
-      await postStockMovement(
+      const moveResult = await postStockMovement(
         trx,
         lineMoveIdempotencyKey,
         {
@@ -2186,8 +2614,24 @@ export async function checkoutSale(
           allowNegativeStockOverride: input.allowNegativeStockOverride ?? false,
           overrideReason: input.overrideReason ?? null,
         },
-        { skipPermissionCheck: true },
+        { skipPermissionCheck: true, skipRealtimePublish: true },
       );
+
+      balanceAfterByProduct.set(line.productId, moveResult.balanceAfter);
+      if (line.batchId) {
+        const bSnap = await trx.db
+          .selectFrom('inventory_batches')
+          .select(['current_quantity'])
+          .where('tenant_id', '=', trx.tenantId)
+          .where('id', '=', line.batchId)
+          .executeTakeFirst();
+        if (bSnap) {
+          batchAvailableAfterByBatch.set(
+            line.batchId,
+            Quantity.fromDecimalString(String(bSnap.current_quantity)).toDecimalString(),
+          );
+        }
+      }
     }
   }
 
@@ -2254,6 +2698,16 @@ export async function checkoutSale(
     lineTotal: string;
     unitCostSnapshot?: string;
     batchId?: string | null;
+    batchNumber?: string | null;
+    internalBarcode?: string | null;
+    expiryDate?: string | null;
+    priceSource?:
+      | 'BATCH_EXPLICIT'
+      | 'POS_MANUAL_OVERRIDE'
+      | 'PRODUCT_FALLBACK'
+      | 'BRANCH_OVERRIDE'
+      | 'GLOBAL_PRODUCT'
+      | null;
     serialId?: string | null;
     originalEnteredQty?: string | null;
     originalUomCode?: string | null;
@@ -2310,6 +2764,10 @@ export async function checkoutSale(
       lineTotal: line.lineTotal.toDecimalString(),
       unitCostSnapshot: line.unitCostSnapshot,
       batchId: line.batchId ?? null,
+      batchNumber: line.batchNumber ?? null,
+      internalBarcode: line.internalBarcode ?? null,
+      expiryDate: line.expiryDate ?? null,
+      priceSource: line.priceSource ?? null,
       serialId: line.serialId ?? null,
       originalEnteredQty: line.quantity.toDecimalString(),
       originalUomCode: line.uomCode,
@@ -2471,9 +2929,17 @@ export async function checkoutSale(
       invoiceNumber,
       registerId: register.id,
       warehouseId: register.warehouse_id,
-      lines: input.lines.map((l) => ({
+      movementType: 'POS_SALE',
+      lines: processedLines.map((l) => ({
         productId: l.productId,
-        quantity: l.quantity,
+        batchId: l.batchId ?? null,
+        quantity: l.quantity.toDecimalString(),
+        uomCode: l.uomCode,
+        qtyDelta: l.normalizedBaseQty.negate().toDecimalString(),
+        balanceAfter: balanceAfterByProduct.get(l.productId) ?? null,
+        batchAvailableAfter: l.batchId
+          ? (batchAvailableAfterByBatch.get(l.batchId) ?? null)
+          : null,
       })),
     },
   });

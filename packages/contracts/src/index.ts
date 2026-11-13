@@ -34,6 +34,11 @@ export const DecimalQuantityStringSchema = Type.String({
   description: 'Fixed-point quantity string with up to 6 decimal places (e.g., "2.500000")',
 });
 
+export const DecimalPctStringSchema = Type.String({
+  pattern: '^-?\\d+(?:\\.\\d{1,4})?$',
+  description: 'Fixed-point percentage string (e.g. "25.00")',
+});
+
 export const IsoTimestampSchema = Type.String({
   pattern: '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,6})?(Z|[+-]\\d{2}:\\d{2})$',
   description: 'ISO-8601 UTC timestamp string',
@@ -241,6 +246,17 @@ export const ErrorCodeSchema = Type.Union([
   Type.Literal('PRICING_MIN_PRICE_VIOLATION'),
   Type.Literal('PRICING_MAX_DISCOUNT_EXCEEDED'),
   Type.Literal('PRICING_OFFLINE_APPROVAL_FORBIDDEN'),
+  Type.Literal('POS_BATCH_PRICE_REQUIRED'),
+  Type.Literal('POS_BATCH_NOT_AVAILABLE'),
+  Type.Literal('POS_BATCH_EXPIRED'),
+  Type.Literal('POS_EXPIRED_BATCH_RESTOCK_BLOCKED'),
+  Type.Literal('POS_BATCH_MIN_PRICE_VIOLATION'),
+  Type.Literal('PUR_BATCH_LOT_CONFLICT'),
+  Type.Literal('CAT_UOM_CHANGE_REQUIRES_WIZARD'),
+  Type.Literal('CAT_BARCODE_COLLISION'),
+  Type.Literal('INV_TRANSFER_NOT_FOUND'),
+  Type.Literal('INV_TRANSFER_INVALID_STATUS'),
+  Type.Literal('INV_TRANSFER_BRANCH_CONFLICT'),
   Type.Literal('ERR_INTERNAL_SERVER_ERROR'),
 ]);
 export type ErrorCode = Static<typeof ErrorCodeSchema>;
@@ -727,6 +743,10 @@ export const CreateProductRequestSchema = Type.Object(
     unitConversions: Type.Optional(
       Type.Array(ProductUnitConversionInputSchema, { maxItems: 20 }),
     ),
+    allocationPolicy: Type.Optional(
+      Type.Union([Type.Literal('FEFO'), Type.Literal('FIFO')]),
+    ),
+    requireBatchSellingPrice: Type.Optional(Type.Boolean()),
   },
   { additionalProperties: false },
 );
@@ -784,6 +804,10 @@ export const UpdateProductRequestSchema = Type.Object(
     unitConversions: Type.Optional(
       Type.Array(ProductUnitConversionInputSchema, { maxItems: 20 }),
     ),
+    allocationPolicy: Type.Optional(
+      Type.Union([Type.Literal('FEFO'), Type.Literal('FIFO')]),
+    ),
+    requireBatchSellingPrice: Type.Optional(Type.Boolean()),
     isActive: Type.Optional(Type.Boolean()),
     status: Type.Optional(RecordLifecycleStatusSchema),
   },
@@ -972,6 +996,10 @@ export const ProductResponseSchema = Type.Object({
   primaryBarcode: Type.Union([Type.String(), Type.Null()]),
   barcodes: Type.Array(ProductBarcodeResponseSchema),
   unitConversions: Type.Array(ProductUnitConversionResponseSchema),
+  allocationPolicy: Type.Optional(
+    Type.Union([Type.Literal('FEFO'), Type.Literal('FIFO')]),
+  ),
+  requireBatchSellingPrice: Type.Optional(Type.Boolean()),
   syncVersion: Type.Integer(),
   createdAt: IsoTimestampSchema,
   updatedAt: IsoTimestampSchema,
@@ -1146,6 +1174,8 @@ export const StockMovementTypeSchema = Type.Union([
   Type.Literal('CORRECTION_REVERSAL'),
   Type.Literal('CUSTOMER_RETURN_RESTOCK'),
   Type.Literal('SUPPLIER_RETURN'),
+  Type.Literal('TRANSFER_OUT'),
+  Type.Literal('TRANSFER_IN'),
 ]);
 export type StockMovementType = Static<typeof StockMovementTypeSchema>;
 
@@ -1165,6 +1195,8 @@ export const PostStockMovementRequestSchema = Type.Object(
       Type.Literal('ADJUSTMENT_NEGATIVE'),
       Type.Literal('CUSTOMER_RETURN_RESTOCK'),
       Type.Literal('SUPPLIER_RETURN'),
+      Type.Literal('TRANSFER_OUT'),
+      Type.Literal('TRANSFER_IN'),
     ]),
     quantity: DecimalQuantityStringSchema,
     uomCode: Type.Optional(Type.String({ minLength: 1, maxLength: 16 })),
@@ -1335,6 +1367,10 @@ export const InventoryBalanceResponseSchema = Type.Object({
   sku: Type.String(),
   productName: Type.String(),
   uomCode: Type.String(),
+  baseUom: Type.Optional(Type.String()),
+  imageUrl: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  warehouseName: Type.Optional(Type.String()),
+  branchName: Type.Optional(Type.String()),
   qtyOnHand: DecimalQuantityStringSchema,
   qtyReserved: DecimalQuantityStringSchema,
   qtyInTransit: DecimalQuantityStringSchema,
@@ -1602,6 +1638,12 @@ export const CheckoutCartLineInputSchema = Type.Object(
     serialNumber: Type.Optional(
       Type.Union([Type.String({ minLength: 1, maxLength: 100 }), Type.Null()]),
     ),
+    overrideSellingPrice: Type.Optional(
+      Type.Union([DecimalMoneyStringSchema, Type.Null()]),
+    ),
+    overrideReason: Type.Optional(
+      Type.Union([Type.String({ minLength: 3, maxLength: 500 }), Type.Null()]),
+    ),
   },
   { additionalProperties: false },
 );
@@ -1670,6 +1712,19 @@ export const SalesInvoiceLineResponseSchema = Type.Object({
   lineTotal: DecimalMoneyStringSchema,
   unitCostSnapshot: Type.Optional(DecimalMoneyStringSchema),
   batchId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
+  batchNumber: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  internalBarcode: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  expiryDate: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  priceSource: Type.Optional(
+    Type.Union([
+      Type.Literal('BATCH_EXPLICIT'),
+      Type.Literal('POS_MANUAL_OVERRIDE'),
+      Type.Literal('PRODUCT_FALLBACK'),
+      Type.Literal('BRANCH_OVERRIDE'),
+      Type.Literal('GLOBAL_PRODUCT'),
+      Type.Null(),
+    ]),
+  ),
   serialId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
   originalEnteredQty: Type.Optional(Type.Union([DecimalQuantityStringSchema, Type.Null()])),
   originalUomCode: Type.Optional(Type.Union([Type.String(), Type.Null()])),
@@ -1791,6 +1846,19 @@ export const PrintableReceiptLineSchema = Type.Object({
   lineTotal: DecimalMoneyStringSchema,
   unitCostSnapshot: Type.Optional(DecimalMoneyStringSchema),
   batchId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
+  batchNumber: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  internalBarcode: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  expiryDate: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  priceSource: Type.Optional(
+    Type.Union([
+      Type.Literal('BATCH_EXPLICIT'),
+      Type.Literal('POS_MANUAL_OVERRIDE'),
+      Type.Literal('PRODUCT_FALLBACK'),
+      Type.Literal('BRANCH_OVERRIDE'),
+      Type.Literal('GLOBAL_PRODUCT'),
+      Type.Null(),
+    ]),
+  ),
   serialId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
   originalEnteredQty: Type.Optional(Type.Union([DecimalQuantityStringSchema, Type.Null()])),
   originalUomCode: Type.Optional(Type.Union([Type.String(), Type.Null()])),
@@ -1840,8 +1908,36 @@ export const BatchStatusSchema = Type.Union([
   Type.Literal('ACTIVE'),
   Type.Literal('QUARANTINED'),
   Type.Literal('DEPLETED'),
+  Type.Literal('EXPIRED'),
+  Type.Literal('INACTIVE'),
+  Type.Literal('DAMAGED'),
 ]);
 export type BatchStatus = Static<typeof BatchStatusSchema>;
+
+export const BatchAllocationPolicySchema = Type.Union([
+  Type.Literal('FEFO'),
+  Type.Literal('FIFO'),
+]);
+export type BatchAllocationPolicy = Static<typeof BatchAllocationPolicySchema>;
+
+export const BatchPricingModeSchema = Type.Union([
+  Type.Literal('EXPLICIT'),
+  Type.Literal('INHERIT_PRODUCT'),
+]);
+export type BatchPricingMode = Static<typeof BatchPricingModeSchema>;
+
+export const BatchPricingFallbackPolicySchema = Type.Union([
+  Type.Literal('BLOCK_MISSING'),
+  Type.Literal('ALLOW_PRODUCT_FALLBACK'),
+]);
+export type BatchPricingFallbackPolicy = Static<typeof BatchPricingFallbackPolicySchema>;
+
+export const LotConflictPolicySchema = Type.Union([
+  Type.Literal('REJECT'),
+  Type.Literal('CREATE_NEW_LOT_SUFFIX'),
+  Type.Literal('MANAGER_OVERRIDE'),
+]);
+export type LotConflictPolicy = Static<typeof LotConflictPolicySchema>;
 
 export const BatchExpiryStatusSchema = Type.Union([
   Type.Literal('VALID'),
@@ -1867,6 +1963,12 @@ export const CreateBatchRequestSchema = Type.Object(
     initialQuantity: DecimalQuantityStringSchema,
     unitCost: DecimalMoneyStringSchema,
     sellingPrice: Type.Optional(Type.Union([DecimalMoneyStringSchema, Type.Null()])),
+    minSellingPrice: Type.Optional(Type.Union([DecimalMoneyStringSchema, Type.Null()])),
+    maxDiscountPct: Type.Optional(Type.Union([DecimalPctStringSchema, Type.Null()])),
+    batchPricingMode: Type.Optional(BatchPricingModeSchema),
+    internalBarcode: Type.Optional(
+      Type.Union([Type.String({ minLength: 3, maxLength: 120 }), Type.Null()]),
+    ),
     currencyCode: Type.Optional(CurrencyCodeSchema),
   },
   { additionalProperties: false },
@@ -1876,6 +1978,7 @@ export type CreateBatchRequest = Static<typeof CreateBatchRequestSchema>;
 export const BatchResponseSchema = Type.Object({
   id: UuidSchema,
   tenantId: UuidSchema,
+  branchId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
   productId: UuidSchema,
   warehouseId: UuidSchema,
   batchNumber: Type.String(),
@@ -1886,8 +1989,15 @@ export const BatchResponseSchema = Type.Object({
   expiryDate: Type.Union([Type.String(), Type.Null()]),
   initialQuantity: DecimalQuantityStringSchema,
   currentQuantity: DecimalQuantityStringSchema,
+  reservedQuantity: Type.Optional(DecimalQuantityStringSchema),
+  availableQuantity: Type.Optional(DecimalQuantityStringSchema),
   unitCost: DecimalMoneyStringSchema,
   sellingPrice: Type.Optional(Type.Union([DecimalMoneyStringSchema, Type.Null()])),
+  minSellingPrice: Type.Optional(Type.Union([DecimalMoneyStringSchema, Type.Null()])),
+  maxDiscountPct: Type.Optional(Type.Union([DecimalPctStringSchema, Type.Null()])),
+  batchPricingMode: Type.Optional(BatchPricingModeSchema),
+  internalBarcode: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  internalBarcodeType: Type.Optional(Type.Union([Type.String(), Type.Null()])),
   currencyCode: CurrencyCodeSchema,
   expiryStatus: BatchExpiryStatusSchema,
   quarantineReason: Type.Union([Type.String(), Type.Null()]),
@@ -1898,14 +2008,18 @@ export type BatchResponse = Static<typeof BatchResponseSchema>;
 
 export const ListBatchesQuerySchema = Type.Object(
   {
+    branchId: Type.Optional(UuidSchema),
     productId: Type.Optional(UuidSchema),
     warehouseId: Type.Optional(UuidSchema),
     status: Type.Optional(BatchStatusSchema),
     expiryStatus: Type.Optional(BatchExpiryStatusSchema),
     expiringWithinDays: Type.Optional(Type.Integer({ minimum: 1, maximum: 365 })),
+    missingPriceOnly: Type.Optional(
+      Type.Union([Type.Boolean(), Type.Literal('true'), Type.Literal('false')]),
+    ),
     search: Type.Optional(Type.String({ maxLength: 64 })),
     limit: Type.Optional(PaginationLimitQueryParamSchema),
-    cursor: Type.Optional(UuidSchema),
+    cursor: Type.Optional(Type.String({ minLength: 1, maxLength: 160 })),
   },
   { additionalProperties: false },
 );
@@ -1922,17 +2036,21 @@ export type QuarantineBatchRequest = Static<typeof QuarantineBatchRequestSchema>
 export const FefoBatchAllocationSchema = Type.Object({
   batchId: UuidSchema,
   batchNumber: Type.String(),
+  internalBarcode: Type.Optional(Type.Union([Type.String(), Type.Null()])),
   expiryDate: Type.Union([Type.String(), Type.Null()]),
   availableQty: DecimalQuantityStringSchema,
+  reservedQty: Type.Optional(DecimalQuantityStringSchema),
   allocatedQty: DecimalQuantityStringSchema,
   unitCost: DecimalMoneyStringSchema,
   sellingPrice: Type.Optional(Type.Union([DecimalMoneyStringSchema, Type.Null()])),
+  batchPricingMode: Type.Optional(BatchPricingModeSchema),
 });
 export type FefoBatchAllocation = Static<typeof FefoBatchAllocationSchema>;
 
 export const FefoSelectionResponseSchema = Type.Object({
   productId: UuidSchema,
   warehouseId: UuidSchema,
+  allocationPolicy: Type.Optional(BatchAllocationPolicySchema),
   requestedQty: DecimalQuantityStringSchema,
   fulfilledQty: DecimalQuantityStringSchema,
   unfulfilledQty: DecimalQuantityStringSchema,
@@ -4400,7 +4518,13 @@ export const CreateGoodsReceiptLineInputSchema = Type.Object(
     receivedQty: DecimalQuantityStringSchema,
     unitCost: DecimalMoneyStringSchema,
     batchNumber: Type.Optional(Type.Union([Type.String({ minLength: 1, maxLength: 64 }), Type.Null()])),
+    manufacturingDate: Type.Optional(Type.Union([Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' }), Type.Null()])),
     expiryDate: Type.Optional(Type.Union([Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' }), Type.Null()])),
+    sellingPrice: Type.Optional(Type.Union([DecimalMoneyStringSchema, Type.Null()])),
+    minSellingPrice: Type.Optional(Type.Union([DecimalMoneyStringSchema, Type.Null()])),
+    maxDiscountPct: Type.Optional(Type.Union([DecimalPctStringSchema, Type.Null()])),
+    batchPricingMode: Type.Optional(BatchPricingModeSchema),
+    lotConflictPolicy: Type.Optional(LotConflictPolicySchema),
   },
   { additionalProperties: false },
 );
@@ -4432,7 +4556,14 @@ export const GoodsReceiptLineResponseSchema = Type.Object({
   unitCostPerBaseUom: DecimalMoneyStringSchema,
   lineTotalCost: DecimalMoneyStringSchema,
   batchNumber: Type.Union([Type.String(), Type.Null()]),
+  batchId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
+  internalBarcode: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  manufacturingDate: Type.Optional(Type.Union([Type.String(), Type.Null()])),
   expiryDate: Type.Union([Type.String(), Type.Null()]),
+  sellingPrice: Type.Optional(Type.Union([DecimalMoneyStringSchema, Type.Null()])),
+  lotConflictResolution: Type.Optional(
+    Type.Union([Type.Literal('NONE'), Type.Literal('SUFFIXED'), Type.Literal('OVERRIDDEN'), Type.Null()]),
+  ),
   ledgerEntryId: Type.Union([UuidSchema, Type.Null()]),
 });
 export type GoodsReceiptLineResponse = Static<typeof GoodsReceiptLineResponseSchema>;
@@ -4528,6 +4659,9 @@ export const PosReturnLineResponseSchema = Type.Object({
   restockCondition: Type.Union([Type.Literal('RESELLABLE'), Type.Literal('DAMAGED')]),
   unitPrice: DecimalMoneyStringSchema,
   refundAmount: DecimalMoneyStringSchema,
+  batchId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
+  batchNumber: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  serialId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
   ledgerEntryId: Type.Union([UuidSchema, Type.Null()]),
 });
 export type PosReturnLineResponse = Static<typeof PosReturnLineResponseSchema>;
@@ -4588,6 +4722,7 @@ export type BranchApprovalPolicy = Static<typeof BranchApprovalPolicySchema>;
 export const PricingScopeSchema = Type.Union([
   Type.Literal('GLOBAL'),
   Type.Literal('BRANCH'),
+  Type.Literal('BATCH'),
 ]);
 export type PricingScope = Static<typeof PricingScopeSchema>;
 
@@ -4619,11 +4754,6 @@ export const CostChangeDirectionSchema = Type.Union([
   Type.Literal('UNCHANGED'),
 ]);
 
-export const DecimalPctStringSchema = Type.String({
-  pattern: '^-?\\d+(?:\\.\\d{1,4})?$',
-  description: 'Fixed-point percentage string (e.g. "25.00")',
-});
-
 export const DateOnlyStringSchema = Type.String({
   pattern: '^\\d{4}-\\d{2}-\\d{2}$',
 });
@@ -4640,6 +4770,8 @@ export const PricingSettingsResponseSchema = Type.Object({
   allowSelfApproval: Type.Boolean(),
   autoCreateSuggestionsOnCostChange: Type.Boolean(),
   autoCreateSuggestionsOnCostDecrease: Type.Boolean(),
+  batchPricingFallbackPolicy: Type.Optional(BatchPricingFallbackPolicySchema),
+  defaultBatchAllocationPolicy: Type.Optional(BatchAllocationPolicySchema),
   updatedAt: IsoTimestampSchema,
 });
 export type PricingSettingsResponse = Static<typeof PricingSettingsResponseSchema>;
@@ -4656,6 +4788,8 @@ export const UpdatePricingSettingsRequestSchema = Type.Object(
     allowSelfApproval: Type.Optional(Type.Boolean()),
     autoCreateSuggestionsOnCostChange: Type.Optional(Type.Boolean()),
     autoCreateSuggestionsOnCostDecrease: Type.Optional(Type.Boolean()),
+    batchPricingFallbackPolicy: Type.Optional(BatchPricingFallbackPolicySchema),
+    defaultBatchAllocationPolicy: Type.Optional(BatchAllocationPolicySchema),
   },
   { additionalProperties: false },
 );
@@ -4897,6 +5031,18 @@ export const SyncCatalogPricingResponseSchema = Type.Object({
   branchId: Type.Union([UuidSchema, Type.Null()]),
   currencyCode: CurrencyCodeSchema,
   syncedAt: IsoTimestampSchema,
+  branding: Type.Optional(
+    Type.Object({
+      shopDisplayName: Type.Union([Type.String(), Type.Null()]),
+      logoUrl: Type.Union([Type.String(), Type.Null()]),
+    }),
+  ),
+  policies: Type.Optional(
+    Type.Object({
+      batchPricingFallbackPolicy: BatchPricingFallbackPolicySchema,
+      defaultBatchAllocationPolicy: BatchAllocationPolicySchema,
+    }),
+  ),
   globalPrices: Type.Array(
     Type.Object({
       productId: UuidSchema,
@@ -4907,14 +5053,395 @@ export const SyncCatalogPricingResponseSchema = Type.Object({
       sellingPrice: DecimalMoneyStringSchema,
       minSellingPrice: Type.Union([DecimalMoneyStringSchema, Type.Null()]),
       maxDiscountPct: Type.Union([DecimalPctStringSchema, Type.Null()]),
+      trackingMode: Type.Optional(TrackingModeSchema),
+      allocationPolicy: Type.Optional(BatchAllocationPolicySchema),
+      requireBatchSellingPrice: Type.Optional(Type.Boolean()),
       syncVersion: Type.Integer(),
     }),
   ),
   branchOverrides: Type.Array(BranchPriceOverrideResponseSchema),
+  batches: Type.Optional(
+    Type.Array(
+      Type.Object({
+        batchId: UuidSchema,
+        productId: UuidSchema,
+        branchId: Type.Union([UuidSchema, Type.Null()]),
+        warehouseId: UuidSchema,
+        batchNumber: Type.String(),
+        internalBarcode: Type.Union([Type.String(), Type.Null()]),
+        expiryDate: Type.Union([Type.String(), Type.Null()]),
+        receivedDate: Type.String(),
+        availableQuantity: DecimalQuantityStringSchema,
+        unitCost: DecimalMoneyStringSchema,
+        sellingPrice: Type.Union([DecimalMoneyStringSchema, Type.Null()]),
+        minSellingPrice: Type.Union([DecimalMoneyStringSchema, Type.Null()]),
+        maxDiscountPct: Type.Union([DecimalPctStringSchema, Type.Null()]),
+        batchPricingMode: BatchPricingModeSchema,
+        status: BatchStatusSchema,
+      }),
+    ),
+  ),
 });
 export type SyncCatalogPricingResponse = Static<
   typeof SyncCatalogPricingResponseSchema
 >;
+
+// ============================================================================
+// Phase 2 — Hybrid Barcodes, Batch Pricing, Transfers & Legacy UOM Correction
+// ============================================================================
+
+export const ResolveBarcodeRequestSchema = Type.Object(
+  {
+    rawBarcode: Type.String({ minLength: 1, maxLength: 255 }),
+    branchId: Type.Optional(UuidSchema),
+    warehouseId: Type.Optional(UuidSchema),
+    requestedQty: Type.Optional(DecimalQuantityStringSchema),
+    context: Type.Optional(
+      Type.Union([
+        Type.Literal('POS'),
+        Type.Literal('GRN'),
+        Type.Literal('INVENTORY'),
+      ]),
+    ),
+  },
+  { additionalProperties: false },
+);
+export type ResolveBarcodeRequest = Static<typeof ResolveBarcodeRequestSchema>;
+
+export const ResolveBarcodeResponseSchema = Type.Object({
+  matchedBy: Type.Union([
+    Type.Literal('INTERNAL_BATCH'),
+    Type.Literal('GS1_BATCH_AND_PRODUCT'),
+    Type.Literal('GS1_PRODUCT_ONLY'),
+    Type.Literal('MANUFACTURER_PRODUCT_BARCODE'),
+    Type.Literal('SERIAL_NUMBER'),
+    Type.Literal('SKU'),
+    Type.Literal('UNRESOLVED'),
+  ]),
+  rawBarcode: Type.String(),
+  normalizedBarcode: Type.String(),
+  isExactBatchLocked: Type.Boolean(),
+  gs1Parsed: Type.Object({
+    isGs1: Type.Boolean(),
+    gtin: Type.Union([Type.String(), Type.Null()]),
+    batchNumber: Type.Union([Type.String(), Type.Null()]),
+    expiryDate: Type.Union([Type.String(), Type.Null()]),
+    serialNumber: Type.Union([Type.String(), Type.Null()]),
+  }),
+  product: Type.Union([
+    Type.Object({
+      id: UuidSchema,
+      sku: Type.String(),
+      name: Type.String(),
+      baseUom: Type.String(),
+      trackingMode: TrackingModeSchema,
+      allocationPolicy: BatchAllocationPolicySchema,
+      requireBatchSellingPrice: Type.Boolean(),
+      sellingPrice: DecimalMoneyStringSchema,
+      primaryBarcode: Type.Union([Type.String(), Type.Null()]),
+    }),
+    Type.Null(),
+  ]),
+  exactBatch: Type.Union([BatchResponseSchema, Type.Null()]),
+  effectiveUnitPrice: Type.Union([DecimalMoneyStringSchema, Type.Null()]),
+  priceSource: Type.Union([
+    Type.Literal('BATCH_EXPLICIT'),
+    Type.Literal('PRODUCT_FALLBACK'),
+    Type.Literal('BRANCH_OVERRIDE'),
+    Type.Literal('GLOBAL_PRODUCT'),
+    Type.Literal('REQUIRES_POS_MANUAL_PRICE'),
+    Type.Literal('MISSING_BLOCKED'),
+    Type.Null(),
+  ]),
+  requiresPricePrompt: Type.Boolean(),
+  blockedReason: Type.Union([Type.String(), Type.Null()]),
+  fefoPreview: Type.Array(FefoBatchAllocationSchema),
+});
+export type ResolveBarcodeResponse = Static<typeof ResolveBarcodeResponseSchema>;
+
+export const UpdateBatchPricingRequestSchema = Type.Object(
+  {
+    sellingPrice: Type.Union([DecimalMoneyStringSchema, Type.Null()]),
+    minSellingPrice: Type.Optional(Type.Union([DecimalMoneyStringSchema, Type.Null()])),
+    maxDiscountPct: Type.Optional(Type.Union([DecimalPctStringSchema, Type.Null()])),
+    batchPricingMode: Type.Optional(BatchPricingModeSchema),
+    changeSource: Type.Optional(
+      Type.Union([
+        Type.Literal('MANUAL_UPDATE'),
+        Type.Literal('SMART_PRICING_APPLIED'),
+        Type.Literal('MANAGER_OVERRIDE'),
+        Type.Literal('LEGACY_MIGRATION'),
+      ]),
+    ),
+    reason: Type.Optional(Type.Union([Type.String({ maxLength: 500 }), Type.Null()])),
+  },
+  { additionalProperties: false },
+);
+export type UpdateBatchPricingRequest = Static<typeof UpdateBatchPricingRequestSchema>;
+
+export const GenerateBatchBarcodeRequestSchema = Type.Object(
+  {
+    symbology: Type.Optional(Type.Literal('CODE128')),
+    prefix: Type.Optional(Type.String({ minLength: 2, maxLength: 16 })),
+    forceRegenerate: Type.Optional(Type.Boolean()),
+  },
+  { additionalProperties: false },
+);
+export type GenerateBatchBarcodeRequest = Static<typeof GenerateBatchBarcodeRequestSchema>;
+
+export const GenerateBatchBarcodeResponseSchema = Type.Object({
+  batchId: UuidSchema,
+  internalBarcode: Type.String(),
+  internalBarcodeType: Type.String(),
+  alreadyExisted: Type.Boolean(),
+});
+export type GenerateBatchBarcodeResponse = Static<typeof GenerateBatchBarcodeResponseSchema>;
+
+export const BatchBarcodePrintLogRequestSchema = Type.Object(
+  {
+    labelFormat: Type.Union([
+      Type.Literal('40x30'),
+      Type.Literal('50x30'),
+      Type.Literal('50x40'),
+      Type.Literal('58mm'),
+      Type.Literal('80mm'),
+      Type.Literal('A4'),
+    ]),
+    copies: Type.Integer({ minimum: 1, maximum: 5000 }),
+    printerName: Type.Optional(Type.Union([Type.String({ maxLength: 160 }), Type.Null()])),
+    printReason: Type.Optional(
+      Type.Union([
+        Type.Literal('INITIAL_RECEIVE'),
+        Type.Literal('REPRINT'),
+        Type.Literal('PRICE_CHANGED'),
+        Type.Literal('DAMAGED_LABEL'),
+      ]),
+    ),
+    deviceId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
+  },
+  { additionalProperties: false },
+);
+export type BatchBarcodePrintLogRequest = Static<typeof BatchBarcodePrintLogRequestSchema>;
+
+export const BatchBarcodePrintLogResponseSchema = Type.Object({
+  id: UuidSchema,
+  tenantId: UuidSchema,
+  batchId: UuidSchema,
+  barcodeValue: Type.String(),
+  labelFormat: Type.String(),
+  copies: Type.Integer(),
+  printedBy: Type.Union([UuidSchema, Type.Null()]),
+  printerName: Type.Union([Type.String(), Type.Null()]),
+  printReason: Type.String(),
+  deviceId: Type.Union([UuidSchema, Type.Null()]),
+  printedAt: IsoTimestampSchema,
+});
+export type BatchBarcodePrintLogResponse = Static<typeof BatchBarcodePrintLogResponseSchema>;
+
+export const BatchPriceHistoryEntrySchema = Type.Object({
+  id: UuidSchema,
+  oldSellingPrice: Type.Union([DecimalMoneyStringSchema, Type.Null()]),
+  newSellingPrice: Type.Union([DecimalMoneyStringSchema, Type.Null()]),
+  oldMinSellingPrice: Type.Union([DecimalMoneyStringSchema, Type.Null()]),
+  newMinSellingPrice: Type.Union([DecimalMoneyStringSchema, Type.Null()]),
+  changeSource: Type.String(),
+  reason: Type.Union([Type.String(), Type.Null()]),
+  changedBy: Type.Union([UuidSchema, Type.Null()]),
+  changedAt: IsoTimestampSchema,
+});
+export type BatchPriceHistoryEntry = Static<typeof BatchPriceHistoryEntrySchema>;
+
+export const BatchHistoryResponseSchema = Type.Object({
+  batch: BatchResponseSchema,
+  priceHistory: Type.Array(BatchPriceHistoryEntrySchema),
+  printLogs: Type.Array(BatchBarcodePrintLogResponseSchema),
+  stockMovements: Type.Array(
+    Type.Object({
+      id: UuidSchema,
+      movementType: StockMovementTypeSchema,
+      quantityDelta: DecimalQuantityStringSchema,
+      unitCost: DecimalMoneyStringSchema,
+      totalCostDelta: DecimalMoneyStringSchema,
+      referenceType: Type.String(),
+      referenceId: UuidSchema,
+      notes: Type.Union([Type.String(), Type.Null()]),
+      createdAt: IsoTimestampSchema,
+    }),
+  ),
+});
+export type BatchHistoryResponse = Static<typeof BatchHistoryResponseSchema>;
+
+export const TenantBrandingResponseSchema = Type.Object({
+  tenantId: UuidSchema,
+  name: Type.String(),
+  shopDisplayName: Type.Union([Type.String(), Type.Null()]),
+  logoUrl: Type.Union([Type.String(), Type.Null()]),
+});
+export type TenantBrandingResponse = Static<typeof TenantBrandingResponseSchema>;
+
+export const UpdateTenantBrandingRequestSchema = Type.Object(
+  {
+    shopDisplayName: Type.Optional(Type.Union([Type.String({ minLength: 1, maxLength: 160 }), Type.Null()])),
+    logoUrl: Type.Optional(Type.Union([Type.String({ maxLength: 2048 }), Type.Null()])),
+  },
+  { additionalProperties: false },
+);
+export type UpdateTenantBrandingRequest = Static<typeof UpdateTenantBrandingRequestSchema>;
+
+export const StockTransferStatusSchema = Type.Union([
+  Type.Literal('DRAFT'),
+  Type.Literal('IN_TRANSIT'),
+  Type.Literal('RECEIVED'),
+  Type.Literal('CANCELLED'),
+]);
+export type StockTransferStatus = Static<typeof StockTransferStatusSchema>;
+
+export const CreateStockTransferLineInputSchema = Type.Object(
+  {
+    productId: UuidSchema,
+    sourceBatchId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
+    quantity: DecimalQuantityStringSchema,
+    notes: Type.Optional(Type.Union([Type.String({ maxLength: 500 }), Type.Null()])),
+  },
+  { additionalProperties: false },
+);
+
+export const CreateStockTransferRequestSchema = Type.Object(
+  {
+    sourceBranchId: UuidSchema,
+    sourceWarehouseId: UuidSchema,
+    destinationBranchId: UuidSchema,
+    destinationWarehouseId: UuidSchema,
+    notes: Type.Optional(Type.Union([Type.String({ maxLength: 500 }), Type.Null()])),
+    lines: Type.Array(CreateStockTransferLineInputSchema, { minItems: 1, maxItems: 100 }),
+  },
+  { additionalProperties: false },
+);
+export type CreateStockTransferRequest = Static<typeof CreateStockTransferRequestSchema>;
+
+export const StockTransferLineResponseSchema = Type.Object({
+  id: UuidSchema,
+  lineNumber: Type.Integer(),
+  productId: UuidSchema,
+  sourceBatchId: Type.Union([UuidSchema, Type.Null()]),
+  destinationBatchId: Type.Union([UuidSchema, Type.Null()]),
+  quantityRequested: DecimalQuantityStringSchema,
+  quantityDispatched: DecimalQuantityStringSchema,
+  quantityReceived: DecimalQuantityStringSchema,
+  unitCostSnapshot: DecimalMoneyStringSchema,
+  sellingPriceSnapshot: Type.Union([DecimalMoneyStringSchema, Type.Null()]),
+  expiryDateSnapshot: Type.Union([Type.String(), Type.Null()]),
+  batchNumberSnapshot: Type.Union([Type.String(), Type.Null()]),
+  notes: Type.Union([Type.String(), Type.Null()]),
+});
+export type StockTransferLineResponse = Static<typeof StockTransferLineResponseSchema>;
+
+export const StockTransferResponseSchema = Type.Object({
+  id: UuidSchema,
+  tenantId: UuidSchema,
+  transferNumber: Type.String(),
+  sourceBranchId: UuidSchema,
+  sourceWarehouseId: UuidSchema,
+  destinationBranchId: UuidSchema,
+  destinationWarehouseId: UuidSchema,
+  status: StockTransferStatusSchema,
+  notes: Type.Union([Type.String(), Type.Null()]),
+  dispatchedBy: Type.Union([UuidSchema, Type.Null()]),
+  dispatchedAt: Type.Union([IsoTimestampSchema, Type.Null()]),
+  receivedBy: Type.Union([UuidSchema, Type.Null()]),
+  receivedAt: Type.Union([IsoTimestampSchema, Type.Null()]),
+  createdBy: Type.Union([UuidSchema, Type.Null()]),
+  createdAt: IsoTimestampSchema,
+  updatedAt: IsoTimestampSchema,
+  lines: Type.Array(StockTransferLineResponseSchema),
+});
+export type StockTransferResponse = Static<typeof StockTransferResponseSchema>;
+
+export const ReceiveStockTransferRequestSchema = Type.Object(
+  {
+    notes: Type.Optional(Type.Union([Type.String({ maxLength: 500 }), Type.Null()])),
+    lines: Type.Optional(
+      Type.Array(
+        Type.Object(
+          {
+            lineId: UuidSchema,
+            quantityReceived: DecimalQuantityStringSchema,
+          },
+          { additionalProperties: false },
+        ),
+        { minItems: 1, maxItems: 100 },
+      ),
+    ),
+  },
+  { additionalProperties: false },
+);
+export type ReceiveStockTransferRequest = Static<typeof ReceiveStockTransferRequestSchema>;
+
+export const ListStockTransfersQuerySchema = Type.Object(
+  {
+    status: Type.Optional(StockTransferStatusSchema),
+    sourceBranchId: Type.Optional(UuidSchema),
+    destinationBranchId: Type.Optional(UuidSchema),
+    limit: Type.Optional(PaginationLimitQueryParamSchema),
+  },
+  { additionalProperties: false },
+);
+export type ListStockTransfersQuery = Static<typeof ListStockTransfersQuerySchema>;
+
+export const StockTransferListResponseSchema = Type.Object({
+  items: Type.Array(StockTransferResponseSchema),
+});
+export type StockTransferListResponse = Static<typeof StockTransferListResponseSchema>;
+
+export const UomCorrectionPreviewRequestSchema = Type.Object(
+  {
+    targetBaseUom: Type.String({ minLength: 1, maxLength: 16 }),
+    targetMeasurementCategory: Type.Optional(Type.Union([MeasurementCategorySchema, Type.Null()])),
+    conversionFactorFromOldToNew: DecimalQuantityStringSchema,
+  },
+  { additionalProperties: false },
+);
+export type UomCorrectionPreviewRequest = Static<typeof UomCorrectionPreviewRequestSchema>;
+
+export const UomCorrectionPreviewResponseSchema = Type.Object({
+  productId: UuidSchema,
+  currentBaseUom: Type.String(),
+  targetBaseUom: Type.String(),
+  conversionFactorFromOldToNew: DecimalQuantityStringSchema,
+  currentTotalQtyInOldUom: DecimalQuantityStringSchema,
+  projectedTotalQtyInNewUom: DecimalQuantityStringSchema,
+  currentTotalValuation: DecimalMoneyStringSchema,
+  projectedUnitCostInNewUom: DecimalMoneyStringSchema,
+  affectedBalancesCount: Type.Integer(),
+  affectedBatchesCount: Type.Integer(),
+  affectedCostLayersCount: Type.Integer(),
+  historicalLedgerEntriesCount: Type.Integer(),
+  warnings: Type.Array(Type.String()),
+});
+export type UomCorrectionPreviewResponse = Static<typeof UomCorrectionPreviewResponseSchema>;
+
+export const UomCorrectionExecuteRequestSchema = Type.Object(
+  {
+    targetBaseUom: Type.String({ minLength: 1, maxLength: 16 }),
+    targetMeasurementCategory: Type.Optional(Type.Union([MeasurementCategorySchema, Type.Null()])),
+    conversionFactorFromOldToNew: DecimalQuantityStringSchema,
+    reason: Type.String({ minLength: 3, maxLength: 500 }),
+  },
+  { additionalProperties: false },
+);
+export type UomCorrectionExecuteRequest = Static<typeof UomCorrectionExecuteRequestSchema>;
+
+export const UomCorrectionExecuteResponseSchema = Type.Object({
+  product: ProductResponseSchema,
+  rebasedBalancesCount: Type.Integer(),
+  rebasedBatchesCount: Type.Integer(),
+  rebasedCostLayersCount: Type.Integer(),
+  previousTotalValuation: DecimalMoneyStringSchema,
+  newTotalValuation: DecimalMoneyStringSchema,
+  auditTrailEntryCount: Type.Integer(),
+});
+export type UomCorrectionExecuteResponse = Static<typeof UomCorrectionExecuteResponseSchema>;
+
 
 
 
