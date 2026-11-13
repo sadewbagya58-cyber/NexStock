@@ -49,12 +49,14 @@ const INBOUND_MOVEMENT_TYPES = new Set<StockMovementType>([
   'STOCK_IN',
   'ADJUSTMENT_POSITIVE',
   'CUSTOMER_RETURN_RESTOCK',
+  'TRANSFER_IN',
 ]);
 
 const OUTBOUND_MOVEMENT_TYPES = new Set<StockMovementType>([
   'STOCK_OUT',
   'ADJUSTMENT_NEGATIVE',
   'SUPPLIER_RETURN',
+  'TRANSFER_OUT',
 ]);
 
 async function getTenantBaseCurrency(
@@ -257,7 +259,10 @@ export async function postStockMovement(
   trx: TenantTransactionContext,
   idempotencyKey: string,
   input: PostStockMovementRequest,
-  options?: { readonly skipPermissionCheck?: boolean },
+  options?: {
+    readonly skipPermissionCheck?: boolean;
+    readonly skipRealtimePublish?: boolean;
+  },
 ): Promise<StockMovementResponse> {
   if (!options?.skipPermissionCheck) {
     await assertAuthorized(trx, {
@@ -495,10 +500,27 @@ export async function postStockMovement(
     }
 
     if (qtyDelta.isNegative()) {
+      if (
+        (batchRow.status === 'INACTIVE' ||
+          batchRow.status === 'DAMAGED' ||
+          batchRow.status === 'EXPIRED') &&
+        input.movementType !== 'ADJUSTMENT_NEGATIVE'
+      ) {
+        throw new AppError({
+          statusCode: 409,
+          errorCode:
+            batchRow.status === 'EXPIRED'
+              ? 'POS_BATCH_EXPIRED'
+              : 'POS_BATCH_NOT_AVAILABLE',
+          title: 'Batch Not Available For Issue',
+          detail: `Cannot issue stock from batch "${batchRow.batch_number}" because status is "${batchRow.status}".`,
+        });
+      }
+
       if (product.trackingMode === 'BATCH_EXPIRY' && batchRow.expiry_date) {
         const expDateStr = new Date(batchRow.expiry_date).toISOString().slice(0, 10);
         const todayStr = new Date().toISOString().slice(0, 10);
-        if (expDateStr < todayStr && !negativeStockOverrideApplied) {
+        if (expDateStr < todayStr && !negativeStockOverrideApplied && input.movementType !== 'ADJUSTMENT_NEGATIVE') {
           throw new AppError({
             statusCode: 409,
             errorCode: 'INV_BATCH_EXPIRED',
@@ -511,13 +533,17 @@ export async function postStockMovement(
       const currentBatchQty = Quantity.fromDecimalString(
         String(batchRow.current_quantity),
       );
+      const reservedQty = Quantity.fromDecimalString(
+        String(batchRow.reserved_quantity ?? '0.000000'),
+      );
+      const effectiveAvailable = currentBatchQty.subtract(reservedQty);
       const needed = qtyDelta.abs();
-      if (currentBatchQty.compare(needed) < 0 && !negativeStockOverrideApplied) {
+      if (effectiveAvailable.compare(needed) < 0 && !negativeStockOverrideApplied) {
         throw new AppError({
           statusCode: 409,
           errorCode: 'INV_INSUFFICIENT_BATCH_STOCK',
           title: 'Insufficient Batch Stock',
-          detail: `Batch "${batchRow.batch_number}" has ${currentBatchQty.toDecimalString()} available, but ${needed.toDecimalString()} requested.`,
+          detail: `Batch "${batchRow.batch_number}" has ${effectiveAvailable.toDecimalString()} available (${reservedQty.toDecimalString()} reserved), but ${needed.toDecimalString()} requested.`,
         });
       }
     }
@@ -611,6 +637,12 @@ export async function postStockMovement(
     balanceAfter.isNegative() ? Quantity.zero() : balanceAfter,
   );
   let updatedFifoLayers: readonly FifoCostLayer[] = [];
+  let consumedFifoSlices: Array<{
+    layerId: string;
+    batchId: string;
+    qtyConsumed: string;
+    unitCost: string;
+  }> = [];
 
   if (product.valuationMethod === 'FIFO') {
     if (qtyDelta.isPositive()) {
@@ -633,13 +665,19 @@ export async function postStockMovement(
           )
         : unitCostMoney;
     } else {
-      const openLayers = await trx.db
+      let openLayersQuery = trx.db
         .selectFrom('inventory_cost_layers')
         .selectAll()
         .where('tenant_id', '=', trx.tenantId)
         .where('warehouse_id', '=', input.warehouseId)
         .where('product_id', '=', input.productId)
-        .where('status', '=', 'OPEN')
+        .where('status', '=', 'OPEN');
+
+      if (input.batchId) {
+        openLayersQuery = openLayersQuery.where('batch_id', '=', input.batchId);
+      }
+
+      const openLayers = await openLayersQuery
         .orderBy('layer_date', 'asc')
         .orderBy('created_at', 'asc')
         .forUpdate()
@@ -652,15 +690,26 @@ export async function postStockMovement(
         unitCost: Money.fromDecimalString(String(l.unit_cost), baseCurrency),
       }));
 
+      const fallbackBatchCost =
+        batchRow && batchRow.unit_cost != null
+          ? Money.fromDecimalString(String(batchRow.unit_cost), baseCurrency)
+          : unitCostMoney;
+
       const consumption = consumeFifoCostLayers({
         layers: fifoLayers,
         qtyToConsume: qtyDelta.abs(),
-        fallbackUnitCost: unitCostMoney,
+        fallbackUnitCost: fallbackBatchCost,
         allowNegativeStock:
           warehouseMeta.allowNegativeStock || negativeStockOverrideApplied,
       });
 
       updatedFifoLayers = consumption.updatedLayers;
+      consumedFifoSlices = consumption.consumedSlices.map((s) => ({
+        layerId: s.layerId,
+        batchId: s.batchId,
+        qtyConsumed: s.qtyConsumed.toDecimalString(),
+        unitCost: s.unitCost.toDecimalString(),
+      }));
       totalCostDelta = consumption.totalCogs.negate();
       unitCostSnapshot = consumption.effectiveUnitCostSnapshot;
 
@@ -765,6 +814,7 @@ export async function postStockMovement(
       metadata_json: {
         sku: product.sku,
         baseUom: product.baseUom,
+        ...(consumedFifoSlices.length > 0 ? { consumedCostLayers: consumedFifoSlices } : {}),
       },
     })
     .execute();
@@ -849,17 +899,29 @@ export async function postStockMovement(
   }
 
   // 4. Update Batch current_quantity
+  let batchQtyAfter: string | null = null;
   if (batchRow) {
     if (qtyDelta.isPositive()) {
       const currentBatchQty = Quantity.fromDecimalString(
         String(batchRow.current_quantity),
       );
       const newBatchQty = currentBatchQty.add(qtyDelta);
+      batchQtyAfter = newBatchQty.toDecimalString();
+      const expStr = batchRow.expiry_date
+        ? new Date(batchRow.expiry_date).toISOString().slice(0, 10)
+        : null;
+      const isDateExpired = Boolean(expStr && expStr < new Date().toISOString().slice(0, 10));
+      const preservedStatus =
+        batchRow.status === 'EXPIRED' || isDateExpired
+          ? 'EXPIRED'
+          : batchRow.status === 'DAMAGED' || batchRow.status === 'INACTIVE'
+            ? batchRow.status
+            : 'ACTIVE';
       await trx.db
         .updateTable('inventory_batches')
         .set({
-          current_quantity: newBatchQty.toDecimalString(),
-          status: 'ACTIVE',
+          current_quantity: batchQtyAfter,
+          status: preservedStatus,
           updated_at: now,
         })
         .where('tenant_id', '=', trx.tenantId)
@@ -871,10 +933,11 @@ export async function postStockMovement(
       );
       const newBatchQty = currentBatchQty.subtract(qtyDelta.abs());
       const finalQty = newBatchQty.isNegative() ? Quantity.zero() : newBatchQty;
+      batchQtyAfter = finalQty.toDecimalString();
       await trx.db
         .updateTable('inventory_batches')
         .set({
-          current_quantity: finalQty.toDecimalString(),
+          current_quantity: batchQtyAfter,
           status: finalQty.isZero() ? 'DEPLETED' : 'ACTIVE',
           updated_at: now,
         })
@@ -982,25 +1045,42 @@ export async function postStockMovement(
     },
   });
 
-  realtimeEventHub.publish({
-    tenantId: trx.tenantId,
-    branchId: input.branchId,
-    eventType: 'STOCK_CHANGED',
-    data: {
-      movementId,
+  if (!options?.skipRealtimePublish) {
+    realtimeEventHub.publish({
+      tenantId: trx.tenantId,
       branchId: input.branchId,
-      warehouseId: input.warehouseId,
-      productId: input.productId,
-      qtyDelta: qtyDelta.toDecimalString(),
-      balanceAfter: balanceAfter.toDecimalString(),
-      lines: [{ productId: input.productId, quantity: qtyDelta.abs().toDecimalString() }],
-    },
-  });
+      eventType: 'STOCK_CHANGED',
+      data: {
+        movementId,
+        movementType: input.movementType,
+        branchId: input.branchId,
+        warehouseId: input.warehouseId,
+        productId: input.productId,
+        batchId: input.batchId ?? null,
+        qtyDelta: qtyDelta.toDecimalString(),
+        balanceAfter: balanceAfter.toDecimalString(),
+        batchAvailableAfter: batchQtyAfter,
+        lines: [
+          {
+            productId: input.productId,
+            batchId: input.batchId ?? null,
+            quantity: qtyDelta.abs().toDecimalString(),
+            qtyDelta: qtyDelta.toDecimalString(),
+            balanceAfter: balanceAfter.toDecimalString(),
+            batchAvailableAfter: batchQtyAfter,
+          },
+        ],
+      },
+    });
+  }
 
   if (
     qtyDelta.isPositive() &&
     !unitCostMoney.isZero() &&
     input.referenceType !== 'GOODS_RECEIPT' &&
+    input.movementType !== 'TRANSFER_IN' &&
+    product.trackingMode !== 'BATCH' &&
+    product.trackingMode !== 'BATCH_EXPIRY' &&
     resolvedEntrySource !== 'CUSTOMER_RETURN' &&
     resolvedEntrySource !== 'POS_VOID'
   ) {
@@ -1200,9 +1280,34 @@ export async function reverseStockMovement(
     })
     .execute();
 
-  const totalValue = unitCostMoney.multiplyByQuantity(
-    balanceAfter.isNegative() ? Quantity.zero() : balanceAfter,
-  );
+  const existingTotalVal = existingBalance
+    ? Money.fromDecimalString(
+        String(existingBalance.total_inventory_value),
+        baseCurrency,
+      )
+    : Money.zero(baseCurrency);
+  const originalTotalCostDelta = original.total_cost_delta
+    ? Money.fromDecimalString(String(original.total_cost_delta), baseCurrency)
+    : unitCostMoney.multiplyByQuantity(originalQtyDelta);
+  const reversalTotalCostDelta = originalTotalCostDelta.negate();
+  let totalValue = existingTotalVal.add(reversalTotalCostDelta);
+  if (totalValue.isNegative() || !balanceAfter.isPositive()) {
+    if (!balanceAfter.isPositive() || totalValue.isNegative()) {
+      totalValue = balanceAfter.isPositive()
+        ? Money.zero(baseCurrency)
+        : Money.zero(baseCurrency);
+    }
+  }
+  const nextMovingAvgCost = balanceAfter.isPositive()
+    ? Money.fromScaledUnits(
+        divideAndRoundBigInt(
+          totalValue.scaledUnits * QUANTITY_SCALE_FACTOR,
+          balanceAfter.microUnits,
+          'HALF_EVEN',
+        ),
+        baseCurrency,
+      )
+    : unitCostMoney;
 
   if (existingBalance) {
     const nextSyncVersion = Number(existingBalance.sync_version) + 1;
@@ -1210,6 +1315,7 @@ export async function reverseStockMovement(
       .updateTable('inventory_balances')
       .set({
         qty_on_hand: balanceAfter.toDecimalString(),
+        moving_avg_cost: nextMovingAvgCost.toDecimalString(),
         total_inventory_value: totalValue.toDecimalString(),
         last_ledger_entry_id: reversalId,
         last_movement_at: occurredAt,
@@ -1221,7 +1327,148 @@ export async function reverseStockMovement(
       .execute();
   }
 
+  // Restore FIFO cost layers accurately when reversing FIFO movements (BUG-097)
+  if (product.valuationMethod === 'FIFO') {
+    if (reversalQtyDelta.isPositive()) {
+      const originalMeta = (original.metadata_json ?? {}) as {
+        consumedCostLayers?: Array<{
+          layerId: string;
+          batchId?: string;
+          qtyConsumed: string;
+          unitCost?: string;
+        }>;
+      };
+      const recordedSlices = Array.isArray(originalMeta.consumedCostLayers)
+        ? originalMeta.consumedCostLayers
+        : [];
+
+      let remainingToRestore = reversalQtyDelta;
+
+      if (recordedSlices.length > 0) {
+        for (const slice of recordedSlices) {
+          const layer = await trx.db
+            .selectFrom('inventory_cost_layers')
+            .select(['id', 'received_qty', 'remaining_qty'])
+            .where('tenant_id', '=', trx.tenantId)
+            .where('id', '=', slice.layerId)
+            .forUpdate()
+            .executeTakeFirst();
+          if (!layer) continue;
+
+          const sliceQty = Quantity.fromDecimalString(String(slice.qtyConsumed));
+          const curRem = Quantity.fromDecimalString(String(layer.remaining_qty));
+          const maxCap = Quantity.fromDecimalString(String(layer.received_qty));
+          const candidateRem = curRem.add(sliceQty);
+          const restoredRem =
+            candidateRem.compare(maxCap) > 0 ? maxCap : candidateRem;
+
+          await trx.db
+            .updateTable('inventory_cost_layers')
+            .set({
+              remaining_qty: restoredRem.toDecimalString(),
+              status: restoredRem.isPositive() ? 'OPEN' : 'DEPLETED',
+              updated_at: now,
+            })
+            .where('tenant_id', '=', trx.tenantId)
+            .where('id', '=', layer.id)
+            .execute();
+
+          remainingToRestore = remainingToRestore.subtract(
+            restoredRem.subtract(curRem),
+          );
+        }
+      } else {
+        // Fallback for legacy outbound FIFO movements without consumedCostLayers metadata
+        let candidateQuery = trx.db
+          .selectFrom('inventory_cost_layers')
+          .select(['id', 'received_qty', 'remaining_qty'])
+          .where('tenant_id', '=', trx.tenantId)
+          .where('warehouse_id', '=', original.warehouse_id)
+          .where('product_id', '=', original.product_id);
+        if (original.batch_id) {
+          candidateQuery = candidateQuery.where('batch_id', '=', original.batch_id);
+        }
+        const candidates = await candidateQuery
+          .orderBy('layer_date', 'desc')
+          .orderBy('created_at', 'desc')
+          .forUpdate()
+          .execute();
+
+        for (const layer of candidates) {
+          if (!remainingToRestore.isPositive()) break;
+          const recQty = Quantity.fromDecimalString(String(layer.received_qty));
+          const curRem = Quantity.fromDecimalString(String(layer.remaining_qty));
+          const deficit = recQty.subtract(curRem);
+          if (!deficit.isPositive()) continue;
+          const addBack =
+            deficit.compare(remainingToRestore) <= 0 ? deficit : remainingToRestore;
+          const restoredRem = curRem.add(addBack);
+          await trx.db
+            .updateTable('inventory_cost_layers')
+            .set({
+              remaining_qty: restoredRem.toDecimalString(),
+              status: restoredRem.isPositive() ? 'OPEN' : 'DEPLETED',
+              updated_at: now,
+            })
+            .where('tenant_id', '=', trx.tenantId)
+            .where('id', '=', layer.id)
+            .execute();
+          remainingToRestore = remainingToRestore.subtract(addBack);
+        }
+      }
+
+      // If outbound originally created an uncovered negative quantity without a layer, open a restoration layer
+      if (remainingToRestore.isPositive()) {
+        await trx.db
+          .insertInto('inventory_cost_layers')
+          .values({
+            id: generateUuidV7(),
+            tenant_id: trx.tenantId,
+            warehouse_id: original.warehouse_id,
+            product_id: original.product_id,
+            batch_id: original.batch_id ?? null,
+            ledger_entry_id: reversalId,
+            layer_date: occurredAt,
+            received_qty: remainingToRestore.toDecimalString(),
+            remaining_qty: remainingToRestore.toDecimalString(),
+            unit_cost: unitCostMoney.toDecimalString(),
+            currency_code: baseCurrency,
+            status: 'OPEN',
+            created_at: now,
+            updated_at: now,
+          })
+          .execute();
+      }
+    } else if (reversalQtyDelta.isNegative()) {
+      // Reversing an inbound FIFO receipt -> deduct or deplete its created cost layer
+      const createdLayer = await trx.db
+        .selectFrom('inventory_cost_layers')
+        .select(['id', 'remaining_qty'])
+        .where('tenant_id', '=', trx.tenantId)
+        .where('ledger_entry_id', '=', original.id)
+        .forUpdate()
+        .executeTakeFirst();
+
+      if (createdLayer) {
+        const curRem = Quantity.fromDecimalString(String(createdLayer.remaining_qty));
+        const nextRem = curRem.subtract(reversalQtyDelta.abs());
+        const clampedRem = nextRem.isNegative() ? Quantity.zero() : nextRem;
+        await trx.db
+          .updateTable('inventory_cost_layers')
+          .set({
+            remaining_qty: clampedRem.toDecimalString(),
+            status: clampedRem.isPositive() ? 'OPEN' : 'DEPLETED',
+            updated_at: now,
+          })
+          .where('tenant_id', '=', trx.tenantId)
+          .where('id', '=', createdLayer.id)
+          .execute();
+      }
+    }
+  }
+
   // Restore Batch quantity on reversal if batch_id was present
+  let reversalBatchQtyAfter: string | null = null;
   if (original.batch_id) {
     const bRow = await trx.db
       .selectFrom('inventory_batches')
@@ -1235,10 +1482,11 @@ export async function reverseStockMovement(
       const cur = Quantity.fromDecimalString(String(bRow.current_quantity));
       const nextBatchQty = cur.add(reversalQtyDelta);
       const finalQty = nextBatchQty.isNegative() ? Quantity.zero() : nextBatchQty;
+      reversalBatchQtyAfter = finalQty.toDecimalString();
       await trx.db
         .updateTable('inventory_batches')
         .set({
-          current_quantity: finalQty.toDecimalString(),
+          current_quantity: reversalBatchQtyAfter,
           status: finalQty.isZero() ? 'DEPLETED' : 'ACTIVE',
           updated_at: now,
         })
@@ -1303,6 +1551,33 @@ export async function reverseStockMovement(
       balanceBefore: balanceBefore.toDecimalString(),
       balanceAfter: balanceAfter.toDecimalString(),
       reason,
+    },
+  });
+
+  realtimeEventHub.publish({
+    tenantId: trx.tenantId,
+    branchId: original.branch_id,
+    eventType: 'STOCK_CHANGED',
+    data: {
+      movementId: reversalId,
+      movementType: 'CORRECTION_REVERSAL',
+      branchId: original.branch_id,
+      warehouseId: original.warehouse_id,
+      productId: original.product_id,
+      batchId: original.batch_id ?? null,
+      qtyDelta: reversalQtyDelta.toDecimalString(),
+      balanceAfter: balanceAfter.toDecimalString(),
+      batchAvailableAfter: reversalBatchQtyAfter,
+      lines: [
+        {
+          productId: original.product_id,
+          batchId: original.batch_id ?? null,
+          quantity: reversalQtyDelta.abs().toDecimalString(),
+          qtyDelta: reversalQtyDelta.toDecimalString(),
+          balanceAfter: balanceAfter.toDecimalString(),
+          batchAvailableAfter: reversalBatchQtyAfter,
+        },
+      ],
     },
   });
 
@@ -1562,6 +1837,16 @@ export async function listInventoryBalances(
         .onRef('products.tenant_id', '=', 'inventory_balances.tenant_id')
         .onRef('products.id', '=', 'inventory_balances.product_id'),
     )
+    .leftJoin('warehouses', (join) =>
+      join
+        .onRef('warehouses.tenant_id', '=', 'inventory_balances.tenant_id')
+        .onRef('warehouses.id', '=', 'inventory_balances.warehouse_id'),
+    )
+    .leftJoin('branches', (join) =>
+      join
+        .onRef('branches.tenant_id', '=', 'inventory_balances.tenant_id')
+        .onRef('branches.id', '=', 'inventory_balances.branch_id'),
+    )
     .select([
       'inventory_balances.id as id',
       'inventory_balances.tenant_id as tenant_id',
@@ -1580,6 +1865,10 @@ export async function listInventoryBalances(
       'inventory_balances.sync_version as sync_version',
       'products.sku as sku',
       'products.name as product_name',
+      'products.base_uom as base_uom',
+      'products.image_url as image_url',
+      'warehouses.name as warehouse_name',
+      'branches.name as branch_name',
       'products.reorder_point as reorder_point',
       'products.reorder_qty as reorder_qty',
     ])
@@ -1668,6 +1957,10 @@ export async function listInventoryBalances(
       sku: r.sku,
       productName: r.product_name,
       uomCode: r.uom_code,
+      baseUom: r.base_uom ?? r.uom_code,
+      imageUrl: r.image_url ?? null,
+      ...(r.warehouse_name ? { warehouseName: r.warehouse_name } : {}),
+      ...(r.branch_name ? { branchName: r.branch_name } : {}),
       qtyOnHand: qtyOnHand.toDecimalString(),
       qtyReserved: qtyReserved.toDecimalString(),
       qtyInTransit: qtyInTransit.toDecimalString(),

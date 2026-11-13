@@ -3087,4 +3087,58 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       expect(html).toContain("entrySource = 'SCALE_WEIGHT'");
     });
   });
+
+  describe('36. Phase 3 Advanced Batch Pricing, Hybrid Barcodes, Transfers, UOM Wizard & Responsive UI', () => {
+    it('supports Shop Branding & Thermal Label Preview/Print across all 6 thermal & sheet sizes with audit logging', () => {
+      const html = readFileSync(resolve(WEB_ROOT, 'public/index.html'), 'utf8');
+      expect(html).toContain('/v1/org/branding');
+      expect(html).toContain('id="settingShopDisplayName"');
+      expect(html).toContain('function saveTenantBranding()');
+      expect(html).toContain('async function openBatchLabelPrintModal(batchId)');
+      expect(html).toContain('THERMAL_40X30');
+      expect(html).toContain('THERMAL_50X30');
+      expect(html).toContain('THERMAL_50X40');
+      expect(html).toContain('THERMAL_58');
+      expect(html).toContain('THERMAL_80');
+      expect(html).toContain('A4_SHEET');
+      expect(html).toContain('/barcode/print-log');
+    });
+
+    it('implements Batches filtering, Edit Batch Price, NB-B Barcode Generation, History Drawer & Cross-Branch Transfers', () => {
+      const html = readFileSync(resolve(WEB_ROOT, 'public/index.html'), 'utf8');
+      expect(html).toContain('async function renderBatchesView(append = false)');
+      expect(html).toContain('id="batchFilterMissingPrice"');
+      expect(html).toContain('async function openBatchPriceModal(batchId)');
+      expect(html).toContain('/pricing');
+      expect(html).toContain('async function openBatchDetailDrawer(batchId)');
+      expect(html).toContain('/barcode/generate');
+      expect(html).toContain('async function renderTransfersTab(container)');
+      expect(html).toContain('/v1/inventory/transfers');
+      expect(html).toContain('dispatchTransferAction');
+      expect(html).toContain('receiveTransferAction');
+    });
+
+    it('implements Legacy UOM Correction Wizard, GRN hybrid/GS1 barcode scanner & lot conflict resolution, and POS hybrid multi-batch splitting', () => {
+      const html = readFileSync(resolve(WEB_ROOT, 'public/index.html'), 'utf8');
+      expect(html).toContain('CAT_UOM_CHANGE_REQUIRES_WIZARD');
+      expect(html).toContain('openLegacyUomWizardModal');
+      expect(html).toContain('previewLegacyUomRebase');
+      expect(html).toContain('executeLegacyUomRebase');
+      expect(html).toContain('handleGrnBarcodeScan');
+      expect(html).toContain('INV_BATCH_LOT_CONFLICT');
+      expect(html).toContain('CREATE_NEW_LOT_SUFFIX');
+      expect(html).toContain('/v1/barcodes/resolve');
+      expect(html).toContain('function addNextFefoBatchLine(');
+      expect(html).toContain('function openPosBatchOverridePriceModal(');
+      expect(html).toContain('function getTotalCartBaseQtyForBatch(');
+      expect(html).toContain('isExactBatchLocked');
+    });
+
+    it('attaches HTTP status, errorCode & payload on apiFetch errors for structured 409/422 modal workflows', () => {
+      const html = readFileSync(resolve(WEB_ROOT, 'public/index.html'), 'utf8');
+      expect(html).toContain('apiErr.status = res.status');
+      expect(html).toContain('apiErr.errorCode = data?.errorCode || data?.code || null');
+      expect(html).toContain('apiErr.data = data || null');
+    });
+  });
 });

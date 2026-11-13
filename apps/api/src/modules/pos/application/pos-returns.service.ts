@@ -257,8 +257,39 @@ export async function createPosReturn(
 
   const responseLines: PosReturnLineResponse[] = [];
 
+  const todayStr = new Date().toISOString().slice(0, 10);
+
   for (const line of preparedLines) {
     let ledgerEntryId: string | null = null;
+    let returnedBatchNumber: string | null = null;
+
+    if (line.invoiceLine.batch_id) {
+      const origBatch = await trx.db
+        .selectFrom('inventory_batches')
+        .select(['id', 'batch_number', 'status', 'expiry_date'])
+        .where('tenant_id', '=', trx.tenantId)
+        .where('id', '=', line.invoiceLine.batch_id)
+        .executeTakeFirst();
+
+      if (origBatch) {
+        returnedBatchNumber = origBatch.batch_number;
+        const expStr = origBatch.expiry_date
+          ? new Date(origBatch.expiry_date).toISOString().slice(0, 10)
+          : null;
+        const isExpiredBatch =
+          origBatch.status === 'EXPIRED' || Boolean(expStr && expStr < todayStr);
+
+        if (isExpiredBatch && line.restockCondition === 'RESELLABLE') {
+          throw new AppError({
+            statusCode: 409,
+            errorCode: 'POS_EXPIRED_BATCH_RESTOCK_BLOCKED',
+            title: 'Expired Batch Cannot Be Restocked As Sellable',
+            detail: `Batch "${origBatch.batch_number}" is expired${expStr ? ` (expiry: ${expStr})` : ''} and cannot be restocked as RESELLABLE/ACTIVE inventory. Process return with restockCondition='DAMAGED' instead.`,
+          });
+        }
+      }
+    }
+
     if (line.restockCondition === 'RESELLABLE' && line.trackInventory) {
       const ledger = await postStockMovement(
         trx,
@@ -292,6 +323,8 @@ export async function createPosReturn(
         pos_return_id: posReturnId,
         invoice_line_id: line.invoiceLine.id,
         product_id: line.invoiceLine.product_id,
+        batch_id: line.invoiceLine.batch_id ?? null,
+        serial_id: line.invoiceLine.serial_id ?? null,
         return_uom: line.returnUom,
         return_qty: line.returnQty.toDecimalString(),
         conversion_factor_to_base: line.conversionFactorToBase,
@@ -315,6 +348,9 @@ export async function createPosReturn(
       restockCondition: line.restockCondition,
       unitPrice: line.unitPrice.toDecimalString(),
       refundAmount: line.refundAmount.toDecimalString(),
+      batchId: line.invoiceLine.batch_id ?? null,
+      batchNumber: returnedBatchNumber,
+      serialId: line.invoiceLine.serial_id ?? null,
       ledgerEntryId,
     });
   }
@@ -426,6 +462,8 @@ export async function listPosReturnsForSale(
       restockCondition: l.restock_condition,
       unitPrice: Money.fromDecimalString(String(l.unit_price), ccy).toDecimalString(),
       refundAmount: Money.fromDecimalString(String(l.refund_amount), ccy).toDecimalString(),
+      batchId: l.batch_id ?? null,
+      serialId: l.serial_id ?? null,
       ledgerEntryId: l.ledger_entry_id,
     });
     linesByRet.set(l.pos_return_id, arr);

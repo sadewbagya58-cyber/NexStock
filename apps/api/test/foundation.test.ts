@@ -365,6 +365,11 @@ describe('@nexstock/api — Milestone 0 Foundation, RLS, Idempotency & Sync Inva
           name: '0026_smart_pricing_management',
           filename: '0026_smart_pricing_management.sql',
         },
+        {
+          version: 27,
+          name: '0027_batch_pricing_hybrid_barcodes_and_transfers',
+          filename: '0027_batch_pricing_hybrid_barcodes_and_transfers.sql',
+        },
       ]);
     });
 
@@ -449,6 +454,7 @@ describe('@nexstock/api — Milestone 0 Foundation, RLS, Idempotency & Sync Inva
         '0024_membership_lifecycle_deactivated_suspended.sql',
         '0025_uom_foundation_and_variable_products.sql',
         '0026_smart_pricing_management.sql',
+        '0027_batch_pricing_hybrid_barcodes_and_transfers.sql',
       ]);
 
       await expect(

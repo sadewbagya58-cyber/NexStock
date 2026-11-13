@@ -548,12 +548,19 @@ describe('@nexstock/api — Customer Credit Management, POS Real-Time Sync & Cas
       });
 
       expect(pollRes.statusCode).toBe(200);
-      const body = pollRes.json();
+      const body = pollRes.json() as {
+        events: Array<{
+          eventType: string;
+          tenantId: string;
+          branchId: string;
+          data: { lines?: unknown };
+        }>;
+      };
       expect(Array.isArray(body.events)).toBe(true);
 
-      const stockEvents = body.events.filter((e: any) => e.eventType === 'STOCK_CHANGED');
+      const stockEvents = body.events.filter((e) => e.eventType === 'STOCK_CHANGED');
       expect(stockEvents.length).toBeGreaterThan(0);
-      const latestStockEvent = stockEvents[stockEvents.length - 1];
+      const latestStockEvent = stockEvents[stockEvents.length - 1]!;
       expect(latestStockEvent.tenantId).toBe(TENANT_ID);
       expect(latestStockEvent.branchId).toBe(branchId);
       expect(latestStockEvent.data.lines).toBeDefined();
@@ -582,10 +589,12 @@ describe('@nexstock/api — Customer Credit Management, POS Real-Time Sync & Cas
       });
 
       expect(pollRes.statusCode).toBe(200);
-      const body = pollRes.json();
-      const creditEvents = body.events.filter((e: any) => e.eventType === 'CREDIT_ACCOUNT_CHANGED');
+      const body = pollRes.json() as {
+        events: Array<{ eventType: string; data: { accountId?: string } }>;
+      };
+      const creditEvents = body.events.filter((e) => e.eventType === 'CREDIT_ACCOUNT_CHANGED');
       expect(creditEvents.length).toBeGreaterThan(0);
-      const latestCreditEvent = creditEvents[creditEvents.length - 1];
+      const latestCreditEvent = creditEvents[creditEvents.length - 1]!;
       expect(latestCreditEvent.data.accountId).toBe(customer1CreditAccountId);
     });
   });
@@ -903,11 +912,18 @@ describe('@nexstock/api — Customer Credit Management, POS Real-Time Sync & Cas
         headers: authHeaders(cashierToken),
       });
       expect(listPayRes.statusCode).toBe(200);
-      const matchedPayment = listPayRes.json().items.find((p: any) => p.id === payment.id);
+      const listPayBody = listPayRes.json() as {
+        items: Array<{
+          id: string;
+          externalReference?: string;
+          allocations: unknown[];
+        }>;
+      };
+      const matchedPayment = listPayBody.items.find((p) => p.id === payment.id);
       expect(matchedPayment).toBeDefined();
-      expect(matchedPayment.externalReference).toBe('SLT-FT-990011');
-      expect(Array.isArray(matchedPayment.allocations)).toBe(true);
-      expect(matchedPayment.allocations.length).toBeGreaterThan(0);
+      expect(matchedPayment!.externalReference).toBe('SLT-FT-990011');
+      expect(Array.isArray(matchedPayment!.allocations)).toBe(true);
+      expect(matchedPayment!.allocations.length).toBeGreaterThan(0);
 
       // 5. Verify payment receipt endpoint includes externalReference and allocations
       const receiptRes = await app.inject({

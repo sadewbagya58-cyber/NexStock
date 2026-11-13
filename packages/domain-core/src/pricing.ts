@@ -432,3 +432,184 @@ export function validateDiscountAgainstPolicy(params: {
 
   return { allowed: true, appliedDiscountPct };
 }
+
+export type BatchPricingMode = 'EXPLICIT' | 'INHERIT_PRODUCT';
+export type BatchPricingFallbackPolicy = 'BLOCK_MISSING' | 'ALLOW_PRODUCT_FALLBACK';
+
+export type BatchPriceResolutionResult =
+  | {
+      readonly ok: true;
+      readonly resolvedPrice: string;
+      readonly source:
+        | 'EXPLICIT_BATCH_PRICE'
+        | 'POS_BATCH_OVERRIDE'
+        | 'BRANCH_DEFAULT_FALLBACK'
+        | 'PRODUCT_DEFAULT_FALLBACK';
+      readonly minSellingPrice: string | null;
+      readonly maxDiscountPct: string | null;
+    }
+  | {
+      readonly ok: false;
+      readonly errorCode:
+        | 'POS_BATCH_PRICE_REQUIRED'
+        | 'BATCH_MIN_PRICE_VIOLATION';
+      readonly reason: string;
+    };
+
+/**
+ * Resolves the authoritative selling price for a batch-tracked stock unit
+ * enforcing the exact 4-level NexStock Batch Pricing Precedence Chain:
+ *  1. Authorized POS/Supervisor Batch Price Override (bounded by floor)
+ *  2. Approved Explicit Batch Selling Price (`inventory_batches.selling_price`)
+ *  3. Restricted Product/Branch Default Fallback (ONLY when `INHERIT_PRODUCT` + `ALLOW_PRODUCT_FALLBACK` + `!requireBatchSellingPrice`)
+ *  4. Mandatory Missing Batch Price Block (`POS_BATCH_PRICE_REQUIRED`)
+ */
+export function resolveEffectiveBatchPrice(params: {
+  readonly batchNumber: string;
+  readonly batchSellingPrice?: string | null;
+  readonly batchMinSellingPrice?: string | null;
+  readonly batchMaxDiscountPct?: string | null;
+  readonly batchPricingMode?: BatchPricingMode | null;
+  readonly productSellingPrice?: string | null;
+  readonly productMinSellingPrice?: string | null;
+  readonly productMaxDiscountPct?: string | null;
+  readonly branchSellingPrice?: string | null;
+  readonly branchMinSellingPrice?: string | null;
+  readonly branchMaxDiscountPct?: string | null;
+  readonly fallbackPolicy?: BatchPricingFallbackPolicy | null;
+  readonly requireBatchSellingPrice?: boolean | null;
+  readonly overrideSellingPrice?: string | null;
+  readonly overrideAuthorized?: boolean;
+  readonly currencyCode: string;
+}): BatchPriceResolutionResult {
+  const effectiveMinFloor =
+    params.batchMinSellingPrice ??
+    params.branchMinSellingPrice ??
+    params.productMinSellingPrice ??
+    null;
+
+  const effectiveMaxDiscountPct =
+    params.batchMaxDiscountPct ??
+    params.branchMaxDiscountPct ??
+    params.productMaxDiscountPct ??
+    null;
+
+  // Level 2: Authorized Batch Override (checked against min selling price floor)
+  if (
+    params.overrideAuthorized &&
+    params.overrideSellingPrice !== undefined &&
+    params.overrideSellingPrice !== null
+  ) {
+    const overrideMoney = Money.fromDecimalString(
+      params.overrideSellingPrice,
+      params.currencyCode,
+    );
+    if (overrideMoney.scaledUnits <= 0n) {
+      return {
+        ok: false,
+        errorCode: 'POS_BATCH_PRICE_REQUIRED',
+        reason: `Batch ${params.batchNumber} override selling price must be strictly positive.`,
+      };
+    }
+    if (effectiveMinFloor !== null) {
+      const floorMoney = Money.fromDecimalString(
+        effectiveMinFloor,
+        params.currencyCode,
+      );
+      if (overrideMoney.scaledUnits < floorMoney.scaledUnits) {
+        return {
+          ok: false,
+          errorCode: 'BATCH_MIN_PRICE_VIOLATION',
+          reason: `Override price (${overrideMoney.toDecimalString()}) for batch ${params.batchNumber} is below minimum floor (${floorMoney.toDecimalString()}).`,
+        };
+      }
+    }
+    return {
+      ok: true,
+      resolvedPrice: overrideMoney.toDecimalString(),
+      source: 'POS_BATCH_OVERRIDE',
+      minSellingPrice: effectiveMinFloor,
+      maxDiscountPct: effectiveMaxDiscountPct,
+    };
+  }
+
+  // Level 1: Explicit Batch Selling Price
+  const mode: BatchPricingMode = params.batchPricingMode ?? 'EXPLICIT';
+  if (
+    params.batchSellingPrice !== undefined &&
+    params.batchSellingPrice !== null &&
+    params.batchSellingPrice.trim() !== ''
+  ) {
+    const batchMoney = Money.fromDecimalString(
+      params.batchSellingPrice,
+      params.currencyCode,
+    );
+    if (batchMoney.scaledUnits > 0n) {
+      return {
+        ok: true,
+        resolvedPrice: batchMoney.toDecimalString(),
+        source: 'EXPLICIT_BATCH_PRICE',
+        minSellingPrice: effectiveMinFloor,
+        maxDiscountPct: effectiveMaxDiscountPct,
+      };
+    }
+  }
+
+  // Level 3: Restricted Product / Branch Fallback
+  const fallbackPolicy: BatchPricingFallbackPolicy =
+    params.fallbackPolicy ?? 'ALLOW_PRODUCT_FALLBACK';
+  const requireBatchPrice = Boolean(params.requireBatchSellingPrice);
+
+  if (
+    mode === 'INHERIT_PRODUCT' &&
+    fallbackPolicy === 'ALLOW_PRODUCT_FALLBACK' &&
+    !requireBatchPrice
+  ) {
+    if (
+      params.branchSellingPrice !== undefined &&
+      params.branchSellingPrice !== null &&
+      params.branchSellingPrice.trim() !== ''
+    ) {
+      const branchMoney = Money.fromDecimalString(
+        params.branchSellingPrice,
+        params.currencyCode,
+      );
+      if (branchMoney.scaledUnits > 0n) {
+        return {
+          ok: true,
+          resolvedPrice: branchMoney.toDecimalString(),
+          source: 'BRANCH_DEFAULT_FALLBACK',
+          minSellingPrice: effectiveMinFloor,
+          maxDiscountPct: effectiveMaxDiscountPct,
+        };
+      }
+    }
+
+    if (
+      params.productSellingPrice !== undefined &&
+      params.productSellingPrice !== null &&
+      params.productSellingPrice.trim() !== ''
+    ) {
+      const productMoney = Money.fromDecimalString(
+        params.productSellingPrice,
+        params.currencyCode,
+      );
+      if (productMoney.scaledUnits > 0n) {
+        return {
+          ok: true,
+          resolvedPrice: productMoney.toDecimalString(),
+          source: 'PRODUCT_DEFAULT_FALLBACK',
+          minSellingPrice: effectiveMinFloor,
+          maxDiscountPct: effectiveMaxDiscountPct,
+        };
+      }
+    }
+  }
+
+  // Level 4: Mandatory Missing Batch Price Block
+  return {
+    ok: false,
+    errorCode: 'POS_BATCH_PRICE_REQUIRED',
+    reason: `Batch ${params.batchNumber} has no approved selling price configured.`,
+  };
+}

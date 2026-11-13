@@ -1,0 +1,9 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Default capability for NexStock offline-first desktop POS and ERP window",
+  "windows": ["main"],
+  "permissions": [
+    "core:default"
+  ]
+}

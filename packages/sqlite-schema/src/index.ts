@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -15,7 +15,9 @@ export interface SqliteDatabaseExecutor {
 }
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
-const migrationsDir = resolve(currentDir, '../migrations');
+const migrationsDir = existsSync(resolve(currentDir, '../migrations'))
+  ? resolve(currentDir, '../migrations')
+  : resolve(currentDir, '../../migrations');
 
 export function getCanonicalSqliteMigrations(): readonly SqliteMigrationSpec[] {
   const filename1 = '0001_local_sync_foundation.sql';
@@ -30,6 +32,8 @@ export function getCanonicalSqliteMigrations(): readonly SqliteMigrationSpec[] {
   const sql5 = readFileSync(resolve(migrationsDir, filename5), 'utf-8');
   const filename6 = '0006_local_branch_pricing.sql';
   const sql6 = readFileSync(resolve(migrationsDir, filename6), 'utf-8');
+  const filename7 = '0007_local_batch_pricing_and_barcodes.sql';
+  const sql7 = readFileSync(resolve(migrationsDir, filename7), 'utf-8');
   return [
     {
       dialect: 'sqlite',
@@ -72,6 +76,13 @@ export function getCanonicalSqliteMigrations(): readonly SqliteMigrationSpec[] {
       name: '0006_local_branch_pricing',
       filename: filename6,
       sql: sql6,
+    },
+    {
+      dialect: 'sqlite',
+      version: 7,
+      name: '0007_local_batch_pricing_and_barcodes',
+      filename: filename7,
+      sql: sql7,
     },
   ];
 }

@@ -92,7 +92,6 @@ describe('@nexstock/api — Phase 4 & 5: Smart Pricing Management System (PRICE-
   let warehouseAId: string;
   let warehouseBId: string;
   let registerAId: string;
-  let registerBId: string;
   let shiftAId: string;
   let supplierId: string;
 
@@ -253,7 +252,7 @@ describe('@nexstock/api — Phase 4 & 5: Smart Pricing Management System (PRICE-
       },
     });
     expect(regBRes.statusCode).toBe(201);
-    registerBId = regBRes.json().id;
+    expect(regBRes.json().id).toBeDefined();
 
     const shiftRes = await app.inject({
       method: 'POST',

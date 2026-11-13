@@ -236,10 +236,31 @@ import {
   type CreatePriceSuggestionRequest,
   type ApprovePriceSuggestionRequest,
   type RejectOrDeferPriceSuggestionRequest,
+  ResolveBarcodeRequestSchema,
+  ResolveBarcodeResponseSchema,
+  UpdateBatchPricingRequestSchema,
+  GenerateBatchBarcodeRequestSchema,
+  GenerateBatchBarcodeResponseSchema,
+  BatchBarcodePrintLogRequestSchema,
+  BatchBarcodePrintLogResponseSchema,
+  BatchHistoryResponseSchema,
+  TenantBrandingResponseSchema,
+  UpdateTenantBrandingRequestSchema,
+  CreateStockTransferRequestSchema,
+  StockTransferResponseSchema,
+  ReceiveStockTransferRequestSchema,
+  ListStockTransfersQuerySchema,
+  StockTransferListResponseSchema,
+  UomCorrectionPreviewRequestSchema,
+  UomCorrectionPreviewResponseSchema,
+  UomCorrectionExecuteRequestSchema,
+  UomCorrectionExecuteResponseSchema,
+  type CreatePosSaleRequest,
+  type CreatePosReturnRequest,
 } from '@nexstock/contracts';
 import { Type } from '@sinclair/typebox';
 import Fastify, { type FastifyInstance } from 'fastify';
-import type { Kysely } from 'kysely';
+import { sql, type Kysely } from 'kysely';
 import {
   acknowledgeOrDeactivateBranchOverride,
   addProductBarcode,
@@ -274,6 +295,8 @@ import {
   updateTenantBarcodeSettings,
   uploadProductImage,
   upsertProductPricingRule,
+  previewLegacyUomCorrection,
+  executeLegacyUomCorrection,
 } from './modules/cat/index.js';
 import {
   convertTenantCurrencyAmount,
@@ -343,17 +366,29 @@ import {
   selectFefoBatches,
   submitStocktakeSession,
   transitionSerialStatus,
+  resolveHybridBarcode,
+  updateBatchPricing,
+  generateBatchBarcode,
+  recordBatchBarcodePrintLog,
+  getBatchHistory,
+  createStockTransfer,
+  getStockTransferById,
+  listStockTransfers,
+  dispatchStockTransfer,
+  receiveStockTransfer,
 } from './modules/inv/index.js';
 import {
   createBranch,
   createWarehouse,
   getBranchById,
+  getTenantBranding,
   getWarehouseById,
   listBranches,
   listWarehouses,
   onboardBusinessAtomic,
   onboardTenantOrganization,
   updateBranchName,
+  updateTenantBranding,
   updateWarehouse,
 } from './modules/org/index.js';
 import {
@@ -1370,7 +1405,10 @@ export async function buildApp(
                 );
               }
 
-              if (envelope.payload['droveStockNegativeOffline'] === true) {
+              if (
+                envelope.payload['droveStockNegativeOffline'] === true &&
+                !Array.isArray(envelope.payload['lines'])
+              ) {
                 return {
                   status: 'APPLIED_WITH_CONFLICT_FLAG',
                   conflictCode: 'NEGATIVE_STOCK_VARIANCE',
@@ -1378,6 +1416,99 @@ export async function buildApp(
                     note: 'Offline physical sale accepted; stock balance went negative.',
                   },
                 };
+              }
+
+              if (
+                rawCmdType === 'POS_RECORD_SALE' &&
+                typeof envelope.payload['registerId'] === 'string' &&
+                Array.isArray(envelope.payload['lines']) &&
+                Array.isArray(envelope.payload['payments'])
+              ) {
+                const salePayload = envelope.payload as unknown as CreatePosSaleRequest;
+                const spName = `sp_sync_exec_${envelope.localSeq}`;
+                await sql`SAVEPOINT ${sql.raw(spName)}`.execute(cmdTrx);
+                try {
+                  const saleResult = await checkoutSale(
+                    cmdTrx,
+                    envelope.commandId,
+                    salePayload,
+                  );
+                  await sql`RELEASE SAVEPOINT ${sql.raw(spName)}`.execute(cmdTrx);
+                  return {
+                    status: 'APPLIED',
+                    responsePayload: {
+                      saleId: saleResult.id,
+                      invoiceNumber: saleResult.invoiceNumber,
+                    },
+                  };
+                } catch (err) {
+                  await sql`ROLLBACK TO SAVEPOINT ${sql.raw(spName)}`.execute(cmdTrx);
+                  await sql`RELEASE SAVEPOINT ${sql.raw(spName)}`.execute(cmdTrx);
+                  if (
+                    err instanceof AppError &&
+                    (err.errorCode === 'INV_INSUFFICIENT_AVAILABLE_STOCK' ||
+                      err.errorCode === 'INV_INSUFFICIENT_BATCH_STOCK')
+                  ) {
+                    const retryResult = await checkoutSale(cmdTrx, envelope.commandId, {
+                      ...salePayload,
+                      allowNegativeStockOverride: true,
+                      overrideReason: 'Offline POS sync variance override',
+                    });
+                    return {
+                      status: 'APPLIED_WITH_CONFLICT_FLAG',
+                      conflictCode: 'NEGATIVE_STOCK_VARIANCE',
+                      conflictDetails: {
+                        saleId: retryResult.id,
+                        invoiceNumber: retryResult.invoiceNumber,
+                        reason: err.message,
+                      },
+                      responsePayload: {
+                        saleId: retryResult.id,
+                        invoiceNumber: retryResult.invoiceNumber,
+                      },
+                    };
+                  }
+                  if (err instanceof AppError) {
+                    throw new SyncPoisonPillError(err.errorCode, err.message, {
+                      commandType: envelope.commandType,
+                      statusCode: err.statusCode,
+                    });
+                  }
+                  throw err;
+                }
+              }
+
+              if (
+                rawCmdType === 'POS_RECORD_RETURN' &&
+                typeof envelope.payload['saleId'] === 'string' &&
+                Array.isArray(envelope.payload['lines'])
+              ) {
+                const { saleId, ...returnBody } = envelope.payload as {
+                  saleId: string;
+                } & CreatePosReturnRequest;
+                try {
+                  const retRes = await createPosReturn(
+                    cmdTrx,
+                    envelope.commandId,
+                    saleId,
+                    returnBody as CreatePosReturnRequest,
+                  );
+                  return {
+                    status: 'APPLIED',
+                    responsePayload: {
+                      returnId: retRes.id,
+                      returnNumber: retRes.returnNumber,
+                    },
+                  };
+                } catch (err) {
+                  if (err instanceof AppError) {
+                    throw new SyncPoisonPillError(err.errorCode, err.message, {
+                      commandType: envelope.commandType,
+                      statusCode: err.statusCode,
+                    });
+                  }
+                  throw err;
+                }
               }
 
               return {
@@ -1778,6 +1909,69 @@ export async function buildApp(
         options.db,
         { tenantId, userId: principal.userId, traceId },
         (trx) => updateWarehouse(trx, request.params.warehouseId, request.body),
+      );
+    },
+  );
+
+  // 12c. Tenant Shop Branding (Thermal Labels & Receipts)
+  app.get(
+    '/v1/org/branding',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        response: {
+          200: TenantBrandingResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => getTenantBranding(trx),
+      );
+    },
+  );
+
+  app.patch(
+    '/v1/org/branding',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        body: UpdateTenantBrandingRequestSchema,
+        response: {
+          200: TenantBrandingResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => updateTenantBranding(trx, request.body),
       );
     },
   );
@@ -3110,6 +3304,108 @@ export async function buildApp(
         options.db,
         { tenantId, userId: principal.userId, traceId },
         (trx) => archiveProduct(trx, request.params.productId),
+      );
+    },
+  );
+
+  // Legacy Product Base UOM Correction Wizard (Rebasing Preview & Atomic Execution)
+  app.post(
+    '/v1/products/:productId/uom-correction-preview',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ productId: UuidSchema }),
+        body: UomCorrectionPreviewRequestSchema,
+        response: {
+          200: UomCorrectionPreviewResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          previewLegacyUomCorrection(trx, request.params.productId, request.body),
+      );
+    },
+  );
+
+  app.post(
+    '/v1/products/:productId/uom-correction',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ productId: UuidSchema }),
+        body: UomCorrectionExecuteRequestSchema,
+        response: {
+          200: UomCorrectionExecuteResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          executeLegacyUomCorrection(trx, request.params.productId, request.body),
+      );
+    },
+  );
+
+  // Hybrid Barcode & GS1 Resolution (POS, GRN, Inventory)
+  app.post(
+    '/v1/barcodes/resolve',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        body: ResolveBarcodeRequestSchema,
+        response: {
+          200: ResolveBarcodeResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => resolveHybridBarcode(trx, request.body),
       );
     },
   );
@@ -4927,6 +5223,301 @@ export async function buildApp(
         options.db,
         { tenantId, userId: principal.userId, traceId },
         (trx) => selectFefoBatches(trx, request.body),
+      );
+    },
+  );
+
+  app.patch(
+    '/v1/inventory/batches/:batchId/pricing',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ batchId: UuidSchema }),
+        body: UpdateBatchPricingRequestSchema,
+        response: {
+          200: BatchResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          422: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => updateBatchPricing(trx, request.params.batchId, request.body),
+      );
+    },
+  );
+
+  app.post(
+    '/v1/inventory/batches/:batchId/barcode/generate',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ batchId: UuidSchema }),
+        body: GenerateBatchBarcodeRequestSchema,
+        response: {
+          200: GenerateBatchBarcodeResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => generateBatchBarcode(trx, request.params.batchId, request.body),
+      );
+    },
+  );
+
+  app.post(
+    '/v1/inventory/batches/:batchId/barcode/print-log',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ batchId: UuidSchema }),
+        body: BatchBarcodePrintLogRequestSchema,
+        response: {
+          201: BatchBarcodePrintLogResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      const logRow = await withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => recordBatchBarcodePrintLog(trx, request.params.batchId, request.body),
+      );
+      return reply.status(201).send(logRow);
+    },
+  );
+
+  app.get(
+    '/v1/inventory/batches/:batchId/history',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ batchId: UuidSchema }),
+        response: {
+          200: BatchHistoryResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => getBatchHistory(trx, request.params.batchId),
+      );
+    },
+  );
+
+  // 1b. Multi-Branch Batch Stock Transfers (Dispatch -> In Transit -> Receive)
+  app.post(
+    '/v1/inventory/transfers',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        body: CreateStockTransferRequestSchema,
+        response: {
+          201: StockTransferResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      const created = await withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => createStockTransfer(trx, request.body),
+      );
+      return reply.status(201).send(created);
+    },
+  );
+
+  app.get(
+    '/v1/inventory/transfers',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        querystring: ListStockTransfersQuerySchema,
+        response: {
+          200: StockTransferListResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => listStockTransfers(trx, request.query),
+      );
+    },
+  );
+
+  app.get(
+    '/v1/inventory/transfers/:transferId',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ transferId: UuidSchema }),
+        response: {
+          200: StockTransferResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => getStockTransferById(trx, request.params.transferId),
+      );
+    },
+  );
+
+  app.post(
+    '/v1/inventory/transfers/:transferId/dispatch',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ transferId: UuidSchema }),
+        response: {
+          200: StockTransferResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => dispatchStockTransfer(trx, request.params.transferId),
+      );
+    },
+  );
+
+  app.post(
+    '/v1/inventory/transfers/:transferId/receive',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ transferId: UuidSchema }),
+        body: Type.Optional(ReceiveStockTransferRequestSchema),
+        response: {
+          200: StockTransferResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          receiveStockTransfer(trx, request.params.transferId, request.body),
       );
     },
   );
@@ -9628,6 +10219,7 @@ export async function buildApp(
 
       const branchId = (request.query as { branchId?: string })?.branchId || null;
 
+      reply.raw.setHeader('Access-Control-Allow-Origin', '*');
       reply.raw.setHeader('Content-Type', 'text/event-stream');
       reply.raw.setHeader('Cache-Control', 'no-cache, no-transform');
       reply.raw.setHeader('Connection', 'keep-alive');

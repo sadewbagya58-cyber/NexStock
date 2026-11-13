@@ -1,3 +1,7 @@
+import type {
+  TenantBrandingResponse,
+  UpdateTenantBrandingRequest,
+} from '@nexstock/contracts';
 import {
   type LocalizationSettingsDto,
   upsertTenantLocalizationSettings,
@@ -768,5 +772,96 @@ export async function updateWarehouse(
     name: nextName,
     allowNegativeStock: existing.allow_negative_stock,
     isActive: nextIsActive,
+  };
+}
+
+export async function getTenantBranding(
+  trx: TenantTransactionContext,
+): Promise<TenantBrandingResponse> {
+  await assertAuthorized(trx, { permission: 'org:branch:read' });
+  await assertSubscriptionEntitlement(trx, { requireWriteAccess: false });
+
+  const tenant = await trx.db
+    .selectFrom('tenants')
+    .select(['id', 'legal_name', 'shop_display_name', 'logo_url'])
+    .where('id', '=', trx.tenantId)
+    .executeTakeFirst();
+
+  if (!tenant) {
+    throw new AppError({
+      statusCode: 404,
+      errorCode: 'ERR_NOT_FOUND',
+      title: 'Tenant Not Found',
+      detail: `Tenant "${trx.tenantId}" was not found.`,
+    });
+  }
+
+  return {
+    tenantId: tenant.id,
+    name: tenant.legal_name,
+    shopDisplayName: tenant.shop_display_name ?? null,
+    logoUrl: tenant.logo_url ?? null,
+  };
+}
+
+export async function updateTenantBranding(
+  trx: TenantTransactionContext,
+  input: UpdateTenantBrandingRequest,
+): Promise<TenantBrandingResponse> {
+  await assertAuthorized(trx, { permission: 'org:tenant:manage' });
+  await assertSubscriptionEntitlement(trx, { requireWriteAccess: true });
+
+  const existing = await trx.db
+    .selectFrom('tenants')
+    .select(['id', 'legal_name', 'shop_display_name', 'logo_url'])
+    .where('id', '=', trx.tenantId)
+    .forUpdate()
+    .executeTakeFirst();
+
+  if (!existing) {
+    throw new AppError({
+      statusCode: 404,
+      errorCode: 'ERR_NOT_FOUND',
+      title: 'Tenant Not Found',
+      detail: `Tenant "${trx.tenantId}" was not found.`,
+    });
+  }
+
+  const nextDisplayName =
+    input.shopDisplayName !== undefined
+      ? input.shopDisplayName?.trim() || null
+      : existing.shop_display_name ?? null;
+  const nextLogoUrl =
+    input.logoUrl !== undefined
+      ? input.logoUrl?.trim() || null
+      : existing.logo_url ?? null;
+
+  await trx.db
+    .updateTable('tenants')
+    .set({
+      shop_display_name: nextDisplayName,
+      logo_url: nextLogoUrl,
+      updated_at: new Date(),
+    })
+    .where('id', '=', trx.tenantId)
+    .execute();
+
+  await appendAuditLog(trx, {
+    action: 'ORG_TENANT_BRANDING_UPDATED',
+    resourceType: 'TENANT',
+    resourceId: trx.tenantId,
+    metadata: {
+      previousShopDisplayName: existing.shop_display_name ?? null,
+      nextShopDisplayName: nextDisplayName,
+      previousLogoUrl: existing.logo_url ?? null,
+      nextLogoUrl,
+    },
+  });
+
+  return {
+    tenantId: existing.id,
+    name: existing.legal_name,
+    shopDisplayName: nextDisplayName,
+    logoUrl: nextLogoUrl,
   };
 }
