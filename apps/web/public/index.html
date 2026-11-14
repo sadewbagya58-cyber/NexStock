@@ -526,9 +526,10 @@
     /* POS Grid & Cart Styles */
     .pos-layout {
       display: grid;
-      grid-template-columns: 1fr 380px;
-      gap: 20px;
+      grid-template-columns: minmax(0, 2.65fr) minmax(275px, 1fr);
+      gap: 16px;
       height: calc(100vh - var(--header-height) - 56px);
+      align-items: stretch;
     }
     .pos-catalog-panel {
       display: flex;
@@ -536,28 +537,31 @@
       background: var(--surface-card);
       border: 1px solid var(--border-subtle);
       border-radius: var(--radius);
-      padding: 16px;
+      padding: 14px 16px;
       overflow: hidden;
+      min-width: 0;
     }
     .pos-product-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(175px, 1fr));
       grid-auto-rows: max-content;
       align-content: start;
       align-items: start;
-      gap: 12px;
+      gap: 10px;
       overflow-y: auto;
       flex: 1;
-      padding-top: 12px;
-      padding-bottom: 12px;
+      padding-top: 8px;
+      padding-bottom: 10px;
     }
     .pos-product-card {
       border: 1px solid var(--border-subtle);
       border-radius: var(--radius);
-      padding: 12px;
+      padding: 10px 12px;
       cursor: pointer;
-      transition: all 0.15s ease;
+      transition: transform 0.1s ease, border-color 0.12s ease, box-shadow 0.12s ease;
       background: var(--surface-card);
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
       display: flex;
       flex-direction: column;
       justify-content: space-between;
@@ -682,12 +686,12 @@
     }
     @media (min-width: 1366px) {
       .pos-layout {
-        grid-template-columns: 1fr 410px;
+        grid-template-columns: minmax(0, 2.65fr) minmax(275px, 1fr);
       }
     }
     @media (min-width: 1680px) {
       .pos-layout {
-        grid-template-columns: 1fr 440px;
+        grid-template-columns: minmax(0, 2.75fr) minmax(360px, 1fr);
       }
     }
     @media (max-width: 640px) {
@@ -702,6 +706,13 @@
       .btn, .form-input, .form-select {
         min-height: 42px;
       }
+      .pos-product-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+        gap: 8px !important;
+      }
+      .pos-product-card {
+        padding: 9px 10px !important;
+      }
     }
     .pos-product-card:hover {
       border-color: var(--accent-primary);
@@ -710,6 +721,11 @@
     }
     .pos-product-card:active {
       transform: scale(0.98);
+      border-color: var(--accent-primary);
+      background: var(--bg-hover);
+    }
+    .pos-product-card.pos-card-added-flash {
+      transform: scale(0.97);
       border-color: var(--accent-primary);
       background: var(--bg-hover);
     }
@@ -738,9 +754,10 @@
       display: flex;
       flex-direction: column;
       overflow: hidden;
+      min-width: 0;
     }
     .pos-cart-header {
-      padding: 14px 16px;
+      padding: 12px 16px;
       border-bottom: 1px solid var(--border-subtle);
       font-weight: 600;
       display: flex;
@@ -750,41 +767,91 @@
     .pos-cart-items {
       flex: 1;
       overflow-y: auto;
-      padding: 12px 16px;
+      padding: 10px 14px;
     }
     .cart-line {
       display: flex;
-      align-items: center;
-      justify-content: space-between;
+      flex-direction: column;
+      gap: 6px;
       padding: 10px 0;
       border-bottom: 1px dashed var(--border-subtle);
+      width: 100%;
+    }
+    .cart-line-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 10px;
+      width: 100%;
+    }
+    .cart-line-bottom {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      flex-wrap: wrap;
     }
     .cart-line-info {
       flex: 1;
+      min-width: 0;
     }
     .cart-line-name {
-      font-size: 13px;
+      flex: 1;
+      min-width: 0;
+      font-size: 13.5px;
       font-weight: 600;
+      line-height: 1.3;
+      color: var(--text-primary);
+      word-break: normal;
+      overflow-wrap: break-word;
+    }
+    .cart-line-total {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text-primary);
+      white-space: nowrap;
+      flex-shrink: 0;
+      text-align: right;
+    }
+    .cart-line-meta {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      flex: 1;
+      min-width: 110px;
     }
     .cart-line-sub {
-      font-size: 11px;
+      font-size: 11.5px;
       color: var(--text-secondary);
+      line-height: 1.25;
     }
     .cart-line-controls {
-      display: flex;
+      display: inline-flex;
       align-items: center;
-      gap: 6px;
-      margin-left: 12px;
+      gap: 5px;
+      margin-left: auto;
+      flex-shrink: 0;
     }
     .qty-btn {
-      width: 26px;
-      height: 26px;
-      border-radius: 4px;
+      width: 28px;
+      height: 28px;
+      min-height: 28px !important;
+      border-radius: 6px;
       border: 1px solid var(--border-subtle);
       background: var(--bg-primary);
       cursor: pointer;
-      font-weight: bold;
+      font-weight: 700;
+      font-size: 14px;
+      line-height: 1;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
       color: var(--text-primary);
+    }
+    .qty-btn:hover {
+      border-color: var(--accent-primary);
+      background: var(--bg-hover);
     }
     .pos-cart-summary {
       background: var(--bg-primary);
@@ -2024,7 +2091,7 @@
         grid-template-columns: 1fr !important;
       }
       .pos-layout {
-        grid-template-columns: 1fr 340px !important;
+        grid-template-columns: minmax(0, 1.85fr) minmax(300px, 1fr) !important;
       }
     }
 
@@ -7770,7 +7837,7 @@
                     <tbody>
                       ${suppliers.map(s => {
                         const code = escapeHtml(s.code);
-                        const name = escapeHtml(s.name);
+                        const name = escapeHtml(s.businessName || s.name || '—');
                         const contact = escapeHtml(s.contactPerson || '—');
                         const email = escapeHtml(s.email || '');
                         const phone = escapeHtml(s.phone || '—');
@@ -7800,7 +7867,7 @@
               <div class="mobile-cards-container">
                 ${suppliers.map(s => {
                   const code = escapeHtml(s.code);
-                  const name = escapeHtml(s.name);
+                  const name = escapeHtml(s.businessName || s.name || '—');
                   const contact = escapeHtml(s.contactPerson || '—');
                   const email = escapeHtml(s.email || '');
                   const phone = escapeHtml(s.phone || '—');
@@ -7877,9 +7944,15 @@
               <input type="text" class="form-input" id="newSupName" placeholder="Acme Components Inc" required>
             </div>
           </div>
-          <div class="form-group">
-            <label class="form-label">Contact Person</label>
-            <input type="text" class="form-input" id="newSupContact" placeholder="Jane Doe">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <div class="form-group">
+              <label class="form-label">Contact Person</label>
+              <input type="text" class="form-input" id="newSupContact" placeholder="Jane Doe">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Tax Registration No.</label>
+              <input type="text" class="form-input" id="newSupTaxReg" placeholder="VAT / TIN (Optional)">
+            </div>
           </div>
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
             <div class="form-group">
@@ -7891,40 +7964,66 @@
               <input type="text" class="form-input" id="newSupPhone" placeholder="+1-555-0199">
             </div>
           </div>
+          <div class="form-group">
+            <label class="form-label">Address</label>
+            <input type="text" class="form-input" id="newSupAddress" placeholder="Business address (Optional)">
+          </div>
+          <div class="form-group" style="margin-bottom:0;">
+            <label class="form-label">Notes</label>
+            <input type="text" class="form-input" id="newSupNotes" placeholder="Payment terms or delivery notes (Optional)">
+          </div>
         `,
         footerHtml: `
           <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-          <button class="btn btn-primary" onclick="submitCreateSupplier()">Create Supplier</button>
+          <button id="btnSubmitCreateSupplier" class="btn btn-primary" onclick="submitCreateSupplier()">Create Supplier</button>
         `
       });
     }
 
     async function submitCreateSupplier() {
-      const code = document.getElementById('newSupCode').value.trim();
-      const name = document.getElementById('newSupName').value.trim();
-      const contactPerson = document.getElementById('newSupContact').value.trim() || null;
-      const email = document.getElementById('newSupEmail').value.trim() || null;
-      const phone = document.getElementById('newSupPhone').value.trim() || null;
+      const code = document.getElementById('newSupCode')?.value.trim() || '';
+      const businessName = document.getElementById('newSupName')?.value.trim() || '';
+      const contactPerson = document.getElementById('newSupContact')?.value.trim() || null;
+      const email = document.getElementById('newSupEmail')?.value.trim() || null;
+      const phone = document.getElementById('newSupPhone')?.value.trim() || null;
+      const address = document.getElementById('newSupAddress')?.value.trim() || null;
+      const taxRegistrationNumber = document.getElementById('newSupTaxReg')?.value.trim() || null;
+      const notes = document.getElementById('newSupNotes')?.value.trim() || null;
 
-      if (!code || !name) return showToast('Code and Name are required', 'error');
+      if (!code || !businessName) return showToast('Code and Vendor Name are required', 'error');
+
+      const submitBtn = document.getElementById('btnSubmitCreateSupplier');
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Creating...';
+      }
 
       try {
-        await apiFetch('/v1/suppliers', {
+        const created = await apiFetch('/v1/suppliers', {
           method: 'POST',
           body: JSON.stringify({
             code,
-            name,
+            businessName,
             contactPerson,
             email,
             phone,
-            countryCode: state.countryCode || 'US',
-            currencyCode: getTenantCurrency()
+            address,
+            taxRegistrationNumber,
+            notes
           })
         });
+        if (created && created.id) {
+          state.cachedSuppliers = [...(state.cachedSuppliers || []), created];
+        }
         showToast(`Supplier ${code} created`, 'success');
         closeModal();
-        renderSuppliersView();
-      } catch (err) {}
+        await renderSuppliersView();
+      } catch (err) {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Create Supplier';
+        }
+      }
     }
 
     function openEditSupplierModal(supplierId) {
@@ -7935,9 +8034,10 @@
       }
 
       const isActive = s.isActive ?? (s.status === 'ACTIVE');
+      const supName = s.businessName || s.name || '';
 
       openModal({
-        title: `Edit Supplier: ${escapeHtml(s.name)}`,
+        title: `Edit Supplier: ${escapeHtml(supName)}`,
         bodyHtml: `
           <div class="form-group">
             <label class="form-label">Supplier Code</label>
@@ -7945,7 +8045,7 @@
           </div>
           <div class="form-group">
             <label class="form-label">Vendor Name *</label>
-            <input type="text" class="form-input" id="editSupName" value="${escapeHtml(s.name)}" required>
+            <input type="text" class="form-input" id="editSupName" value="${escapeHtml(supName)}" required>
           </div>
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
             <div class="form-group">
@@ -7963,9 +8063,23 @@
               <input type="text" class="form-input" id="editSupPhone" value="${escapeHtml(s.phone || '')}">
             </div>
             <div class="form-group">
+              <label class="form-label">Tax Registration No.</label>
+              <input type="text" class="form-input" id="editSupTaxReg" value="${escapeHtml(s.taxRegistrationNumber || '')}">
+            </div>
+          </div>
+          <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 12px;">
+            <div class="form-group">
+              <label class="form-label">Address</label>
+              <input type="text" class="form-input" id="editSupAddress" value="${escapeHtml(s.address || '')}">
+            </div>
+            <div class="form-group">
               <label class="form-label">Lead Time (Days)</label>
               <input type="number" min="0" class="form-input" id="editSupLeadDays" value="${s.leadTimeDays ?? ''}">
             </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Notes</label>
+            <input type="text" class="form-input" id="editSupNotes" value="${escapeHtml(s.notes || '')}">
           </div>
           <div class="form-group">
             <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
@@ -7981,15 +8095,18 @@
     }
 
     async function submitEditSupplier(supplierId) {
-      const name = document.getElementById('editSupName').value.trim();
-      const contactPerson = document.getElementById('editSupContact').value.trim() || null;
-      const email = document.getElementById('editSupEmail').value.trim() || null;
-      const phone = document.getElementById('editSupPhone').value.trim() || null;
-      const leadTimeDaysVal = document.getElementById('editSupLeadDays').value;
+      const businessName = document.getElementById('editSupName')?.value.trim() || '';
+      const contactPerson = document.getElementById('editSupContact')?.value.trim() || null;
+      const email = document.getElementById('editSupEmail')?.value.trim() || null;
+      const phone = document.getElementById('editSupPhone')?.value.trim() || null;
+      const taxRegistrationNumber = document.getElementById('editSupTaxReg')?.value.trim() || null;
+      const address = document.getElementById('editSupAddress')?.value.trim() || null;
+      const notes = document.getElementById('editSupNotes')?.value.trim() || null;
+      const leadTimeDaysVal = document.getElementById('editSupLeadDays')?.value;
       const leadTimeDays = leadTimeDaysVal ? parseInt(leadTimeDaysVal, 10) : undefined;
-      const isActive = document.getElementById('editSupIsActive').checked;
+      const isActive = Boolean(document.getElementById('editSupIsActive')?.checked);
 
-      if (!name) return showToast('Vendor Name is required', 'error');
+      if (!businessName) return showToast('Vendor Name is required', 'error');
 
       const submitBtn = document.getElementById('btnSubmitEditSupplier');
       if (submitBtn) {
@@ -7998,21 +8115,28 @@
       }
 
       try {
-        await apiFetch(`/v1/suppliers/${supplierId}`, {
+        const updated = await apiFetch(`/v1/suppliers/${supplierId}`, {
           method: 'PATCH',
           body: JSON.stringify({
-            name,
+            businessName,
             contactPerson,
             email,
             phone,
-            ...(leadTimeDays !== undefined ? { leadTimeDays } : {}),
+            address,
+            taxRegistrationNumber,
+            notes,
+            ...(leadTimeDays !== undefined && Number.isFinite(leadTimeDays) ? { leadTimeDays } : {}),
+            status: isActive ? 'ACTIVE' : 'ARCHIVED',
             isActive
           })
         });
+        if (updated && updated.id && Array.isArray(state.cachedSuppliers)) {
+          state.cachedSuppliers = state.cachedSuppliers.map(x => x.id === updated.id ? updated : x);
+        }
 
-        showToast(`Supplier "${name}" updated successfully`, 'success');
+        showToast(`Supplier "${businessName}" updated successfully`, 'success');
         closeModal();
-        renderSuppliersView();
+        await renderSuppliersView();
       } catch (err) {
         if (submitBtn) {
           submitBtn.disabled = false;
@@ -9913,11 +10037,18 @@
             ? Promise.resolve(state.posCachedCategories)
             : apiFetch('/v1/categories', { silent: true }).catch(() => ({ data: [] }));
 
-        const [regRes, shiftRes, productsRes, catRes] = await Promise.all([
+        const batchesPromise = canReuseBranchCatalog && state.posBatchesByProductId instanceof Map
+          ? Promise.resolve(null)
+          : (state.warehouseId
+              ? apiFetch(`/v1/inventory/batches?warehouseId=${encodeURIComponent(state.warehouseId)}&status=ACTIVE&limit=100`, { silent: true }).catch(() => ({ data: [] }))
+              : Promise.resolve({ data: [] }));
+
+        const [regRes, shiftRes, productsRes, catRes, batchesRes] = await Promise.all([
           regPromise,
           shiftPromise,
           productsPromise,
-          categoriesPromise
+          categoriesPromise,
+          batchesPromise
         ]);
 
         // Race-condition guard (BUG-089): ignore stale async completion if user switched registers or views meanwhile
@@ -9960,6 +10091,7 @@
         state.posCachedProducts = products;
         state.posCatalogWarehouseId = state.warehouseId;
         state.posCachedCategories = categories;
+        state.posSearchFilter = '';
         state.posProductsMap = new Map();
         for (const p of products) {
           if (p.id) state.posProductsMap.set(p.id, p);
@@ -9967,9 +10099,52 @@
           if (p.primaryBarcode) state.posProductsMap.set(p.primaryBarcode.toLowerCase(), p);
           if (Array.isArray(p.barcodes)) {
             for (const b of p.barcodes) {
-              if (b.barcode) state.posProductsMap.set(b.barcode.toLowerCase(), p);
+              const bcStr = typeof b === 'string' ? b : b?.barcode;
+              if (bcStr) state.posProductsMap.set(String(bcStr).toLowerCase(), p);
             }
           }
+        }
+
+        if (batchesRes !== null) {
+          const rawBatches = Array.isArray(batchesRes) ? batchesRes : (batchesRes?.data || []);
+          const todayIso = new Date().toISOString().slice(0, 10);
+          const byProd = new Map();
+          for (const b of rawBatches) {
+            if (!b || b.status !== 'ACTIVE' || b.expiryStatus === 'EXPIRED') continue;
+            if (b.expiryDate && String(b.expiryDate).slice(0, 10) < todayIso) continue;
+            const cur = parseFloat(b.currentQuantity || '0') || 0;
+            const res = parseFloat(b.reservedQuantity || '0') || 0;
+            const avail = Math.max(0, cur - res);
+            if (avail <= 1e-9) continue;
+            const list = byProd.get(b.productId) || [];
+            list.push({
+              batchId: b.id,
+              batchNumber: b.batchNumber,
+              internalBarcode: b.internalBarcode || null,
+              expiryDate: b.expiryDate ? String(b.expiryDate).slice(0, 10) : null,
+              receivedDate: b.receivedDate ? String(b.receivedDate).slice(0, 10) : '',
+              availableQty: String(avail),
+              sellingPrice: b.sellingPrice,
+              priceSource: b.sellingPrice != null ? 'BATCH_EXPLICIT' : 'PRODUCT_FALLBACK'
+            });
+            byProd.set(b.productId, list);
+          }
+          for (const [prodId, list] of byProd.entries()) {
+            const prod = state.posProductsMap.get(prodId);
+            const policy = prod?.allocationPolicy || state.pricingSettings?.defaultBatchAllocationPolicy || 'FEFO';
+            list.sort((a, b) => {
+              if (policy === 'FIFO') {
+                return String(a.receivedDate || '').localeCompare(String(b.receivedDate || ''));
+              }
+              const ea = a.expiryDate || '9999-12-31';
+              const eb = b.expiryDate || '9999-12-31';
+              if (ea !== eb) return ea.localeCompare(eb);
+              return String(a.receivedDate || '').localeCompare(String(b.receivedDate || ''));
+            });
+          }
+          state.posBatchesByProductId = byProd;
+        } else if (!(state.posBatchesByProductId instanceof Map)) {
+          state.posBatchesByProductId = new Map();
         }
 
         const selectedCatId = state.posSelectedCategoryId || null;
@@ -10038,7 +10213,7 @@
 
               <!-- Category Quick-Selection Pills (F1) -->
               ${categories.length > 0 ? `
-                <div class="pos-category-pills" id="posCategoryPillsContainer" style="display: flex; gap: 8px; flex-wrap: wrap; padding: 2px 0 12px 0; margin-bottom: 8px;">
+                <div class="pos-category-pills" id="posCategoryPillsContainer" style="display: flex; gap: 6px; flex-wrap: nowrap; overflow-x: auto; padding: 2px 0 8px 0; margin-bottom: 8px; scrollbar-width: thin; -webkit-overflow-scrolling: touch; flex-shrink: 0;">
                   <button class="btn btn-sm pos-cat-pill ${!selectedCatId ? 'active' : ''}" data-cat-id="" data-active-bg="var(--accent-primary)" onclick="filterPosCategory(null)" style="border-radius: 20px; font-weight: 600; white-space: nowrap; ${!selectedCatId ? 'background: var(--accent-primary); color: #fff; border: 1px solid var(--accent-primary);' : 'background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-subtle);'}">
                     All Items (${products.length})
                   </button>
@@ -10117,16 +10292,22 @@
         // Render product sections immediately
         renderPosProductSections();
 
-        // Barcode Scanner Listener
+        // Barcode Scanner & Live Instant Catalog Search Listener
         const scannerInput = document.getElementById('posBarcodeScannerInput');
         if (scannerInput) {
+          scannerInput.addEventListener('input', () => {
+            state.posSearchFilter = scannerInput.value.trim();
+            renderPosProductSections();
+          });
           scannerInput.addEventListener('keydown', async (e) => {
             if (e.key === 'Enter') {
               e.preventDefault();
               const query = scannerInput.value.trim();
               if (query) {
-                await executeBarcodeScan(query);
                 scannerInput.value = '';
+                state.posSearchFilter = '';
+                renderPosProductSections();
+                await executeBarcodeScan(query);
               }
             }
           });
@@ -10136,22 +10317,129 @@
       }
     }
 
-    async function handlePosProductCardClick(productId) {
+    function addNextFefoBatchLineSync(product, candidates, scannedBarcode = null, requestedQty = 1, uomCode = null) {
+      if (!Array.isArray(candidates) || candidates.length === 0) return null;
+      const baseUom = uomCode || product.baseUom || 'PCS';
+      let remainingNeed = requestedQty;
+      let firstAddedBatch = null;
+
+      for (const b of candidates) {
+        if (remainingNeed <= 1e-9) break;
+        const batchAvail = parseFloat(b.availableQty ?? b.availableQuantity ?? b.currentQuantity ?? '0') || 0;
+        const inCartForBatch = getTotalCartBaseQtyForBatch(b.batchId);
+        const freeInBatch = Math.max(0, batchAvail - inCartForBatch);
+        if (freeInBatch <= 1e-9) continue;
+
+        const take = Math.min(remainingNeed, freeInBatch);
+        const fallbackProdPrice = product.retailPrice || product.sellingPrice;
+        const unitPrice = b.sellingPrice != null ? b.sellingPrice : fallbackProdPrice;
+        if (unitPrice == null || unitPrice === '') {
+          openPosBatchOverridePriceModal({ product, exactBatch: b, fefoPreview: candidates, isExactBatchLocked: false }, scannedBarcode || product.sku);
+          return firstAddedBatch || { promptedOverride: true };
+        }
+
+        addToCart(
+          product.id,
+          product.sku,
+          product.name,
+          unitPrice,
+          baseUom,
+          product.trackInventory !== false,
+          batchAvail,
+          {
+            qty: take,
+            batchId: b.batchId,
+            batchNumber: b.batchNumber,
+            internalBarcode: b.internalBarcode || null,
+            expiryDate: b.expiryDate || null,
+            isExactBatchLocked: false,
+            scannedBarcode,
+            priceSource: b.priceSource || (b.sellingPrice != null ? 'BATCH_EXPLICIT' : 'PRODUCT_FALLBACK'),
+            fefoPreview: candidates,
+            entrySource: scannedBarcode ? 'BARCODE_SCAN' : 'MANUAL'
+          }
+        );
+        if (!firstAddedBatch) firstAddedBatch = b;
+        remainingNeed -= take;
+      }
+      return firstAddedBatch;
+    }
+
+    const posBgVerifyInFlight = new Set();
+    function verifyPosBatchStockInBackground(product, allocatedBatchId) {
+      if (!product?.id || !state.warehouseId || posBgVerifyInFlight.has(product.id)) return;
+      posBgVerifyInFlight.add(product.id);
+      const lookupCode = product.primaryBarcode || product.sku;
+      if (!lookupCode) {
+        posBgVerifyInFlight.delete(product.id);
+        return;
+      }
+      apiFetch('/v1/barcodes/resolve', {
+        method: 'POST',
+        silent: true,
+        body: JSON.stringify({
+          rawBarcode: lookupCode,
+          branchId: state.branchId || undefined,
+          warehouseId: state.warehouseId
+        })
+      }).then((resolved) => {
+        if (!resolved || !resolved.product) return;
+        if (Array.isArray(resolved.fefoPreview) && resolved.fefoPreview.length > 0 && state.posBatchesByProductId instanceof Map) {
+          state.posBatchesByProductId.set(product.id, resolved.fefoPreview);
+        }
+        if (resolved.blockedReason && allocatedBatchId) {
+          const idx = state.cart.findIndex(c => c.productId === product.id && c.batchId === allocatedBatchId);
+          if (idx >= 0) {
+            state.cart.splice(idx, 1);
+            renderPosCartPanel();
+            showToast(`Removed ${product.name}: batch unavailable (${resolved.blockedReason})`, 'error');
+          }
+        }
+      }).catch(() => {}).finally(() => {
+        posBgVerifyInFlight.delete(product.id);
+      });
+    }
+
+    async function handlePosProductCardClick(productId, cardEl = null) {
       const p = (state.posCachedProducts || []).find(x => x.id === productId);
       if (!p) return;
+
+      if (cardEl && cardEl.classList) {
+        cardEl.classList.add('pos-card-added-flash');
+        setTimeout(() => cardEl.classList.remove('pos-card-added-flash'), 160);
+      }
+
       if (p.productQtyMode === 'VARIABLE') {
         openVariableQtyPosModal(p.id, null, p.featuredPos ? 'QUICK_PICK' : 'MANUAL_WEIGHT');
         return;
       }
-      if (p.trackingMode === 'BATCH' || p.primaryBarcode) {
+
+      // Instant fast-path (<5ms) for Batch-Tracked products using pre-warmed active warehouse batches
+      if (p.trackingMode === 'BATCH' || p.trackingMode === 'BATCH_EXPIRY') {
+        const cachedBatches = state.posBatchesByProductId instanceof Map
+          ? state.posBatchesByProductId.get(p.id)
+          : null;
+        if (Array.isArray(cachedBatches) && cachedBatches.length > 0) {
+          const addedBatch = addNextFefoBatchLineSync(p, cachedBatches, null, 1, p.baseUom || 'PCS');
+          if (addedBatch) {
+            if (!addedBatch.promptedOverride) {
+              playScanChime(true);
+              verifyPosBatchStockInBackground(p, addedBatch.batchId);
+            }
+            return;
+          }
+        }
+        // Fallback when pre-warmed batch cache is empty or exhausted for this product
         const lookupCode = p.primaryBarcode || p.sku;
         if (lookupCode) {
           await executeBarcodeScan(lookupCode, { fromTileProduct: p });
           return;
         }
       }
+
+      // Instant synchronous cart add (<5ms) for standard / serial products — zero network round-trip!
       const price = p.retailPrice || p.sellingPrice || '0.0000';
-      addToCart(p.id, p.sku, p.name, price, p.baseUom || 'PCS', Boolean(p.trackInventory), p.availableQuantity);
+      addToCart(p.id, p.sku, p.name, price, p.baseUom || 'PCS', p.trackInventory !== false, p.availableQuantity);
     }
 
     function renderPosProductCardsHtml(productList) {
@@ -10167,7 +10455,7 @@
         const priceUom = escapeHtml(p.priceUom || p.baseUom || 'PCS');
         const isVar = p.productQtyMode === 'VARIABLE';
         return `
-          <div class="pos-product-card" role="button" tabindex="0" onclick="handlePosProductCardClick('${p.id}')">
+          <div class="pos-product-card" role="button" tabindex="0" onclick="handlePosProductCardClick('${p.id}', this)">
             <div style="display: flex; gap: 10px; align-items: flex-start; min-width: 0;">
               ${imgUrl ? `
                 <img src="${imgUrl}" alt="${escapeHtml(p.name)}" style="width: 44px; height: 44px; border-radius: 8px; object-fit: cover; border: 1px solid var(--border-subtle); flex-shrink: 0; background: var(--bg-hover);" onerror="this.style.display='none'" />
@@ -10212,14 +10500,33 @@
         return;
       }
 
-      const products = state.posCachedProducts || [];
+      const allProducts = state.posCachedProducts || [];
+      const searchQ = (state.posSearchFilter || '').trim().toLowerCase();
+      const products = searchQ
+        ? allProducts.filter(p => {
+            if (p.name && p.name.toLowerCase().includes(searchQ)) return true;
+            if (p.sku && p.sku.toLowerCase().includes(searchQ)) return true;
+            if (p.primaryBarcode && String(p.primaryBarcode).toLowerCase().includes(searchQ)) return true;
+            if (Array.isArray(p.barcodes) && p.barcodes.some(b => String(typeof b === 'string' ? b : b?.barcode || '').toLowerCase().includes(searchQ))) return true;
+            return false;
+          })
+        : allProducts;
       const categories = state.posCachedCategories || [];
       const selectedCatId = state.posSelectedCategoryId || null;
 
-      if (products.length === 0) {
+      if (allProducts.length === 0) {
         container.innerHTML = `
           <div class="card" style="text-align: center; padding: 40px 16px; color: var(--text-secondary);">
             No active products found in this branch catalog. Add products in the Inventory menu to begin sales.
+          </div>
+        `;
+        return;
+      }
+
+      if (products.length === 0 && searchQ) {
+        container.innerHTML = `
+          <div class="card" style="text-align: center; padding: 32px 16px; color: var(--text-secondary);">
+            No products match "<strong>${escapeHtml(state.posSearchFilter)}</strong>". Press Enter to scan/lookup barcode on server.
           </div>
         `;
         return;
@@ -10588,9 +10895,18 @@
             return;
           }
 
-          const fallbackPrice = resolved.effectiveUnitPrice ?? p.sellingPrice ?? scanOpts.fromTileProduct?.retailPrice ?? '0.0000';
+          const cachedProd = (state.posCachedProducts || []).find(
+            x => x.id === p.id || (x.sku && p.sku && x.sku.toLowerCase() === p.sku.toLowerCase())
+          );
+          const resolvedAvail =
+            resolved.availableQuantityTotal ??
+            p.availableQuantity ??
+            scanOpts.fromTileProduct?.availableQuantity ??
+            cachedProd?.availableQuantity ??
+            0;
+          const fallbackPrice = resolved.effectiveUnitPrice ?? p.sellingPrice ?? scanOpts.fromTileProduct?.retailPrice ?? cachedProd?.retailPrice ?? '0.0000';
           playScanChime(true);
-          addToCart(p.id, p.sku, p.name, fallbackPrice, p.baseUom || 'PCS', p.trackInventory !== false, resolved.availableQuantityTotal ?? scanOpts.fromTileProduct?.availableQuantity ?? 0, {
+          addToCart(p.id, p.sku, p.name, fallbackPrice, p.baseUom || 'PCS', p.trackInventory !== false, resolvedAvail, {
             scannedBarcode: scanOpts.fromTileProduct ? null : cleanCode,
             entrySource: scanOpts.fromTileProduct ? 'MANUAL' : 'BARCODE_SCAN'
           });
@@ -10912,7 +11228,9 @@
       if (!code) return '<div style="color:var(--text-secondary); font-size:12px;">(No barcode)</div>';
       const height = options.height || 54;
       const barWidth = options.barWidth || 2;
-      const quietZone = 14;
+      const quietZone = options.quietZone !== undefined ? options.quietZone : 10;
+      const fontSize = options.fontSize || 11;
+      const textPadding = options.textPadding !== undefined ? options.textPadding : Math.max(12, fontSize + 4);
 
       let check = 104; // Code 128 Set B Start
       const indices = [104];
@@ -10938,7 +11256,7 @@
       }
 
       const totalWidth = bits.length * barWidth + (quietZone * 2);
-      const totalHeight = height + 20;
+      const totalHeight = height + textPadding;
 
       let rects = '';
       for (let i = 0; i < bits.length; i++) {
@@ -10949,15 +11267,59 @@
       }
 
       const textX = totalWidth / 2;
-      const textY = height + 15;
-      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${totalWidth} ${totalHeight}" width="${totalWidth}" height="${totalHeight}" style="background:#FFFFFF; max-width:100%; height:auto;">${rects}<text x="${textX}" y="${textY}" text-anchor="middle" font-family="monospace" font-size="12" font-weight="bold" fill="#000000">${escapeHtml(code)}</text></svg>`;
+      const textY = height + fontSize;
+      const svgStyle = options.svgStyle || 'background:#FFFFFF; max-width:100%; height:auto; display:block; margin:0 auto;';
+      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${totalWidth} ${totalHeight}" preserveAspectRatio="xMidYMid meet" width="${totalWidth}" height="${totalHeight}" style="${svgStyle}">${rects}<text x="${textX}" y="${textY}" text-anchor="middle" font-family="monospace" font-size="${fontSize}" font-weight="bold" fill="#000000">${escapeHtml(code)}</text></svg>`;
     }
 
     // In-flight operation guards for barcode mutations (BUG-024)
     const activeBarcodeOps = new Set();
 
-    // Isolated Print Engine for Labels & Receipts (BUG-022 & BUG-028)
-    function printHtmlDocument(printableHtml, pageStyles = '') {
+    // Isolated Print Engine for Labels & Receipts (BUG-022, BUG-028, BUG-097)
+    function printHtmlDocument(printableHtml, pageStyles = '', pageDims = null) {
+      let dynamicStyle = document.getElementById('nexstockDynamicPrintStyle');
+      if (!dynamicStyle) {
+        dynamicStyle = document.createElement('style');
+        dynamicStyle.id = 'nexstockDynamicPrintStyle';
+        document.head.appendChild(dynamicStyle);
+      }
+      const atPageMatches = pageStyles.match(/@page\s*\{[^}]*\}/g);
+      const atPageRules = atPageMatches ? atPageMatches.join('\n') : '';
+      const scopedPrintRules = pageStyles.replace(/@page\s*\{[^}]*\}/g, '');
+      dynamicStyle.textContent = `
+        ${atPageRules}
+        @media screen {
+          #nexstockPrintMount { display: none !important; }
+        }
+        @media print {
+          html, body {
+            margin: 0 !important;
+            padding: 0 !important;
+            background: #ffffff !important;
+            color: #000000 !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+          body > *:not(#nexstockPrintMount):not(#nexstockPrintFrame) {
+            display: none !important;
+          }
+          #nexstockPrintMount {
+            display: block !important;
+            margin: 0 !important;
+            padding: 0 !important;
+          }
+          ${scopedPrintRules}
+        }
+      `;
+
+      let printMount = document.getElementById('nexstockPrintMount');
+      if (!printMount) {
+        printMount = document.createElement('div');
+        printMount.id = 'nexstockPrintMount';
+        document.body.appendChild(printMount);
+      }
+      printMount.innerHTML = printableHtml;
+
       let printFrame = document.getElementById('nexstockPrintFrame');
       if (printFrame) {
         printFrame.remove();
@@ -10965,29 +11327,51 @@
       printFrame = document.createElement('iframe');
       printFrame.id = 'nexstockPrintFrame';
       printFrame.style.position = 'fixed';
-      printFrame.style.right = '0';
-      printFrame.style.bottom = '0';
-      printFrame.style.width = '0';
-      printFrame.style.height = '0';
+      printFrame.style.left = '-9999px';
+      printFrame.style.top = '0';
+      printFrame.style.width = pageDims?.w || '210mm';
+      printFrame.style.height = pageDims?.h && pageDims.h !== 'auto' ? pageDims.h : '297mm';
+      printFrame.style.opacity = '0';
+      printFrame.style.pointerEvents = 'none';
       printFrame.style.border = '0';
+      printFrame.style.zIndex = '-1';
       document.body.appendChild(printFrame);
 
       const doc = printFrame.contentWindow.document;
       doc.open();
-      doc.write(`<!DOCTYPE html><html><head><meta charset="utf-8" /><title>NexStock Print</title><style>* { box-sizing: border-box; margin: 0; padding: 0; } body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: #000; background: #fff; } ${pageStyles}</style></head><body>${printableHtml}</body></html>`);
+      doc.write(`<!DOCTYPE html><html><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>NexStock Print</title><style>* { box-sizing: border-box; margin: 0; padding: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; } html, body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: #000; background: #fff; } ${pageStyles}</style></head><body>${printableHtml}</body></html>`);
       doc.close();
 
+      const isAndroidMobile = /Android/i.test(navigator.userAgent || '');
       setTimeout(() => {
         try {
-          printFrame.contentWindow.focus();
-          printFrame.contentWindow.print();
+          if (isAndroidMobile) {
+            window.focus();
+            window.print();
+          } else {
+            printFrame.contentWindow.focus();
+            printFrame.contentWindow.print();
+          }
         } catch (e) {
           window.print();
         }
-      }, 300);
+      }, 200);
     }
 
-    // Barcode Labels Printing (BUG-022)
+    function getLabelFormatSpec(format) {
+      const specs = {
+        THERMAL_40X30: { w: '40mm', h: '30mm', pad: '0.8mm 1.2mm', headerPt: '6pt', prodPt: '7pt', metaPt: '5.8pt', pricePt: '8pt', svgH: '11.5mm', svgMaxW: '37.4mm', bcHeight: 22, bcBarW: 1.15, bcFont: 8, logoH: '9px' },
+        THERMAL_40X28: { w: '40mm', h: '28mm', pad: '0.7mm 1.1mm', headerPt: '5.8pt', prodPt: '6.8pt', metaPt: '5.5pt', pricePt: '7.8pt', svgH: '10.5mm', svgMaxW: '37.4mm', bcHeight: 20, bcBarW: 1.15, bcFont: 8, logoH: '8px' },
+        THERMAL_50X30: { w: '50mm', h: '30mm', pad: '1mm 1.5mm', headerPt: '6.5pt', prodPt: '7.5pt', metaPt: '6pt', pricePt: '8.5pt', svgH: '12mm', svgMaxW: '46.8mm', bcHeight: 24, bcBarW: 1.25, bcFont: 9, logoH: '10px' },
+        THERMAL_50X40: { w: '50mm', h: '40mm', pad: '1.4mm 1.8mm', headerPt: '7pt', prodPt: '8.5pt', metaPt: '6.8pt', pricePt: '9.5pt', svgH: '16.5mm', svgMaxW: '46.2mm', bcHeight: 32, bcBarW: 1.35, bcFont: 9, logoH: '12px' },
+        THERMAL_58:    { w: '58mm', h: '38mm', pad: '1.4mm 2mm', headerPt: '7pt', prodPt: '8.5pt', metaPt: '6.8pt', pricePt: '9.5pt', svgH: '15.5mm', svgMaxW: '53.8mm', bcHeight: 30, bcBarW: 1.4, bcFont: 9, logoH: '12px' },
+        THERMAL_80:    { w: '80mm', h: '45mm', pad: '1.8mm 2.5mm', headerPt: '8pt', prodPt: '9.5pt', metaPt: '7.5pt', pricePt: '10.5pt', svgH: '18.5mm', svgMaxW: '74.5mm', bcHeight: 36, bcBarW: 1.55, bcFont: 10, logoH: '14px' },
+        A4_SHEET:      { w: '63.5mm', h: '38.1mm', pad: '1.4mm 2mm', headerPt: '6.8pt', prodPt: '8pt', metaPt: '6.2pt', pricePt: '9pt', svgH: '15mm', svgMaxW: '59mm', bcHeight: 28, bcBarW: 1.3, bcFont: 9, logoH: '11px', isA4Grid: true }
+      };
+      return specs[format] || specs.THERMAL_50X30;
+    }
+
+    // Barcode Labels Printing (BUG-022 & BUG-097)
     function printBarcodeLabels(productId) {
       const p = (state.cachedProducts || []).find(x => x.id === productId);
       if (!p) return;
@@ -11000,13 +11384,20 @@
       const formatSelect = document.getElementById('labelPrintFormat');
       const qtySelect = document.getElementById('labelPrintQty');
       const format = formatSelect ? formatSelect.value : 'THERMAL_50X30';
-      const qty = qtySelect ? parseInt(qtySelect.value, 10) || 1 : 1;
+      const qty = Math.max(1, Math.min(500, qtySelect ? parseInt(qtySelect.value, 10) || 1 : 1));
+      const spec = getLabelFormatSpec(format);
 
       const priceFormatted = formatTenantMoney(p.sellingPrice);
-      const svg = renderBarcodeSvg(primaryBarcode, 'CODE128', { height: 44, barWidth: 1.6 });
+      const svg = renderBarcodeSvg(primaryBarcode, 'CODE128', {
+        height: spec.bcHeight,
+        barWidth: spec.bcBarW,
+        fontSize: spec.bcFont,
+        quietZone: 8,
+        svgStyle: `width:100%; max-width:${spec.svgMaxW}; height:${spec.svgH}; max-height:${spec.svgH}; display:block; margin:0 auto;`
+      });
 
       const singleLabelCard = `
-        <div class="print-label-item">
+        <div class="print-label-item batch-print-item">
           <div class="print-sku">${escapeHtml(p.sku)} &bull; ${escapeHtml(p.baseUom || 'PCS')}</div>
           <div class="print-name">${escapeHtml(p.name)}</div>
           <div class="print-barcode">${svg}</div>
@@ -11017,40 +11408,33 @@
       let printableHtml = '';
       let pageStyles = '';
 
-      if (format.startsWith('THERMAL')) {
-        let width = '50mm';
-        let height = '30mm';
-        if (format === 'THERMAL_40X28') { width = '40mm'; height = '28mm'; }
-        if (format === 'THERMAL_58') { width = '58mm'; height = 'auto'; }
-        if (format === 'THERMAL_80') { width = '80mm'; height = 'auto'; }
-
+      if (!spec.isA4Grid) {
         pageStyles = `
-          @page { size: ${width} ${height}; margin: 0; }
-          body { width: ${width}; margin: 0; padding: 2mm; display: flex; flex-direction: column; align-items: center; justify-content: center; }
-          .print-label-item { width: 100%; text-align: center; page-break-after: always; padding: 1mm; }
-          .print-label-item:last-child { page-break-after: avoid; }
-          .print-sku { font-size: 9px; font-weight: 600; text-transform: uppercase; }
-          .print-name { font-size: 10px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 2px; }
-          .print-barcode svg { width: 92%; max-height: 40px; margin: 0 auto; display: block; }
-          .print-price { font-size: 11px; font-weight: 800; margin-top: 1px; }
+          @page { size: ${spec.w} ${spec.h}; margin: 0mm; }
+          html, body { width: ${spec.w}; margin: 0; padding: 0; }
+          .print-label-item { width: ${spec.w}; height: ${spec.h}; max-height: ${spec.h}; padding: ${spec.pad}; box-sizing: border-box; overflow: hidden; display: flex; flex-direction: column; justify-content: space-between; align-items: center; text-align: center; page-break-inside: avoid; break-inside: avoid; page-break-after: avoid; break-after: avoid; }
+          .print-label-item:not(:last-child) { page-break-after: always; break-after: page; }
+          .print-sku { font-size: ${spec.metaPt}; font-weight: 700; text-transform: uppercase; line-height: 1.05; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+          .print-name { font-size: ${spec.prodPt}; font-weight: 700; line-height: 1.1; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+          .print-barcode { width: 100%; display: flex; justify-content: center; align-items: center; overflow: hidden; }
+          .print-price { font-size: ${spec.pricePt}; font-weight: 800; line-height: 1.05; white-space: nowrap; }
         `;
         printableHtml = Array.from({ length: qty }, () => singleLabelCard).join('');
+        printHtmlDocument(printableHtml, pageStyles, { w: spec.w, h: spec.h });
       } else {
-        // A4 Sheet Grid
         pageStyles = `
-          @page { size: A4 portrait; margin: 10mm; }
-          body { margin: 0; padding: 0; }
-          .print-sheet-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4mm; page-break-inside: avoid; }
-          .print-label-item { border: 1px dashed #ccc; border-radius: 4px; padding: 3mm; text-align: center; page-break-inside: avoid; }
-          .print-sku { font-size: 9px; font-weight: 600; text-transform: uppercase; }
-          .print-name { font-size: 11px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 2px; }
-          .print-barcode svg { width: 92%; max-height: 44px; margin: 0 auto; display: block; }
-          .print-price { font-size: 12px; font-weight: 800; margin-top: 2px; }
+          @page { size: A4 portrait; margin: 8mm 7mm; }
+          html, body { width: 210mm; margin: 0; padding: 0; }
+          .print-sheet-grid { display: grid; grid-template-columns: repeat(3, ${spec.w}); grid-auto-rows: ${spec.h}; gap: 0mm 2.5mm; justify-content: center; }
+          .print-label-item { width: ${spec.w}; height: ${spec.h}; max-height: ${spec.h}; border: 0.5px dashed #bbb; padding: ${spec.pad}; box-sizing: border-box; overflow: hidden; display: flex; flex-direction: column; justify-content: space-between; align-items: center; text-align: center; page-break-inside: avoid; break-inside: avoid; }
+          .print-sku { font-size: ${spec.metaPt}; font-weight: 700; text-transform: uppercase; line-height: 1.05; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+          .print-name { font-size: ${spec.prodPt}; font-weight: 700; line-height: 1.1; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+          .print-barcode { width: 100%; display: flex; justify-content: center; align-items: center; overflow: hidden; }
+          .print-price { font-size: ${spec.pricePt}; font-weight: 800; line-height: 1.05; white-space: nowrap; }
         `;
         printableHtml = `<div class="print-sheet-grid">${Array.from({ length: qty }, () => singleLabelCard).join('')}</div>`;
+        printHtmlDocument(printableHtml, pageStyles, { w: '210mm', h: '297mm' });
       }
-
-      printHtmlDocument(printableHtml, pageStyles);
     }
 
     // Barcode Label Preview & Management Modal (BUG-022, BUG-023, BUG-024, BUG-026)
@@ -11097,11 +11481,12 @@
                 <div>
                   <label class="form-label" style="font-size: 11px; margin-bottom: 2px;">Printer Layout</label>
                   <select class="form-select" id="labelPrintFormat" style="font-size: 12px; padding: 5px;">
-                    <option value="THERMAL_50X30" selected>Thermal (50x30mm)</option>
-                    <option value="THERMAL_40X28">Thermal (40x28mm)</option>
-                    <option value="THERMAL_58">Thermal (58mm)</option>
-                    <option value="THERMAL_80">Thermal (80mm)</option>
-                    <option value="A4_SHEET">A4 Sheet (3x8 Grid)</option>
+                    <option value="THERMAL_50X30" selected>Thermal 50 &times; 30 mm</option>
+                    <option value="THERMAL_40X30">Thermal 40 &times; 30 mm</option>
+                    <option value="THERMAL_50X40">Thermal 50 &times; 40 mm</option>
+                    <option value="THERMAL_58">Thermal Roll 58 mm</option>
+                    <option value="THERMAL_80">Thermal Roll 80 mm</option>
+                    <option value="A4_SHEET">A4 Sheet (21 Labels Grid)</option>
                   </select>
                 </div>
                 <div>
@@ -11839,34 +12224,38 @@
       })();
       return `
           <div class="cart-line" data-batch-id="${escapeHtml(line.batchId || '')}">
-            <div class="cart-line-info">
-              <div class="cart-line-name">
+            <div class="cart-line-top">
+              <div class="cart-line-name" title="${escapeHtml(line.name)}">
                 ${escapeHtml(line.name)}
                 ${sourceBadge ? `<span style="margin-left: 4px;">${sourceBadge}</span>` : ''}
               </div>
-              <div style="display: flex; flex-wrap: wrap; gap: 4px; margin: 2px 0;">
-                ${batchBadgeHtml}
-                ${line.expiryDate ? `<span style="font-size: 10px; color: var(--text-secondary);">Exp: ${escapeHtml(line.expiryDate)}</span>` : ''}
-                ${line.priceSource === 'OVERRIDE' ? `<span class="badge-pill badge-yellow" style="font-size: 10px;">Override</span>` : ''}
-              </div>
-              <div class="cart-line-sub">
-                ${isVar || line.uomCode !== priceUomLabel
-                  ? `${formatQty(line.qty)} ${escapeHtml(line.uomCode)} &times; ${formatTenantMoney(pricePerLabel)} / ${escapeHtml(priceUomLabel)}`
-                  : `${formatTenantMoney(line.unitPrice)} / ${escapeHtml(line.uomCode)}`}
-              </div>
+              <div class="cart-line-total">${isVar || (line.priceUom && line.priceUom !== line.uomCode) ? formatTenantMoney(lineTotal) : `${formatTenantMoney(line.qty * (parseFloat(line.unitPrice) || 0))}`}</div>
             </div>
-            <div class="cart-line-controls">
-              ${isVar ? `
-                <button class="btn btn-secondary btn-sm" style="padding: 2px 7px; font-size: 11px;" onclick="openVariableQtyPosModal('${line.productId}', ${idx}, '${escapeHtml(line.entrySource || 'MANUAL_WEIGHT')}')" title="Edit weight/unit">⚖️ ${formatQty(line.qty)} ${escapeHtml(line.uomCode)}</button>
-                <button class="btn btn-danger btn-sm" style="padding: 2px 6px; font-size: 11px;" onclick="updateCartQty(${idx}, -999999)" title="Remove">&times;</button>
-              ` : `
-                <button class="qty-btn" onclick="updateCartQty(${idx}, -1)">-</button>
-                <input type="number" step="${isDec ? '0.001' : '1'}" min="${isDec ? '0.001' : '1'}" max="${maxInSellingUom}" value="${formatQty(line.qty)}" style="width: 54px; text-align: center; border: 1px solid var(--border-subtle); border-radius: 4px; padding: 2px 4px; font-weight: 600; font-size: 13px; background: var(--bg-primary); color: var(--text-primary);" onchange="setCartQty(${idx}, this.value)" />
-                <button class="qty-btn" onclick="updateCartQty(${idx}, 1)">+</button>
-              `}
-            </div>
-            <div style="min-width: 72px; text-align: right; font-weight: 700; color: var(--text-primary); margin-left: 10px;">
-              ${isVar || (line.priceUom && line.priceUom !== line.uomCode) ? formatTenantMoney(lineTotal) : `${formatTenantMoney(line.qty * (parseFloat(line.unitPrice) || 0))}`}
+            <div class="cart-line-bottom">
+              <div class="cart-line-meta">
+                <div class="cart-line-sub">
+                  ${isVar || line.uomCode !== priceUomLabel
+                    ? `${formatQty(line.qty)} ${escapeHtml(line.uomCode)} &times; ${formatTenantMoney(pricePerLabel)} / ${escapeHtml(priceUomLabel)}`
+                    : `${formatTenantMoney(line.unitPrice)} / ${escapeHtml(line.uomCode)}`}
+                </div>
+                ${(batchBadgeHtml || line.expiryDate || line.priceSource === 'OVERRIDE') ? `
+                  <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px;">
+                    ${batchBadgeHtml}
+                    ${line.expiryDate ? `<span style="font-size: 10px; color: var(--text-secondary); white-space: nowrap;">Exp: ${escapeHtml(line.expiryDate)}</span>` : ''}
+                    ${line.priceSource === 'OVERRIDE' ? `<span class="badge-pill badge-yellow" style="font-size: 10px;">Override</span>` : ''}
+                  </div>
+                ` : ''}
+              </div>
+              <div class="cart-line-controls">
+                ${isVar ? `
+                  <button class="btn btn-secondary btn-sm" style="padding: 2px 7px; font-size: 11px;" onclick="openVariableQtyPosModal('${line.productId}', ${idx}, '${escapeHtml(line.entrySource || 'MANUAL_WEIGHT')}')" title="Edit weight/unit">⚖️ ${formatQty(line.qty)} ${escapeHtml(line.uomCode)}</button>
+                  <button class="btn btn-danger btn-sm" style="padding: 2px 6px; font-size: 11px;" onclick="updateCartQty(${idx}, -999999)" title="Remove">&times;</button>
+                ` : `
+                  <button class="qty-btn" onclick="updateCartQty(${idx}, -1)" aria-label="Decrease quantity">-</button>
+                  <input type="number" step="${isDec ? '0.001' : '1'}" min="${isDec ? '0.001' : '1'}" max="${maxInSellingUom}" value="${formatQty(line.qty)}" style="width: 52px; height: 28px; min-height: 28px; text-align: center; border: 1px solid var(--border-subtle); border-radius: 6px; padding: 2px 4px; font-weight: 600; font-size: 13px; background: var(--bg-primary); color: var(--text-primary);" onchange="setCartQty(${idx}, this.value)" />
+                  <button class="qty-btn" onclick="updateCartQty(${idx}, 1)" aria-label="Increase quantity">+</button>
+                `}
+              </div>
             </div>
           </div>
         `;
@@ -16109,22 +16498,53 @@
       const logoUrl = branding.logoUrl ? resolveMediaUrl(branding.logoUrl) : '';
       const priceInfo = resolveBatchDisplayPricing(batch, product);
 
-      const buildPreviewCardHtml = (opts = { showPrice: true, showExpiry: true, showBatch: true, compact: false }) => {
+      const buildPreviewCardHtml = (opts = { showPrice: true, showExpiry: true, showBatch: true, format: 'THERMAL_50X30', forPrint: false }) => {
+        const fmt = opts.format || 'THERMAL_50X30';
+        const spec = getLabelFormatSpec(fmt);
         const code = batch.internalBarcode || batch.batchNumber;
-        const svg = renderBarcodeSvg(code, 'CODE128', { height: opts.compact ? 36 : 44, barWidth: opts.compact ? 1.4 : 1.7 });
+        const svg = renderBarcodeSvg(code, 'CODE128', {
+          height: spec.bcHeight,
+          barWidth: spec.bcBarW,
+          fontSize: spec.bcFont,
+          quietZone: 8,
+          svgStyle: opts.forPrint
+            ? `width:100%; max-width:${spec.svgMaxW}; height:${spec.svgH}; max-height:${spec.svgH}; display:block; margin:0 auto;`
+            : `width:100%; max-width:220px; height:42px; display:block; margin:0 auto;`
+        });
+        const metaParts = [];
+        if (opts.showBatch) metaParts.push(`Batch: <strong>${escapeHtml(batch.batchNumber)}</strong>`);
+        if (opts.showExpiry && batch.expiryDate) metaParts.push(`Exp: ${escapeHtml(batch.expiryDate)}`);
+        const metaHtml = metaParts.join(' &bull; ');
+
+        if (opts.forPrint) {
+          return `
+            <div class="shop-branded-label-preview">
+              <div class="shop-label-header">
+                ${logoUrl ? `<img src="${escapeHtml(logoUrl)}" alt="" style="height:${spec.logoH}; max-width:14mm; object-fit:contain;" onerror="this.style.display='none'" />` : ''}
+                <span class="shop-label-store">${escapeHtml(shopName)}</span>
+              </div>
+              <div class="shop-label-product">${escapeHtml(product?.name || batch.productId)}</div>
+              ${metaHtml ? `<div class="shop-label-meta">${metaHtml}</div>` : ''}
+              <div class="shop-label-barcode">${svg}</div>
+              ${opts.showPrice && priceInfo.price != null ? `<div class="shop-label-price">${formatTenantMoney(priceInfo.price)}</div>` : ''}
+            </div>
+          `;
+        }
+
         return `
-          <div class="shop-branded-label-preview">
+          <div class="shop-branded-label-preview" data-format="${escapeHtml(fmt)}" style="max-width: 280px; margin: 0 auto;">
+            <div style="display:flex; justify-content:space-between; align-items:center; font-size:10px; color:#64748b; margin-bottom:4px;">
+              <span>Preview (${escapeHtml(spec.w)} &times; ${escapeHtml(spec.h)})</span>
+              <span>1 Label / Page</span>
+            </div>
             <div class="shop-label-header">
-              ${logoUrl ? `<img src="${escapeHtml(logoUrl)}" alt="Shop Logo" style="height: 18px; max-width: 60px; object-fit: contain;" onerror="this.style.display='none'" />` : ''}
+              ${logoUrl ? `<img src="${escapeHtml(logoUrl)}" alt="Shop Logo" style="height: 16px; max-width: 54px; object-fit: contain;" onerror="this.style.display='none'" />` : ''}
               <span>${escapeHtml(shopName)}</span>
             </div>
-            <div style="font-weight: 700; font-size: 12px; margin-bottom: 2px; color: #111;">${escapeHtml(product?.name || batch.productId)}</div>
-            <div style="font-size: 10px; color: #444; margin-bottom: 4px;">
-              ${opts.showBatch ? `Batch: <strong>${escapeHtml(batch.batchNumber)}</strong>` : ''}
-              ${opts.showExpiry && batch.expiryDate ? ` &bull; Exp: ${escapeHtml(batch.expiryDate)}` : ''}
-            </div>
-            <div style="margin: 2px 0;">${svg}</div>
-            ${opts.showPrice && priceInfo.price != null ? `<div style="font-weight: 800; font-size: 14px; color: #000; margin-top: 2px;">${formatTenantMoney(priceInfo.price)}</div>` : ''}
+            <div class="shop-label-product" style="font-weight: 700; font-size: 12px; margin-bottom: 2px; color: #111; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(product?.name || batch.productId)}</div>
+            ${metaHtml ? `<div class="shop-label-meta" style="font-size: 10px; color: #444; margin-bottom: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${metaHtml}</div>` : ''}
+            <div class="shop-label-barcode" style="margin: 2px 0;">${svg}</div>
+            ${opts.showPrice && priceInfo.price != null ? `<div class="shop-label-price" style="font-weight: 800; font-size: 13px; color: #000; margin-top: 2px;">${formatTenantMoney(priceInfo.price)}</div>` : ''}
           </div>
         `;
       };
@@ -16172,7 +16592,8 @@
           showPrice: Boolean(document.getElementById('lblShowPrice')?.checked),
           showExpiry: Boolean(document.getElementById('lblShowExpiry')?.checked),
           showBatch: Boolean(document.getElementById('lblShowBatch')?.checked),
-          compact: fmt === 'THERMAL_40X30'
+          format: fmt,
+          forPrint: false
         });
       };
       ['batchLabelFormat', 'lblShowPrice', 'lblShowExpiry', 'lblShowBatch'].forEach(id => {
@@ -16182,46 +16603,53 @@
       document.getElementById('btnPrintBatchLabelsNow').onclick = async () => {
         const format = document.getElementById('batchLabelFormat')?.value || 'THERMAL_50X30';
         const qty = Math.max(1, Math.min(500, parseInt(document.getElementById('batchLabelQty')?.value || '1', 10) || 1));
+        const spec = getLabelFormatSpec(format);
         const opts = {
           showPrice: Boolean(document.getElementById('lblShowPrice')?.checked),
           showExpiry: Boolean(document.getElementById('lblShowExpiry')?.checked),
           showBatch: Boolean(document.getElementById('lblShowBatch')?.checked),
-          compact: format === 'THERMAL_40X30'
+          format,
+          forPrint: true
         };
         const singleCard = `<div class="batch-print-item">${buildPreviewCardHtml(opts)}</div>`;
 
         let pageStyles = '';
         let printableHtml = '';
-        if (format === 'A4_SHEET') {
+        let pageDims = { w: spec.w, h: spec.h };
+        if (spec.isA4Grid) {
+          pageDims = { w: '210mm', h: '297mm' };
           pageStyles = `
-            @page { size: A4 portrait; margin: 10mm; }
-            body { margin: 0; padding: 0; }
-            .a4-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4mm; }
-            .batch-print-item { page-break-inside: avoid; }
-            .shop-branded-label-preview { border: 1px dashed #ccc; padding: 3mm; text-align: center; }
-            .shop-label-header { font-weight: 800; font-size: 10px; border-bottom: 1px solid #000; padding-bottom: 1mm; margin-bottom: 1.5mm; display: flex; align-items: center; justify-content: center; gap: 4px; }
+            @page { size: A4 portrait; margin: 8mm 7mm; }
+            html, body { width: 210mm; margin: 0; padding: 0; }
+            .a4-grid { display: grid; grid-template-columns: repeat(3, ${spec.w}); grid-auto-rows: ${spec.h}; gap: 0mm 2.5mm; justify-content: center; }
+            .batch-print-item { width: ${spec.w}; height: ${spec.h}; max-height: ${spec.h}; border: 0.5px dashed #bbb; padding: ${spec.pad}; box-sizing: border-box; overflow: hidden; page-break-inside: avoid; break-inside: avoid; }
+            .shop-branded-label-preview { width: 100%; height: 100%; max-height: 100%; border: none; padding: 0; margin: 0; box-sizing: border-box; overflow: hidden; display: flex; flex-direction: column; justify-content: space-between; align-items: center; text-align: center; }
+            .shop-label-header { width: 100%; font-weight: 800; font-size: ${spec.headerPt}; line-height: 1.05; border-bottom: 0.5px solid #000; padding-bottom: 0.4mm; margin-bottom: 0.3mm; display: flex; align-items: center; justify-content: center; gap: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+            .shop-label-store { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+            .shop-label-product { width: 100%; font-weight: 700; font-size: ${spec.prodPt}; line-height: 1.1; color: #000; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin: 0; }
+            .shop-label-meta { width: 100%; font-size: ${spec.metaPt}; line-height: 1.05; color: #222; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin: 0; }
+            .shop-label-barcode { width: 100%; max-height: ${spec.svgH}; display: flex; justify-content: center; align-items: center; overflow: hidden; margin: 0.2mm 0; }
+            .shop-label-price { width: 100%; font-weight: 800; font-size: ${spec.pricePt}; line-height: 1.05; color: #000; white-space: nowrap; margin: 0; }
           `;
           printableHtml = `<div class="a4-grid">${Array.from({ length: qty }, () => singleCard).join('')}</div>`;
         } else {
-          const sizeMap = {
-            THERMAL_40X30: { w: '40mm', h: '30mm' },
-            THERMAL_50X30: { w: '50mm', h: '30mm' },
-            THERMAL_50X40: { w: '50mm', h: '40mm' },
-            THERMAL_58: { w: '58mm', h: 'auto' },
-            THERMAL_80: { w: '80mm', h: 'auto' }
-          };
-          const dims = sizeMap[format] || sizeMap.THERMAL_50X30;
           pageStyles = `
-            @page { size: ${dims.w} ${dims.h}; margin: 0; }
-            body { width: ${dims.w}; margin: 0; padding: 1.5mm; }
-            .batch-print-item { width: 100%; page-break-after: always; text-align: center; }
-            .shop-branded-label-preview { border: none; padding: 0; text-align: center; }
-            .shop-label-header { font-weight: 800; font-size: 10px; border-bottom: 1px solid #000; padding-bottom: 1mm; margin-bottom: 1mm; display: flex; align-items: center; justify-content: center; gap: 4px; }
+            @page { size: ${spec.w} ${spec.h}; margin: 0mm; }
+            html, body { width: ${spec.w}; margin: 0; padding: 0; }
+            .batch-print-item { width: ${spec.w}; height: ${spec.h}; max-height: ${spec.h}; padding: ${spec.pad}; box-sizing: border-box; overflow: hidden; page-break-inside: avoid; break-inside: avoid; page-break-after: avoid; break-after: avoid; }
+            .batch-print-item:not(:last-child) { page-break-after: always; break-after: page; }
+            .shop-branded-label-preview { width: 100%; height: 100%; max-height: 100%; border: none; padding: 0; margin: 0; box-sizing: border-box; overflow: hidden; display: flex; flex-direction: column; justify-content: space-between; align-items: center; text-align: center; }
+            .shop-label-header { width: 100%; font-weight: 800; font-size: ${spec.headerPt}; line-height: 1.05; border-bottom: 0.5px solid #000; padding-bottom: 0.4mm; margin-bottom: 0.3mm; display: flex; align-items: center; justify-content: center; gap: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+            .shop-label-store { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+            .shop-label-product { width: 100%; font-weight: 700; font-size: ${spec.prodPt}; line-height: 1.1; color: #000; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin: 0; }
+            .shop-label-meta { width: 100%; font-size: ${spec.metaPt}; line-height: 1.05; color: #222; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin: 0; }
+            .shop-label-barcode { width: 100%; max-height: ${spec.svgH}; display: flex; justify-content: center; align-items: center; overflow: hidden; margin: 0.2mm 0; }
+            .shop-label-price { width: 100%; font-weight: 800; font-size: ${spec.pricePt}; line-height: 1.05; color: #000; white-space: nowrap; margin: 0; }
           `;
           printableHtml = Array.from({ length: qty }, () => singleCard).join('');
         }
 
-        printHtmlDocument(printableHtml, pageStyles);
+        printHtmlDocument(printableHtml, pageStyles, pageDims);
         await apiFetch(`/v1/inventory/batches/${batchId}/barcode/print-log`, {
           method: 'POST',
           silent: true,
