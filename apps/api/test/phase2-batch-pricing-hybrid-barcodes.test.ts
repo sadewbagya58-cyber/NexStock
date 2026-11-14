@@ -881,5 +881,221 @@ describe('@nexstock/api — Phase 2: Batch Pricing, Hybrid Barcodes, Transfers, 
     expect(syncPushRes.json().receipts[0].status).toBe('APPLIED');
     expect(syncPushRes.json().receipts[1].status).toBe('QUARANTINED');
     expect(syncPushRes.json().receipts[1].conflictCode).toBe('POS_BATCH_EXPIRED');
+
+    // =========================================================================
+    // Production QA Regression Suite: Supplier API Contract & Maxeal Barcode Scan
+    // =========================================================================
+
+    // 1. Supplier creation with canonical businessName + full fields
+    const supCanonicalRes = await app.inject({
+      method: 'POST',
+      url: '/v1/suppliers',
+      headers: headers(ownerToken),
+      payload: {
+        code: 'SUP-QA-01',
+        businessName: 'Lanka Dairy & Pharma Distributors',
+        contactPerson: 'Kasun Perera',
+        email: 'kasun@lankadairy.lk',
+        phone: '+94112345678',
+        address: '42 Galle Face Court, Colombo 03',
+        taxRegistrationNumber: 'VAT-LK-998877',
+        notes: 'Net 30 days',
+      },
+    });
+    expect(supCanonicalRes.statusCode).toBe(201);
+    expect(supCanonicalRes.json().businessName).toBe('Lanka Dairy & Pharma Distributors');
+    expect(supCanonicalRes.json().name).toBe('Lanka Dairy & Pharma Distributors');
+    expect(supCanonicalRes.json().isActive).toBe(true);
+
+    // 2. Supplier creation with UI alias payload (name, countryCode, currencyCode)
+    const supAliasRes = await app.inject({
+      method: 'POST',
+      url: '/v1/suppliers',
+      headers: headers(ownerToken),
+      payload: {
+        code: 'SUP-QA-02',
+        name: 'Maxeal Healthcare Supplies',
+        contactPerson: 'Nimal Silva',
+        email: 'nimal@maxeal.lk',
+        phone: '+94771234567',
+        countryCode: 'LK',
+        currencyCode: 'LKR',
+      },
+    });
+    expect(supAliasRes.statusCode).toBe(201);
+    const supAliasId = supAliasRes.json().id;
+    expect(supAliasRes.json().businessName).toBe('Maxeal Healthcare Supplies');
+    expect(supAliasRes.json().name).toBe('Maxeal Healthcare Supplies');
+
+    // 3. Supplier edit with PATCH (businessName / name / leadTimeDays / isActive)
+    const supPatchRes = await app.inject({
+      method: 'PATCH',
+      url: `/v1/suppliers/${supAliasId}`,
+      headers: headers(ownerToken),
+      payload: {
+        businessName: 'Maxeal Healthcare Supplies Pvt Ltd',
+        contactPerson: 'Nimal Silva',
+        email: 'nimal@maxeal.lk',
+        phone: '+94771234567',
+        leadTimeDays: 5,
+        isActive: true,
+      },
+    });
+    expect(supPatchRes.statusCode).toBe(200);
+    expect(supPatchRes.json().businessName).toBe('Maxeal Healthcare Supplies Pvt Ltd');
+    expect(supPatchRes.json().name).toBe('Maxeal Healthcare Supplies Pvt Ltd');
+
+    // 4. Supplier strict validation: reject arbitrary unknown properties & blank name
+    const supUnknownPropRes = await app.inject({
+      method: 'POST',
+      url: '/v1/suppliers',
+      headers: headers(ownerToken),
+      payload: {
+        code: 'SUP-BAD-01',
+        businessName: 'Valid Name',
+        unexpectedField: 'should-fail',
+      },
+    });
+    expect(supUnknownPropRes.statusCode).toBe(400);
+
+    const supMissingNameRes = await app.inject({
+      method: 'POST',
+      url: '/v1/suppliers',
+      headers: headers(ownerToken),
+      payload: {
+        code: 'SUP-BAD-02',
+      },
+    });
+    expect(supMissingNameRes.statusCode).toBe(400);
+
+    // 5. Maxeal (SKU: MAX-SY) Barcode Scan vs POS Search Stock Availability Parity
+    const maxealProdRes = await app.inject({
+      method: 'POST',
+      url: '/v1/products',
+      headers: headers(ownerToken),
+      payload: {
+        sku: 'MAX-SY',
+        name: 'Maxeal',
+        productType: 'STANDARD',
+        baseUom: 'PCS',
+        purchaseCost: '250.0000',
+        sellingPrice: '380.0000',
+        trackInventory: true,
+        trackingMode: 'NONE',
+        primaryBarcode: '8909990001112',
+      },
+    });
+    expect(maxealProdRes.statusCode).toBe(201);
+    const maxealId = maxealProdRes.json().id;
+
+    // Post 9 PCS opening stock for Maxeal in whAId
+    const maxealStockRes = await app.inject({
+      method: 'POST',
+      url: '/v1/inventory/movements',
+      headers: headers(ownerToken, { 'idempotency-key': randomUUID() }),
+      payload: {
+        branchId: branchAId,
+        warehouseId: whAId,
+        productId: maxealId,
+        movementType: 'OPENING_STOCK',
+        quantity: '9.000000',
+        uomCode: 'PCS',
+        unitCost: '250.0000',
+        notes: 'Initial 9 PCS stock for Maxeal',
+      },
+    });
+    expect(maxealStockRes.statusCode).toBe(201);
+
+    // Verify POS catalog search returns 9.000000 available
+    const posSearchMaxeal = await app.inject({
+      method: 'GET',
+      url: `/v1/pos/products/search?warehouseId=${whAId}&q=Maxeal`,
+      headers: headers(cashierToken),
+    });
+    expect(posSearchMaxeal.statusCode).toBe(200);
+    expect(posSearchMaxeal.json()[0].availableQuantity).toBe('9.000000');
+
+    // Verify Barcode Resolve by primary barcode, uppercase SKU, and lowercase SKU all return 9.000000 available
+    for (const scanInput of ['8909990001112', 'MAX-SY', 'max-sy']) {
+      const resolveMaxeal = await app.inject({
+        method: 'POST',
+        url: '/v1/barcodes/resolve',
+        headers: headers(cashierToken),
+        payload: {
+          rawBarcode: scanInput,
+          branchId: branchAId,
+          warehouseId: whAId,
+        },
+      });
+      expect(resolveMaxeal.statusCode).toBe(200);
+      expect(resolveMaxeal.json().product?.id).toBe(maxealId);
+      expect(resolveMaxeal.json().blockedReason).toBeNull();
+      expect(resolveMaxeal.json().availableQuantityTotal).toBe('9.000000');
+      expect(resolveMaxeal.json().product?.availableQuantity).toBe('9.000000');
+    }
+
+    // 6. Batch-tracked product with legacy/opening stock in inventory_balances (0 batch rows)
+    const legacyBatchProdRes = await app.inject({
+      method: 'POST',
+      url: '/v1/products',
+      headers: headers(ownerToken),
+      payload: {
+        sku: 'MAX-SY-BATCH',
+        name: 'Maxeal Syrup Batch Mode',
+        productType: 'STANDARD',
+        baseUom: 'PCS',
+        purchaseCost: '250.0000',
+        sellingPrice: '380.0000',
+        trackInventory: true,
+        trackingMode: 'BATCH',
+        primaryBarcode: '8909990002225',
+      },
+    });
+    expect(legacyBatchProdRes.statusCode).toBe(201);
+    const legacyBatchProdId = legacyBatchProdRes.json().id;
+
+    await app.inject({
+      method: 'POST',
+      url: '/v1/inventory/movements',
+      headers: headers(ownerToken, { 'idempotency-key': randomUUID() }),
+      payload: {
+        branchId: branchAId,
+        warehouseId: whAId,
+        productId: legacyBatchProdId,
+        movementType: 'OPENING_STOCK',
+        quantity: '9.000000',
+        uomCode: 'PCS',
+        unitCost: '250.0000',
+        notes: 'Opening stock without batch row',
+      },
+    });
+
+    const resolveLegacyBatch = await app.inject({
+      method: 'POST',
+      url: '/v1/barcodes/resolve',
+      headers: headers(cashierToken),
+      payload: {
+        rawBarcode: '8909990002225',
+        branchId: branchAId,
+        warehouseId: whAId,
+      },
+    });
+    expect(resolveLegacyBatch.statusCode).toBe(200);
+    expect(resolveLegacyBatch.json().blockedReason).toBeNull();
+    expect(resolveLegacyBatch.json().availableQuantityTotal).toBe('9.000000');
+
+    // Checkout 1 PCS of legacyBatchProdId succeeds and decrements inventory_balances to 8.000000
+    const saleLegacyBatch = await app.inject({
+      method: 'POST',
+      url: '/v1/pos/sales',
+      headers: headers(cashierToken, { 'idempotency-key': randomUUID() }),
+      payload: {
+        registerId,
+        shiftId,
+        lines: [{ productId: legacyBatchProdId, quantity: '1.000000', uomCode: 'PCS' }],
+        payments: [{ paymentMethod: 'CASH', amount: '380.0000', tenderedAmount: '400.0000' }],
+      },
+    });
+    expect(saleLegacyBatch.statusCode).toBe(201);
   });
 });

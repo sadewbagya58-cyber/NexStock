@@ -3140,5 +3140,35 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       expect(html).toContain('apiErr.errorCode = data?.errorCode || data?.code || null');
       expect(html).toContain('apiErr.data = data || null');
     });
+
+    it('resolves Production QA issues: BUG-097 thermal print layout, Supplier contract, instant POS add-to-cart, responsive cart UI, and Maxeal barcode scan', () => {
+      const html = readFileSync(resolve(WEB_ROOT, 'public/index.html'), 'utf8');
+
+      // 1. BUG-097 Thermal label layout specs and single-page print isolation
+      expect(html).toContain('function getLabelFormatSpec(format)');
+      expect(html).toContain('nexstockPrintMount');
+      expect(html).toContain('nexstockDynamicPrintStyle');
+      expect(html).toContain('.batch-print-item:not(:last-child) { page-break-after: always; break-after: page; }');
+      expect(html).toContain('@page { size: ${spec.w} ${spec.h}; margin: 0mm; }');
+
+      // 2. Supplier contract uses canonical businessName and displays s.businessName || s.name
+      expect(html).toContain('const name = escapeHtml(s.businessName || s.name ||');
+      expect(html).toContain('businessName,');
+
+      // 3. POS instant add-to-cart pre-warmed batch map & synchronous fast-path
+      expect(html).toContain('state.posBatchesByProductId');
+      expect(html).toContain('function addNextFefoBatchLineSync(');
+      expect(html).toContain('function verifyPosBatchStockInBackground(');
+
+      // 4. POS responsive 2-row cart line & live search filter
+      expect(html).toContain('class="cart-line-top"');
+      expect(html).toContain('class="cart-line-bottom"');
+      expect(html).toContain('class="cart-line-total"');
+      expect(html).toContain('state.posSearchFilter');
+
+      // 5. Barcode scan resolves availableQuantityTotal / p.availableQuantity / cachedProd.availableQuantity
+      expect(html).toContain('resolved.availableQuantityTotal ??');
+      expect(html).toContain('cachedProd?.availableQuantity ??');
+    });
   });
 });

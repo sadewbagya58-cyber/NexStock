@@ -1981,12 +1981,47 @@ export async function checkoutSale(
           !allowNegative &&
           (fefo.allocations.length === 0 || unfulfilledQty.isPositive())
         ) {
-          throw new AppError({
-            statusCode: 409,
-            errorCode: 'INV_INSUFFICIENT_BATCH_STOCK',
-            title: 'Insufficient Batch Stock',
-            detail: `Insufficient active non-expired batch stock for product "${product.sku}": requested ${normalizedBaseQty.toDecimalString()}, available ${fefo.fulfilledQty}.`,
-          });
+          let allowUnbatchedBalanceFallback = false;
+          if (fefo.allocations.length === 0) {
+            const existingBatchRow = await trx.db
+              .selectFrom('inventory_batches')
+              .select(['id'])
+              .where('tenant_id', '=', trx.tenantId)
+              .where('warehouse_id', '=', register.warehouse_id)
+              .where('product_id', '=', product.id)
+              .limit(1)
+              .executeTakeFirst();
+
+            if (!existingBatchRow) {
+              const balRow = await trx.db
+                .selectFrom('inventory_balances')
+                .select(['qty_on_hand', 'qty_reserved'])
+                .where('tenant_id', '=', trx.tenantId)
+                .where('warehouse_id', '=', register.warehouse_id)
+                .where('product_id', '=', product.id)
+                .executeTakeFirst();
+              const onHand = balRow
+                ? Quantity.fromDecimalString(String(balRow.qty_on_hand))
+                : Quantity.zero();
+              const reserved = balRow
+                ? Quantity.fromDecimalString(
+                    String(balRow.qty_reserved ?? '0.000000'),
+                  )
+                : Quantity.zero();
+              if (onHand.subtract(reserved).compare(normalizedBaseQty) >= 0) {
+                allowUnbatchedBalanceFallback = true;
+              }
+            }
+          }
+
+          if (!allowUnbatchedBalanceFallback) {
+            throw new AppError({
+              statusCode: 409,
+              errorCode: 'INV_INSUFFICIENT_BATCH_STOCK',
+              title: 'Insufficient Batch Stock',
+              detail: `Insufficient active non-expired batch stock for product "${product.sku}": requested ${normalizedBaseQty.toDecimalString()}, available ${fefo.fulfilledQty}.`,
+            });
+          }
         }
 
         if (fefo.allocations.length === 0) {

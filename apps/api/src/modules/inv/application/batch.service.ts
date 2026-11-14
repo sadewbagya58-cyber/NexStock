@@ -1822,23 +1822,89 @@ export async function resolveHybridBarcode(
     };
   }
 
-  function mapProductSummary(prod: {
-    id: string;
-    sku: string;
-    name: string;
-    base_uom: string;
-    tracking_mode: string;
-    allocation_policy: string;
-    require_batch_selling_price: boolean;
-    selling_price: string;
-    primary_barcode: string | null;
-  }) {
+  async function resolveTargetWarehouseId(): Promise<string | null> {
+    if (input.warehouseId) return input.warehouseId;
+    if (input.branchId) {
+      const wh = await trx.db
+        .selectFrom('warehouses')
+        .select(['id'])
+        .where('tenant_id', '=', trx.tenantId)
+        .where('branch_id', '=', input.branchId)
+        .where('is_active', '=', true)
+        .executeTakeFirst();
+      return wh?.id ?? null;
+    }
+    return null;
+  }
+
+  async function resolveProductAvailableBalance(
+    productId: string,
+    trackInventory: boolean,
+    targetWarehouseId: string | null,
+  ): Promise<string> {
+    if (!trackInventory) return '0.000000';
+    if (targetWarehouseId) {
+      const balRow = await trx.db
+        .selectFrom('inventory_balances')
+        .select(['qty_on_hand', 'qty_reserved'])
+        .where('tenant_id', '=', trx.tenantId)
+        .where('warehouse_id', '=', targetWarehouseId)
+        .where('product_id', '=', productId)
+        .executeTakeFirst();
+      if (!balRow) return '0.000000';
+      const onHand = Quantity.fromDecimalString(String(balRow.qty_on_hand));
+      const reserved = Quantity.fromDecimalString(
+        String(balRow.qty_reserved ?? '0.000000'),
+      );
+      const diff = onHand.subtract(reserved);
+      return (diff.isPositive() ? diff : Quantity.zero()).toDecimalString();
+    }
+
+    const balRows = await trx.db
+      .selectFrom('inventory_balances')
+      .select(['qty_on_hand', 'qty_reserved'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('product_id', '=', productId)
+      .execute();
+    let total = Quantity.zero();
+    for (const b of balRows) {
+      const onHand = Quantity.fromDecimalString(String(b.qty_on_hand));
+      const reserved = Quantity.fromDecimalString(
+        String(b.qty_reserved ?? '0.000000'),
+      );
+      const diff = onHand.subtract(reserved);
+      if (diff.isPositive()) {
+        total = total.add(diff);
+      }
+    }
+    return total.toDecimalString();
+  }
+
+  function mapProductSummary(
+    prod: {
+      id: string;
+      sku: string;
+      name: string;
+      base_uom: string;
+      tracking_mode: string;
+      track_inventory?: boolean;
+      product_qty_mode?: string | null;
+      allocation_policy: string;
+      require_batch_selling_price: boolean;
+      selling_price: string;
+      primary_barcode: string | null;
+    },
+    availableQuantityStr = '0.000000',
+  ) {
     return {
       id: prod.id,
       sku: prod.sku,
       name: prod.name,
       baseUom: prod.base_uom,
       trackingMode: prod.tracking_mode as 'NONE' | 'BATCH' | 'BATCH_EXPIRY' | 'SERIAL',
+      trackInventory: prod.track_inventory !== false,
+      productQtyMode: (prod.product_qty_mode ?? 'STANDARD') as 'STANDARD' | 'VARIABLE',
+      availableQuantity: availableQuantityStr,
       allocationPolicy: (prod.allocation_policy ?? 'FEFO') as BatchAllocationPolicy,
       requireBatchSellingPrice: Boolean(prod.require_batch_selling_price),
       sellingPrice: Money.fromDecimalString(
@@ -1906,6 +1972,8 @@ export async function resolveHybridBarcode(
       blockedReason = 'BATCH_PRICE_REQUIRED';
     }
 
+    const batchAvailStr = mappedBatch.availableQuantity ?? mappedBatch.currentQuantity;
+
     return {
       matchedBy,
       rawBarcode: input.rawBarcode,
@@ -1918,8 +1986,9 @@ export async function resolveHybridBarcode(
         expiryDate: gs1.expiryDate ?? null,
         serialNumber: gs1.serialNumber ?? null,
       },
-      product: mapProductSummary(productRow),
+      product: mapProductSummary(productRow, batchAvailStr),
       exactBatch: mappedBatch,
+      availableQuantityTotal: batchAvailStr,
       effectiveUnitPrice: mappedPrice.effectiveUnitPrice,
       priceSource: mappedPrice.priceSource,
       requiresPricePrompt: mappedPrice.requiresPricePrompt,
@@ -1930,7 +1999,7 @@ export async function resolveHybridBarcode(
           batchNumber: mappedBatch.batchNumber,
           internalBarcode: mappedBatch.internalBarcode ?? null,
           expiryDate: mappedBatch.expiryDate,
-          availableQty: mappedBatch.availableQuantity ?? mappedBatch.currentQuantity,
+          availableQty: batchAvailStr,
           reservedQty: mappedBatch.reservedQuantity ?? '0.000000',
           allocatedQty: input.requestedQty ?? '1.000000',
           unitCost: mappedBatch.unitCost,
@@ -1962,12 +2031,17 @@ export async function resolveHybridBarcode(
   // Helper to lookup product by barcode candidates
   async function findProductByBarcodeCandidates(candidates: readonly string[]) {
     if (candidates.length === 0) return undefined;
+    const expanded = [
+      ...new Set(
+        candidates.flatMap((c) => [c, c.toUpperCase(), c.toLowerCase()]),
+      ),
+    ];
     const pbMatch = await trx.db
       .selectFrom('product_barcodes')
       .select(['product_id', 'barcode'])
       .where('tenant_id', '=', trx.tenantId)
       .where('is_active', '=', true)
-      .where('barcode', 'in', [...candidates])
+      .where('barcode', 'in', expanded)
       .executeTakeFirst();
     if (pbMatch) {
       return trx.db
@@ -1981,7 +2055,7 @@ export async function resolveHybridBarcode(
       .selectFrom('products')
       .selectAll()
       .where('tenant_id', '=', trx.tenantId)
-      .where('primary_barcode', 'in', [...candidates])
+      .where('primary_barcode', 'in', expanded)
       .executeTakeFirst();
   }
 
@@ -1991,7 +2065,15 @@ export async function resolveHybridBarcode(
     productRow: NonNullable<Awaited<ReturnType<typeof findProductByBarcodeCandidates>>>,
     matchedBarcodeText: string,
   ): Promise<ResolveBarcodeResponse> {
-    const productSummary = mapProductSummary(productRow);
+    const targetWarehouseId = await resolveTargetWarehouseId();
+    const balanceAvailStr = await resolveProductAvailableBalance(
+      productRow.id,
+      Boolean(productRow.track_inventory),
+      targetWarehouseId,
+    );
+    let availableQuantityTotal = balanceAvailStr;
+
+    const baseProductSummary = mapProductSummary(productRow, availableQuantityTotal);
     const { branchSellingPrice } = await resolveProductEffectivePriceContext(
       productRow.id,
       String(productRow.selling_price),
@@ -1999,7 +2081,7 @@ export async function resolveHybridBarcode(
 
     let fefoPreview: FefoBatchAllocation[] = [];
     let effectiveUnitPrice: string | null =
-      branchSellingPrice ?? productSummary.sellingPrice;
+      branchSellingPrice ?? baseProductSummary.sellingPrice;
     let priceSource: ResolveBarcodeResponse['priceSource'] = branchSellingPrice
       ? 'BRANCH_OVERRIDE'
       : 'GLOBAL_PRODUCT';
@@ -2009,55 +2091,91 @@ export async function resolveHybridBarcode(
     if (
       (productRow.tracking_mode === 'BATCH' ||
         productRow.tracking_mode === 'BATCH_EXPIRY') &&
-      (input.warehouseId || input.branchId)
+      targetWarehouseId
     ) {
-      let targetWarehouseId = input.warehouseId ?? null;
-      if (!targetWarehouseId && input.branchId) {
-        const wh = await trx.db
-          .selectFrom('warehouses')
+      const fefo = await selectFefoBatches(trx, {
+        warehouseId: targetWarehouseId,
+        productId: productRow.id,
+        requiredQuantity: input.requestedQty ?? '1',
+        skipPermissionCheck: true,
+      });
+      fefoPreview = fefo.allocations;
+
+      if (fefo.allocations.length > 0) {
+        const allActiveBatches = await trx.db
+          .selectFrom('inventory_batches')
+          .select(['current_quantity', 'reserved_quantity', 'expiry_date'])
+          .where('tenant_id', '=', trx.tenantId)
+          .where('warehouse_id', '=', targetWarehouseId)
+          .where('product_id', '=', productRow.id)
+          .where('status', '=', 'ACTIVE')
+          .execute();
+        let batchAvailSum = Quantity.zero();
+        for (const b of allActiveBatches) {
+          const expRaw: unknown = b.expiry_date;
+          const expStr = expRaw
+            ? typeof expRaw === 'string'
+              ? expRaw.slice(0, 10)
+              : (expRaw as Date).toISOString().slice(0, 10)
+            : null;
+          if (expStr && expStr < todayStr) continue;
+          const cur = Quantity.fromDecimalString(String(b.current_quantity));
+          const res = Quantity.fromDecimalString(
+            String(b.reserved_quantity ?? '0.000000'),
+          );
+          const diff = cur.subtract(res);
+          if (diff.isPositive()) {
+            batchAvailSum = batchAvailSum.add(diff);
+          }
+        }
+        availableQuantityTotal = batchAvailSum.toDecimalString();
+
+        const primaryAlloc = fefo.allocations[0]!;
+        const priceResolution = resolveEffectiveBatchPrice({
+          batchNumber: primaryAlloc.batchNumber,
+          batchSellingPrice: primaryAlloc.sellingPrice ?? null,
+          batchPricingMode: primaryAlloc.batchPricingMode ?? 'EXPLICIT',
+          productSellingPrice: baseProductSummary.sellingPrice,
+          productMinSellingPrice: null,
+          productMaxDiscountPct: null,
+          branchSellingPrice,
+          fallbackPolicy: tenantFallbackPolicy,
+          requireBatchSellingPrice: baseProductSummary.requireBatchSellingPrice,
+          currencyCode: baseCurrency,
+        });
+        const mappedPrice = mapResolvedPriceSource(priceResolution);
+        effectiveUnitPrice = mappedPrice.effectiveUnitPrice;
+        priceSource = mappedPrice.priceSource;
+        requiresPricePrompt = mappedPrice.requiresPricePrompt;
+        if (mappedPrice.missingPriceBlocked) {
+          blockedReason = 'BATCH_PRICE_REQUIRED';
+        }
+      } else {
+        const warehouseBatchRows = await trx.db
+          .selectFrom('inventory_batches')
           .select(['id'])
           .where('tenant_id', '=', trx.tenantId)
-          .where('branch_id', '=', input.branchId)
-          .where('is_active', '=', true)
-          .executeTakeFirst();
-        targetWarehouseId = wh?.id ?? null;
-      }
+          .where('warehouse_id', '=', targetWarehouseId)
+          .where('product_id', '=', productRow.id)
+          .limit(1)
+          .execute();
 
-      if (targetWarehouseId) {
-        const fefo = await selectFefoBatches(trx, {
-          warehouseId: targetWarehouseId,
-          productId: productRow.id,
-          requiredQuantity: input.requestedQty ?? '1',
-          skipPermissionCheck: true,
-        });
-        fefoPreview = fefo.allocations;
-
-        if (fefo.allocations.length > 0) {
-          const primaryAlloc = fefo.allocations[0]!;
-          const priceResolution = resolveEffectiveBatchPrice({
-            batchNumber: primaryAlloc.batchNumber,
-            batchSellingPrice: primaryAlloc.sellingPrice ?? null,
-            batchPricingMode: primaryAlloc.batchPricingMode ?? 'EXPLICIT',
-            productSellingPrice: productSummary.sellingPrice,
-            productMinSellingPrice: null,
-            productMaxDiscountPct: null,
-            branchSellingPrice,
-            fallbackPolicy: tenantFallbackPolicy,
-            requireBatchSellingPrice: productSummary.requireBatchSellingPrice,
-            currencyCode: baseCurrency,
-          });
-          const mappedPrice = mapResolvedPriceSource(priceResolution);
-          effectiveUnitPrice = mappedPrice.effectiveUnitPrice;
-          priceSource = mappedPrice.priceSource;
-          requiresPricePrompt = mappedPrice.requiresPricePrompt;
-          if (mappedPrice.missingPriceBlocked) {
-            blockedReason = 'BATCH_PRICE_REQUIRED';
-          }
+        if (
+          warehouseBatchRows.length === 0 &&
+          (!productRow.track_inventory ||
+            Quantity.fromDecimalString(balanceAvailStr).isPositive())
+        ) {
+          // Product has unbatched stock in inventory_balances and zero batch records
+          blockedReason = null;
+          availableQuantityTotal = balanceAvailStr;
         } else {
           blockedReason = 'NO_ELIGIBLE_BATCH_AVAILABLE';
+          availableQuantityTotal = '0.000000';
         }
       }
     }
+
+    const productSummary = mapProductSummary(productRow, availableQuantityTotal);
 
     return {
       matchedBy,
@@ -2073,6 +2191,7 @@ export async function resolveHybridBarcode(
       },
       product: productSummary,
       exactBatch: null,
+      availableQuantityTotal,
       effectiveUnitPrice,
       priceSource,
       requiresPricePrompt,
@@ -2144,6 +2263,8 @@ export async function resolveHybridBarcode(
     );
     const serialBlocked =
       serialMatch.status !== 'IN_STOCK' ? `SERIAL_${serialMatch.status}` : null;
+    const serialAvailStr =
+      serialMatch.status === 'IN_STOCK' ? '1.000000' : '0.000000';
     return {
       matchedBy: 'SERIAL_NUMBER',
       rawBarcode: input.rawBarcode,
@@ -2156,8 +2277,9 @@ export async function resolveHybridBarcode(
         expiryDate: gs1.expiryDate ?? null,
         serialNumber: serialMatch.serial_number,
       },
-      product: mapProductSummary(serialProduct),
+      product: mapProductSummary(serialProduct, serialAvailStr),
       exactBatch: null,
+      availableQuantityTotal: serialAvailStr,
       effectiveUnitPrice:
         branchSellingPrice ??
         Money.fromDecimalString(
@@ -2175,7 +2297,12 @@ export async function resolveHybridBarcode(
     .selectFrom('products')
     .selectAll()
     .where('tenant_id', '=', trx.tenantId)
-    .where('sku', '=', normalizedBarcode)
+    .where((eb) =>
+      eb.or([
+        eb('sku', '=', normalizedBarcode),
+        eb('sku', '=', upperNormalized),
+      ]),
+    )
     .executeTakeFirst();
 
   if (skuMatch) {
@@ -2196,6 +2323,7 @@ export async function resolveHybridBarcode(
     },
     product: null,
     exactBatch: null,
+    availableQuantityTotal: '0.000000',
     effectiveUnitPrice: null,
     priceSource: null,
     requiresPricePrompt: false,

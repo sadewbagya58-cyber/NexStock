@@ -1034,7 +1034,8 @@ export type UploadProductImageResponse = Static<typeof UploadProductImageRespons
 export const CreateSupplierRequestSchema = Type.Object(
   {
     code: Type.String({ minLength: 1, maxLength: 32 }),
-    businessName: Type.String({ minLength: 1, maxLength: 160 }),
+    businessName: Type.Optional(Type.String({ minLength: 1, maxLength: 160 })),
+    name: Type.Optional(Type.String({ minLength: 1, maxLength: 160 })),
     contactPerson: Type.Optional(
       Type.Union([Type.String({ maxLength: 120 }), Type.Null()]),
     ),
@@ -1053,6 +1054,16 @@ export const CreateSupplierRequestSchema = Type.Object(
     notes: Type.Optional(
       Type.Union([Type.String({ maxLength: 1000 }), Type.Null()]),
     ),
+    countryCode: Type.Optional(
+      Type.Union([Type.String({ minLength: 2, maxLength: 3 }), Type.Null()]),
+    ),
+    currencyCode: Type.Optional(
+      Type.Union([CurrencyCodeSchema, Type.Null()]),
+    ),
+    leadTimeDays: Type.Optional(
+      Type.Union([Type.Integer({ minimum: 0, maximum: 365 }), Type.Null()]),
+    ),
+    isActive: Type.Optional(Type.Boolean()),
   },
   { additionalProperties: false },
 );
@@ -1062,6 +1073,7 @@ export const UpdateSupplierRequestSchema = Type.Object(
   {
     code: Type.Optional(Type.String({ minLength: 1, maxLength: 32 })),
     businessName: Type.Optional(Type.String({ minLength: 1, maxLength: 160 })),
+    name: Type.Optional(Type.String({ minLength: 1, maxLength: 160 })),
     contactPerson: Type.Optional(
       Type.Union([Type.String({ maxLength: 120 }), Type.Null()]),
     ),
@@ -1080,6 +1092,17 @@ export const UpdateSupplierRequestSchema = Type.Object(
     notes: Type.Optional(
       Type.Union([Type.String({ maxLength: 1000 }), Type.Null()]),
     ),
+    countryCode: Type.Optional(
+      Type.Union([Type.String({ minLength: 2, maxLength: 3 }), Type.Null()]),
+    ),
+    currencyCode: Type.Optional(
+      Type.Union([CurrencyCodeSchema, Type.Null()]),
+    ),
+    leadTimeDays: Type.Optional(
+      Type.Union([Type.Integer({ minimum: 0, maximum: 365 }), Type.Null()]),
+    ),
+    isActive: Type.Optional(Type.Boolean()),
+    status: Type.Optional(RecordLifecycleStatusSchema),
   },
   { additionalProperties: false },
 );
@@ -1149,6 +1172,7 @@ export const SupplierResponseSchema = Type.Object({
   tenantId: UuidSchema,
   code: Type.String(),
   businessName: Type.String(),
+  name: Type.Optional(Type.String()),
   contactPerson: Type.Union([Type.String(), Type.Null()]),
   email: Type.Union([Type.String(), Type.Null()]),
   phone: Type.Union([Type.String(), Type.Null()]),
@@ -1156,6 +1180,7 @@ export const SupplierResponseSchema = Type.Object({
   taxRegistrationNumber: Type.Union([Type.String(), Type.Null()]),
   notes: Type.Union([Type.String(), Type.Null()]),
   status: RecordLifecycleStatusSchema,
+  isActive: Type.Optional(Type.Boolean()),
   products: Type.Array(SupplierProductResponseSchema),
   syncVersion: Type.Integer(),
   createdAt: IsoTimestampSchema,
@@ -5135,6 +5160,9 @@ export const ResolveBarcodeResponseSchema = Type.Object({
       name: Type.String(),
       baseUom: Type.String(),
       trackingMode: TrackingModeSchema,
+      trackInventory: Type.Optional(Type.Boolean()),
+      productQtyMode: Type.Optional(ProductQtyModeSchema),
+      availableQuantity: Type.Optional(DecimalQuantityStringSchema),
       allocationPolicy: BatchAllocationPolicySchema,
       requireBatchSellingPrice: Type.Boolean(),
       sellingPrice: DecimalMoneyStringSchema,
@@ -5143,6 +5171,7 @@ export const ResolveBarcodeResponseSchema = Type.Object({
     Type.Null(),
   ]),
   exactBatch: Type.Union([BatchResponseSchema, Type.Null()]),
+  availableQuantityTotal: Type.Optional(DecimalQuantityStringSchema),
   effectiveUnitPrice: Type.Union([DecimalMoneyStringSchema, Type.Null()]),
   priceSource: Type.Union([
     Type.Literal('BATCH_EXPLICIT'),

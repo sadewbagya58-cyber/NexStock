@@ -128,6 +128,7 @@ async function hydrateSuppliersBatch(
     tenantId: row.tenant_id,
     code: row.code,
     businessName: row.business_name,
+    name: row.business_name,
     contactPerson: row.contact_person,
     email: row.email,
     phone: row.phone,
@@ -135,6 +136,7 @@ async function hydrateSuppliersBatch(
     taxRegistrationNumber: row.tax_registration_number,
     notes: row.notes,
     status: row.status,
+    isActive: row.status === 'ACTIVE',
     products: productsBySupplierId.get(row.id) ?? [],
     syncVersion: Number(row.sync_version),
     createdAt: new Date(row.created_at).toISOString(),
@@ -164,7 +166,8 @@ export async function createSupplier(
   });
 
   const code = input.code.trim().toUpperCase();
-  const businessName = input.businessName.trim();
+  const rawBusinessName = input.businessName ?? input.name ?? '';
+  const businessName = rawBusinessName.trim();
 
   if (!code || !businessName) {
     throw new AppError({
@@ -328,9 +331,15 @@ export async function updateSupplier(
 
   const nextCode =
     input.code !== undefined ? input.code.trim().toUpperCase() : existing.code;
-  const nextBusinessName =
+  const rawNextBusinessName =
     input.businessName !== undefined
-      ? input.businessName.trim()
+      ? input.businessName
+      : input.name !== undefined
+        ? input.name
+        : undefined;
+  const nextBusinessName =
+    rawNextBusinessName !== undefined
+      ? rawNextBusinessName.trim()
       : existing.business_name;
 
   if (!nextCode || !nextBusinessName) {
@@ -402,6 +411,18 @@ export async function updateSupplier(
 
   const now = new Date();
   const nextSyncVersion = Number(existing.sync_version) + 1;
+  const nextStatus =
+    input.status !== undefined
+      ? input.status
+      : input.isActive !== undefined
+        ? (input.isActive ? 'ACTIVE' : 'ARCHIVED')
+        : existing.status;
+  const nextArchivedAt =
+    nextStatus === 'ARCHIVED'
+      ? (existing.archived_at ?? now)
+      : nextStatus === 'ACTIVE'
+        ? null
+        : existing.archived_at;
 
   await trx.db
     .updateTable('suppliers')
@@ -423,6 +444,8 @@ export async function updateSupplier(
         input.notes !== undefined
           ? (input.notes?.trim() || null)
           : existing.notes,
+      status: nextStatus,
+      archived_at: nextArchivedAt,
       sync_version: nextSyncVersion,
       updated_at: now,
     })
