@@ -1097,5 +1097,119 @@ describe('@nexstock/api — Phase 2: Batch Pricing, Hybrid Barcodes, Transfers, 
       },
     });
     expect(saleLegacyBatch.statusCode).toBe(201);
+
+    // =========================================================================
+    // 7. BUG-098: Archive & Restore Product Lifecycle + History Preservation
+    // =========================================================================
+    const archiveRes = await app.inject({
+      method: 'POST',
+      url: `/v1/products/${maxealId}/archive`,
+      headers: headers(ownerToken),
+      payload: {},
+    });
+    expect(archiveRes.statusCode).toBe(200);
+    expect(archiveRes.json().status).toBe('ARCHIVED');
+    expect(archiveRes.json().archivedAt).toBeTruthy();
+
+    // Archived filter list returns the archived product
+    const archivedListRes = await app.inject({
+      method: 'GET',
+      url: '/v1/products?status=ARCHIVED',
+      headers: headers(ownerToken),
+    });
+    expect(archivedListRes.statusCode).toBe(200);
+    const archivedItems = archivedListRes.json().data ?? archivedListRes.json().items ?? [];
+    expect(archivedItems.some((p: { id: string }) => p.id === maxealId)).toBe(true);
+
+    // Restore / Unarchive product returns it to ACTIVE and preserves inventory balance (9.000000)
+    const restoreRes = await app.inject({
+      method: 'POST',
+      url: `/v1/products/${maxealId}/restore`,
+      headers: headers(ownerToken),
+      payload: {},
+    });
+    expect(restoreRes.statusCode).toBe(200);
+    expect(restoreRes.json().status).toBe('ACTIVE');
+    expect(restoreRes.json().archivedAt).toBeNull();
+
+    const resolveAfterRestore = await app.inject({
+      method: 'POST',
+      url: '/v1/barcodes/resolve',
+      headers: headers(cashierToken),
+      payload: {
+        rawBarcode: '8909990001112',
+        branchId: branchAId,
+        warehouseId: whAId,
+      },
+    });
+    expect(resolveAfterRestore.statusCode).toBe(200);
+    expect(resolveAfterRestore.json().availableQuantityTotal).toBe('9.000000');
+
+    // Active filter list now includes restored product again
+    const activeListRes = await app.inject({
+      method: 'GET',
+      url: '/v1/products?status=ACTIVE',
+      headers: headers(ownerToken),
+    });
+    expect(activeListRes.statusCode).toBe(200);
+    const activeItems = activeListRes.json().data ?? activeListRes.json().items ?? [];
+    expect(activeItems.some((p: { id: string }) => p.id === maxealId)).toBe(true);
+
+    // =========================================================================
+    // 8. Phase 7.5: Business Reports Engine (All 8 Categories + Drilldown)
+    // =========================================================================
+    const reportCategories = [
+      'SALES',
+      'INVENTORY',
+      'PROFITABILITY',
+      'PURCHASING',
+      'CUSTOMER_CREDIT',
+      'EMPLOYEE_HR',
+      'FINANCIAL_EXPENSE',
+      'AUDIT_OPERATIONAL',
+    ] as const;
+
+    for (const category of reportCategories) {
+      const repRes = await app.inject({
+        method: 'GET',
+        url: `/v1/reports/business?category=${category}&granularity=DAILY&comparePrevious=true`,
+        headers: headers(ownerToken),
+      });
+      expect(repRes.statusCode).toBe(200);
+      const repBody = repRes.json();
+      expect(repBody.category).toBe(category);
+      expect(Array.isArray(repBody.kpis)).toBe(true);
+      expect(repBody.kpis.length).toBeGreaterThan(0);
+      expect(Array.isArray(repBody.charts)).toBe(true);
+      expect(Array.isArray(repBody.tables)).toBe(true);
+      expect(repBody.costBasisNote).toContain('Moving Average Cost (MAC)');
+      expect(repBody.costBasisNote).toContain('FIFO');
+      expect(['CONFIRMED_ACTUAL', 'PARTIAL_UNCOSTED']).toContain(repBody.costConfirmationStatus);
+
+      if (category === 'PROFITABILITY') {
+        const kpiKeys = repBody.kpis.map((k: { key: string }) => k.key);
+        expect(kpiKeys).toContain('net_revenue');
+        expect(kpiKeys).toContain('confirmed_cogs');
+        expect(kpiKeys).toContain('gross_profit');
+        expect(kpiKeys).toContain('net_profit');
+        expect(kpiKeys).toContain('gross_margin_pct');
+        expect(kpiKeys).toContain('net_margin_pct');
+        const tableKeys = repBody.tables.map((t: { key: string }) => t.key);
+        expect(tableKeys).toContain('product_profitability');
+        expect(tableKeys).toContain('category_profitability');
+        expect(tableKeys).toContain('branch_profitability');
+      }
+    }
+
+    // Drill-down endpoint verification for product source transactions
+    const drillRes = await app.inject({
+      method: 'GET',
+      url: `/v1/reports/business/drilldown?drilldownType=PRODUCT&targetId=${legacyBatchProdId}`,
+      headers: headers(ownerToken),
+    });
+    expect(drillRes.statusCode).toBe(200);
+    expect(drillRes.json().drilldownType).toBe('PRODUCT');
+    expect(Array.isArray(drillRes.json().rows)).toBe(true);
+    expect(drillRes.json().rows.length).toBeGreaterThan(0);
   });
 });

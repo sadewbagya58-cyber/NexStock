@@ -1513,7 +1513,11 @@ export async function updateProduct(
         detail: `Category "${nextCategoryId}" was not found in tenant "${trx.tenantId}".`,
       });
     }
-    if (categoryRow.status !== 'ACTIVE') {
+    if (
+      categoryRow.status !== 'ACTIVE' &&
+      input.categoryId !== undefined &&
+      input.categoryId !== existing.category_id
+    ) {
       throw new AppError({
         statusCode: 400,
         errorCode: 'ERR_VALIDATION_FAILED',
@@ -2205,6 +2209,70 @@ export async function archiveProduct(
   const updated = await trx.db
     .selectFrom('products')
     .selectAll()
+    .where('id', '=', productId)
+    .executeTakeFirstOrThrow();
+
+  return hydrateProductDetails(trx, updated);
+}
+
+export async function restoreProduct(
+  trx: TenantTransactionContext,
+  productId: string,
+): Promise<ProductResponse> {
+  await assertAuthorized(trx, {
+    permission: 'cat:product:manage',
+  });
+
+  await assertSubscriptionEntitlement(trx, {
+    requireWriteAccess: true,
+  });
+
+  const existing = await trx.db
+    .selectFrom('products')
+    .selectAll()
+    .where('tenant_id', '=', trx.tenantId)
+    .where('id', '=', productId)
+    .executeTakeFirst();
+
+  if (!existing) {
+    throw new AppError({
+      statusCode: 404,
+      errorCode: 'ERR_NOT_FOUND',
+      title: 'Product Not Found',
+      detail: `Product "${productId}" was not found.`,
+    });
+  }
+
+  const now = new Date();
+  const nextSyncVersion = Number(existing.sync_version) + 1;
+
+  await trx.db
+    .updateTable('products')
+    .set({
+      status: 'ACTIVE',
+      archived_at: null,
+      sync_version: nextSyncVersion,
+      updated_at: now,
+    })
+    .where('tenant_id', '=', trx.tenantId)
+    .where('id', '=', productId)
+    .execute();
+
+  await appendAuditLog(trx, {
+    action: 'CAT_PRODUCT_RESTORED',
+    resourceType: 'PRODUCT',
+    resourceId: productId,
+    metadata: {
+      sku: existing.sku,
+      name: existing.name,
+      previousStatus: existing.status,
+    },
+  });
+
+  const updated = await trx.db
+    .selectFrom('products')
+    .selectAll()
+    .where('tenant_id', '=', trx.tenantId)
     .where('id', '=', productId)
     .executeTakeFirstOrThrow();
 

@@ -267,6 +267,7 @@ import {
   approvePriceSuggestion,
   archiveCategory,
   archiveProduct,
+  restoreProduct,
   createCategory,
   createPriceSuggestion,
   createProduct,
@@ -298,6 +299,12 @@ import {
   previewLegacyUomCorrection,
   executeLegacyUomCorrection,
 } from './modules/cat/index.js';
+import {
+  type BusinessReportDrilldownQuery,
+  type BusinessReportQuery,
+  getBusinessReport,
+  getBusinessReportDrilldown,
+} from './modules/reports/index.js';
 import {
   convertTenantCurrencyAmount,
   recordTenantExchangeRate,
@@ -657,6 +664,14 @@ export async function buildApp(
       'Content-Type, Authorization, x-tenant-id, idempotency-key',
     );
     reply.header('access-control-expose-headers', 'x-idempotent-replayed');
+
+    if (
+      (request.method === 'POST' || request.method === 'DELETE' || request.method === 'PATCH') &&
+      request.headers['content-type']?.includes('application/json') &&
+      (!request.headers['content-length'] || request.headers['content-length'] === '0')
+    ) {
+      delete request.headers['content-type'];
+    }
 
     if (request.method === 'OPTIONS') {
       return reply.status(204).send();
@@ -3304,6 +3319,37 @@ export async function buildApp(
         options.db,
         { tenantId, userId: principal.userId, traceId },
         (trx) => archiveProduct(trx, request.params.productId),
+      );
+    },
+  );
+
+  app.post(
+    '/v1/products/:productId/restore',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ productId: UuidSchema }),
+        response: {
+          200: ProductResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => restoreProduct(trx, request.params.productId),
       );
     },
   );
@@ -10280,6 +10326,122 @@ export async function buildApp(
       const branchId = (request.query as { branchId?: string })?.branchId || null;
       const events = realtimeEventHub.getEventsSince(tenantId, sinceEpoch, branchId);
       return { events, currentEpoch: Date.now() };
+    },
+  );
+
+  // --------------------------------------------------------------------------
+  // Phase 7.5: Business Reports & Source Transaction Drilldown
+  // --------------------------------------------------------------------------
+  app.get(
+    '/v1/reports/business',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        querystring: Type.Object(
+          {
+            category: Type.Optional(
+              Type.Union([
+                Type.Literal('SALES'),
+                Type.Literal('INVENTORY'),
+                Type.Literal('PROFITABILITY'),
+                Type.Literal('PURCHASING'),
+                Type.Literal('CUSTOMER_CREDIT'),
+                Type.Literal('EMPLOYEE_HR'),
+                Type.Literal('FINANCIAL_EXPENSE'),
+                Type.Literal('AUDIT_OPERATIONAL'),
+              ]),
+            ),
+            granularity: Type.Optional(
+              Type.Union([
+                Type.Literal('DAILY'),
+                Type.Literal('WEEKLY'),
+                Type.Literal('MONTHLY'),
+              ]),
+            ),
+            startDate: Type.Optional(Type.String()),
+            endDate: Type.Optional(Type.String()),
+            branchId: Type.Optional(UuidSchema),
+            warehouseId: Type.Optional(UuidSchema),
+            employeeId: Type.Optional(Type.String()),
+            productId: Type.Optional(UuidSchema),
+            categoryId: Type.Optional(UuidSchema),
+            supplierId: Type.Optional(UuidSchema),
+            comparePrevious: Type.Optional(Type.String()),
+            comparePeriod: Type.Optional(Type.String()),
+          },
+          { additionalProperties: false },
+        ),
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => getBusinessReport(trx, request.query as BusinessReportQuery),
+      );
+    },
+  );
+
+  app.get(
+    '/v1/reports/business/drilldown',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        querystring: Type.Object(
+          {
+            drilldownType: Type.Union([
+              Type.Literal('PRODUCT'),
+              Type.Literal('PRODUCT_SALES'),
+              Type.Literal('CATEGORY'),
+              Type.Literal('CATEGORY_SALES'),
+              Type.Literal('BRANCH'),
+              Type.Literal('BRANCH_SALES'),
+              Type.Literal('EMPLOYEE'),
+              Type.Literal('EMPLOYEE_SALES'),
+              Type.Literal('STOCK_MOVEMENTS'),
+              Type.Literal('SUPPLIER'),
+              Type.Literal('SUPPLIER_PURCHASES'),
+              Type.Literal('CUSTOMER'),
+              Type.Literal('CUSTOMER_HISTORY'),
+              Type.Literal('EXPENSE_CATEGORY'),
+              Type.Literal('VOIDED_INVOICE'),
+            ]),
+            targetId: Type.Optional(Type.String()),
+            startDate: Type.Optional(Type.String()),
+            endDate: Type.Optional(Type.String()),
+            branchId: Type.Optional(UuidSchema),
+            warehouseId: Type.Optional(UuidSchema),
+          },
+          { additionalProperties: false },
+        ),
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          getBusinessReportDrilldown(
+            trx,
+            request.query as BusinessReportDrilldownQuery,
+          ),
+      );
     },
   );
 

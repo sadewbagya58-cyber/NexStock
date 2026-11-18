@@ -963,12 +963,8 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       expect(html).toContain('touch-action: manipulation;');
       expect(html).toContain('.pos-product-card:active {');
 
-      // 3. Small mobile responsive rules (480px)
-      expect(html).toContain('min-height: 86px !important;');
-
-      // 4. Ultra-compact mobile responsive rules (360px - 320px)
-      expect(html).toContain('grid-template-columns: repeat(2, 1fr) !important;');
-      expect(html).toContain('min-height: 80px !important;');
+      // 3. Mobile responsive single-column catalog rules (Task 3 All-Device POS Redesign)
+      expect(html).toContain('grid-template-columns: 1fr !important;');
     });
 
     it('BUG-011: verifies session retention, token refresh mutex, HTTP 403 safety, and multi-tab sync', () => {
@@ -3169,6 +3165,47 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       // 5. Barcode scan resolves availableQuantityTotal / p.availableQuantity / cachedProd.availableQuantity
       expect(html).toContain('resolved.availableQuantityTotal ??');
       expect(html).toContain('cachedProd?.availableQuantity ??');
+    });
+
+    it('implements Phase 7.5 Business Reports (all 8 categories, drilldown, exports), BUG-098 Archive/Restore, and All-Device POS Responsive UI', () => {
+      const html = readFileSync(resolve(WEB_ROOT, 'public/index.html'), 'utf8');
+
+      // 1. Phase 7.5 Business Reports: 8 categories, filters, drilldown, and exports
+      expect(html).toContain('function renderBusinessReportsView()');
+      expect(html).toContain('/v1/reports/business');
+      expect(html).toContain('/v1/reports/business/drilldown');
+      expect(html).toContain("id: 'SALES'");
+      expect(html).toContain("id: 'INVENTORY'");
+      expect(html).toContain("id: 'PROFITABILITY'");
+      expect(html).toContain("id: 'PURCHASING'");
+      expect(html).toContain("id: 'CUSTOMER_CREDIT'");
+      expect(html).toContain("id: 'EMPLOYEE_HR'");
+      expect(html).toContain("id: 'FINANCIAL_EXPENSE'");
+      expect(html).toContain("id: 'AUDIT_OPERATIONAL'");
+      expect(html).toContain('function openReportDrilldownModal(');
+      expect(html).toContain('function exportBusinessReportCsv()');
+      expect(html).toContain('function exportBusinessReportExcel()');
+      expect(html).toContain('function exportBusinessReportPdf()');
+      expect(html).toContain('function printBusinessReport()');
+      expect(html).toContain('CONFIRMED_ACTUAL');
+
+      // 2. BUG-098: Archive immediate UI update, duplicate guard, Archived filter tab, and Restore/Unarchive
+      expect(html).toContain('activeProductLifecycleOps');
+      expect(html).toContain('function setProductStatusFilter(');
+      expect(html).toContain('id="btnFilterProdActive"');
+      expect(html).toContain('id="btnFilterProdArchived"');
+      expect(html).toContain('id="btnFilterProdAll"');
+      expect(html).toContain('async function restoreProduct(id, name, btnEl = null)');
+      expect(html).toContain('window.unarchiveProduct = restoreProduct');
+      expect(html).toContain('/restore');
+      expect(html).toContain('Archiving...');
+      expect(html).toContain('Restoring...');
+
+      // 3. POS All-Device Responsive UI/UX Redesign (73%/27% split, independent scroll, mobile single-column catalog)
+      expect(html).toContain('grid-template-columns: minmax(0, 2.65fr) minmax(275px, 1fr);');
+      expect(html).toContain('#posProductSectionsContainer');
+      expect(html).toContain('grid-template-columns: 1fr !important;');
+      expect(html).toContain("catalogEl.classList.remove('mobile-hidden')");
     });
   });
 });

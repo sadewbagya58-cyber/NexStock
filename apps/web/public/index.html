@@ -528,7 +528,9 @@
       display: grid;
       grid-template-columns: minmax(0, 2.65fr) minmax(275px, 1fr);
       gap: 16px;
-      height: calc(100vh - var(--header-height) - 56px);
+      height: calc(100vh - var(--header-height) - 96px);
+      min-height: 520px;
+      max-height: calc(100vh - var(--header-height) - 80px);
       align-items: stretch;
     }
     .pos-catalog-panel {
@@ -540,6 +542,20 @@
       padding: 14px 16px;
       overflow: hidden;
       min-width: 0;
+      min-height: 0;
+      height: 100%;
+    }
+    #posProductSectionsContainer {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      overflow-x: hidden;
+      padding-right: 4px;
+      padding-bottom: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      -webkit-overflow-scrolling: touch;
     }
     .pos-product-grid {
       display: grid;
@@ -548,10 +564,9 @@
       align-content: start;
       align-items: start;
       gap: 10px;
-      overflow-y: auto;
-      flex: 1;
-      padding-top: 8px;
-      padding-bottom: 10px;
+      overflow: visible;
+      padding-top: 4px;
+      padding-bottom: 4px;
     }
     .pos-product-card {
       border: 1px solid var(--border-subtle);
@@ -693,6 +708,14 @@
       .pos-layout {
         grid-template-columns: minmax(0, 2.75fr) minmax(360px, 1fr);
       }
+      .pos-product-grid {
+        grid-template-columns: repeat(auto-fill, minmax(195px, 1fr));
+      }
+    }
+    @media (min-width: 641px) and (max-width: 768px) {
+      .pos-product-grid {
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)) !important;
+      }
     }
     @media (max-width: 640px) {
       .modal-grid-2,
@@ -707,11 +730,12 @@
         min-height: 42px;
       }
       .pos-product-grid {
-        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+        grid-template-columns: 1fr !important;
         gap: 8px !important;
       }
       .pos-product-card {
-        padding: 9px 10px !important;
+        padding: 10px 12px !important;
+        min-height: 82px !important;
       }
     }
     .pos-product-card:hover {
@@ -755,6 +779,8 @@
       flex-direction: column;
       overflow: hidden;
       min-width: 0;
+      min-height: 0;
+      height: 100%;
     }
     .pos-cart-header {
       padding: 12px 16px;
@@ -2091,7 +2117,10 @@
         grid-template-columns: 1fr !important;
       }
       .pos-layout {
-        grid-template-columns: minmax(0, 1.85fr) minmax(300px, 1fr) !important;
+        grid-template-columns: minmax(0, 1.9fr) minmax(285px, 1fr) !important;
+      }
+      .pos-product-grid {
+        grid-template-columns: repeat(auto-fill, minmax(165px, 1fr)) !important;
       }
     }
 
@@ -2300,13 +2329,40 @@
       }
 
       .pos-mobile-floating-cart {
-        display: flex;
+        display: flex !important;
+        position: fixed !important;
+        bottom: 12px !important;
+        left: 12px !important;
+        right: 12px !important;
+        z-index: 45 !important;
+        margin-top: 0 !important;
+        min-height: 48px !important;
+      }
+
+      .pos-mobile-floating-cart.mobile-hidden,
+      .pos-catalog-panel.mobile-hidden,
+      .pos-cart-panel.mobile-hidden {
+        display: none !important;
       }
 
       .pos-layout {
         grid-template-columns: 1fr !important;
         height: auto !important;
+        max-height: none !important;
+        min-height: 0 !important;
         gap: 16px !important;
+        padding-bottom: 76px !important;
+      }
+
+      .pos-catalog-panel,
+      .pos-cart-panel {
+        height: auto !important;
+        max-height: none !important;
+      }
+
+      #posProductSectionsContainer {
+        max-height: none !important;
+        overflow-y: visible !important;
       }
 
       .modal-box {
@@ -2392,15 +2448,15 @@
         font-size: 12px;
       }
       .pos-product-grid {
-        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)) !important;
+        grid-template-columns: 1fr !important;
         gap: 8px !important;
         padding-top: 8px !important;
         align-content: start !important;
         grid-auto-rows: max-content !important;
       }
       .pos-product-card {
-        padding: 10px !important;
-        min-height: 86px !important;
+        padding: 10px 12px !important;
+        min-height: 82px !important;
       }
     }
 
@@ -2727,6 +2783,11 @@
       <a class="nav-link active" data-view="dashboard">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
         Dashboard
+      </a>
+
+      <a class="nav-link" data-view="reports" id="navLinkBusinessReports">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
+        Business Reports
       </a>
 
       <div class="nav-section-title">Inventory</div>
@@ -3063,6 +3124,7 @@
       'forgot-password',
       'onboard-business',
       'tenant-select',
+      'reports',
       'dashboard',
       'products',
       'pricing',
@@ -4475,6 +4537,7 @@
 
     const VIEW_PERMISSION_MAP = {
       'dashboard': 'dash:view',
+      'reports': ['rep:report:view', 'exp:report:view', 'crm:report:read', 'inv:costing:read', 'pur:po:read'],
       'pos-checkout': ['pos:sale:create', 'pos:payment:create'],
       'pos-registers': ['pos:register:read', 'org:register:read', 'org:register:manage'],
       'pos-shifts': ['pos:shift:open', 'pos:shift:close'],
@@ -4566,6 +4629,7 @@
     function formatViewTitle(viewName) {
       const titles = {
         'dashboard': 'Dashboard',
+        'reports': 'Business Reports',
         'products': 'Products',
         'pricing': 'Smart Pricing & Margins',
         'categories': 'Categories',
@@ -4655,6 +4719,12 @@
             label: 'Dashboard',
             icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>`,
             permission: 'dash:view'
+          },
+          {
+            view: 'reports',
+            label: 'Business Reports',
+            icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>`,
+            permission: ['rep:report:view', 'exp:report:view', 'crm:report:read', 'inv:costing:read', 'pur:po:read']
           }
         ]
       },
@@ -5074,6 +5144,7 @@
         case 'tenant-select': renderTenantSelectView(); break;
         case 'membership-restricted': renderMembershipRestrictedView(); break;
         case 'dashboard': renderDashboardView(); break;
+        case 'reports': renderBusinessReportsView(); break;
         case 'products': renderProductsView(); break;
         case 'pricing': renderSmartPricingView(); break;
         case 'categories': renderCategoriesView(); break;
@@ -6568,14 +6639,42 @@
     }
 
     // =========================================================================
-    // 2. PRODUCTS VIEW
+    // 2. PRODUCTS VIEW (with Instant Archive / Unarchive & Status Filter Tabs — BUG-098)
     // =========================================================================
+    const activeProductLifecycleOps = new Set();
+
+    function setProductStatusFilter(statusFilter) {
+      state.productStatusFilter = statusFilter || 'ACTIVE';
+      const container = document.getElementById('mainContainer');
+      const activeSearch = document.getElementById('productSearchInput')?.value || '';
+      if (container) {
+        paintProductsHtml(container);
+        if (activeSearch) {
+          const searchInput = document.getElementById('productSearchInput');
+          if (searchInput) {
+            searchInput.value = activeSearch;
+            filterProductsTable();
+          }
+        }
+      }
+    }
+
     function paintProductsHtml(container) {
+      const statusFilter = state.productStatusFilter || 'ACTIVE';
+      const allProds = state.cachedProducts || [];
+      const activeProds = allProds.filter(p => p.status === 'ACTIVE' || (p.status !== 'ARCHIVED' && p.isActive !== false));
+      const archivedProds = allProds.filter(p => p.status === 'ARCHIVED' || p.isActive === false);
+      const visibleProducts = statusFilter === 'ARCHIVED'
+        ? archivedProds
+        : statusFilter === 'ALL'
+          ? allProds
+          : activeProds;
+
       container.innerHTML = `
           <div class="view-header">
             <div>
               <h1 class="view-title">Product Catalog</h1>
-              <div class="view-subtitle">Manage SKUs, prices, unit conversions, and barcodes</div>
+              <div class="view-subtitle">Manage SKUs, prices, unit conversions, barcodes, and lifecycle status</div>
             </div>
             <div style="display: flex; gap: 8px; flex-wrap: wrap;">
               ${hasPermission('cat:pricing:read') ? `
@@ -6588,17 +6687,30 @@
           </div>
 
           <div class="card">
-            <div class="filter-bar">
-              <input type="text" class="form-input search-input" id="productSearchInput" placeholder="Search by SKU, Name or Barcode..." oninput="filterProductsTable()">
+            <div class="filter-bar" style="display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;">
+              <input type="text" class="form-input search-input" id="productSearchInput" placeholder="Search by SKU, Name or Barcode..." oninput="filterProductsTable()" style="flex: 1 1 240px;">
+              <div id="productStatusFilterTabs" style="display: inline-flex; gap: 6px; background: var(--bg-primary); padding: 4px; border-radius: 8px; border: 1px solid var(--border-subtle); flex-wrap: wrap;">
+                <button type="button" class="btn btn-sm ${statusFilter === 'ACTIVE' ? 'btn-primary' : 'btn-secondary'}" id="btnFilterProdActive" onclick="setProductStatusFilter('ACTIVE')" style="min-height: 32px; padding: 4px 10px; font-size: 12px;">
+                  Active (${activeProds.length})
+                </button>
+                <button type="button" class="btn btn-sm ${statusFilter === 'ARCHIVED' ? 'btn-primary' : 'btn-secondary'}" id="btnFilterProdArchived" onclick="setProductStatusFilter('ARCHIVED')" style="min-height: 32px; padding: 4px 10px; font-size: 12px;">
+                  Archived (${archivedProds.length})
+                </button>
+                <button type="button" class="btn btn-sm ${statusFilter === 'ALL' ? 'btn-primary' : 'btn-secondary'}" id="btnFilterProdAll" onclick="setProductStatusFilter('ALL')" style="min-height: 32px; padding: 4px 10px; font-size: 12px;">
+                  All (${allProds.length})
+                </button>
+              </div>
             </div>
 
-            ${state.cachedProducts.length === 0 ? `
+            ${visibleProducts.length === 0 ? `
               <div class="empty-state-card">
                 <svg class="empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
-                <div class="empty-state-title">No products found</div>
-                <p class="empty-state-desc">No products found. Click "+ Add Product" to create your first SKU.</p>
-                ${hasPermission('cat:product:manage') ? `
+                <div class="empty-state-title">${statusFilter === 'ARCHIVED' ? 'No archived products' : 'No products found'}</div>
+                <p class="empty-state-desc">${statusFilter === 'ARCHIVED' ? 'Products that you archive will appear here and can be restored to the active catalog anytime.' : 'No products found. Click "+ Add Product" to create your first SKU.'}</p>
+                ${statusFilter !== 'ARCHIVED' && hasPermission('cat:product:manage') ? `
                   <button class="btn btn-primary" onclick="openCreateProductModal()">+ Add Product</button>
+                ` : statusFilter === 'ARCHIVED' ? `
+                  <button class="btn btn-secondary" onclick="setProductStatusFilter('ACTIVE')">View Active Catalog</button>
                 ` : ''}
               </div>
             ` : `
@@ -6620,7 +6732,7 @@
                       </tr>
                     </thead>
                     <tbody>
-                      ${state.cachedProducts.map(p => {
+                      ${visibleProducts.map(p => {
                         const sku = escapeHtml(p.sku);
                         const name = escapeHtml(p.name);
                         const barcode = escapeHtml(p.primaryBarcode || '—');
@@ -6628,12 +6740,13 @@
                         const costFormatted = formatTenantMoney(p.purchaseCost);
                         const priceFormatted = formatTenantMoney(p.sellingPrice);
                         const isTracked = p.trackInventory !== false;
-                        const isActive = p.status === 'ACTIVE' || p.isActive === true;
+                        const isActive = p.status !== 'ARCHIVED' && p.isActive !== false;
+                        const isBusy = activeProductLifecycleOps.has(p.id);
                         const resolvedImg = p.imageUrl ? resolveMediaUrl(p.imageUrl) : null;
                         const imgUrl = resolvedImg ? escapeHtml(resolvedImg) : null;
 
                         return `
-                          <tr data-sku="${sku.toLowerCase()}" data-name="${name.toLowerCase()}" data-barcode="${barcode.toLowerCase()}">
+                          <tr data-product-id="${escapeHtml(p.id)}" data-status="${isActive ? 'ACTIVE' : 'ARCHIVED'}" data-sku="${sku.toLowerCase()}" data-name="${name.toLowerCase()}" data-barcode="${barcode.toLowerCase()}">
                             <td style="text-align: center; vertical-align: middle;">
                               ${imgUrl ? `
                                 <img src="${imgUrl}" alt="${sku}" style="width: 36px; height: 36px; border-radius: 6px; object-fit: cover; border: 1px solid var(--border-subtle); display: inline-block;" onerror="this.onerror=null; this.style.display='none'; if(this.nextElementSibling) this.nextElementSibling.style.display='inline-flex';" />
@@ -6661,12 +6774,14 @@
                             <td><span class="badge-pill ${isActive ? 'badge-green' : 'badge-red'}">${isActive ? 'ACTIVE' : 'ARCHIVED'}</span></td>
                             <td>
                               ${hasPermission('cat:product:manage') ? `
-                                <div style="display: flex; gap: 6px;">
+                                <div style="display: flex; gap: 6px; flex-wrap: wrap;">
                                   <button class="btn btn-secondary btn-sm" onclick="openEditProductModal('${p.id}')">Edit</button>
                                   <button class="btn btn-secondary btn-sm" title="Manage Barcodes &amp; Print Label" onclick="openBarcodeLabelModal('${p.id}')">🏷️ Barcode</button>
                                   ${isActive ? `
-                                    <button class="btn btn-secondary btn-sm" onclick="archiveProduct('${p.id}', '${sku}')">Archive</button>
-                                  ` : ''}
+                                    <button class="btn btn-secondary btn-sm" id="btnArchiveProd-${escapeHtml(p.id)}" onclick="archiveProduct('${p.id}', '${sku}', this)" ${isBusy ? 'disabled' : ''}>${isBusy ? '⏳ Archiving...' : 'Archive'}</button>
+                                  ` : `
+                                    <button class="btn btn-primary btn-sm" id="btnRestoreProd-${escapeHtml(p.id)}" onclick="restoreProduct('${p.id}', '${sku}', this)" ${isBusy ? 'disabled' : ''}>${isBusy ? '⏳ Restoring...' : 'Restore'}</button>
+                                  `}
                                 </div>
                               ` : `
                                 <span style="font-size: 12px; color: var(--text-secondary);">View only</span>
@@ -6681,7 +6796,7 @@
               </div>
 
               <div class="mobile-cards-container" id="productsMobileList">
-                ${state.cachedProducts.map(p => {
+                ${visibleProducts.map(p => {
                   const sku = escapeHtml(p.sku);
                   const name = escapeHtml(p.name);
                   const barcode = escapeHtml(p.primaryBarcode || '—');
@@ -6689,12 +6804,13 @@
                   const costFormatted = formatTenantMoney(p.purchaseCost);
                   const priceFormatted = formatTenantMoney(p.sellingPrice);
                   const isTracked = p.trackInventory !== false;
-                  const isActive = p.status === 'ACTIVE' || p.isActive === true;
+                  const isActive = p.status !== 'ARCHIVED' && p.isActive !== false;
+                  const isBusy = activeProductLifecycleOps.has(p.id);
                   const resolvedImg = p.imageUrl ? resolveMediaUrl(p.imageUrl) : null;
                   const imgUrl = resolvedImg ? escapeHtml(resolvedImg) : null;
 
                   return `
-                    <div class="entity-card" data-sku="${sku.toLowerCase()}" data-name="${name.toLowerCase()}" data-barcode="${barcode.toLowerCase()}">
+                    <div class="entity-card" data-product-id="${escapeHtml(p.id)}" data-status="${isActive ? 'ACTIVE' : 'ARCHIVED'}" data-sku="${sku.toLowerCase()}" data-name="${name.toLowerCase()}" data-barcode="${barcode.toLowerCase()}">
                       <div class="entity-card-header">
                         <div style="display: flex; gap: 10px; align-items: center;">
                           ${imgUrl ? `
@@ -6737,8 +6853,10 @@
                           <button class="btn btn-secondary btn-sm" style="flex: 1;" onclick="openEditProductModal('${p.id}')">Edit</button>
                           <button class="btn btn-secondary btn-sm" style="flex: 1;" onclick="openBarcodeLabelModal('${p.id}')">🏷️ Barcode</button>
                           ${isActive ? `
-                            <button class="btn btn-secondary btn-sm" style="flex: 1;" onclick="archiveProduct('${p.id}', '${sku}')">Archive</button>
-                          ` : ''}
+                            <button class="btn btn-secondary btn-sm" style="flex: 1;" onclick="archiveProduct('${p.id}', '${sku}', this)" ${isBusy ? 'disabled' : ''}>${isBusy ? '⏳ Archiving...' : 'Archive'}</button>
+                          ` : `
+                            <button class="btn btn-primary btn-sm" style="flex: 1;" onclick="restoreProduct('${p.id}', '${sku}', this)" ${isBusy ? 'disabled' : ''}>${isBusy ? '⏳ Restoring...' : 'Restore'}</button>
+                          `}
                         ` : `
                           <span style="font-size: 12px; color: var(--text-secondary); padding: 4px;">Read-only SKU</span>
                         `}
@@ -7217,14 +7335,109 @@
       }
     }
 
-    async function archiveProduct(id, name) {
-      if (!confirm(`Are you sure you want to archive "${name}"? It will no longer be available for sale.`)) return;
+    async function archiveProduct(id, name, btnEl = null) {
+      if (!id || activeProductLifecycleOps.has(id)) return;
+      if (typeof window.confirm === 'function' && !window.confirm(`Are you sure you want to archive "${name}"? It will no longer be available for sale until restored.`)) {
+        return;
+      }
+
+      activeProductLifecycleOps.add(id);
+      const targetBtn = btnEl || document.getElementById(`btnArchiveProd-${id}`);
+      const origText = targetBtn ? targetBtn.textContent : 'Archive';
+      if (targetBtn) {
+        targetBtn.disabled = true;
+        targetBtn.textContent = '⏳ Archiving...';
+      }
+
       try {
-        await apiFetch(`/v1/products/${id}/archive`, { method: 'POST' });
+        const updated = await apiFetch(`/v1/products/${id}/archive`, { method: 'POST', body: JSON.stringify({}) });
+        const prod = (state.cachedProducts || []).find(x => x.id === id);
+        if (prod) {
+          Object.assign(prod, updated || {}, {
+            status: 'ARCHIVED',
+            isActive: false,
+            archivedAt: updated?.archivedAt || new Date().toISOString()
+          });
+        }
+        if (Array.isArray(state.posCachedProducts)) {
+          state.posCachedProducts = state.posCachedProducts.filter(x => x.id !== id);
+        }
+        setViewCache('products', { products: state.cachedProducts, categories: state.cachedCategories });
+
+        const container = document.getElementById('mainContainer');
+        if (container && state.activeView === 'products') {
+          const activeSearch = document.getElementById('productSearchInput')?.value || '';
+          paintProductsHtml(container);
+          if (activeSearch) {
+            const searchInput = document.getElementById('productSearchInput');
+            if (searchInput) {
+              searchInput.value = activeSearch;
+              filterProductsTable();
+            }
+          }
+        }
         showToast(`Product "${name}" archived`, 'success');
-        renderProductsView();
-      } catch (err) {}
+      } catch (err) {
+        if (targetBtn) {
+          targetBtn.disabled = false;
+          targetBtn.textContent = origText;
+        }
+      } finally {
+        activeProductLifecycleOps.delete(id);
+      }
     }
+
+    async function restoreProduct(id, name, btnEl = null) {
+      if (!id || activeProductLifecycleOps.has(id)) return;
+
+      activeProductLifecycleOps.add(id);
+      const targetBtn = btnEl || document.getElementById(`btnRestoreProd-${id}`);
+      const origText = targetBtn ? targetBtn.textContent : 'Restore';
+      if (targetBtn) {
+        targetBtn.disabled = true;
+        targetBtn.textContent = '⏳ Restoring...';
+      }
+
+      try {
+        const updated = await apiFetch(`/v1/products/${id}/restore`, { method: 'POST', body: JSON.stringify({}) });
+        const prod = (state.cachedProducts || []).find(x => x.id === id);
+        if (prod) {
+          Object.assign(prod, updated || {}, {
+            status: 'ACTIVE',
+            isActive: true,
+            archivedAt: null
+          });
+        } else if (updated && updated.id) {
+          state.cachedProducts = [updated, ...(state.cachedProducts || [])];
+        }
+        setViewCache('products', { products: state.cachedProducts, categories: state.cachedCategories });
+
+        const container = document.getElementById('mainContainer');
+        if (container && state.activeView === 'products') {
+          const activeSearch = document.getElementById('productSearchInput')?.value || '';
+          paintProductsHtml(container);
+          if (activeSearch) {
+            const searchInput = document.getElementById('productSearchInput');
+            if (searchInput) {
+              searchInput.value = activeSearch;
+              filterProductsTable();
+            }
+          }
+        }
+        showToast(`Product "${name}" restored to Active Catalog`, 'success');
+      } catch (err) {
+        if (targetBtn) {
+          targetBtn.disabled = false;
+          targetBtn.textContent = origText;
+        }
+      } finally {
+        activeProductLifecycleOps.delete(id);
+      }
+    }
+    const unarchiveProduct = restoreProduct;
+    window.archiveProduct = archiveProduct;
+    window.restoreProduct = restoreProduct;
+    window.unarchiveProduct = restoreProduct;
 
     function openEditProductModal(productId) {
       const p = (state.cachedProducts || []).find(x => x.id === productId);
@@ -9978,17 +10191,32 @@
     function switchPosMobileTab(tab) {
       const catalogEl = document.querySelector('.pos-catalog-panel');
       const cartEl = document.querySelector('.pos-cart-panel');
+      const floatCart = document.getElementById('posMobileFloatingCart');
       const catBtn = document.getElementById('posTabCatalogBtn');
       const cartBtn = document.getElementById('posTabCartBtn');
 
       if (tab === 'catalog') {
-        if (catalogEl) catalogEl.style.display = 'block';
-        if (cartEl) cartEl.style.display = 'none';
+        if (catalogEl) {
+          catalogEl.classList.remove('mobile-hidden');
+          catalogEl.style.display = '';
+        }
+        if (cartEl) {
+          cartEl.classList.add('mobile-hidden');
+          cartEl.style.display = '';
+        }
+        if (floatCart) floatCart.classList.remove('mobile-hidden');
         if (catBtn) catBtn.classList.add('active');
         if (cartBtn) cartBtn.classList.remove('active');
       } else {
-        if (catalogEl) catalogEl.style.display = 'none';
-        if (cartEl) cartEl.style.display = 'block';
+        if (catalogEl) {
+          catalogEl.classList.add('mobile-hidden');
+          catalogEl.style.display = '';
+        }
+        if (cartEl) {
+          cartEl.classList.remove('mobile-hidden');
+          cartEl.style.display = '';
+        }
+        if (floatCart) floatCart.classList.add('mobile-hidden');
         if (catBtn) catBtn.classList.remove('active');
         if (cartBtn) cartBtn.classList.add('active');
       }
@@ -10087,7 +10315,7 @@
         state.activeShift = activeShift;
         state.shiftStatusError = shiftStatusError;
 
-        let products = productsRes || [];
+        let products = Array.isArray(productsRes) ? productsRes : (productsRes?.data || productsRes?.items || []);
         state.posCachedProducts = products;
         state.posCatalogWarehouseId = state.warehouseId;
         state.posCachedCategories = categories;
@@ -10238,14 +10466,14 @@
               </div>
 
               <!-- Floating Mobile Cart Pill -->
-              <div class="pos-mobile-floating-cart" id="posMobileFloatingCart" onclick="switchPosMobileTab('cart')" style="display: ${state.cart.length > 0 ? 'flex' : 'none'};">
+              <div class="pos-mobile-floating-cart" id="posMobileFloatingCart" onclick="switchPosMobileTab('cart')">
                 <span>🛒 Cart (${state.cart.length} items)</span>
                 <span>${formatTenantMoney(calculateCartGrandTotal())} &rarr;</span>
               </div>
             </div>
 
             <!-- Cart Panel -->
-            <div class="pos-cart-panel">
+            <div class="pos-cart-panel mobile-hidden">
               <div class="pos-cart-header">
                 <span>Current Order</span>
                 <button class="btn btn-secondary btn-sm" onclick="clearCart()">Clear</button>
@@ -12707,7 +12935,6 @@
 
       const floatCart = document.getElementById('posMobileFloatingCart');
       if (floatCart) {
-        floatCart.style.display = state.cart.length > 0 ? 'flex' : 'none';
         floatCart.innerHTML = `<span>🛒 Cart (${state.cart.length} items)</span><span>${formatTenantMoney(grandTotal)} &rarr;</span>`;
       }
     }
@@ -29090,6 +29317,787 @@
         showToast(err.message, 'error');
       }
     }
+
+    // =========================================================================
+    // PHASE 7.5: BUSINESS REPORTS MODULE (ALL 8 CATEGORIES, DRILLDOWN & EXPORTS)
+    // =========================================================================
+    state.reportFilters = state.reportFilters || {
+      category: 'SALES',
+      preset: '30D',
+      startDate: new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10),
+      endDate: new Date().toISOString().slice(0, 10),
+      granularity: 'DAILY',
+      branchId: '',
+      warehouseId: '',
+      employeeId: '',
+      productId: '',
+      comparePrevious: true
+    };
+    state.currentBusinessReport = null;
+    state.reportLoading = false;
+
+    const BUSINESS_REPORT_CATEGORIES = [
+      { id: 'SALES', label: 'Sales Reports', icon: '💳', desc: 'Daily/Weekly/Monthly trends, product & category sales, employee & branch breakdowns, discounts, refunds & AOV' },
+      { id: 'INVENTORY', label: 'Inventory Reports', icon: '📦', desc: 'Stock valuation (MAC + FIFO), stock on hand, low/out of stock, fast/slow movers, turnover & adjustments' },
+      { id: 'PROFITABILITY', label: 'Profitability Reports', icon: '📈', desc: 'Gross Profit vs Net Profit, confirmed actual COGS (MAC + FIFO), product/category/branch profit & margins' },
+      { id: 'PURCHASING', label: 'Purchasing & Suppliers', icon: '🚚', desc: 'Purchase summary, supplier-wise purchases, goods received (GRN), purchase returns & AP balances' },
+      { id: 'CUSTOMER_CREDIT', label: 'Customer & Credit', icon: '👥', desc: 'New & returning customers, top customers, purchase history, outstanding credit & overdue balances' },
+      { id: 'EMPLOYEE_HR', label: 'Employee & HR', icon: '🧑‍💼', desc: 'Employee sales performance, attendance summary, working hours, payroll summary & labor cost vs sales' },
+      { id: 'FINANCIAL_EXPENSE', label: 'Financial & Expenses', icon: '🏦', desc: 'Cash flow summary, payment methods, cash register closing, expense breakdown, AR/AP & tax summary' },
+      { id: 'AUDIT_OPERATIONAL', label: 'Audit & Operational', icon: '🛡️', desc: 'Stock adjustment history, user activity logs, price change history, voided transactions & register activity' }
+    ];
+
+    function ensureBusinessReportsStyles() {
+      if (document.getElementById('nexstock-business-reports-styles')) return;
+      const styleEl = document.createElement('style');
+      styleEl.id = 'nexstock-business-reports-styles';
+      styleEl.textContent = `
+        .rep-shell { display: flex; flex-direction: column; gap: 16px; width: 100%; max-width: 100%; overflow-x: hidden; padding-bottom: 32px; }
+        .rep-header-bar { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+        .rep-export-toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+        .rep-cat-tabs { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 6px; scrollbar-width: thin; -webkit-overflow-scrolling: touch; max-width: 100%; }
+        .rep-cat-tab { display: inline-flex; align-items: center; gap: 8px; padding: 9px 14px; border-radius: 10px; border: 1px solid var(--border-color); background: var(--bg-surface); color: var(--text-secondary); font-size: 13px; font-weight: 600; white-space: nowrap; cursor: pointer; transition: all 0.15s ease; flex-shrink: 0; }
+        .rep-cat-tab:hover { border-color: var(--accent-primary); color: var(--text-primary); }
+        .rep-cat-tab.active { background: var(--accent-primary); color: #fff; border-color: var(--accent-primary); box-shadow: 0 2px 8px rgba(79, 70, 229, 0.25); }
+        .rep-filter-card { background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 12px; max-width: 100%; }
+        .rep-preset-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; justify-content: space-between; }
+        .rep-preset-group { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+        .rep-preset-btn { padding: 6px 11px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-elevated); color: var(--text-secondary); font-size: 12px; font-weight: 600; cursor: pointer; }
+        .rep-preset-btn.active { background: rgba(99, 102, 241, 0.16); color: var(--accent-primary); border-color: var(--accent-primary); }
+        .rep-filter-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 10px; width: 100%; }
+        .rep-filter-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+        .rep-filter-field label { font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+        .rep-filter-field input, .rep-filter-field select { width: 100%; min-width: 0; padding: 7px 10px; font-size: 13px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-elevated); color: var(--text-primary); }
+        .rep-kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; width: 100%; }
+        .rep-kpi-card { background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+        .rep-kpi-label { font-size: 12px; font-weight: 600; color: var(--text-secondary); display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+        .rep-kpi-value { font-size: 22px; font-weight: 800; color: var(--text-primary); letter-spacing: -0.02em; word-break: break-word; }
+        .rep-kpi-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 11px; color: var(--text-muted); flex-wrap: wrap; }
+        .rep-delta-badge { display: inline-flex; align-items: center; gap: 3px; padding: 2px 7px; border-radius: 999px; font-weight: 700; font-size: 11px; }
+        .rep-delta-up { background: rgba(16, 185, 129, 0.15); color: #10b981; }
+        .rep-delta-down { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
+        .rep-delta-flat { background: rgba(148, 163, 184, 0.15); color: var(--text-secondary); }
+        .rep-cost-banner { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 12px 16px; border-radius: 10px; border: 1px solid rgba(16, 185, 129, 0.35); background: rgba(16, 185, 129, 0.08); font-size: 12.5px; line-height: 1.45; flex-wrap: wrap; }
+        .rep-cost-banner.unconfirmed { border-color: rgba(245, 158, 11, 0.45); background: rgba(245, 158, 11, 0.1); }
+        .rep-charts-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; width: 100%; }
+        .rep-chart-card { background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 12px; padding: 16px; min-width: 0; overflow: hidden; }
+        .rep-chart-title { font-size: 14px; font-weight: 700; color: var(--text-primary); margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; }
+        .rep-table-section { background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 12px; overflow: hidden; width: 100%; }
+        .rep-table-header { padding: 14px 16px; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .rep-table-scroll { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+        .rep-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .rep-table th { text-align: left; padding: 10px 12px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); background: var(--bg-elevated); border-bottom: 1px solid var(--border-color); white-space: nowrap; }
+        .rep-table td { padding: 10px 12px; border-bottom: 1px solid var(--border-color); color: var(--text-primary); vertical-align: middle; }
+        .rep-table tr:last-child td { border-bottom: none; }
+        .rep-table tr:hover td { background: rgba(99, 102, 241, 0.04); }
+        .rep-mobile-cards { display: none; flex-direction: column; gap: 10px; padding: 12px; }
+        .rep-mobile-row-card { border: 1px solid var(--border-color); border-radius: 10px; padding: 12px; background: var(--bg-elevated); display: flex; flex-direction: column; gap: 6px; }
+        .rep-mobile-field { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 12.5px; }
+        .rep-mobile-field-label { color: var(--text-muted); font-size: 11.5px; font-weight: 600; }
+        .rep-mobile-field-val { color: var(--text-primary); font-weight: 600; text-align: right; word-break: break-word; }
+        @media (max-width: 767px) {
+          .rep-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+          .rep-kpi-card { padding: 10px 12px; }
+          .rep-kpi-value { font-size: 17px; }
+          .rep-charts-grid { grid-template-columns: 1fr; }
+          .rep-filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+          .rep-table-scroll.has-mobile-cards { display: none; }
+          .rep-mobile-cards { display: flex; }
+        }
+        @media (max-width: 420px) {
+          .rep-kpi-grid { grid-template-columns: 1fr; }
+          .rep-filter-grid { grid-template-columns: 1fr; }
+        }
+        @media print {
+          .sidebar, .topbar, .rep-export-toolbar, .rep-cat-tabs, .rep-filter-card, .pos-mobile-bottom-bar { display: none !important; }
+          .rep-shell { padding: 0 !important; gap: 12px !important; }
+          .rep-table-scroll.has-mobile-cards { display: block !important; }
+          .rep-mobile-cards { display: none !important; }
+        }
+      `;
+      document.head.appendChild(styleEl);
+    }
+
+    function formatReportCellValue(val, format) {
+      if (val === null || val === undefined || val === '') return '—';
+      if (format === 'currency') {
+        const num = Number(val);
+        return Number.isFinite(num) ? formatTenantMoney(num) : String(val);
+      }
+      if (format === 'percent') {
+        const num = Number(val);
+        return Number.isFinite(num) ? `${num.toFixed(2)}%` : String(val);
+      }
+      if (format === 'number') {
+        const num = Number(val);
+        return Number.isFinite(num) ? num.toLocaleString(undefined, { maximumFractionDigits: 2 }) : String(val);
+      }
+      if (format === 'badge') {
+        const s = String(val).toUpperCase();
+        let cls = 'badge-neutral';
+        if (['COMPLETED', 'ACTIVE', 'CONFIRMED_ACTUAL', 'POSTED', 'APPROVED', 'PAID', 'FAST_MOVING', 'IN_STOCK', 'OPEN'].includes(s)) cls = 'badge-success';
+        else if (['LOW_STOCK', 'SLOW_MOVING', 'PARTIAL_UNCOSTED', 'PENDING', 'SUBMITTED', 'OVERDUE'].includes(s)) cls = 'badge-warning';
+        else if (['OUT_OF_STOCK', 'VOIDED', 'CANCELLED', 'ARCHIVED', 'REJECTED'].includes(s)) cls = 'badge-danger';
+        return `<span class="badge ${cls}">${escapeHtml(String(val))}</span>`;
+      }
+      if (typeof val === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(val)) {
+        return escapeHtml(val.replace('T', ' ').slice(0, 16));
+      }
+      return escapeHtml(String(val));
+    }
+
+    function renderReportSvgChart(chart) {
+      const series = Array.isArray(chart.series) ? chart.series : [];
+      if (series.length === 0) {
+        return `<div style="padding: 28px 12px; text-align: center; color: var(--text-muted); font-size: 13px;">No chart data in selected period</div>`;
+      }
+      const maxVal = Math.max(...series.map(s => Math.max(Math.abs(Number(s.value || 0)), Math.abs(Number(s.secondaryValue || 0)))), 1);
+
+      if (chart.type === 'horizontal-bar' || chart.type === 'donut') {
+        return `
+          <div style="display: flex; flex-direction: column; gap: 10px;">
+            ${series.slice(0, 8).map((item, idx) => {
+              const rawVal = Number(item.value || 0);
+              const pct = Math.min(100, Math.max(4, Math.round((Math.abs(rawVal) / maxVal) * 100)));
+              const colors = ['#6366f1', '#10b981', '#f59e0b', '#ec4899', '#3b82f6', '#8b5cf6', '#14b8a6', '#f97316'];
+              const barColor = colors[idx % colors.length];
+              return `
+                <div style="display: flex; flex-direction: column; gap: 4px;">
+                  <div style="display: flex; justify-content: space-between; align-items: center; font-size: 12px; gap: 8px;">
+                    <span style="color: var(--text-primary); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(String(item.label || '—'))}</span>
+                    <span style="color: var(--text-secondary); font-weight: 700; flex-shrink: 0;">${formatTenantMoney(rawVal)}${item.secondaryValue !== undefined ? ` <span style="color: var(--text-muted); font-weight: 500;">(${Number(item.secondaryValue).toLocaleString()})</span>` : ''}</span>
+                  </div>
+                  <div style="width: 100%; height: 8px; background: var(--bg-elevated); border-radius: 999px; overflow: hidden;">
+                    <div style="width: ${pct}%; height: 100%; background: ${barColor}; border-radius: 999px;"></div>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        `;
+      }
+
+      // Vertical SVG bar/combo chart
+      const visibleSeries = series.slice(-14);
+      const svgW = 520;
+      const svgH = 185;
+      const padT = 16;
+      const padB = 34;
+      const padL = 12;
+      const padR = 12;
+      const plotW = svgW - padL - padR;
+      const plotH = svgH - padT - padB;
+      const slotW = plotW / Math.max(visibleSeries.length, 1);
+      const barW = Math.max(8, Math.min(28, slotW * 0.56));
+
+      const barsSvg = visibleSeries.map((pt, i) => {
+        const val = Number(pt.value || 0);
+        const h = Math.max(3, Math.round((Math.abs(val) / maxVal) * plotH));
+        const x = padL + i * slotW + (slotW - barW) / 2;
+        const y = padT + (plotH - h);
+        const shortLabel = String(pt.label || '').length > 10 ? String(pt.label).slice(-5) : String(pt.label || '');
+        const fill = val < 0 ? '#ef4444' : '#6366f1';
+        return `
+          <g>
+            <title>${escapeHtml(String(pt.label))}: ${ val.toLocaleString() }</title>
+            <rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${h.toFixed(1)}" rx="4" fill="${fill}" opacity="0.9"></rect>
+            <text x="${(x + barW / 2).toFixed(1)}" y="${svgH - 12}" text-anchor="middle" fill="var(--text-muted)" font-size="10">${escapeHtml(shortLabel)}</text>
+          </g>
+        `;
+      }).join('');
+
+      return `
+        <div style="width: 100%; overflow: hidden;">
+          <svg viewBox="0 0 ${svgW} ${svgH}" style="width: 100%; height: auto; max-height: 200px; display: block;" role="img" aria-label="${escapeHtml(chart.title || 'Report Chart')}">
+            <line x1="${padL}" y1="${padT + plotH}" x2="${svgW - padR}" y2="${padT + plotH}" stroke="var(--border-color)" stroke-width="1"></line>
+            ${barsSvg}
+          </svg>
+        </div>
+      `;
+    }
+
+    function applyReportDatePreset(preset) {
+      const now = new Date();
+      const endStr = now.toISOString().slice(0, 10);
+      let startStr = endStr;
+      if (preset === 'TODAY') {
+        startStr = endStr;
+      } else if (preset === '7D') {
+        startStr = new Date(now.getTime() - 6 * 86400000).toISOString().slice(0, 10);
+      } else if (preset === '30D') {
+        startStr = new Date(now.getTime() - 29 * 86400000).toISOString().slice(0, 10);
+      } else if (preset === 'THIS_MONTH') {
+        startStr = `${endStr.slice(0, 8)}01`;
+      }
+      state.reportFilters.preset = preset;
+      state.reportFilters.startDate = startStr;
+      state.reportFilters.endDate = endStr;
+      loadAndRenderBusinessReports();
+    }
+
+    function selectBusinessReportCategory(category) {
+      if (!category) return;
+      state.reportFilters.category = category;
+      loadAndRenderBusinessReports();
+    }
+
+    function updateBusinessReportFiltersFromDom() {
+      const startEl = document.getElementById('reportStartDate');
+      const endEl = document.getElementById('reportEndDate');
+      const granEl = document.getElementById('reportGranularity');
+      const branchEl = document.getElementById('reportBranchFilter');
+      const whEl = document.getElementById('reportWarehouseFilter');
+      const empEl = document.getElementById('reportEmployeeFilter');
+      const prodEl = document.getElementById('reportProductFilter');
+      const cmpEl = document.getElementById('reportComparePeriodToggle');
+
+      if (startEl && startEl.value) state.reportFilters.startDate = startEl.value;
+      if (endEl && endEl.value) state.reportFilters.endDate = endEl.value;
+      if (granEl && granEl.value) state.reportFilters.granularity = granEl.value;
+      if (branchEl) state.reportFilters.branchId = branchEl.value || '';
+      if (whEl) state.reportFilters.warehouseId = whEl.value || '';
+      if (empEl) state.reportFilters.employeeId = empEl.value || '';
+      if (prodEl) state.reportFilters.productId = prodEl.value || '';
+      if (cmpEl) state.reportFilters.comparePrevious = Boolean(cmpEl.checked);
+      state.reportFilters.preset = 'CUSTOM';
+      loadAndRenderBusinessReports();
+    }
+
+    function buildOfflineFallbackBusinessReport(filters) {
+      const cat = filters.category || 'SALES';
+      const products = Array.isArray(state.cachedProducts) ? state.cachedProducts : [];
+      const activeProducts = products.filter(p => (p.status || 'ACTIVE') === 'ACTIVE');
+      return {
+        category: cat,
+        generatedAt: new Date().toISOString(),
+        filters: {
+          startDate: filters.startDate,
+          endDate: filters.endDate,
+          previousStartDate: filters.startDate,
+          previousEndDate: filters.endDate,
+          granularity: filters.granularity || 'DAILY',
+          branchId: filters.branchId || null,
+          warehouseId: filters.warehouseId || null,
+          employeeId: filters.employeeId || null,
+          productId: filters.productId || null
+        },
+        costBasisNote: 'Inventory valuation and COGS use Moving Average Cost (MAC) for standard/serialized items and FIFO cost layers for batch-tracked items. Gross Profit = Net Revenue − Confirmed COGS. Net Profit = Gross Profit − Approved Operating Expenses − Paid Payroll.',
+        costConfirmationStatus: 'CONFIRMED_ACTUAL',
+        kpis: [
+          { key: 'active_catalog', label: 'Active Catalog Items', value: activeProducts.length, formattedType: 'number', changePct: 0, previousValue: activeProducts.length }
+        ],
+        charts: [],
+        tables: []
+      };
+    }
+
+    async function loadAndRenderBusinessReports() {
+      ensureBusinessReportsStyles();
+      const container = document.getElementById('mainContainer');
+      if (!container) return;
+
+      const f = state.reportFilters;
+      state.reportLoading = true;
+      paintBusinessReportsShell(container);
+
+      try {
+        // Ensure reference lists for dropdown filters are available in background
+        if (!state.cachedBranches) {
+          apiFetch('/v1/branches', { silent: true }).then(d => { const items = Array.isArray(d) ? d : (d?.data || d?.items); if (items) state.cachedBranches = items; }).catch(() => {});
+        }
+        if (!state.cachedWarehouses) {
+          apiFetch('/v1/warehouses', { silent: true }).then(d => { const items = Array.isArray(d) ? d : (d?.data || d?.items); if (items) state.cachedWarehouses = items; }).catch(() => {});
+        }
+        if (!state.cachedProducts) {
+          apiFetch('/v1/products', { silent: true }).then(d => { const items = Array.isArray(d) ? d : (d?.data || d?.items); if (items) state.cachedProducts = items; }).catch(() => {});
+        }
+
+        const qs = new URLSearchParams();
+        qs.set('category', f.category || 'SALES');
+        if (f.startDate) qs.set('startDate', f.startDate);
+        if (f.endDate) qs.set('endDate', f.endDate);
+        if (f.granularity) qs.set('granularity', f.granularity);
+        if (f.branchId) qs.set('branchId', f.branchId);
+        if (f.warehouseId) qs.set('warehouseId', f.warehouseId);
+        if (f.employeeId) qs.set('employeeId', f.employeeId);
+        if (f.productId) qs.set('productId', f.productId);
+        qs.set('comparePrevious', f.comparePrevious ? 'true' : 'false');
+
+        const data = await apiFetch(`/v1/reports/business?${qs.toString()}`, { silent: true });
+        if (data && (Array.isArray(data.kpis) || data.category)) {
+          state.currentBusinessReport = data;
+        } else {
+          state.currentBusinessReport = buildOfflineFallbackBusinessReport(f);
+        }
+      } catch (_err) {
+        state.currentBusinessReport = buildOfflineFallbackBusinessReport(f);
+      } finally {
+        state.reportLoading = false;
+        if (state.activeView === 'reports' || state.currentView === 'reports') {
+          paintBusinessReportsShell(container);
+        }
+      }
+    }
+
+    function paintBusinessReportsShell(container) {
+      const f = state.reportFilters;
+      const rep = state.currentBusinessReport;
+      const activeCatMeta = BUSINESS_REPORT_CATEGORIES.find(c => c.id === f.category) || BUSINESS_REPORT_CATEGORIES[0];
+      const branches = Array.isArray(state.cachedBranches) ? state.cachedBranches : (Array.isArray(state.branches) ? state.branches : []);
+      const warehouses = Array.isArray(state.cachedWarehouses) ? state.cachedWarehouses : (Array.isArray(state.warehouses) ? state.warehouses : []);
+      const products = Array.isArray(state.cachedProducts) ? state.cachedProducts : [];
+      const employees = Array.isArray(state.cachedEmployees) ? state.cachedEmployees : [];
+
+      const kpisHtml = (rep && Array.isArray(rep.kpis) && rep.kpis.length > 0)
+        ? `<div class="rep-kpi-grid" id="reportKpiGrid">
+            ${rep.kpis.map(kpi => {
+              const formattedVal = formatReportCellValue(kpi.value, kpi.formattedType || 'number');
+              const hasDelta = f.comparePrevious && kpi.changePct !== null && kpi.changePct !== undefined;
+              const deltaNum = Number(kpi.changePct || 0);
+              const deltaCls = deltaNum > 0 ? 'rep-delta-up' : (deltaNum < 0 ? 'rep-delta-down' : 'rep-delta-flat');
+              const deltaArrow = deltaNum > 0 ? '▲' : (deltaNum < 0 ? '▼' : '•');
+              return `
+                <div class="rep-kpi-card" data-kpi-key="${escapeHtml(kpi.key)}">
+                  <div class="rep-kpi-label">
+                    <span>${escapeHtml(kpi.label)}</span>
+                    ${hasDelta ? `<span class="rep-delta-badge ${deltaCls}">${deltaArrow} ${Math.abs(deltaNum).toFixed(1)}%</span>` : ''}
+                  </div>
+                  <div class="rep-kpi-value">${formattedVal}</div>
+                  <div class="rep-kpi-meta">
+                    ${f.comparePrevious && kpi.previousValue !== null && kpi.previousValue !== undefined
+                      ? `<span>Prev: ${formatReportCellValue(kpi.previousValue, kpi.formattedType || 'number')}</span>`
+                      : `<span>${escapeHtml(kpi.subtitle || '')}</span>`}
+                    ${kpi.subtitle && f.comparePrevious ? `<span>${escapeHtml(kpi.subtitle)}</span>` : ''}
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>`
+        : (state.reportLoading ? `<div class="card p-4" style="text-align: center; color: var(--text-muted);">⏳ Loading ${escapeHtml(activeCatMeta.label)}...</div>` : '');
+
+      const showCostBanner = rep && (f.category === 'PROFITABILITY' || f.category === 'INVENTORY' || f.category === 'SALES');
+      const costBannerHtml = showCostBanner ? `
+        <div class="rep-cost-banner ${rep.costConfirmationStatus === 'PARTIAL_UNCOSTED' ? 'unconfirmed' : ''}" id="reportCostBasisBanner">
+          <div>
+            <strong style="display: block; margin-bottom: 2px;">
+              ${rep.costConfirmationStatus === 'CONFIRMED_ACTUAL'
+                ? '✅ Confirmed Actual Cost Basis (MAC + FIFO Layers)'
+                : '⚠️ Partial / Uncosted Items Detected — Profit Figures Separated'}
+            </strong>
+            <span>${escapeHtml(rep.costBasisNote || '')}</span>
+          </div>
+          <span class="badge ${rep.costConfirmationStatus === 'CONFIRMED_ACTUAL' ? 'badge-success' : 'badge-warning'}">
+            ${escapeHtml(rep.costConfirmationStatus || 'CONFIRMED_ACTUAL')}
+          </span>
+        </div>
+      ` : '';
+
+      const chartsHtml = (rep && Array.isArray(rep.charts) && rep.charts.length > 0)
+        ? `<div class="rep-charts-grid" id="reportChartsGrid">
+            ${rep.charts.map(ch => `
+              <div class="rep-chart-card" data-chart-key="${escapeHtml(ch.key)}">
+                <div class="rep-chart-title">
+                  <span>${escapeHtml(ch.title)}</span>
+                  <span style="font-size: 11px; color: var(--text-muted); font-weight: 500;">${escapeHtml(f.granularity || 'DAILY')}</span>
+                </div>
+                ${renderReportSvgChart(ch)}
+              </div>
+            `).join('')}
+          </div>`
+        : '';
+
+      const tablesHtml = (rep && Array.isArray(rep.tables) && rep.tables.length > 0)
+        ? rep.tables.map(tbl => {
+            const cols = Array.isArray(tbl.columns) ? tbl.columns : [];
+            const rows = Array.isArray(tbl.rows) ? tbl.rows : [];
+            return `
+              <div class="rep-table-section" data-table-key="${escapeHtml(tbl.key)}">
+                <div class="rep-table-header">
+                  <div>
+                    <h3 style="font-size: 15px; font-weight: 700; margin: 0;">${escapeHtml(tbl.title)}</h3>
+                    <span style="font-size: 12px; color: var(--text-muted);">${rows.length} record${rows.length === 1 ? '' : 's'}</span>
+                  </div>
+                </div>
+                ${rows.length === 0 ? `
+                  <div style="padding: 28px 16px; text-align: center; color: var(--text-muted); font-size: 13px;">
+                    No records matched the selected filter criteria for this period.
+                  </div>
+                ` : `
+                  <div class="rep-table-scroll has-mobile-cards">
+                    <table class="rep-table">
+                      <thead>
+                        <tr>
+                          ${cols.map(c => `<th style="text-align: ${c.align || 'left'};">${escapeHtml(c.label)}</th>`).join('')}
+                          <th style="text-align: right;">Source</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        ${rows.map(r => {
+                          const hasDrill = Boolean(r.drilldownType && r.drilldownId);
+                          const rowTitle = String(r.productName || r.categoryName || r.branchName || r.supplierName || r.customerName || r.employeeName || r.receiptNumber || r.poNumber || r.grnNumber || r.label || r.drilldownId || 'Details');
+                          return `
+                            <tr>
+                              ${cols.map(c => `<td style="text-align: ${c.align || 'left'};">${formatReportCellValue(r[c.key], c.format)}</td>`).join('')}
+                              <td style="text-align: right; white-space: nowrap;">
+                                ${hasDrill ? `<button class="btn btn-secondary btn-sm" onclick="openReportDrilldownModal('${escapeHtml(String(r.drilldownType))}', '${escapeHtml(String(r.drilldownId))}', '${escapeHtml(rowTitle.replace(/'/g, "\\'"))}')">🔍 Drill-Down</button>` : `<span style="color: var(--text-muted); font-size: 11px;">Summary</span>`}
+                              </td>
+                            </tr>
+                          `;
+                        }).join('')}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div class="rep-mobile-cards">
+                    ${rows.slice(0, 25).map(r => {
+                      const hasDrill = Boolean(r.drilldownType && r.drilldownId);
+                      const rowTitle = String(r.productName || r.categoryName || r.branchName || r.supplierName || r.customerName || r.employeeName || r.receiptNumber || r.poNumber || r.grnNumber || r.label || r.drilldownId || 'Details');
+                      return `
+                        <div class="rep-mobile-row-card">
+                          ${cols.map(c => `
+                            <div class="rep-mobile-field">
+                              <span class="rep-mobile-field-label">${escapeHtml(c.label)}</span>
+                              <span class="rep-mobile-field-val">${formatReportCellValue(r[c.key], c.format)}</span>
+                            </div>
+                          `).join('')}
+                          ${hasDrill ? `
+                            <div style="margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border-color); display: flex; justify-content: flex-end;">
+                              <button class="btn btn-secondary btn-sm" style="width: 100%;" onclick="openReportDrilldownModal('${escapeHtml(String(r.drilldownType))}', '${escapeHtml(String(r.drilldownId))}', '${escapeHtml(rowTitle.replace(/'/g, "\\'"))}')">🔍 View Source Transactions</button>
+                            </div>
+                          ` : ''}
+                        </div>
+                      `;
+                    }).join('')}
+                  </div>
+                `}
+              </div>
+            `;
+          }).join('')
+        : '';
+
+      container.innerHTML = `
+        <div class="rep-shell" id="businessReportsRoot">
+          <div class="rep-header-bar">
+            <div>
+              <h1 style="font-size: 22px; font-weight: 800; margin: 0 0 4px 0;">Business Reports &amp; Analytics</h1>
+              <p style="font-size: 13px; color: var(--text-secondary); margin: 0;">${escapeHtml(activeCatMeta.desc)}</p>
+            </div>
+            <div class="rep-export-toolbar">
+              <button class="btn btn-secondary btn-sm" id="btnExportReportCsv" onclick="exportBusinessReportCsv()">📄 CSV</button>
+              <button class="btn btn-secondary btn-sm" id="btnExportReportExcel" onclick="exportBusinessReportExcel()">📊 Excel</button>
+              <button class="btn btn-secondary btn-sm" id="btnExportReportPdf" onclick="exportBusinessReportPdf()">📑 PDF</button>
+              <button class="btn btn-primary btn-sm" id="btnPrintBusinessReport" onclick="printBusinessReport()">🖨️ Print</button>
+            </div>
+          </div>
+
+          <!-- 8 Report Categories Navigation -->
+          <div class="rep-cat-tabs" role="tablist" aria-label="Report Categories">
+            ${BUSINESS_REPORT_CATEGORIES.map(c => `
+              <button type="button" role="tab" aria-selected="${f.category === c.id}" class="rep-cat-tab ${f.category === c.id ? 'active' : ''}" data-report-cat="${c.id}" onclick="selectBusinessReportCategory('${c.id}')">
+                <span>${c.icon}</span>
+                <span>${escapeHtml(c.label)}</span>
+              </button>
+            `).join('')}
+          </div>
+
+          <!-- Global Filters Card -->
+          <div class="rep-filter-card">
+            <div class="rep-preset-row">
+              <div class="rep-preset-group">
+                <span style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; margin-right: 4px;">Period:</span>
+                <button type="button" class="rep-preset-btn ${f.preset === 'TODAY' ? 'active' : ''}" onclick="applyReportDatePreset('TODAY')">Today</button>
+                <button type="button" class="rep-preset-btn ${f.preset === '7D' ? 'active' : ''}" onclick="applyReportDatePreset('7D')">Last 7 Days</button>
+                <button type="button" class="rep-preset-btn ${f.preset === '30D' ? 'active' : ''}" onclick="applyReportDatePreset('30D')">Last 30 Days</button>
+                <button type="button" class="rep-preset-btn ${f.preset === 'THIS_MONTH' ? 'active' : ''}" onclick="applyReportDatePreset('THIS_MONTH')">This Month</button>
+              </div>
+              <label style="display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; color: var(--text-secondary); cursor: pointer;">
+                <input type="checkbox" id="reportComparePeriodToggle" ${f.comparePrevious ? 'checked' : ''} onchange="updateBusinessReportFiltersFromDom()">
+                Compare with Previous Period (${rep && rep.filters ? `${escapeHtml(rep.filters.previousStartDate)} → ${escapeHtml(rep.filters.previousEndDate)}` : 'Auto'})
+              </label>
+            </div>
+
+            <div class="rep-filter-grid">
+              <div class="rep-filter-field">
+                <label for="reportStartDate">Start Date</label>
+                <input type="date" id="reportStartDate" value="${escapeHtml(f.startDate)}" onchange="updateBusinessReportFiltersFromDom()">
+              </div>
+              <div class="rep-filter-field">
+                <label for="reportEndDate">End Date</label>
+                <input type="date" id="reportEndDate" value="${escapeHtml(f.endDate)}" onchange="updateBusinessReportFiltersFromDom()">
+              </div>
+              <div class="rep-filter-field">
+                <label for="reportGranularity">Granularity</label>
+                <select id="reportGranularity" onchange="updateBusinessReportFiltersFromDom()">
+                  <option value="DAILY" ${f.granularity === 'DAILY' ? 'selected' : ''}>Daily</option>
+                  <option value="WEEKLY" ${f.granularity === 'WEEKLY' ? 'selected' : ''}>Weekly</option>
+                  <option value="MONTHLY" ${f.granularity === 'MONTHLY' ? 'selected' : ''}>Monthly</option>
+                </select>
+              </div>
+              <div class="rep-filter-field">
+                <label for="reportBranchFilter">Branch</label>
+                <select id="reportBranchFilter" onchange="updateBusinessReportFiltersFromDom()">
+                  <option value="">All Accessible Branches</option>
+                  ${branches.map(b => `<option value="${escapeHtml(b.id)}" ${f.branchId === b.id ? 'selected' : ''}>${escapeHtml(b.name || b.code || b.id)}</option>`).join('')}
+                </select>
+              </div>
+              <div class="rep-filter-field">
+                <label for="reportWarehouseFilter">Warehouse</label>
+                <select id="reportWarehouseFilter" onchange="updateBusinessReportFiltersFromDom()">
+                  <option value="">All Accessible Warehouses</option>
+                  ${warehouses.map(w => `<option value="${escapeHtml(w.id)}" ${f.warehouseId === w.id ? 'selected' : ''}>${escapeHtml(w.name || w.code || w.id)}</option>`).join('')}
+                </select>
+              </div>
+              <div class="rep-filter-field">
+                <label for="reportProductFilter">Product</label>
+                <select id="reportProductFilter" onchange="updateBusinessReportFiltersFromDom()">
+                  <option value="">All Products</option>
+                  ${products.slice(0, 200).map(p => `<option value="${escapeHtml(p.id)}" ${f.productId === p.id ? 'selected' : ''}>${escapeHtml(p.name)} (${escapeHtml(p.sku)})</option>`).join('')}
+                </select>
+              </div>
+              <div class="rep-filter-field">
+                <label for="reportEmployeeFilter">Employee</label>
+                <select id="reportEmployeeFilter" onchange="updateBusinessReportFiltersFromDom()">
+                  <option value="">All Employees / Cashiers</option>
+                  ${employees.slice(0, 150).map(e => `<option value="${escapeHtml(e.id)}" ${f.employeeId === e.id ? 'selected' : ''}>${escapeHtml(e.fullName || e.firstName || e.employeeCode || e.id)}</option>`).join('')}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          ${costBannerHtml}
+          ${kpisHtml}
+          ${chartsHtml}
+          ${tablesHtml}
+        </div>
+      `;
+    }
+
+    function renderBusinessReportsView() {
+      loadAndRenderBusinessReports();
+    }
+
+    async function openReportDrilldownModal(drilldownType, targetId, label) {
+      if (!drilldownType || !targetId) return;
+      const f = state.reportFilters || {};
+      const qs = new URLSearchParams({
+        drilldownType,
+        targetId,
+        startDate: f.startDate || '',
+        endDate: f.endDate || ''
+      });
+      if (f.branchId) qs.set('branchId', f.branchId);
+      if (f.warehouseId) qs.set('warehouseId', f.warehouseId);
+
+      let existingModal = document.getElementById('reportDrilldownModalOverlay');
+      if (!existingModal) {
+        existingModal = document.createElement('div');
+        existingModal.id = 'reportDrilldownModalOverlay';
+        existingModal.className = 'modal-overlay active';
+        existingModal.style.zIndex = '9999';
+        document.body.appendChild(existingModal);
+      } else {
+        existingModal.className = 'modal-overlay active';
+      }
+
+      existingModal.innerHTML = `
+        <div class="modal-content" style="max-width: 780px; width: 94%; max-height: 86vh; display: flex; flex-direction: column; overflow: hidden;">
+          <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; border-bottom: 1px solid var(--border-color);">
+            <div>
+              <h3 style="margin: 0; font-size: 16px; font-weight: 700;">🔍 Source Transaction Drill-Down: ${escapeHtml(label || targetId)}</h3>
+              <span style="font-size: 12px; color: var(--text-muted);">${escapeHtml(drilldownType)} • ${escapeHtml(f.startDate || '')} to ${escapeHtml(f.endDate || '')}</span>
+            </div>
+            <button type="button" class="btn-icon" onclick="closeReportDrilldownModal()" aria-label="Close drilldown">&times;</button>
+          </div>
+          <div class="modal-body" id="reportDrilldownModalBody" style="padding: 16px; overflow-y: auto; flex: 1;">
+            <div style="padding: 24px; text-align: center; color: var(--text-muted);">⏳ Loading source transactions...</div>
+          </div>
+          <div class="modal-footer" style="padding: 12px 18px; border-top: 1px solid var(--border-color); display: flex; justify-content: flex-end;">
+            <button type="button" class="btn btn-secondary" onclick="closeReportDrilldownModal()">Close</button>
+          </div>
+        </div>
+      `;
+
+      try {
+        const data = await apiFetch(`/v1/reports/business/drilldown?${qs.toString()}`, { silent: true });
+        const bodyEl = document.getElementById('reportDrilldownModalBody');
+        if (!bodyEl) return;
+        if (!data) {
+          bodyEl.innerHTML = `<div style="padding: 20px; text-align: center; color: var(--text-muted);">Unable to load source records for this selection.</div>`;
+          return;
+        }
+        const rows = Array.isArray(data.rows) ? data.rows : (Array.isArray(data.records) ? data.records : []);
+        if (rows.length === 0) {
+          bodyEl.innerHTML = `<div style="padding: 20px; text-align: center; color: var(--text-muted);">No individual source transactions found in this date range.</div>`;
+          return;
+        }
+        const keys = Object.keys(rows[0]).filter(k => k !== 'id');
+        bodyEl.innerHTML = `
+          <div style="overflow-x: auto;">
+            <table class="rep-table">
+              <thead>
+                <tr>
+                  ${keys.map(k => `<th>${escapeHtml(k.replace(/([A-Z])/g, ' $1').toUpperCase())}</th>`).join('')}
+                </tr>
+              </thead>
+              <tbody>
+                ${rows.map(r => `
+                  <tr>
+                    ${keys.map(k => {
+                      const v = r[k];
+                      const isMoney = /amount|total|price|cost|revenue|cogs|profit|balance|tax|discount/i.test(k) && typeof v === 'number';
+                      return `<td>${isMoney ? formatTenantMoney(v) : escapeHtml(v === null || v === undefined ? '—' : String(v))}</td>`;
+                    }).join('')}
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        `;
+      } catch (_err) {
+        const bodyEl = document.getElementById('reportDrilldownModalBody');
+        if (bodyEl) bodyEl.innerHTML = `<div style="padding: 20px; text-align: center; color: var(--text-muted);">Source transaction drill-down unavailable offline.</div>`;
+      }
+    }
+
+    function closeReportDrilldownModal() {
+      const el = document.getElementById('reportDrilldownModalOverlay');
+      if (el) el.remove();
+    }
+
+    function exportBusinessReportCsv() {
+      const rep = state.currentBusinessReport || buildOfflineFallbackBusinessReport(state.reportFilters || {});
+      const lines = [];
+      lines.push(`"NexStock Business Report","${(rep.category || 'SALES').replace(/"/g, '""')}"`);
+      lines.push(`"Period","${rep.filters?.startDate || ''} to ${rep.filters?.endDate || ''}"`);
+      lines.push(`"Generated At","${rep.generatedAt || new Date().toISOString()}"`);
+      if (rep.costBasisNote) {
+        lines.push(`"Cost Basis","${String(rep.costBasisNote).replace(/"/g, '""')}"`);
+      }
+      lines.push('');
+      lines.push('"KPI Metric","Current Value","Previous Value","Change %"');
+      (rep.kpis || []).forEach(k => {
+        lines.push(`"${String(k.label || '').replace(/"/g, '""')}","${k.value ?? ''}","${k.previousValue ?? ''}","${k.changePct ?? ''}"`);
+      });
+      lines.push('');
+
+      (rep.tables || []).forEach(tbl => {
+        lines.push(`"Table: ${String(tbl.title || tbl.key).replace(/"/g, '""')}"`);
+        const cols = Array.isArray(tbl.columns) ? tbl.columns : [];
+        lines.push(cols.map(c => `"${String(c.label || c.key).replace(/"/g, '""')}"`).join(','));
+        (tbl.rows || []).forEach(r => {
+          lines.push(cols.map(c => `"${String(r[c.key] ?? '').replace(/"/g, '""')}"`).join(','));
+        });
+        lines.push('');
+      });
+
+      const csvContent = '\uFEFF' + lines.join('\r\n');
+      const filename = `nexstock-report-${(rep.category || 'sales').toLowerCase()}-${rep.filters?.startDate || 'export'}.csv`;
+      window._lastReportExport = { format: 'CSV', filename, content: csvContent, timestamp: Date.now() };
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1500);
+      showToast(`Exported ${filename}`, 'success');
+      return window._lastReportExport;
+    }
+
+    function exportBusinessReportExcel() {
+      const rep = state.currentBusinessReport || buildOfflineFallbackBusinessReport(state.reportFilters || {});
+      const tablesMarkup = (rep.tables || []).map(tbl => {
+        const cols = Array.isArray(tbl.columns) ? tbl.columns : [];
+        return `
+          <h3>${escapeHtml(tbl.title || tbl.key)}</h3>
+          <table border="1" cellspacing="0" cellpadding="4">
+            <thead>
+              <tr>${cols.map(c => `<th style="background:#eef2ff;font-weight:bold;">${escapeHtml(c.label)}</th>`).join('')}</tr>
+            </thead>
+            <tbody>
+              ${(tbl.rows || []).map(r => `<tr>${cols.map(c => `<td>${escapeHtml(String(r[c.key] ?? ''))}</td>`).join('')}</tr>`).join('')}
+            </tbody>
+          </table>
+        `;
+      }).join('<br/>');
+
+      const htmlWorkbook = `
+        <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel">
+        <head><meta charset="UTF-8"><title>NexStock Report</title></head>
+        <body>
+          <h2>NexStock Business Report — ${escapeHtml(rep.category || 'SALES')}</h2>
+          <p>Period: ${escapeHtml(rep.filters?.startDate || '')} to ${escapeHtml(rep.filters?.endDate || '')}</p>
+          <p>${escapeHtml(rep.costBasisNote || '')}</p>
+          <h3>Key Performance Indicators</h3>
+          <table border="1" cellspacing="0" cellpadding="4">
+            <thead><tr style="background:#eef2ff;font-weight:bold;"><th>Metric</th><th>Value</th><th>Previous Period</th><th>Change %</th></tr></thead>
+            <tbody>
+              ${(rep.kpis || []).map(k => `<tr><td>${escapeHtml(k.label)}</td><td>${escapeHtml(String(k.value ?? ''))}</td><td>${escapeHtml(String(k.previousValue ?? '—'))}</td><td>${escapeHtml(k.changePct !== null && k.changePct !== undefined ? `${k.changePct}%` : '—')}</td></tr>`).join('')}
+            </tbody>
+          </table>
+          <br/>
+          ${tablesMarkup}
+        </body></html>
+      `;
+      const filename = `nexstock-report-${(rep.category || 'sales').toLowerCase()}-${rep.filters?.startDate || 'export'}.xls`;
+      window._lastReportExport = { format: 'EXCEL', filename, content: htmlWorkbook, timestamp: Date.now() };
+      const blob = new Blob([htmlWorkbook], { type: 'application/vnd.ms-excel;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1500);
+      showToast(`Exported Excel workbook ${filename}`, 'success');
+      return window._lastReportExport;
+    }
+
+    function exportBusinessReportPdf() {
+      const rep = state.currentBusinessReport || buildOfflineFallbackBusinessReport(state.reportFilters || {});
+      const filename = `nexstock-report-${(rep.category || 'sales').toLowerCase()}-${rep.filters?.startDate || 'export'}.pdf`;
+      window._lastReportExport = {
+        format: 'PDF',
+        filename,
+        category: rep.category,
+        period: `${rep.filters?.startDate || ''} to ${rep.filters?.endDate || ''}`,
+        kpiCount: (rep.kpis || []).length,
+        tableCount: (rep.tables || []).length,
+        timestamp: Date.now()
+      };
+      showToast(`Prepared PDF report (${filename})`, 'success');
+      if (typeof window.print === 'function' && !window.__NEXSTOCK_SUPPRESS_PRINT_DIALOG__) {
+        try { window.print(); } catch (_e) {}
+      }
+      return window._lastReportExport;
+    }
+
+    function printBusinessReport() {
+      const rep = state.currentBusinessReport || buildOfflineFallbackBusinessReport(state.reportFilters || {});
+      window._lastReportExport = {
+        format: 'PRINT',
+        category: rep.category,
+        period: `${rep.filters?.startDate || ''} to ${rep.filters?.endDate || ''}`,
+        timestamp: Date.now()
+      };
+      if (typeof window.print === 'function' && !window.__NEXSTOCK_SUPPRESS_PRINT_DIALOG__) {
+        try { window.print(); } catch (_e) {}
+      }
+      return window._lastReportExport;
+    }
+
+    window.renderBusinessReportsView = renderBusinessReportsView;
+    window.selectBusinessReportCategory = selectBusinessReportCategory;
+    window.applyReportDatePreset = applyReportDatePreset;
+    window.updateBusinessReportFiltersFromDom = updateBusinessReportFiltersFromDom;
+    window.openReportDrilldownModal = openReportDrilldownModal;
+    window.closeReportDrilldownModal = closeReportDrilldownModal;
+    window.exportBusinessReportCsv = exportBusinessReportCsv;
+    window.exportBusinessReportExcel = exportBusinessReportExcel;
+    window.exportBusinessReportPdf = exportBusinessReportPdf;
+    window.printBusinessReport = printBusinessReport;
 
     // Immediate fast path: if user is definitely unauthenticated, resolve initial public route without flash
     if (!storedSessionToken && !storedRefreshToken) {
