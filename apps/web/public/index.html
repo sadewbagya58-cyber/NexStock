@@ -2725,8 +2725,8 @@
           <span class="badge-pill badge-green" id="topbarPlanBadge">TRIAL</span>
         </div>
 
-        <div class="context-selector" id="topbarBranchContext">
-          <span>Branch:</span> <strong id="topbarBranchName">—</strong>
+        <div class="context-selector" id="topbarBranchContext" onclick="openBranchSwitcherModal()" style="cursor: pointer;" title="Click to switch active branch or view all branches">
+          <span>Branch:</span> <strong id="topbarBranchName">—</strong> <span style="font-size: 10px; opacity: 0.7;">▾</span>
         </div>
 
         <div class="context-selector" id="topbarRoleContext">
@@ -2759,9 +2759,10 @@
         <strong id="topbarMobileTenantName" class="subbar-tenant-name">—</strong>
         <span class="badge-pill badge-green" id="topbarMobilePlanBadge">TRIAL</span>
       </div>
-      <div class="mobile-subbar-branch" id="topbarMobileBranchContext">
+      <div class="mobile-subbar-branch" id="topbarMobileBranchContext" onclick="openBranchSwitcherModal()" style="cursor: pointer;" title="Switch active branch">
         <span class="subbar-divider">•</span>
         <span id="topbarMobileBranchName" class="subbar-branch-name">—</span>
+        <span style="font-size: 10px; opacity: 0.7; margin-left: 2px;">▾</span>
       </div>
     </div>
   </header>
@@ -2877,6 +2878,10 @@
       </a>
 
       <div class="nav-section-title">Organization</div>
+      <a class="nav-link" data-view="branches">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18"></path><path d="M5 21V7l8-4v18"></path><path d="M19 21V11l-6-4"></path><line x1="9" y1="9" x2="9" y2="9.01"></line><line x1="9" y1="13" x2="9" y2="13.01"></line><line x1="9" y1="17" x2="9" y2="17.01"></line></svg>
+        Branches &amp; Locations
+      </a>
       <a class="nav-link" data-view="team-staff">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
         Team &amp; Staff Accounts
@@ -3151,6 +3156,7 @@
       'customers',
       'credit-accounts',
       'team-staff',
+      'branches',
       'accept-invitation',
       'roles-permissions',
       'org-settings'
@@ -3234,7 +3240,10 @@
       cachedBatches: [],
       batchesNextCursor: null,
       movementsTab: 'ledger',
-      cachedTransfers: []
+      cachedTransfers: [],
+      cachedBranches: [],
+      branchesStatusFilter: 'ACTIVE',
+      branchesSearchFilter: ''
     };
 
     // Synchronous Cache Restoration for Cold Start Elimination (BUG-030)
@@ -3950,19 +3959,24 @@
     async function hydrateTenantLocationContext(targetTenantId) {
       if (!targetTenantId || state.tenantId !== targetTenantId) return;
       try {
-        if (!state.warehouseId && state.tenantId) {
+        const explicitAllBranches =
+          !state.branchId &&
+          state.branchName === 'All Branches' &&
+          state.allLocationsAccess === true;
+        if (!state.warehouseId && !explicitAllBranches && state.tenantId) {
           const branchRes = await apiFetch('/v1/org/branches', { silent: true }).catch(() => ({ items: [] }));
           if (state.tenantId !== targetTenantId) return;
-          const branches = branchRes?.items || (Array.isArray(branchRes) ? branchRes : []);
-          const activeBranch = branches.find(b => b.id === state.branchId) || branches[0];
+          const branches = (branchRes?.items || (Array.isArray(branchRes) ? branchRes : [])).filter(b => b.isActive !== false);
+          state.cachedBranches = branches;
+          const activeBranch =
+            branches.find(b => b.id === state.branchId) ||
+            branches.find(b => b.isMainBranch || b.isHeadquarters) ||
+            branches[0];
           if (activeBranch) {
             state.branchId = activeBranch.id;
             state.branchName = activeBranch.name;
             state.warehouseId = activeBranch.defaultWarehouseId || '';
-            const branchEl = document.getElementById('topbarBranchName');
-            if (branchEl) branchEl.innerText = state.branchName;
-            const mobileBranchEl = document.getElementById('topbarMobileBranchName');
-            if (mobileBranchEl) mobileBranchEl.innerText = state.branchName;
+            updateTopbarContext();
           }
         }
 
@@ -4002,14 +4016,17 @@
       }
     }
 
-    // Centralized Topbar Context Synchronizer (BUG-048)
+    // Centralized Topbar Context Synchronizer (BUG-048 + Phase 8 Multi-Branch)
     function updateTopbarContext() {
       const tenantEl = document.getElementById('topbarTenantName');
       if (tenantEl) tenantEl.innerText = state.tenantName || '—';
       const planEl = document.getElementById('topbarPlanBadge');
       if (planEl) planEl.innerText = state.plan || 'TRIAL';
+      const displayBranch = state.branchId
+        ? (state.branchName || 'Selected Branch')
+        : (state.allLocationsAccess ? 'All Branches' : '—');
       const branchEl = document.getElementById('topbarBranchName');
-      if (branchEl) branchEl.innerText = state.branchName || '—';
+      if (branchEl) branchEl.innerText = displayBranch;
       const roleEl = document.getElementById('topbarUserRole');
       if (roleEl) roleEl.innerText = state.userRole || '—';
 
@@ -4018,7 +4035,7 @@
       const mobilePlanEl = document.getElementById('topbarMobilePlanBadge');
       if (mobilePlanEl) mobilePlanEl.innerText = state.plan || 'TRIAL';
       const mobileBranchEl = document.getElementById('topbarMobileBranchName');
-      if (mobileBranchEl) mobileBranchEl.innerText = state.branchName || '—';
+      if (mobileBranchEl) mobileBranchEl.innerText = displayBranch;
       const mobileSubbar = document.getElementById('topbarMobileSubbar');
       if (mobileSubbar) {
         const isAuthView = AUTH_VIEWS.includes(state.activeView);
@@ -4027,6 +4044,125 @@
 
       const userNameEl = document.getElementById('topbarUserName');
       if (userNameEl && state.fullName) userNameEl.innerText = state.fullName;
+    }
+
+    async function switchActiveBranchContext(branchObj, options = {}) {
+      clearTenantViewCache();
+      state.cachedBatches = [];
+      state.cachedTransfers = [];
+      state.cachedRegisters = [];
+      state.registerId = '';
+      state.registerCode = '';
+      state.activeShift = null;
+
+      if (branchObj && branchObj.id) {
+        state.branchId = branchObj.id;
+        state.branchName = branchObj.name || 'Branch';
+        state.warehouseId = branchObj.defaultWarehouseId || '';
+      } else if (state.allLocationsAccess) {
+        state.branchId = '';
+        state.branchName = 'All Branches';
+        state.warehouseId = '';
+      }
+
+      try {
+        if (state.tenantId) {
+          localStorage.setItem(
+            `nexstock_active_branch_${state.tenantId}`,
+            JSON.stringify({
+              branchId: state.branchId,
+              branchName: state.branchName,
+              warehouseId: state.warehouseId
+            })
+          );
+        }
+      } catch {}
+
+      updateTopbarContext();
+      if (options.refresh !== false && state.activeView && !AUTH_VIEWS.includes(state.activeView)) {
+        renderView(state.activeView);
+      }
+      if (!options.silent) {
+        showToast(
+          state.branchId
+            ? `Switched branch context to ${state.branchName}`
+            : 'Switched to All Branches (Business-Wide View)',
+          'success'
+        );
+      }
+    }
+
+    async function openBranchSwitcherModal() {
+      if (!state.token || !state.tenantId) return;
+      openModal({
+        title: 'Switch Active Branch',
+        bodyHtml: `<div style="display:flex;align-items:center;gap:10px;padding:16px 0;color:var(--text-secondary);"><div class="spinner-sm" style="width:18px;height:18px;border-width:2px;"></div> Loading accessible branches...</div>`,
+        footerHtml: `<button class="btn btn-secondary" onclick="closeModal()">Close</button>`
+      });
+
+      try {
+        const res = await apiFetch('/v1/org/branches?status=ACTIVE', { silent: true });
+        const branches = (res?.items || (Array.isArray(res) ? res : [])).filter(b => b.isActive !== false);
+        state.cachedBranches = branches;
+
+        const canViewAll = state.allLocationsAccess === true;
+        const bodyEl = document.getElementById('modalBody');
+        if (!bodyEl) return;
+
+        bodyEl.innerHTML = `
+          <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 12px;">
+            ${canViewAll
+              ? 'Choose a branch to scope POS registers and location actions, or select Business-Wide to view all branches.'
+              : 'Select one of your authorized branches. Data from other branches is restricted.'}
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 8px; max-height: 55vh; overflow-y: auto;">
+            ${canViewAll ? `
+              <button type="button" class="btn ${!state.branchId ? 'btn-primary' : 'btn-secondary'}" style="justify-content: space-between; text-align: left; padding: 12px 14px;" onclick="selectBranchFromSwitcher('')">
+                <div>
+                  <div style="font-weight: 700;">🏢 All Branches (Business-Wide)</div>
+                  <div style="font-size: 11px; opacity: 0.85;">View combined inventory balances, stock movements &amp; transfers across all branches</div>
+                </div>
+                ${!state.branchId ? '<span>✓ Active</span>' : ''}
+              </button>
+            ` : ''}
+            ${branches.length === 0 ? `
+              <div class="empty-state-card" style="padding: 18px;">No active branches accessible for your account.</div>
+            ` : branches.map(b => {
+              const isSelected = state.branchId === b.id;
+              return `
+                <button type="button" class="btn ${isSelected ? 'btn-primary' : 'btn-secondary'}" style="justify-content: space-between; text-align: left; padding: 12px 14px;" onclick="selectBranchFromSwitcher('${b.id}')">
+                  <div>
+                    <div style="font-weight: 700;">
+                      ${b.isMainBranch || b.isHeadquarters ? '⭐ ' : ''}${escapeHtml(b.name)}
+                      <code style="font-size: 11px; margin-left: 6px; opacity: 0.85;">${escapeHtml(b.code)}</code>
+                    </div>
+                    <div style="font-size: 11px; opacity: 0.85; margin-top: 2px;">
+                      ${b.city ? escapeHtml(b.city) + ' &bull; ' : ''}Default WH: ${escapeHtml(b.defaultWarehouseName || b.defaultWarehouseCode || 'Linked')}
+                    </div>
+                  </div>
+                  ${isSelected ? '<span>✓ Active</span>' : ''}
+                </button>
+              `;
+            }).join('')}
+          </div>
+        `;
+      } catch (err) {
+        const bodyEl = document.getElementById('modalBody');
+        if (bodyEl) bodyEl.innerHTML = `<div style="color: var(--status-danger);">Failed to load branches: ${escapeHtml(err.message)}</div>`;
+      }
+    }
+
+    function selectBranchFromSwitcher(branchId) {
+      if (!branchId) {
+        closeModal();
+        switchActiveBranchContext(null);
+        return;
+      }
+      const found = (state.cachedBranches || []).find(b => b.id === branchId);
+      closeModal();
+      if (found) {
+        switchActiveBranchContext(found);
+      }
     }
 
     // Select Active Tenant Membership
@@ -4057,14 +4193,35 @@
         }
       } catch {}
 
-      const hq = (membership.branches || []).find(b => b.isHeadquarters) || (membership.branches || [])[0];
-      if (hq) {
+      let savedBranchPref = null;
+      try {
+        const rawPref = localStorage.getItem(`nexstock_active_branch_${membership.tenantId}`);
+        if (rawPref) savedBranchPref = JSON.parse(rawPref);
+      } catch {}
+
+      const hq =
+        (membership.branches || []).find(b => b.isMainBranch || b.isHeadquarters) ||
+        (membership.branches || [])[0];
+      if (savedBranchPref && savedBranchPref.branchId === '' && state.allLocationsAccess) {
+        state.branchId = '';
+        state.branchName = 'All Branches';
+        state.warehouseId = '';
+      } else if (
+        savedBranchPref &&
+        savedBranchPref.branchId &&
+        (state.allLocationsAccess || (state.allowedBranchIds || []).includes(savedBranchPref.branchId))
+      ) {
+        const matched = (membership.branches || []).find(b => b.id === savedBranchPref.branchId);
+        state.branchId = matched ? matched.id : savedBranchPref.branchId;
+        state.branchName = matched ? matched.name : (savedBranchPref.branchName || 'Branch');
+        state.warehouseId = matched ? (matched.defaultWarehouseId || savedBranchPref.warehouseId || '') : (savedBranchPref.warehouseId || '');
+      } else if (hq) {
         state.branchId = hq.id;
         state.branchName = hq.name;
         state.warehouseId = hq.defaultWarehouseId || '';
       } else {
         state.branchId = '';
-        state.branchName = 'Default Branch';
+        state.branchName = state.allLocationsAccess ? 'All Branches' : 'Default Branch';
         state.warehouseId = '';
       }
 
@@ -4563,6 +4720,7 @@
       'credit-accounts': ['crm:credit:read', 'crm:credit:manage'],
       'credit-dashboard': ['crm:credit:read', 'crm:report:read'],
       'team-staff': ['iam:member:read', 'iam:member:manage'],
+      'branches': ['org:branch:read', 'org:branch:manage'],
       'roles-permissions': 'iam:role:manage',
       'org-settings': ['org:tenant:manage', 'org:branch:manage', 'org:warehouse:manage', 'sub:subscription:read', 'sub:subscription:manage', 'i18n:settings:read', 'i18n:settings:manage'],
     };
@@ -4655,6 +4813,7 @@
         'customers': 'Customers',
         'credit-accounts': 'Credit Accounts',
         'team-staff': 'Team & Staff Accounts',
+        'branches': 'Branches & Locations',
         'roles-permissions': 'Roles & Permissions',
         'org-settings': 'Settings & Quotas'
       };
@@ -4901,6 +5060,12 @@
       {
         category: 'Organization',
         items: [
+          {
+            view: 'branches',
+            label: 'Branches & Locations',
+            icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18"></path><path d="M5 21V7l8-4v18"></path><path d="M19 21V11l-6-4"></path><line x1="9" y1="9" x2="9" y2="9.01"></line><line x1="9" y1="13" x2="9" y2="13.01"></line><line x1="9" y1="17" x2="9" y2="17.01"></line></svg>`,
+            permission: ['org:branch:read', 'org:branch:manage']
+          },
           {
             view: 'team-staff',
             label: 'Team & Staff Accounts',
@@ -5170,6 +5335,7 @@
         case 'customers': renderCustomersView(); break;
         case 'credit-accounts': renderCreditAccountsView(); break;
         case 'team-staff': renderTeamStaffAccountsView(); break;
+        case 'branches': renderBranchesView(); break;
         case 'accept-invitation': renderAcceptInvitationView(); break;
         case 'roles-permissions': renderRolesPermissionsView(); break;
         case 'org-settings': renderOrgSettingsView(); break;
@@ -9199,14 +9365,15 @@
               <div class="view-subtitle">Immutable append-only ledger and cross-branch batch transfers preserving batch prices &amp; generating destination barcodes</div>
             </div>
             <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-              <button class="btn btn-secondary" onclick="renderMovementsView('transfers')">Batch Transfers</button>
+              <button class="btn btn-secondary" onclick="openBranchSwitcherModal()">⇄ ${escapeHtml(state.branchId ? (state.branchName || 'Switch Branch') : 'All Branches')}</button>
+              <button class="btn btn-secondary" onclick="renderMovementsView('transfers')">Stock Transfers</button>
               <button class="btn btn-primary" onclick="openRecordStockMovementModal()">+ Post Movement</button>
             </div>
           </div>
 
           <div style="display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap;">
             <button class="btn btn-primary btn-sm" onclick="renderMovementsView('ledger')">Stock Ledger</button>
-            <button class="btn btn-secondary btn-sm" onclick="renderMovementsView('transfers')">Cross-Branch Batch Transfers</button>
+            <button class="btn btn-secondary btn-sm" onclick="renderMovementsView('transfers')">Stock Transfers</button>
           </div>
 
           <div class="card">
@@ -9343,41 +9510,41 @@
     async function renderTransfersTab(container) {
       try {
         const [transfersRes, branchesRes, whRes] = await Promise.all([
-          apiFetch('/v1/inventory/transfers?limit=50', { silent: true }).catch(() => ({ data: [] })),
-          apiFetch('/v1/org/branches', { silent: true }).catch(() => ({ items: [] })),
-          apiFetch('/v1/org/warehouses', { silent: true }).catch(() => ({ data: [] }))
+          apiFetch('/v1/inventory/transfers?limit=50', { silent: true }).catch(() => ({ items: [] })),
+          apiFetch('/v1/org/branches?status=ACTIVE', { silent: true }).catch(() => ({ items: [] })),
+          apiFetch('/v1/org/warehouses', { silent: true }).catch(() => ({ items: [] }))
         ]);
 
-        const transfers = transfersRes?.data || (Array.isArray(transfersRes) ? transfersRes : []);
+        const transfers = transfersRes?.items || transfersRes?.data || (Array.isArray(transfersRes) ? transfersRes : []);
         state.cachedTransfers = transfers;
-        const branches = branchesRes?.items || (Array.isArray(branchesRes) ? branchesRes : []);
-        const warehouses = whRes?.data || whRes?.items || (Array.isArray(whRes) ? whRes : []);
+        const branches = (branchesRes?.items || branchesRes?.data || (Array.isArray(branchesRes) ? branchesRes : [])).filter(b => b.isActive !== false);
+        const warehouses = whRes?.items || whRes?.data || (Array.isArray(whRes) ? whRes : []);
         const branchMap = new Map(branches.map(b => [b.id, b.name]));
         const whMap = new Map(warehouses.map(w => [w.id, w.name]));
 
         container.innerHTML = `
           <div class="view-header">
             <div>
-              <h1 class="view-title">Cross-Branch Batch Transfers</h1>
-              <div class="view-subtitle">Transfer exact batches across branches &amp; warehouses while preserving batch cost and selling price</div>
+              <h1 class="view-title">Inter-Branch Stock Transfers</h1>
+              <div class="view-subtitle">Move inventory accurately between branches with live source stock checks, batch/serial preservation, and permanent audit traceability</div>
             </div>
             <div style="display: flex; gap: 8px; flex-wrap: wrap;">
               <button class="btn btn-secondary" onclick="renderMovementsView('ledger')">Stock Ledger</button>
-              <button class="btn btn-primary" id="btnNewBatchTransfer">+ New Batch Transfer</button>
+              <button class="btn btn-primary" id="btnNewBatchTransfer">+ New Stock Transfer</button>
             </div>
           </div>
 
           <div style="display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap;">
             <button class="btn btn-secondary btn-sm" onclick="renderMovementsView('ledger')">Stock Ledger</button>
-            <button class="btn btn-primary btn-sm" onclick="renderMovementsView('transfers')">Cross-Branch Batch Transfers</button>
+            <button class="btn btn-primary btn-sm" onclick="renderMovementsView('transfers')">Stock Transfers</button>
           </div>
 
           <div class="card">
-            <div class="card-title">Transfer Orders</div>
+            <div class="card-title">Stock Transfer History (${transfers.length})</div>
             ${transfers.length === 0 ? `
               <div class="empty-state-card">
-                <div class="empty-state-title">No batch transfers recorded yet</div>
-                <p class="empty-state-desc">Create a transfer order to move specific priced batches between branches or warehouses.</p>
+                <div class="empty-state-title">No stock transfers recorded yet</div>
+                <p class="empty-state-desc">Click "+ New Stock Transfer" to move products between branches safely without creating fake sales or purchases.</p>
               </div>
             ` : `
               <div class="desktop-table-container">
@@ -9385,38 +9552,46 @@
                   <table class="data-table">
                     <thead>
                       <tr>
-                        <th>Transfer ID</th>
-                        <th>Route</th>
-                        <th>Items / Price Preserved</th>
+                        <th>Reference</th>
+                        <th>Route (Source &rarr; Destination)</th>
+                        <th>Items &amp; Quantities</th>
+                        <th>Created By &amp; Date</th>
                         <th>Status</th>
-                        <th>Created</th>
                         <th>Actions</th>
                       </tr>
                     </thead>
                     <tbody>
                       ${transfers.map(t => {
-                        const srcName = `${escapeHtml(branchMap.get(t.sourceBranchId) || 'Source')} (${escapeHtml(whMap.get(t.sourceWarehouseId) || '')})`;
-                        const dstName = `${escapeHtml(branchMap.get(t.destinationBranchId) || 'Destination')} (${escapeHtml(whMap.get(t.destinationWarehouseId) || '')})`;
+                        const srcBranch = escapeHtml(t.sourceBranchName || branchMap.get(t.sourceBranchId) || 'Source');
+                        const dstBranch = escapeHtml(t.destinationBranchName || branchMap.get(t.destinationBranchId) || 'Destination');
                         const lines = Array.isArray(t.lines) ? t.lines : [];
                         const firstDestBatch = lines.find(l => l.destinationBatchId)?.destinationBatchId;
                         let stBadge = '<span class="badge-pill badge-yellow">DRAFT</span>';
                         if (t.status === 'IN_TRANSIT') stBadge = '<span class="badge-pill badge-blue">IN TRANSIT</span>';
-                        else if (t.status === 'RECEIVED') stBadge = '<span class="badge-pill badge-green">RECEIVED</span>';
+                        else if (t.status === 'RECEIVED') stBadge = '<span class="badge-pill badge-green">COMPLETED</span>';
 
                         return `
                           <tr>
                             <td><code>${escapeHtml(t.transferNumber || t.id.slice(0, 8))}</code></td>
-                            <td>${srcName} &rarr; <strong>${dstName}</strong></td>
+                            <td>${srcBranch} &rarr; <strong>${dstBranch}</strong></td>
                             <td style="font-size: 12px;">
-                              ${lines.map(l => `<div>Qty: <strong>${formatQty(l.quantity)}</strong> ${l.sellingPriceSnapshot != null ? `&bull; Sell: <strong>${formatTenantMoney(l.sellingPriceSnapshot)}</strong>` : ''} ${l.destinationBarcode ? `&bull; Dest Barcode: <code>${escapeHtml(l.destinationBarcode)}</code>` : ''}</div>`).join('') || '—'}
+                              ${lines.map(l => {
+                                const prodLabel = escapeHtml([l.productSku, l.productName].filter(Boolean).join(' – ') || 'Item');
+                                const uom = escapeHtml(l.uomCode || '');
+                                return `<div><strong>${prodLabel}</strong> &bull; Qty: <strong>${formatQty(l.quantity ?? l.quantityRequested)} ${uom}</strong>${l.batchNumberSnapshot ? ` &bull; Batch: <code>${escapeHtml(l.batchNumberSnapshot)}</code>` : ''}${l.serialNumber ? ` &bull; SN: <code>${escapeHtml(l.serialNumber)}</code>` : ''}</div>`;
+                              }).join('') || '—'}
+                            </td>
+                            <td style="font-size: 12px;">
+                              <div>${escapeHtml(t.createdByName || 'Team Member')}</div>
+                              <div style="color: var(--text-secondary);">${t.createdAt ? new Date(t.createdAt).toLocaleString() : '—'}</div>
                             </td>
                             <td>${stBadge}</td>
-                            <td style="font-size: 12px;">${t.createdAt ? new Date(t.createdAt).toLocaleString() : '—'}</td>
                             <td>
                               <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                                <button class="btn btn-secondary btn-sm" onclick="openTransferDetailsModal('${t.id}')">Details</button>
                                 ${t.status === 'DRAFT' ? `<button class="btn btn-primary btn-sm" onclick="dispatchTransferAction('${t.id}')">Dispatch</button>` : ''}
                                 ${t.status === 'IN_TRANSIT' ? `<button class="btn btn-success btn-sm" onclick="receiveTransferAction('${t.id}')">Receive</button>` : ''}
-                                ${t.status === 'RECEIVED' && firstDestBatch ? `<button class="btn btn-secondary btn-sm" onclick="openBatchLabelPrintModal('${firstDestBatch}')">Print Dest Label</button>` : ''}
+                                ${t.status === 'RECEIVED' && firstDestBatch ? `<button class="btn btn-secondary btn-sm" onclick="openBatchLabelPrintModal('${firstDestBatch}')">Print Label</button>` : ''}
                               </div>
                             </td>
                           </tr>
@@ -9429,32 +9604,37 @@
 
               <div class="mobile-cards-container">
                 ${transfers.map(t => {
-                  const srcName = escapeHtml(branchMap.get(t.sourceBranchId) || 'Source');
-                  const dstName = escapeHtml(branchMap.get(t.destinationBranchId) || 'Destination');
+                  const srcBranch = escapeHtml(t.sourceBranchName || branchMap.get(t.sourceBranchId) || 'Source');
+                  const dstBranch = escapeHtml(t.destinationBranchName || branchMap.get(t.destinationBranchId) || 'Destination');
                   const lines = Array.isArray(t.lines) ? t.lines : [];
                   const firstDestBatch = lines.find(l => l.destinationBatchId)?.destinationBatchId;
                   let stBadge = '<span class="badge-pill badge-yellow">DRAFT</span>';
                   if (t.status === 'IN_TRANSIT') stBadge = '<span class="badge-pill badge-blue">IN TRANSIT</span>';
-                  else if (t.status === 'RECEIVED') stBadge = '<span class="badge-pill badge-green">RECEIVED</span>';
+                  else if (t.status === 'RECEIVED') stBadge = '<span class="badge-pill badge-green">COMPLETED</span>';
                   return `
                     <div class="entity-card">
                       <div class="entity-card-header">
                         <code>${escapeHtml(t.transferNumber || t.id.slice(0, 8))}</code>
                         ${stBadge}
                       </div>
-                      <div class="entity-card-title">${srcName} &rarr; ${dstName}</div>
+                      <div class="entity-card-title">${srcBranch} &rarr; ${dstBranch}</div>
                       <div class="entity-card-details">
                         ${lines.map(l => `
                           <div class="detail-row">
-                            <span class="detail-label">Qty / Preserved Price</span>
-                            <span class="detail-value">${formatQty(l.quantity)} ${l.sellingPriceSnapshot != null ? `&bull; ${formatTenantMoney(l.sellingPriceSnapshot)}` : ''}</span>
+                            <span class="detail-label">${escapeHtml(l.productName || l.productSku || 'Qty')}</span>
+                            <span class="detail-value"><strong>${formatQty(l.quantity ?? l.quantityRequested)} ${escapeHtml(l.uomCode || '')}</strong></span>
                           </div>
                         `).join('')}
+                        <div class="detail-row">
+                          <span class="detail-label">By / Date</span>
+                          <span class="detail-value">${escapeHtml(t.createdByName || 'User')} &bull; ${t.createdAt ? new Date(t.createdAt).toLocaleDateString() : '—'}</span>
+                        </div>
                       </div>
                       <div class="entity-card-footer" style="display: flex; gap: 8px; flex-wrap: wrap;">
+                        <button class="btn btn-secondary btn-sm" style="flex: 1;" onclick="openTransferDetailsModal('${t.id}')">Details</button>
                         ${t.status === 'DRAFT' ? `<button class="btn btn-primary btn-sm" style="flex: 1;" onclick="dispatchTransferAction('${t.id}')">Dispatch</button>` : ''}
                         ${t.status === 'IN_TRANSIT' ? `<button class="btn btn-success btn-sm" style="flex: 1;" onclick="receiveTransferAction('${t.id}')">Receive</button>` : ''}
-                        ${t.status === 'RECEIVED' && firstDestBatch ? `<button class="btn btn-secondary btn-sm" style="flex: 1;" onclick="openBatchLabelPrintModal('${firstDestBatch}')">Print Dest Label</button>` : ''}
+                        ${t.status === 'RECEIVED' && firstDestBatch ? `<button class="btn btn-secondary btn-sm" style="flex: 1;" onclick="openBatchLabelPrintModal('${firstDestBatch}')">Print Label</button>` : ''}
                       </div>
                     </div>
                   `;
@@ -9470,123 +9650,291 @@
       }
     }
 
-    async function openCreateTransferModal(branchesList = null, warehousesList = null) {
-      const [branchesRes, whRes, prodsRes, batchesRes] = await Promise.all([
-        branchesList ? Promise.resolve({ items: branchesList }) : apiFetch('/v1/org/branches', { silent: true }).catch(() => ({ items: [] })),
-        warehousesList ? Promise.resolve({ data: warehousesList }) : apiFetch('/v1/org/warehouses', { silent: true }).catch(() => ({ data: [] })),
-        apiFetch('/v1/products?limit=200', { silent: true }).catch(() => ({ data: [] })),
+    function openTransferDetailsModal(transferId) {
+      const t = (state.cachedTransfers || []).find(item => item.id === transferId);
+      if (!t) return;
+      const lines = Array.isArray(t.lines) ? t.lines : [];
+      openModal({
+        title: `Stock Transfer ${escapeHtml(t.transferNumber || t.id)}`,
+        bodyHtml: `
+          <div class="modal-grid-2" style="margin-bottom: 12px;">
+            <div style="padding: 10px; background: var(--bg-hover); border-radius: 8px;">
+              <div style="font-size:11px; color:var(--text-secondary);">FROM (SOURCE BRANCH)</div>
+              <div style="font-weight:700; margin-top:4px;">${escapeHtml(t.sourceBranchName || t.sourceBranchId)}</div>
+              <div style="font-size:12px; color:var(--text-secondary);">${escapeHtml(t.sourceWarehouseName || '')}</div>
+            </div>
+            <div style="padding: 10px; background: var(--bg-hover); border-radius: 8px;">
+              <div style="font-size:11px; color:var(--text-secondary);">TO (DESTINATION BRANCH)</div>
+              <div style="font-weight:700; margin-top:4px;">${escapeHtml(t.destinationBranchName || t.destinationBranchId)}</div>
+              <div style="font-size:12px; color:var(--text-secondary);">${escapeHtml(t.destinationWarehouseName || '')}</div>
+            </div>
+          </div>
+          <div style="font-size:12px; color:var(--text-secondary); margin-bottom:10px;">
+            Status: <strong>${escapeHtml(t.status)}</strong> &bull;
+            Created by: <strong>${escapeHtml(t.createdByName || 'Team Member')}</strong> &bull;
+            Date: ${t.createdAt ? new Date(t.createdAt).toLocaleString() : '—'}
+          </div>
+          <div class="table-responsive">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Product</th>
+                  <th>Batch / Serial</th>
+                  <th>Qty</th>
+                  <th>Unit Cost</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${lines.map(l => `
+                  <tr>
+                    <td><strong>${escapeHtml(l.productSku || '')}</strong> ${escapeHtml(l.productName || l.productId)}</td>
+                    <td style="font-size:12px;">${l.serialNumber ? `SN: <code>${escapeHtml(l.serialNumber)}</code>` : (l.batchNumberSnapshot ? `<code>${escapeHtml(l.batchNumberSnapshot)}</code>` : 'Standard')}</td>
+                    <td><strong>${formatQty(l.quantity ?? l.quantityRequested)} ${escapeHtml(l.uomCode || '')}</strong></td>
+                    <td>${formatTenantMoney(l.unitCostSnapshot)}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+          ${t.notes ? `<div style="margin-top:10px; font-size:12px; color:var(--text-secondary);">Notes: ${escapeHtml(t.notes)}</div>` : ''}
+        `,
+        footerHtml: `<button class="btn btn-secondary" onclick="closeModal()">Close</button>`
+      });
+    }
+
+    async function openCreateTransferModal(branchesList = null, warehousesList = null, preferredSourceBranchId = null) {
+      const [branchesRes, prodsRes, batchesRes] = await Promise.all([
+        branchesList && branchesList.length > 0 ? Promise.resolve({ items: branchesList }) : apiFetch('/v1/org/branches?status=ACTIVE', { silent: true }).catch(() => ({ items: [] })),
+        apiFetch('/v1/products?limit=200&status=ACTIVE', { silent: true }).catch(() => ({ data: [] })),
         apiFetch('/v1/inventory/batches?status=ACTIVE&limit=200', { silent: true }).catch(() => ({ data: [] }))
       ]);
 
-      const branches = branchesRes?.items || (Array.isArray(branchesRes) ? branchesRes : []);
-      const warehouses = whRes?.data || whRes?.items || (Array.isArray(whRes) ? whRes : []);
-      const products = prodsRes?.data || (Array.isArray(prodsRes) ? prodsRes : []);
+      const branches = (branchesRes?.items || branchesRes?.data || (Array.isArray(branchesRes) ? branchesRes : [])).filter(b => b.isActive !== false);
+      const products = (prodsRes?.data || (Array.isArray(prodsRes) ? prodsRes : [])).filter(p => p.trackInventory !== false && p.productType !== 'SERVICE');
       const batches = batchesRes?.data || (Array.isArray(batchesRes) ? batchesRes : []);
 
+      if (branches.length < 2) {
+        showToast('At least two active branches are required to perform an inter-branch stock transfer.', 'warning');
+        return;
+      }
+
+      const initialSourceId =
+        (preferredSourceBranchId && branches.some(b => b.id === preferredSourceBranchId) && preferredSourceBranchId) ||
+        (state.branchId && branches.some(b => b.id === state.branchId) && state.branchId) ||
+        branches[0].id;
+      const initialDestId = (branches.find(b => b.id !== initialSourceId) || branches[1]).id;
+
       openModal({
-        title: 'Create Cross-Branch Batch Transfer',
+        title: 'Transfer Stock Between Branches',
         bodyHtml: `
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+          <div class="modal-grid-2">
             <div class="form-group">
-              <label class="form-label">Source Branch</label>
+              <label class="form-label">Source Branch *</label>
               <select class="form-select" id="trSourceBranch">
-                ${branches.map(b => `<option value="${b.id}" ${b.id === state.branchId ? 'selected' : ''}>${escapeHtml(b.name)}</option>`).join('')}
+                ${branches.map(b => `<option value="${b.id}" ${b.id === initialSourceId ? 'selected' : ''}>${escapeHtml(b.name)} (${escapeHtml(b.code)})</option>`).join('')}
               </select>
+              <div id="trSourceWhCaption" style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;"></div>
             </div>
             <div class="form-group">
-              <label class="form-label">Source Warehouse</label>
-              <select class="form-select" id="trSourceWh">
-                ${warehouses.map(w => `<option value="${w.id}" ${w.id === state.warehouseId ? 'selected' : ''}>${escapeHtml(w.name)}</option>`).join('')}
-              </select>
-            </div>
-            <div class="form-group">
-              <label class="form-label">Destination Branch</label>
+              <label class="form-label">Destination Branch *</label>
               <select class="form-select" id="trDestBranch">
-                ${branches.map((b, idx) => `<option value="${b.id}" ${b.id !== state.branchId || idx === 1 ? 'selected' : ''}>${escapeHtml(b.name)}</option>`).join('')}
+                ${branches.map(b => `<option value="${b.id}" ${b.id === initialDestId ? 'selected' : ''}>${escapeHtml(b.name)} (${escapeHtml(b.code)})</option>`).join('')}
               </select>
-            </div>
-            <div class="form-group">
-              <label class="form-label">Destination Warehouse</label>
-              <select class="form-select" id="trDestWh">
-                ${warehouses.map((w, idx) => `<option value="${w.id}" ${w.id !== state.warehouseId || idx === 1 ? 'selected' : ''}>${escapeHtml(w.name)}</option>`).join('')}
-              </select>
+              <div id="trDestWhCaption" style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;"></div>
             </div>
           </div>
 
           <div class="form-group">
             <label class="form-label">Product *</label>
             <select class="form-select" id="trProductId">
-              <option value="">Select product...</option>
-              ${products.map(p => `<option value="${p.id}">${escapeHtml(p.sku)} &ndash; ${escapeHtml(p.name)}</option>`).join('')}
+              <option value="">Select product to transfer...</option>
+              ${products.map(p => `<option value="${p.id}" data-tracking="${escapeHtml(p.trackingMode || 'NONE')}" data-uom="${escapeHtml(p.baseUom || 'PCS')}">${escapeHtml(p.sku)} &ndash; ${escapeHtml(p.name)}</option>`).join('')}
             </select>
           </div>
 
-          <div class="form-group">
+          <div id="trAvailableStockBanner" style="display:none; padding: 10px 12px; border-radius: 8px; margin-bottom: 12px; font-size: 13px; border: 1px solid var(--border-subtle); background: var(--bg-hover);"></div>
+
+          <div class="form-group" id="trBatchGroup" style="display: none;">
             <label class="form-label">Source Batch (preserves batch cost &amp; selling price)</label>
             <select class="form-select" id="trSourceBatchId">
-              <option value="">Auto / FEFO allocation</option>
+              <option value="">Auto FEFO allocation</option>
             </select>
           </div>
 
-          <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 10px;">
+          <div class="modal-grid-2">
             <div class="form-group">
               <label class="form-label">Quantity *</label>
               <input type="number" step="0.001" min="0.001" class="form-input" id="trQty" value="1" />
+              <div id="trQtyValidationMsg" style="font-size: 11px; color: var(--status-danger); margin-top: 4px; display: none;"></div>
             </div>
             <div class="form-group">
-              <label class="form-label">Notes</label>
-              <input type="text" class="form-input" id="trNotes" placeholder="Reason / manifest notes" />
+              <label class="form-label">Notes (Optional)</label>
+              <input type="text" class="form-input" id="trNotes" placeholder="Transfer reason / reference" />
             </div>
           </div>
+
+          <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; margin-top: 4px;">
+            <input type="checkbox" id="trAutoComplete" checked />
+            <span>Complete transfer immediately (deduct source branch &amp; credit destination branch now)</span>
+          </label>
         `,
         footerHtml: `
-          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-          <button class="btn btn-primary" id="btnSubmitTransferCreate">Create Transfer Order</button>
+          <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button type="button" class="btn btn-primary" id="btnSubmitTransferCreate">Confirm Stock Transfer</button>
         `
       });
 
-      const refreshBatchOptions = () => {
-        const pid = document.getElementById('trProductId')?.value;
-        const sWh = document.getElementById('trSourceWh')?.value;
-        const bSel = document.getElementById('trSourceBatchId');
-        if (!bSel) return;
-        const matching = batches.filter(b => (!pid || b.productId === pid) && (!sWh || b.warehouseId === sWh));
-        bSel.innerHTML = `<option value="">Auto / FEFO allocation</option>` + matching.map(b => {
-          const sp = b.sellingPrice != null ? formatTenantMoney(b.sellingPrice) : 'Default';
-          return `<option value="${b.id}">${escapeHtml(b.batchNumber)} (Avail: ${formatQty(b.currentQuantity)}, Sell: ${sp}${b.expiryDate ? `, Exp: ${escapeHtml(b.expiryDate)}` : ''})</option>`;
-        }).join('');
-      };
-      document.getElementById('trProductId')?.addEventListener('change', refreshBatchOptions);
-      document.getElementById('trSourceWh')?.addEventListener('change', refreshBatchOptions);
-      refreshBatchOptions();
+      const branchById = new Map(branches.map(b => [b.id, b]));
+      const sourceBalancesCache = new Map();
+      let currentAvailableQty = null;
 
-      document.getElementById('btnSubmitTransferCreate').onclick = async () => {
+      const updateWarehouseCaptions = () => {
+        const sId = document.getElementById('trSourceBranch')?.value;
+        const dId = document.getElementById('trDestBranch')?.value;
+        const sBr = branchById.get(sId);
+        const dBr = branchById.get(dId);
+        const sCap = document.getElementById('trSourceWhCaption');
+        const dCap = document.getElementById('trDestWhCaption');
+        if (sCap) sCap.innerText = sBr ? `Default Warehouse: ${sBr.defaultWarehouseName || sBr.defaultWarehouseCode || 'Linked'}` : '';
+        if (dCap) dCap.innerText = dBr ? `Default Warehouse: ${dBr.defaultWarehouseName || dBr.defaultWarehouseCode || 'Linked'}` : '';
+      };
+
+      const validateQtyAndToggleBtn = () => {
+        const sId = document.getElementById('trSourceBranch')?.value;
+        const dId = document.getElementById('trDestBranch')?.value;
+        const pid = document.getElementById('trProductId')?.value;
+        const qtyVal = parseFloat(document.getElementById('trQty')?.value || '0');
+        const msgEl = document.getElementById('trQtyValidationMsg');
+        const btn = document.getElementById('btnSubmitTransferCreate');
+        let errText = '';
+
+        if (sId && dId && sId === dId) {
+          errText = 'Source branch and destination branch must be different.';
+        } else if (pid && (!Number.isFinite(qtyVal) || qtyVal <= 0)) {
+          errText = 'Enter a transfer quantity greater than 0.';
+        } else if (pid && currentAvailableQty !== null && qtyVal > currentAvailableQty) {
+          errText = `Requested quantity (${formatQty(qtyVal)}) exceeds available source stock (${formatQty(currentAvailableQty)}).`;
+        }
+
+        if (msgEl) {
+          msgEl.innerText = errText;
+          msgEl.style.display = errText ? 'block' : 'none';
+        }
+        if (btn && !btn.dataset.submitting) {
+          btn.disabled = Boolean(errText || !pid);
+        }
+      };
+
+      const refreshSourceAvailability = async () => {
+        updateWarehouseCaptions();
+        const sId = document.getElementById('trSourceBranch')?.value;
+        const pid = document.getElementById('trProductId')?.value;
+        const prod = products.find(p => p.id === pid);
+        const banner = document.getElementById('trAvailableStockBanner');
+        const batchGroup = document.getElementById('trBatchGroup');
+        const batchSel = document.getElementById('trSourceBatchId');
+        const sBr = branchById.get(sId);
+        const sWh = sBr?.defaultWarehouseId || '';
+
+        if (!pid || !sId) {
+          currentAvailableQty = null;
+          if (banner) banner.style.display = 'none';
+          if (batchGroup) batchGroup.style.display = 'none';
+          validateQtyAndToggleBtn();
+          return;
+        }
+
+        const trackingMode = prod?.trackingMode || 'NONE';
+        const isBatchTracked = trackingMode === 'BATCH' || trackingMode === 'BATCH_EXPIRY';
+        if (batchGroup) batchGroup.style.display = isBatchTracked ? 'block' : 'none';
+
+        if (batchSel && isBatchTracked) {
+          const matchingBatches = batches.filter(b => b.productId === pid && (!sWh || b.warehouseId === sWh));
+          batchSel.innerHTML = `<option value="">Auto FEFO allocation</option>` + matchingBatches.map(b => {
+            const avail = Math.max(0, (parseFloat(b.currentQuantity) || 0) - (parseFloat(b.reservedQuantity) || 0));
+            return `<option value="${b.id}" data-avail="${avail}">${escapeHtml(b.batchNumber)} (Avail: ${formatQty(avail)}${b.sellingPrice != null ? ` • ${formatTenantMoney(b.sellingPrice)}` : ''})</option>`;
+          }).join('');
+        }
+
+        if (banner) {
+          banner.style.display = 'block';
+          banner.innerHTML = `<span style="color: var(--text-secondary);">Checking available stock in ${escapeHtml(sBr?.name || 'Source Branch')}...</span>`;
+        }
+
+        try {
+          if (!sourceBalancesCache.has(sId)) {
+            const balRes = await apiFetch(`/v1/inventory/balances?branchId=${encodeURIComponent(sId)}&limit=100`, { silent: true });
+            const map = new Map((balRes?.data || []).map(row => [row.productId, row]));
+            sourceBalancesCache.set(sId, map);
+          }
+          const balMap = sourceBalancesCache.get(sId);
+          const row = balMap?.get(pid);
+          const selectedBatchOpt = batchSel && isBatchTracked ? batchSel.options[batchSel.selectedIndex] : null;
+          const batchAvailAttr = selectedBatchOpt ? selectedBatchOpt.getAttribute('data-avail') : null;
+          const avail = batchAvailAttr !== null && batchAvailAttr !== undefined && batchAvailAttr !== ''
+            ? parseFloat(batchAvailAttr)
+            : (row ? Math.max(0, parseFloat(row.availableQty ?? row.qtyOnHand ?? '0')) : 0);
+
+          currentAvailableQty = Number.isFinite(avail) ? avail : 0;
+          const uom = prod?.baseUom || 'PCS';
+          if (banner) {
+            const color = currentAvailableQty > 0 ? 'var(--status-success)' : 'var(--status-danger)';
+            banner.style.borderColor = color;
+            banner.innerHTML = `Available in <strong>${escapeHtml(sBr?.name || 'Source Branch')}</strong>: <strong style="color:${color}; font-size:14px;">${formatQty(currentAvailableQty)} ${escapeHtml(uom)}</strong>`;
+          }
+        } catch {
+          currentAvailableQty = null;
+          if (banner) banner.style.display = 'none';
+        }
+        validateQtyAndToggleBtn();
+      };
+
+      document.getElementById('trSourceBranch')?.addEventListener('change', refreshSourceAvailability);
+      document.getElementById('trDestBranch')?.addEventListener('change', () => { updateWarehouseCaptions(); validateQtyAndToggleBtn(); });
+      document.getElementById('trProductId')?.addEventListener('change', refreshSourceAvailability);
+      document.getElementById('trSourceBatchId')?.addEventListener('change', refreshSourceAvailability);
+      document.getElementById('trQty')?.addEventListener('input', validateQtyAndToggleBtn);
+
+      updateWarehouseCaptions();
+      validateQtyAndToggleBtn();
+
+      const submitBtn = document.getElementById('btnSubmitTransferCreate');
+      submitBtn.onclick = async () => {
+        if (submitBtn.disabled || submitBtn.dataset.submitting) return;
         const sourceBranchId = document.getElementById('trSourceBranch')?.value;
-        const sourceWarehouseId = document.getElementById('trSourceWh')?.value;
         const destinationBranchId = document.getElementById('trDestBranch')?.value;
-        const destinationWarehouseId = document.getElementById('trDestWh')?.value;
         const productId = document.getElementById('trProductId')?.value;
         const sourceBatchId = document.getElementById('trSourceBatchId')?.value || null;
         const qtyVal = parseFloat(document.getElementById('trQty')?.value || '0');
         const notes = document.getElementById('trNotes')?.value?.trim() || undefined;
+        const autoComplete = document.getElementById('trAutoComplete')?.checked !== false;
 
         if (!productId || !Number.isFinite(qtyVal) || qtyVal <= 0) {
-          showToast('Select a product and valid transfer quantity', 'warning');
+          showToast('Select a product and valid transfer quantity.', 'warning');
           return;
         }
-        if (sourceWarehouseId === destinationWarehouseId) {
-          showToast('Destination warehouse must differ from source warehouse', 'warning');
+        if (sourceBranchId === destinationBranchId) {
+          showToast('Destination branch must differ from source branch.', 'warning');
           return;
         }
 
+        const srcBr = branchById.get(sourceBranchId);
+        const dstBr = branchById.get(destinationBranchId);
+
+        submitBtn.dataset.submitting = '1';
+        submitBtn.disabled = true;
+        const origLabel = submitBtn.innerText;
+        submitBtn.innerText = autoComplete ? 'Transferring Stock...' : 'Creating Transfer...';
+
         try {
-          await apiFetch('/v1/inventory/transfers', {
+          const res = await apiFetch('/v1/inventory/transfers', {
             method: 'POST',
             body: JSON.stringify({
               sourceBranchId,
-              sourceWarehouseId,
+              ...(srcBr?.defaultWarehouseId ? { sourceWarehouseId: srcBr.defaultWarehouseId } : {}),
               destinationBranchId,
-              destinationWarehouseId,
+              ...(dstBr?.defaultWarehouseId ? { destinationWarehouseId: dstBr.defaultWarehouseId } : {}),
+              autoComplete,
               notes,
               lines: [{
                 productId,
@@ -9595,11 +9943,24 @@
               }]
             })
           });
-          showToast('Batch transfer order created', 'success');
+          clearTenantViewCache();
+          showToast(
+            autoComplete
+              ? `Transferred ${formatQty(qtyVal)} units (${res.transferNumber}) from ${srcBr?.name || 'Source'} to ${dstBr?.name || 'Destination'}`
+              : `Transfer order ${res.transferNumber} created`,
+            'success'
+          );
           closeModal();
-          renderMovementsView('transfers');
+          if (state.activeView === 'movements') {
+            renderMovementsView('transfers');
+          } else {
+            renderView(state.activeView);
+          }
         } catch (err) {
-          showToast(`Failed to create transfer: ${err.message}`, 'error');
+          showToast(`Stock transfer failed: ${err.message}`, 'error');
+          delete submitBtn.dataset.submitting;
+          submitBtn.disabled = false;
+          submitBtn.innerText = origLabel;
         }
       };
     }
@@ -10044,11 +10405,19 @@
       const container = document.getElementById('mainContainer');
       const renderSeq = state.viewRenderSeq;
 
+      const scopeDesc = state.branchId
+        ? `${escapeHtml(state.branchName || 'Active Branch')}`
+        : 'All Accessible Branches (Business-Wide)';
+
       const buildBalancesHtml = (balances) => `
           <div class="view-header">
             <div>
               <h1 class="view-title">Inventory Balances</h1>
-              <div class="view-subtitle">Snapshot of on-hand and reserved stock across ${escapeHtml(state.branchName || 'active branch')} &bull; ${escapeHtml(state.warehouseName || 'all warehouses')}</div>
+              <div class="view-subtitle">Snapshot of on-hand and reserved stock across ${scopeDesc}</div>
+            </div>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+              <button class="btn btn-secondary" onclick="openBranchSwitcherModal()">⇄ ${escapeHtml(state.branchId ? (state.branchName || 'Switch Branch') : 'All Branches')}</button>
+              ${hasAnyPermission(['inv:movement:post', 'inv:movement:read']) ? `<button class="btn btn-primary" onclick="openCreateTransferModal(null, null, state.branchId || null)">⇄ Transfer Stock</button>` : ''}
             </div>
           </div>
 
@@ -10171,8 +10540,10 @@
       }
 
       try {
-        const whParam = state.warehouseId ? `warehouseId=${encodeURIComponent(state.warehouseId)}&` : '';
-        const res = await apiFetch(`/v1/inventory/balances?${whParam}limit=100`).catch(() => ({ data: [] }));
+        const scopeParam = state.branchId
+          ? `branchId=${encodeURIComponent(state.branchId)}&`
+          : (state.warehouseId ? `warehouseId=${encodeURIComponent(state.warehouseId)}&` : '');
+        const res = await apiFetch(`/v1/inventory/balances?${scopeParam}limit=100`).catch(() => ({ data: [] }));
         if (!isCurrentViewRender('balances', renderSeq)) return;
         const balances = res?.data || (Array.isArray(res) ? res : []);
         setViewCache('balances', balances);
@@ -15286,6 +15657,568 @@
     }
 
     // =========================================================================
+    // PHASE 8: MULTI-BRANCH MANAGEMENT & AUTOMATIC DEFAULT WAREHOUSE VIEW
+    // =========================================================================
+    async function renderBranchesView() {
+      const container = document.getElementById('mainContainer');
+      const renderSeq = state.viewRenderSeq;
+      const statusFilter = state.branchesStatusFilter || 'ACTIVE';
+      const searchQuery = (state.branchesSearchFilter || '').trim().toLowerCase();
+
+      try {
+        const res = await apiFetch('/v1/org/branches?status=ALL', { silent: true });
+        if (!isCurrentViewRender('branches', renderSeq)) return;
+
+        const allBranches = res?.items || res?.data || (Array.isArray(res) ? res : []);
+        state.cachedBranches = allBranches;
+
+        const activeCount = allBranches.filter(b => b.isActive !== false).length;
+        const archivedCount = allBranches.filter(b => b.isActive === false).length;
+        const mainBranch = allBranches.find(b => b.isMainBranch || b.isHeadquarters) || allBranches[0] || null;
+        const withWhCount = allBranches.filter(b => Boolean(b.defaultWarehouseId)).length;
+
+        const canManage = hasPermission('org:branch:manage') && state.allLocationsAccess === true;
+        const canEdit = hasPermission('org:branch:manage');
+        const canTransfer = hasAnyPermission(['inv:movement:post', 'inv:movement:read']);
+
+        const filtered = allBranches.filter(b => {
+          const isAct = b.isActive !== false;
+          if (statusFilter === 'ACTIVE' && !isAct) return false;
+          if (statusFilter === 'ARCHIVED' && isAct) return false;
+          if (searchQuery) {
+            const hay = [b.code, b.name, b.city, b.address, b.managerName, b.phone, b.defaultWarehouseCode, b.defaultWarehouseName]
+              .filter(Boolean)
+              .join(' ')
+              .toLowerCase();
+            if (!hay.includes(searchQuery)) return false;
+          }
+          return true;
+        });
+
+        container.innerHTML = `
+          <div class="view-header">
+            <div>
+              <h1 class="view-title">Branches &amp; Locations</h1>
+              <div class="view-subtitle">Manage store branches, automatic default warehouses, Main Branch designation, and inter-branch stock transfers</div>
+            </div>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+              ${canTransfer ? `<button class="btn btn-secondary" id="btnBranchStockTransferShortcut" onclick="state.movementsTab='transfers'; renderView('movements');">⇄ Stock Transfers</button>` : ''}
+              ${canManage ? `<button class="btn btn-primary" id="btnNewBranch" onclick="openCreateBranchModal()">+ New Branch</button>` : ''}
+            </div>
+          </div>
+
+          <div class="kpi-grid">
+            <div class="kpi-card">
+              <div class="kpi-label">Active Branches</div>
+              <div class="kpi-value">${activeCount}</div>
+              <div style="font-size: 12px; color: var(--text-secondary);">Operational locations</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Main Branch</div>
+              <div class="kpi-value" style="font-size: 18px;">${mainBranch ? escapeHtml(mainBranch.name) : '—'}</div>
+              <div style="font-size: 12px; color: var(--accent-primary);">${mainBranch ? escapeHtml(mainBranch.code) : 'Not designated'}</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Default Warehouses</div>
+              <div class="kpi-value">${withWhCount}</div>
+              <div style="font-size: 12px; color: var(--status-success);">Auto-linked per branch</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Archived Branches</div>
+              <div class="kpi-value">${archivedCount}</div>
+              <div style="font-size: 12px; color: var(--text-secondary);">History &amp; audit preserved</div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="filter-toolbar" style="display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px;">
+              <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                <button type="button" class="btn btn-sm ${statusFilter === 'ACTIVE' ? 'btn-primary' : 'btn-secondary'}" onclick="state.branchesStatusFilter='ACTIVE'; renderBranchesView();">Active (${activeCount})</button>
+                <button type="button" class="btn btn-sm ${statusFilter === 'ARCHIVED' ? 'btn-primary' : 'btn-secondary'}" onclick="state.branchesStatusFilter='ARCHIVED'; renderBranchesView();">Archived (${archivedCount})</button>
+                <button type="button" class="btn btn-sm ${statusFilter === 'ALL' ? 'btn-primary' : 'btn-secondary'}" onclick="state.branchesStatusFilter='ALL'; renderBranchesView();">All (${allBranches.length})</button>
+              </div>
+              <div class="filter-field" style="min-width: 240px; flex: 0 1 320px;">
+                <input type="text" class="form-input" id="branchSearchInput" value="${escapeHtml(state.branchesSearchFilter || '')}" placeholder="Search branch name, code, city, manager..." />
+              </div>
+            </div>
+
+            ${filtered.length === 0 ? `
+              <div class="empty-state-card">
+                <div class="empty-state-title">No ${statusFilter === 'ARCHIVED' ? 'archived ' : ''}branches match your filter</div>
+                <p class="empty-state-desc">${canManage && statusFilter === 'ACTIVE' ? 'Click "+ New Branch" to add another location with an automatic Default Warehouse.' : 'Adjust your search or status filter.'}</p>
+              </div>
+            ` : `
+              <div class="desktop-table-container">
+                <div class="table-responsive">
+                  <table class="data-table">
+                    <thead>
+                      <tr>
+                        <th>Branch</th>
+                        <th>Location &amp; Contact</th>
+                        <th>Manager</th>
+                        <th>Default Warehouse</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${filtered.map(b => {
+                        const isMain = Boolean(b.isMainBranch || b.isHeadquarters);
+                        const isAct = b.isActive !== false;
+                        return `
+                          <tr>
+                            <td>
+                              <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                                <strong>${escapeHtml(b.name)}</strong>
+                                ${isMain ? '<span class="badge-pill badge-blue">⭐ Main Branch</span>' : ''}
+                                ${state.branchId === b.id ? '<span class="badge-pill badge-green">Current</span>' : ''}
+                              </div>
+                              <div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;"><code>${escapeHtml(b.code)}</code> &bull; ${escapeHtml(b.timezone || 'UTC')} (${escapeHtml(b.countryCode || 'US')})</div>
+                            </td>
+                            <td style="font-size: 12px;">
+                              <div>${escapeHtml([b.city, b.address].filter(Boolean).join(' — ') || 'No address added')}</div>
+                              <div style="color: var(--text-secondary);">${escapeHtml([b.phone, b.email].filter(Boolean).join(' • ') || '—')}</div>
+                            </td>
+                            <td style="font-size: 13px;">${escapeHtml(b.managerName || '—')}</td>
+                            <td>
+                              <div style="font-size: 12px; font-weight: 600;">${escapeHtml(b.defaultWarehouseName || 'Default Warehouse')}</div>
+                              <code style="font-size: 11px; color: var(--text-secondary);">${escapeHtml(b.defaultWarehouseCode || 'Linked')}</code>
+                            </td>
+                            <td>
+                              ${isAct
+                                ? '<span class="badge-pill badge-green">Active</span>'
+                                : '<span class="badge-pill badge-yellow">Archived</span>'}
+                            </td>
+                            <td>
+                              <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                                <button type="button" class="btn btn-secondary btn-sm" onclick="openBranchDetailsModal('${b.id}')">Details</button>
+                                ${canEdit ? `<button type="button" class="btn btn-secondary btn-sm" onclick="openEditBranchModal('${b.id}')">Edit</button>` : ''}
+                                ${isAct && canTransfer ? `<button type="button" class="btn btn-secondary btn-sm" onclick="openQuickTransferFromBranch('${b.id}')">⇄ Transfer</button>` : ''}
+                                ${isAct && !isMain && canManage ? `<button type="button" class="btn btn-secondary btn-sm" onclick="setMainBranchAction('${b.id}')">Set Main</button>` : ''}
+                                ${isAct && !isMain && canEdit ? `<button type="button" class="btn btn-secondary btn-sm" style="color: var(--status-warning);" onclick="archiveBranchAction('${b.id}')">Archive</button>` : ''}
+                                ${!isAct && canEdit ? `<button type="button" class="btn btn-primary btn-sm" onclick="restoreBranchAction('${b.id}')">Restore</button>` : ''}
+                              </div>
+                            </td>
+                          </tr>
+                        `;
+                      }).join('')}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div class="mobile-cards-container">
+                ${filtered.map(b => {
+                  const isMain = Boolean(b.isMainBranch || b.isHeadquarters);
+                  const isAct = b.isActive !== false;
+                  return `
+                    <div class="entity-card">
+                      <div class="entity-card-header">
+                        <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                          <code>${escapeHtml(b.code)}</code>
+                          ${isMain ? '<span class="badge-pill badge-blue">⭐ Main</span>' : ''}
+                        </div>
+                        ${isAct ? '<span class="badge-pill badge-green">Active</span>' : '<span class="badge-pill badge-yellow">Archived</span>'}
+                      </div>
+                      <div class="entity-card-title">${escapeHtml(b.name)}</div>
+                      <div class="entity-card-details">
+                        <div class="detail-row">
+                          <span class="detail-label">Default Warehouse</span>
+                          <span class="detail-value">${escapeHtml(b.defaultWarehouseName || 'Default Warehouse')} (${escapeHtml(b.defaultWarehouseCode || 'Linked')})</span>
+                        </div>
+                        <div class="detail-row">
+                          <span class="detail-label">City / Address</span>
+                          <span class="detail-value">${escapeHtml([b.city, b.address].filter(Boolean).join(', ') || '—')}</span>
+                        </div>
+                        <div class="detail-row">
+                          <span class="detail-label">Manager / Phone</span>
+                          <span class="detail-value">${escapeHtml([b.managerName, b.phone].filter(Boolean).join(' • ') || '—')}</span>
+                        </div>
+                      </div>
+                      <div class="entity-card-footer" style="display: flex; gap: 6px; flex-wrap: wrap;">
+                        <button type="button" class="btn btn-secondary btn-sm" style="flex: 1;" onclick="openBranchDetailsModal('${b.id}')">Details</button>
+                        ${canEdit ? `<button type="button" class="btn btn-secondary btn-sm" style="flex: 1;" onclick="openEditBranchModal('${b.id}')">Edit</button>` : ''}
+                        ${isAct && canTransfer ? `<button type="button" class="btn btn-secondary btn-sm" style="flex: 1;" onclick="openQuickTransferFromBranch('${b.id}')">⇄ Transfer</button>` : ''}
+                        ${isAct && !isMain && canManage ? `<button type="button" class="btn btn-secondary btn-sm" style="flex: 1;" onclick="setMainBranchAction('${b.id}')">Set Main</button>` : ''}
+                        ${isAct && !isMain && canEdit ? `<button type="button" class="btn btn-secondary btn-sm" style="flex: 1; color: var(--status-warning);" onclick="archiveBranchAction('${b.id}')">Archive</button>` : ''}
+                        ${!isAct && canEdit ? `<button type="button" class="btn btn-primary btn-sm" style="flex: 1;" onclick="restoreBranchAction('${b.id}')">Restore</button>` : ''}
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            `}
+          </div>
+        `;
+
+        const searchEl = document.getElementById('branchSearchInput');
+        if (searchEl) {
+          searchEl.oninput = (e) => {
+            state.branchesSearchFilter = e.target.value;
+            renderBranchesView();
+          };
+        }
+      } catch (err) {
+        container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load branches: ${escapeHtml(err.message)}</div>`;
+      }
+    }
+
+    function openCreateBranchModal() {
+      const defaultTz = state.timezone || 'UTC';
+      const defaultCountry = (state.countryCode || 'US').toUpperCase();
+      openModal({
+        title: 'Create New Branch',
+        bodyHtml: `
+          <div style="background: rgba(59,130,246,0.08); border: 1px solid rgba(59,130,246,0.25); border-radius: 8px; padding: 10px 12px; font-size: 12px; color: var(--text-secondary); margin-bottom: 14px;">
+            ℹ️ Creating this branch automatically provisions its own <strong>Default Warehouse</strong> starting with <strong>zero stock</strong>. Stock is never copied from Main Branch.
+          </div>
+          <div class="modal-grid-2">
+            <div class="form-group">
+              <label class="form-label">Branch Name *</label>
+              <input type="text" class="form-input" id="brName" placeholder="e.g. Kandy Outlet" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Unique Branch Code *</label>
+              <input type="text" class="form-input" id="brCode" placeholder="e.g. KDY-01" style="text-transform: uppercase;" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">City</label>
+              <input type="text" class="form-input" id="brCity" placeholder="e.g. Kandy" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Phone</label>
+              <input type="text" class="form-input" id="brPhone" placeholder="+94 81 222 3344" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Email</label>
+              <input type="email" class="form-input" id="brEmail" placeholder="kandy@business.com" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Branch Manager (Optional)</label>
+              <input type="text" class="form-input" id="brManagerName" placeholder="Manager full name" />
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Street Address</label>
+            <input type="text" class="form-input" id="brAddress" placeholder="No. 42 Peradeniya Road" />
+          </div>
+          <div class="modal-grid-2">
+            <div class="form-group" style="margin-bottom: 0;">
+              <label class="form-label">Timezone</label>
+              <input type="text" class="form-input" id="brTimezone" value="${escapeHtml(defaultTz)}" />
+            </div>
+            <div class="form-group" style="margin-bottom: 0;">
+              <label class="form-label">Country Code (ISO 2-Letter)</label>
+              <input type="text" class="form-input" id="brCountryCode" maxlength="2" value="${escapeHtml(defaultCountry)}" style="text-transform: uppercase;" />
+            </div>
+          </div>
+        `,
+        footerHtml: `
+          <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button type="button" class="btn btn-primary" id="btnSubmitCreateBranch">Create Branch &amp; Default Warehouse</button>
+        `
+      });
+
+      const btn = document.getElementById('btnSubmitCreateBranch');
+      btn.onclick = async () => {
+        if (btn.disabled) return;
+        const name = document.getElementById('brName')?.value?.trim();
+        const code = document.getElementById('brCode')?.value?.trim().toUpperCase();
+        const city = document.getElementById('brCity')?.value?.trim() || null;
+        const phone = document.getElementById('brPhone')?.value?.trim() || null;
+        const email = document.getElementById('brEmail')?.value?.trim() || null;
+        const managerName = document.getElementById('brManagerName')?.value?.trim() || null;
+        const address = document.getElementById('brAddress')?.value?.trim() || null;
+        const timezone = document.getElementById('brTimezone')?.value?.trim() || defaultTz;
+        const countryCode = (document.getElementById('brCountryCode')?.value?.trim() || defaultCountry).toUpperCase();
+
+        if (!name || name.length < 2) {
+          showToast('Branch name must be at least 2 characters.', 'warning');
+          return;
+        }
+        if (!code || code.length < 2) {
+          showToast('Unique branch code must be at least 2 characters.', 'warning');
+          return;
+        }
+        if (!/^[A-Z]{2}$/.test(countryCode)) {
+          showToast('Country code must be a valid 2-letter ISO code (e.g. LK, US).', 'warning');
+          return;
+        }
+
+        btn.disabled = true;
+        const origLabel = btn.innerText;
+        btn.innerText = 'Creating Branch...';
+        try {
+          const created = await apiFetch('/v1/org/branches', {
+            method: 'POST',
+            body: JSON.stringify({
+              name,
+              code,
+              timezone,
+              countryCode,
+              city,
+              phone,
+              email,
+              managerName,
+              address
+            })
+          });
+          clearTenantViewCache();
+          showToast(`Branch "${created.name}" created with Default Warehouse (${created.defaultWarehouseCode || 'linked'})`, 'success');
+          closeModal();
+          renderBranchesView();
+        } catch (err) {
+          showToast(`Could not create branch: ${err.message}`, 'error');
+          btn.disabled = false;
+          btn.innerText = origLabel;
+        }
+      };
+    }
+
+    async function openEditBranchModal(branchId) {
+      const cached = (state.cachedBranches || []).find(b => b.id === branchId);
+      const branch = cached || await apiFetch(`/v1/org/branches/${branchId}`);
+      if (!branch) return;
+
+      openModal({
+        title: `Edit Branch — ${escapeHtml(branch.name)}`,
+        bodyHtml: `
+          <div class="modal-grid-2">
+            <div class="form-group">
+              <label class="form-label">Branch Name *</label>
+              <input type="text" class="form-input" id="editBrName" value="${escapeHtml(branch.name || '')}" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Branch Code *</label>
+              <input type="text" class="form-input" id="editBrCode" value="${escapeHtml(branch.code || '')}" style="text-transform: uppercase;" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">City</label>
+              <input type="text" class="form-input" id="editBrCity" value="${escapeHtml(branch.city || '')}" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Phone</label>
+              <input type="text" class="form-input" id="editBrPhone" value="${escapeHtml(branch.phone || '')}" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Email</label>
+              <input type="email" class="form-input" id="editBrEmail" value="${escapeHtml(branch.email || '')}" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Branch Manager</label>
+              <input type="text" class="form-input" id="editBrManagerName" value="${escapeHtml(branch.managerName || '')}" />
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Street Address</label>
+            <input type="text" class="form-input" id="editBrAddress" value="${escapeHtml(branch.address || '')}" />
+          </div>
+          <div class="modal-grid-2">
+            <div class="form-group" style="margin-bottom: 0;">
+              <label class="form-label">Timezone</label>
+              <input type="text" class="form-input" id="editBrTimezone" value="${escapeHtml(branch.timezone || 'UTC')}" />
+            </div>
+            <div class="form-group" style="margin-bottom: 0;">
+              <label class="form-label">Country Code</label>
+              <input type="text" class="form-input" id="editBrCountryCode" maxlength="2" value="${escapeHtml(branch.countryCode || 'US')}" style="text-transform: uppercase;" />
+            </div>
+          </div>
+        `,
+        footerHtml: `
+          <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button type="button" class="btn btn-primary" id="btnSubmitEditBranch">Save Changes</button>
+        `
+      });
+
+      const btn = document.getElementById('btnSubmitEditBranch');
+      btn.onclick = async () => {
+        if (btn.disabled) return;
+        const name = document.getElementById('editBrName')?.value?.trim();
+        const code = document.getElementById('editBrCode')?.value?.trim().toUpperCase();
+        const city = document.getElementById('editBrCity')?.value?.trim() || null;
+        const phone = document.getElementById('editBrPhone')?.value?.trim() || null;
+        const email = document.getElementById('editBrEmail')?.value?.trim() || null;
+        const managerName = document.getElementById('editBrManagerName')?.value?.trim() || null;
+        const address = document.getElementById('editBrAddress')?.value?.trim() || null;
+        const timezone = document.getElementById('editBrTimezone')?.value?.trim() || branch.timezone;
+        const countryCode = (document.getElementById('editBrCountryCode')?.value?.trim() || branch.countryCode || 'US').toUpperCase();
+
+        if (!name || name.length < 2 || !code || code.length < 2) {
+          showToast('Branch name and code must each be at least 2 characters.', 'warning');
+          return;
+        }
+
+        btn.disabled = true;
+        btn.innerText = 'Saving...';
+        try {
+          const updated = await apiFetch(`/v1/org/branches/${branchId}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ name, code, city, phone, email, managerName, address, timezone, countryCode })
+          });
+          if (state.branchId === branchId) {
+            state.branchName = updated.name;
+            updateTopbarContext();
+          }
+          clearTenantViewCache();
+          showToast(`Branch "${updated.name}" updated`, 'success');
+          closeModal();
+          renderBranchesView();
+        } catch (err) {
+          showToast(`Failed to update branch: ${err.message}`, 'error');
+          btn.disabled = false;
+          btn.innerText = 'Save Changes';
+        }
+      };
+    }
+
+    async function openBranchDetailsModal(branchId) {
+      openModal({
+        title: 'Branch Details',
+        bodyHtml: `<div style="padding: 18px 0; color: var(--text-secondary);">Loading branch overview &amp; stock summary...</div>`,
+        footerHtml: `<button type="button" class="btn btn-secondary" onclick="closeModal()">Close</button>`
+      });
+
+      try {
+        const [branch, balRes, trRes] = await Promise.all([
+          apiFetch(`/v1/org/branches/${branchId}`),
+          apiFetch(`/v1/inventory/balances?branchId=${encodeURIComponent(branchId)}&limit=50`, { silent: true }).catch(() => ({ data: [] })),
+          apiFetch(`/v1/inventory/transfers?branchId=${encodeURIComponent(branchId)}&limit=5`, { silent: true }).catch(() => ({ items: [] }))
+        ]);
+
+        const balances = balRes?.data || [];
+        const transfers = trRes?.items || [];
+        const totalUnits = balances.reduce((s, row) => s + (parseFloat(row.qtyOnHand) || 0), 0);
+        const totalValue = balances.reduce((s, row) => s + (parseFloat(row.totalInventoryValue) || 0), 0);
+        const isMain = Boolean(branch.isMainBranch || branch.isHeadquarters);
+
+        const bodyEl = document.getElementById('modalBody');
+        if (!bodyEl) return;
+        bodyEl.innerHTML = `
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap; margin-bottom:14px;">
+            <div>
+              <h3 style="margin:0; font-size:18px;">${escapeHtml(branch.name)} ${isMain ? '<span class="badge-pill badge-blue">⭐ Main Branch</span>' : ''}</h3>
+              <div style="font-size:12px; color:var(--text-secondary); margin-top:4px;">Code: <code>${escapeHtml(branch.code)}</code> &bull; ${escapeHtml(branch.timezone)} (${escapeHtml(branch.countryCode)})</div>
+            </div>
+            <span class="badge-pill ${branch.isActive !== false ? 'badge-green' : 'badge-yellow'}">${branch.isActive !== false ? 'Active' : 'Archived'}</span>
+          </div>
+
+          <div class="modal-grid-2" style="margin-bottom: 14px;">
+            <div style="padding: 12px; background: var(--bg-hover); border-radius: 8px; border: 1px solid var(--border-subtle);">
+              <div style="font-size:11px; color:var(--text-secondary); text-transform:uppercase;">Contact &amp; Location</div>
+              <div style="font-size:13px; margin-top:6px;"><strong>City:</strong> ${escapeHtml(branch.city || '—')}</div>
+              <div style="font-size:13px;"><strong>Address:</strong> ${escapeHtml(branch.address || '—')}</div>
+              <div style="font-size:13px;"><strong>Phone:</strong> ${escapeHtml(branch.phone || '—')}</div>
+              <div style="font-size:13px;"><strong>Email:</strong> ${escapeHtml(branch.email || '—')}</div>
+              <div style="font-size:13px;"><strong>Manager:</strong> ${escapeHtml(branch.managerName || '—')}</div>
+            </div>
+            <div style="padding: 12px; background: var(--bg-hover); border-radius: 8px; border: 1px solid var(--border-subtle);">
+              <div style="font-size:11px; color:var(--text-secondary); text-transform:uppercase;">Default Warehouse &amp; Inventory</div>
+              <div style="font-size:13px; margin-top:6px;"><strong>Warehouse:</strong> ${escapeHtml(branch.defaultWarehouseName || 'Default Warehouse')}</div>
+              <div style="font-size:13px;"><strong>WH Code:</strong> <code>${escapeHtml(branch.defaultWarehouseCode || '—')}</code></div>
+              <div style="font-size:13px;"><strong>Tracked SKUs:</strong> ${balances.length}</div>
+              <div style="font-size:13px;"><strong>On-Hand Units:</strong> ${formatQty(totalUnits)}</div>
+              <div style="font-size:13px;"><strong>Stock Value:</strong> ${formatTenantMoney(totalValue)}</div>
+            </div>
+          </div>
+
+          <div style="font-size:12px; font-weight:700; margin-bottom:6px;">Recent Stock Transfers Involving This Branch</div>
+          ${transfers.length === 0 ? `
+            <div style="font-size:12px; color:var(--text-secondary); padding:10px; background:var(--bg-hover); border-radius:6px;">No transfers involving this branch yet.</div>
+          ` : `
+            <div style="display:flex; flex-direction:column; gap:6px;">
+              ${transfers.map(t => `
+                <div style="display:flex; justify-content:space-between; align-items:center; font-size:12px; padding:8px 10px; border:1px solid var(--border-subtle); border-radius:6px;">
+                  <div>
+                    <code>${escapeHtml(t.transferNumber)}</code>
+                    <span style="margin-left:6px;">${escapeHtml(t.sourceBranchName || '')} &rarr; ${escapeHtml(t.destinationBranchName || '')}</span>
+                  </div>
+                  <span class="badge-pill ${t.status === 'RECEIVED' ? 'badge-green' : 'badge-blue'}">${escapeHtml(t.status)}</span>
+                </div>
+              `).join('')}
+            </div>
+          `}
+        `;
+      } catch (err) {
+        const bodyEl = document.getElementById('modalBody');
+        if (bodyEl) bodyEl.innerHTML = `<div style="color: var(--status-danger);">Failed to load branch details: ${escapeHtml(err.message)}</div>`;
+      }
+    }
+
+    async function archiveBranchAction(branchId) {
+      const target = (state.cachedBranches || []).find(b => b.id === branchId);
+      const label = target ? target.name : 'this branch';
+      openModal({
+        title: 'Archive Branch?',
+        bodyHtml: `
+          <p style="font-size: 14px; line-height: 1.5; margin-top: 0;">
+            Are you sure you want to archive <strong>${escapeHtml(label)}</strong>?
+          </p>
+          <p style="font-size: 13px; color: var(--text-secondary);">
+            Historical transactions, sales, purchases, stock records, and audit history remain completely intact. You can restore the branch at any time.
+          </p>
+        `,
+        footerHtml: `
+          <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button type="button" class="btn btn-danger" id="btnConfirmArchiveBranch">Archive Branch</button>
+        `
+      });
+
+      const btn = document.getElementById('btnConfirmArchiveBranch');
+      btn.onclick = async () => {
+        if (btn.disabled) return;
+        btn.disabled = true;
+        btn.innerText = 'Archiving...';
+        try {
+          await apiFetch(`/v1/org/branches/${branchId}/archive`, { method: 'POST', body: JSON.stringify({}) });
+          clearTenantViewCache();
+          if (state.branchId === branchId) {
+            const replacement = (state.cachedBranches || []).find(b => b.id !== branchId && b.isActive !== false);
+            await switchActiveBranchContext(replacement || null, { refresh: false, silent: true });
+          }
+          showToast(`Branch "${label}" archived (history preserved)`, 'success');
+          closeModal();
+          renderBranchesView();
+        } catch (err) {
+          showToast(`Could not archive branch: ${err.message}`, 'error');
+          btn.disabled = false;
+          btn.innerText = 'Archive Branch';
+        }
+      };
+    }
+
+    async function restoreBranchAction(branchId) {
+      try {
+        const restored = await apiFetch(`/v1/org/branches/${branchId}/restore`, {
+          method: 'POST',
+          body: JSON.stringify({})
+        });
+        clearTenantViewCache();
+        showToast(`Branch "${restored.name}" restored to Active`, 'success');
+        renderBranchesView();
+      } catch (err) {
+        showToast(`Failed to restore branch: ${err.message}`, 'error');
+      }
+    }
+
+    async function setMainBranchAction(branchId) {
+      try {
+        const updated = await apiFetch(`/v1/org/branches/${branchId}/set-main`, {
+          method: 'POST',
+          body: JSON.stringify({})
+        });
+        clearTenantViewCache();
+        showToast(`"${updated.name}" is now designated as Main Branch`, 'success');
+        renderBranchesView();
+      } catch (err) {
+        showToast(`Failed to set Main Branch: ${err.message}`, 'error');
+      }
+    }
+
+    async function openQuickTransferFromBranch(sourceBranchId) {
+      await openCreateTransferModal(state.cachedBranches || null, null, sourceBranchId);
+    }
+
+    // =========================================================================
     // 9. ORGANIZATION SETTINGS & ENTITLEMENTS VIEW
     // =========================================================================
     async function renderOrgSettingsView() {
@@ -15336,7 +16269,7 @@
         const shopBrand = state.tenantBranding || {};
 
         const branchesError = branchesRes?._error || null;
-        const branches = Array.isArray(branchesRes) ? branchesRes : (branchesRes?.data || []);
+        const branches = Array.isArray(branchesRes) ? branchesRes : (branchesRes?.items || branchesRes?.data || []);
 
         let activeTab = state.orgSettingsActiveTab || 'org';
         if (activeTab === 'profile') activeTab = 'org';
@@ -15444,9 +16377,9 @@
                 </div>
 
                 <div class="card" style="margin-bottom: 0;">
-                  <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
-                    <span>Active Branches (${branches.length})</span>
-                    <span class="badge-pill badge-green">Operational</span>
+                  <div class="card-title" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+                    <span>Branches (${branches.length})</span>
+                    <button class="btn btn-primary btn-sm" onclick="renderView('branches')">Manage Branches &amp; Locations →</button>
                   </div>
                   <div class="table-responsive">
                     <table class="data-table">
@@ -15454,17 +16387,22 @@
                         <tr>
                           <th>Branch Code</th>
                           <th>Branch Name</th>
+                          <th>Default Warehouse</th>
                           <th>Status</th>
                         </tr>
                       </thead>
                       <tbody>
                         ${branches.length === 0 ? `
-                          <tr><td colspan="3" style="text-align: center; color: var(--text-secondary);">No branches configured.</td></tr>
+                          <tr><td colspan="4" style="text-align: center; color: var(--text-secondary);">No branches configured.</td></tr>
                         ` : branches.map(b => `
                           <tr>
                             <td><code>${escapeHtml(b.code || 'MAIN')}</code></td>
-                            <td><strong>${escapeHtml(b.name || 'Main Branch')}</strong></td>
-                            <td><span class="badge-pill badge-green">Active</span></td>
+                            <td>
+                              <strong>${escapeHtml(b.name || 'Main Branch')}</strong>
+                              ${b.isMainBranch || b.isHeadquarters ? '<span class="badge-pill badge-blue" style="margin-left:6px;">Main Branch</span>' : ''}
+                            </td>
+                            <td style="font-size: 12px;">${escapeHtml(b.defaultWarehouseName || b.defaultWarehouseCode || 'Auto Default WH')}</td>
+                            <td><span class="badge-pill ${b.isActive === false ? 'badge-yellow' : 'badge-green'}">${b.isActive === false ? 'Archived' : 'Active'}</span></td>
                           </tr>
                         `).join('')}
                       </tbody>

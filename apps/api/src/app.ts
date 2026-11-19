@@ -124,6 +124,7 @@ import {
   TenantContextHeadersSchema,
   TenantMembershipSummarySchema,
   TransitionSerialStatusRequestSchema,
+  UpdateBranchRequestSchema,
   UpdateCategoryRequestSchema,
   UpdateEmployeeRequestSchema,
   UpdateEmployeeStatusRequestSchema,
@@ -385,6 +386,7 @@ import {
   receiveStockTransfer,
 } from './modules/inv/index.js';
 import {
+  archiveBranch,
   createBranch,
   createWarehouse,
   getBranchById,
@@ -394,7 +396,9 @@ import {
   listWarehouses,
   onboardBusinessAtomic,
   onboardTenantOrganization,
-  updateBranchName,
+  restoreBranch,
+  setMainBranch,
+  updateBranch,
   updateTenantBranding,
   updateWarehouse,
 } from './modules/org/index.js';
@@ -1636,151 +1640,299 @@ export async function buildApp(
     },
   );
 
-  // 8. Create Branch (Enforces JWT + 3D RBAC + SUB Quota)
-  app.post(
-    '/v1/org/branches',
-    {
-      schema: {
-        headers: AuthenticatedTenantHeadersSchema,
-        body: CreateBranchRequestSchema,
-        response: {
-          201: BranchResponseSchema,
-          401: ProblemDetailsSchema,
-          403: ProblemDetailsSchema,
+  // 8. Create Branch (Enforces JWT + 3D RBAC + SUB Quota + Auto Default Warehouse)
+  for (const path of ['/v1/org/branches', '/v1/branches'] as const) {
+    app.post(
+      path,
+      {
+        schema: {
+          headers: AuthenticatedTenantHeadersSchema,
+          body: CreateBranchRequestSchema,
+          response: {
+            201: BranchResponseSchema,
+            401: ProblemDetailsSchema,
+            403: ProblemDetailsSchema,
+            409: ProblemDetailsSchema,
+          },
         },
       },
-    },
-    async (request, reply) => {
-      const principal = await verifySupabaseJwt(
-        request.headers.authorization,
-        jwksProvider,
-        jwtOptions,
-      );
-      const tenantId = request.headers['x-tenant-id'];
-      const traceId = String(request.id);
+      async (request, reply) => {
+        const principal = await verifySupabaseJwt(
+          request.headers.authorization,
+          jwksProvider,
+          jwtOptions,
+        );
+        const tenantId = request.headers['x-tenant-id'];
+        const traceId = String(request.id);
 
-      const branch = await withTenantTransaction(
-        options.db,
-        { tenantId, userId: principal.userId, traceId },
-        async (trx) => {
-          return createBranch(trx, request.body);
-        },
-      );
+        const branch = await withTenantTransaction(
+          options.db,
+          { tenantId, userId: principal.userId, traceId },
+          async (trx) => {
+            return createBranch(trx, request.body);
+          },
+        );
 
-      return reply.status(201).send(branch);
-    },
+        return reply.status(201).send(branch);
+      },
+    );
+  }
+
+  // 9. List Branches (Enforces JWT + 3D Location Scope Filter + RLS + Status/Search Filter)
+  const listBranchesQuerySchema = Type.Optional(
+    Type.Object({
+      status: Type.Optional(
+        Type.Union([
+          Type.Literal('ACTIVE'),
+          Type.Literal('ARCHIVED'),
+          Type.Literal('ALL'),
+        ]),
+      ),
+      search: Type.Optional(Type.String({ maxLength: 160 })),
+    }),
   );
 
-  // 9. List Branches (Enforces JWT + 3D Location Scope Filter + RLS)
-  app.get(
-    '/v1/org/branches',
-    {
-      schema: {
-        headers: AuthenticatedTenantHeadersSchema,
-        response: {
-          200: Type.Object({
-            items: Type.Array(BranchResponseSchema),
-          }),
-          401: ProblemDetailsSchema,
-          403: ProblemDetailsSchema,
+  for (const path of ['/v1/org/branches', '/v1/branches'] as const) {
+    app.get(
+      path,
+      {
+        schema: {
+          headers: AuthenticatedTenantHeadersSchema,
+          querystring: listBranchesQuerySchema,
+          response: {
+            200: Type.Object({
+              items: Type.Array(BranchResponseSchema),
+            }),
+            401: ProblemDetailsSchema,
+            403: ProblemDetailsSchema,
+          },
         },
       },
-    },
-    async (request) => {
-      const principal = await verifySupabaseJwt(
-        request.headers.authorization,
-        jwksProvider,
-        jwtOptions,
-      );
-      const tenantId = request.headers['x-tenant-id'];
-      const traceId = String(request.id);
+      async (request) => {
+        const principal = await verifySupabaseJwt(
+          request.headers.authorization,
+          jwksProvider,
+          jwtOptions,
+        );
+        const tenantId = request.headers['x-tenant-id'];
+        const traceId = String(request.id);
+        const q = (request.query ?? {}) as {
+          status?: 'ACTIVE' | 'ARCHIVED' | 'ALL';
+          search?: string;
+        };
 
-      const items = await withTenantTransaction(
-        options.db,
-        { tenantId, userId: principal.userId, traceId },
-        async (trx) => {
-          return listBranches(trx);
-        },
-      );
+        const items = await withTenantTransaction(
+          options.db,
+          { tenantId, userId: principal.userId, traceId },
+          async (trx) => {
+            return listBranches(trx, {
+              status: q.status,
+              search: q.search,
+            });
+          },
+        );
 
-      return { items: [...items] };
-    },
-  );
+        return { items: [...items] };
+      },
+    );
+  }
 
   // 10. Get Branch by ID (Enforces JWT + Branch Scope + RLS)
-  app.get(
-    '/v1/org/branches/:branchId',
-    {
-      schema: {
-        headers: AuthenticatedTenantHeadersSchema,
-        params: Type.Object({ branchId: UuidSchema }),
-        response: {
-          200: BranchResponseSchema,
-          401: ProblemDetailsSchema,
-          403: ProblemDetailsSchema,
-          404: ProblemDetailsSchema,
+  for (const path of ['/v1/org/branches/:branchId', '/v1/branches/:branchId'] as const) {
+    app.get(
+      path,
+      {
+        schema: {
+          headers: AuthenticatedTenantHeadersSchema,
+          params: Type.Object({ branchId: UuidSchema }),
+          response: {
+            200: BranchResponseSchema,
+            401: ProblemDetailsSchema,
+            403: ProblemDetailsSchema,
+            404: ProblemDetailsSchema,
+          },
         },
       },
-    },
-    async (request) => {
-      const principal = await verifySupabaseJwt(
-        request.headers.authorization,
-        jwksProvider,
-        jwtOptions,
-      );
-      const tenantId = request.headers['x-tenant-id'];
-      const traceId = String(request.id);
+      async (request) => {
+        const principal = await verifySupabaseJwt(
+          request.headers.authorization,
+          jwksProvider,
+          jwtOptions,
+        );
+        const tenantId = request.headers['x-tenant-id'];
+        const traceId = String(request.id);
 
-      return withTenantTransaction(
-        options.db,
-        { tenantId, userId: principal.userId, traceId },
-        async (trx) => {
-          return getBranchById(trx, request.params.branchId);
-        },
-      );
-    },
-  );
+        return withTenantTransaction(
+          options.db,
+          { tenantId, userId: principal.userId, traceId },
+          async (trx) => {
+            return getBranchById(trx, request.params.branchId);
+          },
+        );
+      },
+    );
+  }
 
-  // 11. Update Branch Name (Enforces JWT + Branch Scope + SUB Write Entitlement)
-  app.patch(
-    '/v1/org/branches/:branchId',
-    {
-      schema: {
-        headers: AuthenticatedTenantHeadersSchema,
-        params: Type.Object({ branchId: UuidSchema }),
-        body: Type.Object(
-          { name: Type.String({ minLength: 2, maxLength: 120 }) },
-          { additionalProperties: false },
-        ),
-        response: {
-          200: BranchResponseSchema,
-          401: ProblemDetailsSchema,
-          403: ProblemDetailsSchema,
-          404: ProblemDetailsSchema,
+  // 11. Update Branch (Enforces JWT + Branch Scope + SUB Write Entitlement)
+  for (const path of ['/v1/org/branches/:branchId', '/v1/branches/:branchId'] as const) {
+    app.patch(
+      path,
+      {
+        schema: {
+          headers: AuthenticatedTenantHeadersSchema,
+          params: Type.Object({ branchId: UuidSchema }),
+          body: UpdateBranchRequestSchema,
+          response: {
+            200: BranchResponseSchema,
+            401: ProblemDetailsSchema,
+            403: ProblemDetailsSchema,
+            404: ProblemDetailsSchema,
+            409: ProblemDetailsSchema,
+          },
         },
       },
-    },
-    async (request) => {
-      const principal = await verifySupabaseJwt(
-        request.headers.authorization,
-        jwksProvider,
-        jwtOptions,
-      );
-      const tenantId = request.headers['x-tenant-id'];
-      const traceId = String(request.id);
+      async (request) => {
+        const principal = await verifySupabaseJwt(
+          request.headers.authorization,
+          jwksProvider,
+          jwtOptions,
+        );
+        const tenantId = request.headers['x-tenant-id'];
+        const traceId = String(request.id);
 
-      return withTenantTransaction(
-        options.db,
-        { tenantId, userId: principal.userId, traceId },
-        async (trx) => {
-          return updateBranchName(trx, {
-            branchId: request.params.branchId,
-            name: request.body.name,
-          });
+        return withTenantTransaction(
+          options.db,
+          { tenantId, userId: principal.userId, traceId },
+          async (trx) => {
+            return updateBranch(trx, {
+              branchId: request.params.branchId,
+              ...request.body,
+            });
+          },
+        );
+      },
+    );
+  }
+
+  // 11a-1. Archive Branch
+  for (const path of [
+    '/v1/org/branches/:branchId/archive',
+    '/v1/branches/:branchId/archive',
+  ] as const) {
+    app.post(
+      path,
+      {
+        schema: {
+          headers: AuthenticatedTenantHeadersSchema,
+          params: Type.Object({ branchId: UuidSchema }),
+          response: {
+            200: BranchResponseSchema,
+            401: ProblemDetailsSchema,
+            403: ProblemDetailsSchema,
+            404: ProblemDetailsSchema,
+            409: ProblemDetailsSchema,
+          },
         },
-      );
-    },
-  );
+      },
+      async (request) => {
+        const principal = await verifySupabaseJwt(
+          request.headers.authorization,
+          jwksProvider,
+          jwtOptions,
+        );
+        const tenantId = request.headers['x-tenant-id'];
+        const traceId = String(request.id);
+
+        return withTenantTransaction(
+          options.db,
+          { tenantId, userId: principal.userId, traceId },
+          async (trx) => {
+            return archiveBranch(trx, request.params.branchId);
+          },
+        );
+      },
+    );
+  }
+
+  // 11a-2. Restore Archived Branch
+  for (const path of [
+    '/v1/org/branches/:branchId/restore',
+    '/v1/branches/:branchId/restore',
+  ] as const) {
+    app.post(
+      path,
+      {
+        schema: {
+          headers: AuthenticatedTenantHeadersSchema,
+          params: Type.Object({ branchId: UuidSchema }),
+          response: {
+            200: BranchResponseSchema,
+            401: ProblemDetailsSchema,
+            403: ProblemDetailsSchema,
+            404: ProblemDetailsSchema,
+            409: ProblemDetailsSchema,
+          },
+        },
+      },
+      async (request) => {
+        const principal = await verifySupabaseJwt(
+          request.headers.authorization,
+          jwksProvider,
+          jwtOptions,
+        );
+        const tenantId = request.headers['x-tenant-id'];
+        const traceId = String(request.id);
+
+        return withTenantTransaction(
+          options.db,
+          { tenantId, userId: principal.userId, traceId },
+          async (trx) => {
+            return restoreBranch(trx, request.params.branchId);
+          },
+        );
+      },
+    );
+  }
+
+  // 11a-3. Designate Main Branch
+  for (const path of [
+    '/v1/org/branches/:branchId/set-main',
+    '/v1/branches/:branchId/set-main',
+  ] as const) {
+    app.post(
+      path,
+      {
+        schema: {
+          headers: AuthenticatedTenantHeadersSchema,
+          params: Type.Object({ branchId: UuidSchema }),
+          response: {
+            200: BranchResponseSchema,
+            401: ProblemDetailsSchema,
+            403: ProblemDetailsSchema,
+            404: ProblemDetailsSchema,
+            409: ProblemDetailsSchema,
+          },
+        },
+      },
+      async (request) => {
+        const principal = await verifySupabaseJwt(
+          request.headers.authorization,
+          jwksProvider,
+          jwtOptions,
+        );
+        const tenantId = request.headers['x-tenant-id'];
+        const traceId = String(request.id);
+
+        return withTenantTransaction(
+          options.db,
+          { tenantId, userId: principal.userId, traceId },
+          async (trx) => {
+            return setMainBranch(trx, request.params.branchId);
+          },
+        );
+      },
+    );
+  }
 
   // 11b. List Warehouses (Enforces JWT + 3D Location Scope Filter + RLS)
   app.get(

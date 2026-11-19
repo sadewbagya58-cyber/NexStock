@@ -384,7 +384,7 @@ describe('BUG-066 — Global Application Initialization & Loading Performance Re
 
     it('verifies POS Checkout view loads registers, shifts, products, and categories concurrently', () => {
       expect(html).toContain('// Parallel register, shift, product, and category retrieval (BUG-066 Waterfall Optimization)');
-      expect(html).toContain('const [regRes, shiftRes, productsRes, catRes] = await Promise.all([');
+      expect(html).toContain('const [regRes, shiftRes, productsRes, catRes, batchesRes] = await Promise.all([');
     });
 
     it('verifies Dashboard view does not execute redundant POS register queries', () => {

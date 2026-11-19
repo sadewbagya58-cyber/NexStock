@@ -34,19 +34,204 @@ async function getTenantBaseCurrency(trx: TenantTransactionContext): Promise<str
   return tenant?.base_currency?.trim() ?? 'USD';
 }
 
+async function resolveBranchDefaultWarehouseId(
+  trx: TenantTransactionContext,
+  branchId: string,
+  providedWarehouseId: string | undefined,
+  label: string,
+): Promise<{
+  readonly warehouseId: string;
+  readonly branchName: string;
+  readonly branchCode: string;
+}> {
+  const branch = await trx.db
+    .selectFrom('branches')
+    .select(['id', 'code', 'name', 'default_warehouse_id', 'is_active'])
+    .where('tenant_id', '=', trx.tenantId)
+    .where('id', '=', branchId)
+    .executeTakeFirst();
+
+  if (!branch) {
+    throw new AppError({
+      statusCode: 404,
+      errorCode: 'ERR_NOT_FOUND',
+      title: `${label} Branch Not Found`,
+      detail: `${label} branch "${branchId}" was not found.`,
+    });
+  }
+
+  if (!branch.is_active) {
+    throw new AppError({
+      statusCode: 409,
+      errorCode: 'ERR_CONFLICT',
+      title: `${label} Branch Is Archived`,
+      detail: `Archived branch "${branch.name}" (${branch.code}) cannot be used for stock transfers.`,
+    });
+  }
+
+  if (providedWarehouseId) {
+    await assertWarehouseBelongsToBranch(trx, providedWarehouseId, branchId, label);
+    return {
+      warehouseId: providedWarehouseId,
+      branchName: branch.name,
+      branchCode: branch.code,
+    };
+  }
+
+  if (branch.default_warehouse_id) {
+    const wh = await trx.db
+      .selectFrom('warehouses')
+      .select(['id', 'is_active'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('id', '=', branch.default_warehouse_id)
+      .executeTakeFirst();
+    if (wh && wh.is_active) {
+      return {
+        warehouseId: wh.id,
+        branchName: branch.name,
+        branchCode: branch.code,
+      };
+    }
+  }
+
+  const linkedWh = await trx.db
+    .selectFrom('warehouses')
+    .select(['id'])
+    .where('tenant_id', '=', trx.tenantId)
+    .where('branch_id', '=', branchId)
+    .where('is_active', '=', true)
+    .orderBy('created_at', 'asc')
+    .executeTakeFirst();
+
+  if (!linkedWh) {
+    throw new AppError({
+      statusCode: 409,
+      errorCode: 'ERR_CONFLICT',
+      title: `No Active Warehouse For ${label} Branch`,
+      detail: `${label} branch "${branch.name}" does not have an active default warehouse.`,
+    });
+  }
+
+  await trx.db
+    .updateTable('branches')
+    .set({ default_warehouse_id: linkedWh.id, updated_at: new Date() })
+    .where('tenant_id', '=', trx.tenantId)
+    .where('id', '=', branchId)
+    .execute();
+
+  return {
+    warehouseId: linkedWh.id,
+    branchName: branch.name,
+    branchCode: branch.code,
+  };
+}
+
+interface TransferEnrichmentLookups {
+  readonly branches: ReadonlyMap<string, { code: string; name: string }>;
+  readonly warehouses: ReadonlyMap<string, { code: string; name: string }>;
+  readonly products: ReadonlyMap<string, { sku: string; name: string }>;
+  readonly serials: ReadonlyMap<string, string>;
+  readonly users: ReadonlyMap<string, string>;
+}
+
+async function loadTransferEnrichments(
+  trx: TenantTransactionContext,
+  transfers: readonly Selectable<StockTransfersTable>[],
+  lines: readonly Selectable<StockTransferLinesTable>[],
+): Promise<TransferEnrichmentLookups> {
+  const branchIds = new Set<string>();
+  const warehouseIds = new Set<string>();
+  const userIds = new Set<string>();
+  for (const t of transfers) {
+    branchIds.add(t.source_branch_id);
+    branchIds.add(t.destination_branch_id);
+    warehouseIds.add(t.source_warehouse_id);
+    warehouseIds.add(t.destination_warehouse_id);
+    if (t.created_by_user_id) userIds.add(t.created_by_user_id);
+  }
+
+  const productIds = new Set<string>();
+  const serialIds = new Set<string>();
+  for (const l of lines) {
+    productIds.add(l.product_id);
+    if (l.serial_id) serialIds.add(l.serial_id);
+  }
+
+  const [branchRows, whRows, productRows, serialRows, userRows] = await Promise.all([
+    branchIds.size > 0
+      ? trx.db
+          .selectFrom('branches')
+          .select(['id', 'code', 'name'])
+          .where('tenant_id', '=', trx.tenantId)
+          .where('id', 'in', [...branchIds])
+          .execute()
+      : [],
+    warehouseIds.size > 0
+      ? trx.db
+          .selectFrom('warehouses')
+          .select(['id', 'code', 'name'])
+          .where('tenant_id', '=', trx.tenantId)
+          .where('id', 'in', [...warehouseIds])
+          .execute()
+      : [],
+    productIds.size > 0
+      ? trx.db
+          .selectFrom('products')
+          .select(['id', 'sku', 'name'])
+          .where('tenant_id', '=', trx.tenantId)
+          .where('id', 'in', [...productIds])
+          .execute()
+      : [],
+    serialIds.size > 0
+      ? trx.db
+          .selectFrom('inventory_serials')
+          .select(['id', 'serial_number'])
+          .where('tenant_id', '=', trx.tenantId)
+          .where('id', 'in', [...serialIds])
+          .execute()
+      : [],
+    userIds.size > 0
+      ? trx.db
+          .selectFrom('users')
+          .select(['id', 'full_name', 'email'])
+          .where('id', 'in', [...userIds])
+          .execute()
+      : [],
+  ]);
+
+  return {
+    branches: new Map(branchRows.map((b) => [b.id, { code: b.code, name: b.name }])),
+    warehouses: new Map(whRows.map((w) => [w.id, { code: w.code, name: w.name }])),
+    products: new Map(productRows.map((p) => [p.id, { sku: p.sku, name: p.name }])),
+    serials: new Map(serialRows.map((s) => [s.id, s.serial_number])),
+    users: new Map(
+      userRows.map((u) => [u.id, u.full_name || u.email || u.id]),
+    ),
+  };
+}
+
 function mapTransferLineRow(
   row: Selectable<StockTransferLinesTable>,
   baseCurrency: string,
+  lookups?: TransferEnrichmentLookups,
 ): StockTransferLineResponse {
+  const prod = lookups?.products.get(row.product_id);
+  const reqStr = Quantity.fromDecimalString(
+    String(row.requested_qty),
+  ).toDecimalString();
   return {
     id: row.id,
     lineNumber: row.line_number,
     productId: row.product_id,
+    productSku: prod?.sku ?? null,
+    productName: prod?.name ?? null,
+    uomCode: row.uom_code ?? null,
     sourceBatchId: row.source_batch_id,
     destinationBatchId: row.destination_batch_id,
-    quantityRequested: Quantity.fromDecimalString(
-      String(row.requested_qty),
-    ).toDecimalString(),
+    serialId: row.serial_id ?? null,
+    serialNumber: row.serial_id ? (lookups?.serials.get(row.serial_id) ?? null) : null,
+    quantity: reqStr,
+    quantityRequested: reqStr,
     quantityDispatched: Quantity.fromDecimalString(
       String(row.dispatched_qty ?? '0.000000'),
     ).toDecimalString(),
@@ -76,15 +261,27 @@ function mapTransferRow(
   row: Selectable<StockTransfersTable>,
   lines: readonly Selectable<StockTransferLinesTable>[],
   baseCurrency: string,
+  lookups?: TransferEnrichmentLookups,
 ): StockTransferResponse {
+  const srcBranch = lookups?.branches.get(row.source_branch_id);
+  const dstBranch = lookups?.branches.get(row.destination_branch_id);
+  const srcWh = lookups?.warehouses.get(row.source_warehouse_id);
+  const dstWh = lookups?.warehouses.get(row.destination_warehouse_id);
+
   return {
     id: row.id,
     tenantId: row.tenant_id,
     transferNumber: row.transfer_number,
     sourceBranchId: row.source_branch_id,
+    sourceBranchCode: srcBranch?.code ?? null,
+    sourceBranchName: srcBranch?.name ?? null,
     sourceWarehouseId: row.source_warehouse_id,
+    sourceWarehouseName: srcWh?.name ?? null,
     destinationBranchId: row.destination_branch_id,
+    destinationBranchCode: dstBranch?.code ?? null,
+    destinationBranchName: dstBranch?.name ?? null,
     destinationWarehouseId: row.destination_warehouse_id,
+    destinationWarehouseName: dstWh?.name ?? null,
     status: row.status as StockTransferStatus,
     notes: row.notes,
     dispatchedBy: row.dispatched_by_user_id,
@@ -96,9 +293,12 @@ function mapTransferRow(
       ? new Date(row.received_at).toISOString()
       : null,
     createdBy: row.created_by_user_id,
+    createdByName: row.created_by_user_id
+      ? (lookups?.users.get(row.created_by_user_id) ?? null)
+      : null,
     createdAt: new Date(row.created_at).toISOString(),
     updatedAt: new Date(row.updated_at).toISOString(),
-    lines: lines.map((l) => mapTransferLineRow(l, baseCurrency)),
+    lines: lines.map((l) => mapTransferLineRow(l, baseCurrency, lookups)),
   };
 }
 
@@ -151,15 +351,50 @@ export async function createStockTransfer(
   input: CreateStockTransferRequest,
   idempotencyKey?: string,
 ): Promise<StockTransferResponse> {
+  if (input.sourceBranchId === input.destinationBranchId) {
+    throw new AppError({
+      statusCode: 422,
+      errorCode: 'INV_TRANSFER_BRANCH_CONFLICT',
+      title: 'Identical Source and Destination Branch',
+      detail: 'Source branch and destination branch must be different.',
+    });
+  }
+
+  const [sourceResolved, destResolved] = await Promise.all([
+    resolveBranchDefaultWarehouseId(
+      trx,
+      input.sourceBranchId,
+      input.sourceWarehouseId,
+      'Source',
+    ),
+    resolveBranchDefaultWarehouseId(
+      trx,
+      input.destinationBranchId,
+      input.destinationWarehouseId,
+      'Destination',
+    ),
+  ]);
+
+  const sourceWarehouseId = sourceResolved.warehouseId;
+  const destinationWarehouseId = destResolved.warehouseId;
+
   await assertAuthorized(trx, {
     permission: 'inv:movement:post',
     branchId: input.sourceBranchId,
-    warehouseId: input.sourceWarehouseId,
+    warehouseId: sourceWarehouseId,
   });
+
+  if (input.autoComplete) {
+    await assertAuthorized(trx, {
+      permission: 'inv:movement:post',
+      branchId: input.destinationBranchId,
+      warehouseId: destinationWarehouseId,
+    });
+  }
 
   await assertSubscriptionEntitlement(trx, { requireWriteAccess: true });
 
-  if (input.sourceWarehouseId === input.destinationWarehouseId) {
+  if (sourceWarehouseId === destinationWarehouseId) {
     throw new AppError({
       statusCode: 422,
       errorCode: 'INV_TRANSFER_BRANCH_CONFLICT',
@@ -167,21 +402,6 @@ export async function createStockTransfer(
       detail: 'Source warehouse and destination warehouse cannot be the same.',
     });
   }
-
-  await Promise.all([
-    assertWarehouseBelongsToBranch(
-      trx,
-      input.sourceWarehouseId,
-      input.sourceBranchId,
-      'Source',
-    ),
-    assertWarehouseBelongsToBranch(
-      trx,
-      input.destinationWarehouseId,
-      input.destinationBranchId,
-      'Destination',
-    ),
-  ]);
 
   const baseCurrency = await getTenantBaseCurrency(trx);
   const transferId = generateUuidV7();
@@ -196,9 +416,9 @@ export async function createStockTransfer(
       tenant_id: trx.tenantId,
       transfer_number: transferNumber,
       source_branch_id: input.sourceBranchId,
-      source_warehouse_id: input.sourceWarehouseId,
+      source_warehouse_id: sourceWarehouseId,
       destination_branch_id: input.destinationBranchId,
-      destination_warehouse_id: input.destinationWarehouseId,
+      destination_warehouse_id: destinationWarehouseId,
       status: 'DRAFT',
       notes: input.notes ?? null,
       created_by_user_id: trx.userId,
@@ -253,13 +473,103 @@ export async function createStockTransfer(
 
     const isBatchTracked =
       product.tracking_mode === 'BATCH' || product.tracking_mode === 'BATCH_EXPIRY';
+    const isSerialTracked = product.tracking_mode === 'SERIAL';
 
-    if (reqLine.sourceBatchId) {
+    if (isSerialTracked) {
+      const oneUnit = Quantity.fromDecimalString('1.000000');
+      const countBig = reqQty.microUnits / oneUnit.microUnits;
+      if (reqQty.microUnits % oneUnit.microUnits !== 0n || countBig < 1n) {
+        throw new AppError({
+          statusCode: 422,
+          errorCode: 'ERR_VALIDATION_FAILED',
+          title: 'Integer Quantity Required For Serialized Product',
+          detail: `Product "${product.sku}" is serial-tracked and requires a whole-number transfer quantity.`,
+        });
+      }
+      const neededCount = Number(countBig);
+
+      let selectedSerials;
+      if (reqLine.serialIds && reqLine.serialIds.length > 0) {
+        if (reqLine.serialIds.length !== neededCount) {
+          throw new AppError({
+            statusCode: 422,
+            errorCode: 'ERR_VALIDATION_FAILED',
+            title: 'Serial Count Mismatch',
+            detail: `Selected ${reqLine.serialIds.length} serial numbers but transfer quantity is ${neededCount}.`,
+          });
+        }
+        selectedSerials = await trx.db
+          .selectFrom('inventory_serials')
+          .selectAll()
+          .where('tenant_id', '=', trx.tenantId)
+          .where('warehouse_id', '=', sourceWarehouseId)
+          .where('product_id', '=', reqLine.productId)
+          .where('status', '=', 'IN_STOCK')
+          .where('id', 'in', reqLine.serialIds)
+          .forUpdate()
+          .execute();
+      } else {
+        selectedSerials = await trx.db
+          .selectFrom('inventory_serials')
+          .selectAll()
+          .where('tenant_id', '=', trx.tenantId)
+          .where('warehouse_id', '=', sourceWarehouseId)
+          .where('product_id', '=', reqLine.productId)
+          .where('status', '=', 'IN_STOCK')
+          .orderBy('received_at', 'asc')
+          .orderBy('id', 'asc')
+          .limit(neededCount)
+          .forUpdate()
+          .execute();
+      }
+
+      if (selectedSerials.length < neededCount) {
+        throw new AppError({
+          statusCode: 409,
+          errorCode: 'INV_INSUFFICIENT_AVAILABLE_STOCK',
+          title: 'Insufficient Available Serials',
+          detail: `Product "${product.sku}" only has ${selectedSerials.length} in-stock serial numbers in source branch "${sourceResolved.branchName}"; requested ${neededCount}.`,
+        });
+      }
+
+      for (const serial of selectedSerials) {
+        await trx.db
+          .insertInto('stock_transfer_lines')
+          .values({
+            id: generateUuidV7(),
+            tenant_id: trx.tenantId,
+            transfer_id: transferId,
+            line_number: lineNum++,
+            product_id: reqLine.productId,
+            source_batch_id: serial.batch_id ?? null,
+            destination_batch_id: null,
+            serial_id: serial.id,
+            uom_code: product.base_uom,
+            requested_qty: '1.000000',
+            dispatched_qty: null,
+            received_qty: null,
+            transfer_unit_cost: Money.fromDecimalString(
+              String(serial.unit_cost),
+              baseCurrency,
+            ).toDecimalString(),
+            transfer_selling_price: Money.fromDecimalString(
+              String(product.selling_price),
+              baseCurrency,
+            ).toDecimalString(),
+            expiry_date: null,
+            batch_number_snapshot: null,
+            dispatch_ledger_entry_id: null,
+            receive_ledger_entry_id: null,
+            created_at: now,
+          })
+          .execute();
+      }
+    } else if (reqLine.sourceBatchId) {
       const batch = await trx.db
         .selectFrom('inventory_batches')
         .selectAll()
         .where('tenant_id', '=', trx.tenantId)
-        .where('warehouse_id', '=', input.sourceWarehouseId)
+        .where('warehouse_id', '=', sourceWarehouseId)
         .where('product_id', '=', reqLine.productId)
         .where('id', '=', reqLine.sourceBatchId)
         .executeTakeFirst();
@@ -344,7 +654,7 @@ export async function createStockTransfer(
         .execute();
     } else if (isBatchTracked) {
       const allocation = await selectFefoBatches(trx, {
-        warehouseId: input.sourceWarehouseId,
+        warehouseId: sourceWarehouseId,
         productId: reqLine.productId,
         requiredQuantity: reqQty.toDecimalString(),
         skipPermissionCheck: true,
@@ -388,19 +698,21 @@ export async function createStockTransfer(
     } else {
       const srcBal = await trx.db
         .selectFrom('inventory_balances')
-        .select(['qty_on_hand', 'moving_avg_cost'])
+        .select(['qty_on_hand', 'qty_reserved', 'moving_avg_cost'])
         .where('tenant_id', '=', trx.tenantId)
-        .where('warehouse_id', '=', input.sourceWarehouseId)
+        .where('warehouse_id', '=', sourceWarehouseId)
         .where('product_id', '=', reqLine.productId)
         .executeTakeFirst();
 
       const onHand = Quantity.fromDecimalString(String(srcBal?.qty_on_hand ?? '0'));
-      if (onHand.compare(reqQty) < 0) {
+      const reserved = Quantity.fromDecimalString(String(srcBal?.qty_reserved ?? '0'));
+      const available = onHand.subtract(reserved);
+      if (available.compare(reqQty) < 0) {
         throw new AppError({
           statusCode: 409,
           errorCode: 'INV_INSUFFICIENT_AVAILABLE_STOCK',
           title: 'Insufficient Stock',
-          detail: `Product "${product.sku}" has ${onHand.toDecimalString()} in source warehouse; requested ${reqQty.toDecimalString()}.`,
+          detail: `Product "${product.sku}" has ${available.toDecimalString()} available in source branch "${sourceResolved.branchName}"; requested ${reqQty.toDecimalString()}.`,
         });
       }
 
@@ -446,11 +758,19 @@ export async function createStockTransfer(
     metadata: {
       transferNumber,
       sourceBranchId: input.sourceBranchId,
-      sourceWarehouseId: input.sourceWarehouseId,
+      sourceWarehouseId,
       destinationBranchId: input.destinationBranchId,
-      destinationWarehouseId: input.destinationWarehouseId,
+      destinationWarehouseId,
+      autoComplete: Boolean(input.autoComplete),
     },
   });
+
+  if (input.autoComplete) {
+    await dispatchStockTransfer(trx, transferId);
+    return receiveStockTransfer(trx, transferId, {
+      notes: input.notes ?? null,
+    });
+  }
 
   return getStockTransferById(trx, transferId);
 }
@@ -459,7 +779,7 @@ export async function getStockTransferById(
   trx: TenantTransactionContext,
   transferId: string,
 ): Promise<StockTransferResponse> {
-  await assertAuthorized(trx, { permission: 'inv:movement:read' });
+  const authCtx = await assertAuthorized(trx, { permission: 'inv:movement:read' });
 
   const row = await trx.db
     .selectFrom('stock_transfers')
@@ -477,6 +797,19 @@ export async function getStockTransferById(
     });
   }
 
+  if (!authCtx.allLocationsAccess) {
+    const canSeeSource = authCtx.allowedBranchIds.has(row.source_branch_id);
+    const canSeeDest = authCtx.allowedBranchIds.has(row.destination_branch_id);
+    if (!canSeeSource && !canSeeDest) {
+      throw new AppError({
+        statusCode: 403,
+        errorCode: 'IAM_LOCATION_SCOPE_DENIED',
+        title: 'Location Scope Access Denied',
+        detail: `User is not authorized to view stock transfer "${row.transfer_number}".`,
+      });
+    }
+  }
+
   const [baseCurrency, lines] = await Promise.all([
     getTenantBaseCurrency(trx),
     trx.db
@@ -488,14 +821,48 @@ export async function getStockTransferById(
       .execute(),
   ]);
 
-  return mapTransferRow(row, lines, baseCurrency);
+  const lookups = await loadTransferEnrichments(trx, [row], lines);
+  return mapTransferRow(row, lines, baseCurrency, lookups);
 }
 
 export async function listStockTransfers(
   trx: TenantTransactionContext,
   query: ListStockTransfersQuery,
 ): Promise<StockTransferListResponse> {
-  await assertAuthorized(trx, { permission: 'inv:movement:read' });
+  const authCtx = await assertAuthorized(trx, { permission: 'inv:movement:read' });
+
+  if (!authCtx.allLocationsAccess) {
+    if (query.branchId && !authCtx.allowedBranchIds.has(query.branchId)) {
+      throw new AppError({
+        statusCode: 403,
+        errorCode: 'IAM_LOCATION_SCOPE_DENIED',
+        title: 'Location Scope Access Denied',
+        detail: `User is not authorized to query transfers for branch "${query.branchId}".`,
+      });
+    }
+    if (
+      query.sourceBranchId &&
+      !authCtx.allowedBranchIds.has(query.sourceBranchId)
+    ) {
+      throw new AppError({
+        statusCode: 403,
+        errorCode: 'IAM_LOCATION_SCOPE_DENIED',
+        title: 'Location Scope Access Denied',
+        detail: `User is not authorized to query transfers from branch "${query.sourceBranchId}".`,
+      });
+    }
+    if (
+      query.destinationBranchId &&
+      !authCtx.allowedBranchIds.has(query.destinationBranchId)
+    ) {
+      throw new AppError({
+        statusCode: 403,
+        errorCode: 'IAM_LOCATION_SCOPE_DENIED',
+        title: 'Location Scope Access Denied',
+        detail: `User is not authorized to query transfers to branch "${query.destinationBranchId}".`,
+      });
+    }
+  }
 
   const limit = Math.min(Math.max(Number(query.limit ?? 50), 1), 100);
   let dbQuery = trx.db
@@ -503,14 +870,53 @@ export async function listStockTransfers(
     .selectAll()
     .where('tenant_id', '=', trx.tenantId);
 
+  if (!authCtx.allLocationsAccess) {
+    const allowedBranches = [...authCtx.allowedBranchIds];
+    if (allowedBranches.length === 0) {
+      return { items: [] };
+    }
+    dbQuery = dbQuery.where((eb) =>
+      eb.or([
+        eb('source_branch_id', 'in', allowedBranches),
+        eb('destination_branch_id', 'in', allowedBranches),
+      ]),
+    );
+  }
+
   if (query.status) {
     dbQuery = dbQuery.where('status', '=', query.status);
+  }
+  if (query.branchId) {
+    const bid = query.branchId;
+    dbQuery = dbQuery.where((eb) =>
+      eb.or([
+        eb('source_branch_id', '=', bid),
+        eb('destination_branch_id', '=', bid),
+      ]),
+    );
   }
   if (query.sourceBranchId) {
     dbQuery = dbQuery.where('source_branch_id', '=', query.sourceBranchId);
   }
   if (query.destinationBranchId) {
     dbQuery = dbQuery.where('destination_branch_id', '=', query.destinationBranchId);
+  }
+  if (query.productId) {
+    const matchingTransferIds = await trx.db
+      .selectFrom('stock_transfer_lines')
+      .select('transfer_id')
+      .where('tenant_id', '=', trx.tenantId)
+      .where('product_id', '=', query.productId)
+      .execute();
+    const ids = matchingTransferIds.map((m) => m.transfer_id);
+    if (ids.length === 0) {
+      return { items: [] };
+    }
+    dbQuery = dbQuery.where('id', 'in', ids);
+  }
+  if (query.search && query.search.trim().length > 0) {
+    const pattern = `%${query.search.trim().toUpperCase()}%`;
+    dbQuery = dbQuery.where('transfer_number', 'ilike', pattern);
   }
 
   const rows = await dbQuery
@@ -532,6 +938,8 @@ export async function listStockTransfers(
     .orderBy('line_number', 'asc')
     .execute();
 
+  const lookups = await loadTransferEnrichments(trx, rows, allLines);
+
   const linesByTransfer = new Map<string, Selectable<StockTransferLinesTable>[]>();
   for (const line of allLines) {
     const existing = linesByTransfer.get(line.transfer_id) ?? [];
@@ -541,7 +949,7 @@ export async function listStockTransfers(
 
   return {
     items: rows.map((r) =>
-      mapTransferRow(r, linesByTransfer.get(r.id) ?? [], baseCurrency),
+      mapTransferRow(r, linesByTransfer.get(r.id) ?? [], baseCurrency, lookups),
     ),
   };
 }
@@ -601,6 +1009,7 @@ export async function dispatchStockTransfer(
         warehouseId: transfer.source_warehouse_id,
         productId: line.product_id,
         batchId: line.source_batch_id,
+        serialId: line.serial_id ?? null,
         movementType: 'TRANSFER_OUT',
         quantity: reqQty.negate().toDecimalString(),
         uomCode: line.uom_code,
@@ -617,6 +1026,7 @@ export async function dispatchStockTransfer(
       .set({
         dispatched_qty: reqQty.toDecimalString(),
         dispatch_ledger_entry_id: movement.id,
+        transfer_unit_cost: movement.unitCost,
       })
       .where('tenant_id', '=', trx.tenantId)
       .where('id', '=', line.id)
@@ -860,6 +1270,7 @@ export async function receiveStockTransfer(
         warehouseId: transfer.destination_warehouse_id,
         productId: line.product_id,
         batchId: destinationBatchId,
+        serialId: line.serial_id ?? null,
         movementType: 'TRANSFER_IN',
         quantity: receiveQty.toDecimalString(),
         uomCode: line.uom_code,

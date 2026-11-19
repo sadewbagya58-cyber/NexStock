@@ -3207,5 +3207,33 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       expect(html).toContain('grid-template-columns: 1fr !important;');
       expect(html).toContain("catalogEl.classList.remove('mobile-hidden')");
     });
+
+    it('implements Phase 8 Multi-Branch Management, Topbar Branch Switcher, Auto Default Warehouse & Simple Stock Transfers', () => {
+      const html = readFileSync(resolve(WEB_ROOT, 'public/index.html'), 'utf8');
+
+      // 1. Branch Switcher & Navigation
+      expect(html).toContain("data-view=\"branches\"");
+      expect(html).toContain('openBranchSwitcherModal()');
+      expect(html).toContain('function switchActiveBranchContext(');
+      expect(html).toContain('All Branches (Business-Wide)');
+
+      // 2. Branch CRUD, Main Branch Designation, Archive/Restore & Details
+      expect(html).toContain('async function renderBranchesView()');
+      expect(html).toContain('function openCreateBranchModal()');
+      expect(html).toContain('async function openEditBranchModal(');
+      expect(html).toContain('async function openBranchDetailsModal(');
+      expect(html).toContain('async function archiveBranchAction(');
+      expect(html).toContain('async function restoreBranchAction(');
+      expect(html).toContain('async function setMainBranchAction(');
+      expect(html).toContain('/v1/org/branches?status=ALL');
+
+      // 3. Simple Inter-Branch Stock Transfers with live available stock check & autoComplete
+      expect(html).toContain('async function renderTransfersTab(container)');
+      expect(html).toContain('async function openCreateTransferModal(');
+      expect(html).toContain('trAvailableStockBanner');
+      expect(html).toContain('trAutoComplete');
+      expect(html).toContain('autoComplete,');
+      expect(html).toContain('openTransferDetailsModal');
+    });
   });
 });

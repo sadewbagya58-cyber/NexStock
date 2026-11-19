@@ -531,9 +531,10 @@ export async function listBatches(
   trx: TenantTransactionContext,
   query: ListBatchesQuery,
 ): Promise<CursorPaginatedResult<BatchResponse>> {
-  await assertAuthorized(trx, {
+  const authCtx = await assertAuthorized(trx, {
     permission: 'inv:batch:read',
     ...(query.warehouseId ? { warehouseId: query.warehouseId } : {}),
+    ...(query.branchId ? { branchId: query.branchId } : {}),
   });
 
   const limit = Math.min(Math.max(Number(query.limit ?? 50), 1), 100);
@@ -543,6 +544,23 @@ export async function listBatches(
     .selectFrom('inventory_batches')
     .selectAll()
     .where('tenant_id', '=', trx.tenantId);
+
+  if (!authCtx.allLocationsAccess) {
+    const allowedWh = [...authCtx.allowedWarehouseIds];
+    const allowedBr = [...authCtx.allowedBranchIds];
+    if (allowedWh.length === 0 && allowedBr.length === 0) {
+      return {
+        data: [],
+        pageInfo: { hasNextPage: false, nextCursor: null },
+      };
+    }
+    dbQuery = dbQuery.where((eb) =>
+      eb.or([
+        ...(allowedWh.length > 0 ? [eb('warehouse_id', 'in', allowedWh)] : []),
+        ...(allowedBr.length > 0 ? [eb('branch_id', 'in', allowedBr)] : []),
+      ]),
+    );
+  }
 
   if (query.branchId) {
     dbQuery = dbQuery.where('branch_id', '=', query.branchId);

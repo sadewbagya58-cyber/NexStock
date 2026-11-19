@@ -572,6 +572,14 @@ export async function postStockMovement(
     }
 
     if (qtyDelta.isNegative()) {
+      if (serialRow.warehouse_id !== input.warehouseId && !negativeStockOverrideApplied) {
+        throw new AppError({
+          statusCode: 409,
+          errorCode: 'INV_SERIAL_NOT_AVAILABLE',
+          title: 'Serial Not In Source Warehouse',
+          detail: `Serial "${serialRow.serial_number}" belongs to a different warehouse and cannot be issued from "${input.warehouseId}".`,
+        });
+      }
       if (serialRow.status !== 'IN_STOCK' && !negativeStockOverrideApplied) {
         throw new AppError({
           statusCode: 409,
@@ -951,7 +959,11 @@ export async function postStockMovement(
   if (serialRow) {
     if (qtyDelta.isNegative()) {
       const nextStatus =
-        input.movementType === 'STOCK_OUT' ? 'SOLD' : 'WRITTEN_OFF';
+        input.movementType === 'STOCK_OUT'
+          ? 'SOLD'
+          : input.movementType === 'TRANSFER_OUT'
+            ? 'RESERVED'
+            : 'WRITTEN_OFF';
       await trx.db
         .updateTable('inventory_serials')
         .set({
@@ -984,6 +996,9 @@ export async function postStockMovement(
         .updateTable('inventory_serials')
         .set({
           status: 'IN_STOCK',
+          branch_id: input.branchId,
+          warehouse_id: input.warehouseId,
+          ...(input.batchId !== undefined ? { batch_id: input.batchId } : {}),
           last_movement_id: movementId,
           updated_at: now,
         })
