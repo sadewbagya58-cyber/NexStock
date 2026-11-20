@@ -17,12 +17,14 @@ import {
   generateUuidV7,
   realtimeEventHub,
 } from '../../shared/index.js';
+import { assertSubscriptionEntitlement } from '../../sub/index.js';
 
 export async function recordCustomerCreditPayment(
   trx: TenantTransactionContext,
   input: RecordCustomerCreditPaymentRequest,
 ): Promise<CustomerCreditPaymentResponse> {
   await assertAuthorized(trx, { permission: 'crm:payment:create', branchId: input.branchId ?? undefined });
+  await assertSubscriptionEntitlement(trx, { requireWriteAccess: true });
 
   // 1. Fetch account with row lock
   const account = await trx.db
@@ -349,6 +351,7 @@ export async function reverseCustomerCreditPayment(
   input: ReverseCustomerCreditPaymentRequest,
 ): Promise<CustomerCreditPaymentResponse> {
   await assertAuthorized(trx, { permission: 'crm:payment:reverse' });
+  await assertSubscriptionEntitlement(trx, { requireWriteAccess: true });
 
   const payment = await trx.db
     .selectFrom('customer_credit_payments')
@@ -554,6 +557,7 @@ export async function allocateUnappliedPayment(
   input: AllocateUnappliedPaymentRequest,
 ): Promise<CustomerCreditPaymentResponse> {
   await assertAuthorized(trx, { permission: 'crm:payment:create' });
+  await assertSubscriptionEntitlement(trx, { requireWriteAccess: true });
 
   const payment = await trx.db
     .selectFrom('customer_credit_payments')

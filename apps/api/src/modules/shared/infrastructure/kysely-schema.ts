@@ -109,8 +109,13 @@ export interface CurrenciesTable {
 export type TenantLifecycleStatus =
   | 'TRIALING'
   | 'ACTIVE'
-  | 'PAST_DUE'
+  | 'PENDING_PAYMENT'
+  | 'PAYMENT_VERIFICATION_REQUIRED'
+  | 'RENEWAL_DUE'
   | 'GRACE_PERIOD'
+  | 'EXPIRED'
+  | 'READ_ONLY'
+  | 'PAST_DUE'
   | 'SUSPENDED'
   | 'CANCELLED';
 
@@ -224,15 +229,27 @@ export interface SubscriptionPlansTable {
   id: string;
   code: string;
   name: string;
+  description: Generated<string>;
+  display_order: Generated<number>;
+  is_public: Generated<boolean>;
+  is_custom_pricing: Generated<boolean>;
   max_branches: number;
   max_warehouses: number;
   max_registers: number;
   max_users: number;
+  max_products: Generated<number>;
+  max_storage_mb: Generated<number>;
   monthly_price_amount: string;
+  annual_discount_pct: Generated<string>;
+  additional_branch_monthly_fee: string | null;
   currency_code: string;
+  trial_days: Generated<number>;
+  support_level: Generated<string>;
   features_json: unknown;
   is_active: Generated<boolean>;
+  version: Generated<number>;
   created_at: Generated<Date>;
+  updated_at: Generated<Date>;
 }
 
 export interface TenantSubscriptionsTable {
@@ -243,10 +260,23 @@ export interface TenantSubscriptionsTable {
   provider_code: Generated<
     'MANUAL_ADMIN' | 'PAYHERE_LK' | 'STRIPE' | 'PADDLE'
   >;
+  billing_cycle: Generated<'MONTHLY' | 'ANNUAL'>;
   status: TenantLifecycleStatus;
+  trial_started_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
   trial_ends_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  trial_converted_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
   current_period_start: ColumnType<Date, Date | string, Date | string>;
   current_period_end: ColumnType<Date, Date | string, Date | string>;
+  grace_period_ends_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  read_only_entered_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  cancelled_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  scheduled_plan_id: string | null;
+  scheduled_billing_cycle: 'MONTHLY' | 'ANNUAL' | null;
+  scheduled_change_effective_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  additional_branch_slots: Generated<number>;
+  custom_monthly_price: string | null;
+  custom_limits_json: unknown | null;
+  custom_features_json: unknown | null;
   allow_admin_override: Generated<boolean>;
   override_reason: string | null;
   updated_at: Generated<Date>;
@@ -258,11 +288,24 @@ export interface SubscriptionInvoicesTable {
   subscription_id: string;
   invoice_number: string;
   currency_code: string;
+  billing_cycle: Generated<'MONTHLY' | 'ANNUAL'>;
+  invoice_type: Generated<
+    'PLAN_SUBSCRIPTION' | 'TRIAL_CONVERSION' | 'UPGRADE' | 'RENEWAL' | 'BRANCH_ADDON' | 'CUSTOM'
+  >;
+  target_plan_id: string | null;
+  target_billing_cycle: 'MONTHLY' | 'ANNUAL' | null;
+  branch_addon_qty: Generated<number>;
+  plan_amount: Generated<string>;
+  discount_amount: Generated<string>;
+  addon_amount: Generated<string>;
+  proration_amount: Generated<string>;
+  notes: string | null;
   total_amount: string;
   amount_paid: Generated<string>;
   status: 'DRAFT' | 'OPEN' | 'PAID' | 'PAST_DUE' | 'VOID';
   due_date: ColumnType<Date | string, Date | string, Date | string>;
   issued_at: Generated<Date>;
+  paid_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
 }
 
 export interface SubscriptionPaymentsTable {
@@ -279,6 +322,227 @@ export interface SubscriptionPaymentsTable {
   reference_number: string;
   recorded_by_user_id: string;
   paid_at: Generated<Date>;
+}
+
+export interface SubscriptionPlanHistoryTable {
+  id: string;
+  tenant_id: string;
+  subscription_id: string;
+  change_type:
+    | 'TRIAL_STARTED'
+    | 'TRIAL_CONVERTED'
+    | 'UPGRADED'
+    | 'DOWNGRADE_SCHEDULED'
+    | 'DOWNGRADE_APPLIED'
+    | 'DOWNGRADE_CANCELLED'
+    | 'RENEWED'
+    | 'BRANCH_ADDON_PURCHASED'
+    | 'STATUS_CHANGED'
+    | 'LIFECYCLE_OVERRIDE';
+  from_plan_id: string | null;
+  to_plan_id: string | null;
+  from_status: string | null;
+  to_status: string | null;
+  billing_cycle: Generated<'MONTHLY' | 'ANNUAL'>;
+  effective_at: Generated<Date>;
+  actor_user_id: string;
+  notes: string | null;
+  metadata_json: Generated<unknown>;
+  created_at: Generated<Date>;
+}
+
+export interface SubscriptionBranchAddonsTable {
+  id: string;
+  tenant_id: string;
+  subscription_id: string;
+  invoice_id: string | null;
+  quantity: number;
+  unit_monthly_price: string;
+  prorated_amount: string;
+  currency_code: string;
+  billing_cycle: 'MONTHLY' | 'ANNUAL';
+  period_start: ColumnType<Date, Date | string, Date | string>;
+  period_end: ColumnType<Date, Date | string, Date | string>;
+  status: Generated<'PENDING_PAYMENT' | 'ACTIVE' | 'CANCELLED'>;
+  created_at: Generated<Date>;
+}
+
+export interface SubscriptionPlatformSettingsTable {
+  singleton_id: number;
+  manual_bank_transfer_enabled: Generated<boolean>;
+  bank_account_name: string;
+  bank_name: string;
+  bank_branch: string;
+  bank_account_number: string;
+  bank_instructions: string;
+  online_gateway_enabled: Generated<boolean>;
+  online_gateway_provider: Generated<'PAYHERE_LK' | 'STRIPE' | 'PADDLE'>;
+  super_admin_email: Generated<string>;
+  grace_period_days: Generated<number>;
+  trial_days_default: Generated<number>;
+  support_email: Generated<string>;
+  support_phone: Generated<string>;
+  support_hours: Generated<string>;
+  updated_at: Generated<Date>;
+  updated_by_user_id: string | null;
+}
+
+export interface SubscriptionPaymentSubmissionsTable {
+  id: string;
+  tenant_id: string;
+  subscription_id: string;
+  invoice_id: string;
+  target_plan_id: string;
+  target_billing_cycle: 'MONTHLY' | 'ANNUAL';
+  payment_channel: 'MANUAL_BANK_TRANSFER' | 'ONLINE_GATEWAY';
+  gateway_provider: 'PAYHERE_LK' | 'STRIPE' | 'PADDLE' | null;
+  expected_amount: string;
+  submitted_amount: string;
+  currency_code: string;
+  payment_reference: string;
+  submission_notes: string | null;
+  proof_storage_key: string | null;
+  proof_file_name: string | null;
+  proof_mime_type: string | null;
+  proof_file_size: number | null;
+  proof_data_bytea: Buffer | null;
+  status: Generated<
+    'PENDING' | 'SUBMITTED' | 'UNDER_REVIEW' | 'VERIFIED' | 'REJECTED' | 'FAILED'
+  >;
+  submitted_by_user_id: string;
+  submitted_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  reviewed_by_user_id: string | null;
+  reviewed_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  rejection_reason: string | null;
+  gateway_transaction_id: string | null;
+  gateway_payload_json: unknown | null;
+  verified_payment_id: string | null;
+  idempotency_key: string | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface SubscriptionGatewayWebhookLogsTable {
+  id: string;
+  tenant_id: string;
+  provider_code: 'PAYHERE_LK' | 'STRIPE' | 'PADDLE';
+  provider_event_id: string;
+  submission_id: string;
+  gateway_transaction_id: string;
+  event_status: string;
+  payload_json: unknown;
+  processed_at: Generated<Date>;
+}
+
+export interface PlatformAdminAccountsTable {
+  user_id: string;
+  email: string;
+  platform_role: 'SUPER_ADMIN' | 'BILLING_ADMIN' | 'SUPPORT_ADMIN' | 'ANALYST';
+  status: Generated<'ACTIVE' | 'SUSPENDED'>;
+  mfa_enforced: Generated<boolean>;
+  totp_enabled: Generated<boolean>;
+  totp_secret_base32: string | null;
+  mfa_verified_until: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  last_login_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  created_by_user_id: string | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface SubscriptionNotificationsTable {
+  id: string;
+  tenant_id: string;
+  subscription_id: string;
+  event_type:
+    | 'TRIAL_STARTED'
+    | 'TRIAL_ENDING_SOON'
+    | 'RENEWAL_APPROACHING'
+    | 'PAYMENT_SUBMITTED'
+    | 'PAYMENT_VERIFIED'
+    | 'PAYMENT_REJECTED'
+    | 'SUBSCRIPTION_UPGRADED'
+    | 'DOWNGRADE_SCHEDULED'
+    | 'DOWNGRADE_APPROACHING'
+    | 'SUBSCRIPTION_EXPIRED'
+    | 'GRACE_PERIOD_STARTED'
+    | 'READ_ONLY_ACTIVATED'
+    | 'RENEWAL_COMPLETED'
+    | 'SUBSCRIPTION_SUSPENDED'
+    | 'SUBSCRIPTION_RESTORED';
+  dedupe_key: string | null;
+  severity: 'INFO' | 'WARNING' | 'CRITICAL' | 'SUCCESS';
+  title: string;
+  message: string;
+  metadata_json: Generated<unknown>;
+  is_read: Generated<boolean>;
+  read_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  read_by_user_id: string | null;
+  created_at: Generated<Date>;
+}
+
+export interface SubscriptionPlanConfigHistoryTable {
+  id: string;
+  plan_id: string;
+  plan_code: string;
+  version: number;
+  changed_by_user_id: string;
+  previous_config_json: unknown;
+  new_config_json: unknown;
+  change_reason: string | null;
+  created_at: Generated<Date>;
+}
+
+export interface PlatformAuditLogsTable {
+  id: string;
+  actor_user_id: string;
+  actor_role: string;
+  target_tenant_id: string | null;
+  action: string;
+  resource_type: string;
+  resource_id: string;
+  previous_state_json: unknown | null;
+  new_state_json: unknown | null;
+  correlation_id: string;
+  ip_address: string | null;
+  metadata_json: Generated<unknown>;
+  created_at: Generated<Date>;
+}
+
+export interface PlatformSystemAlertsTable {
+  id: string;
+  event_category:
+    | 'LIFECYCLE_FAILURE'
+    | 'PAYMENT_VERIFICATION_FAILURE'
+    | 'WEBHOOK_FAILURE'
+    | 'RENEWAL_FAILURE'
+    | 'UNAUTHORIZED_ACCESS'
+    | 'AUDIT_FAILURE'
+    | 'BACKUP_FAILURE'
+    | 'SYNC_ERROR'
+    | 'DB_ERROR';
+  severity: 'INFO' | 'WARNING' | 'CRITICAL';
+  status: Generated<'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED'>;
+  tenant_id: string | null;
+  summary: string;
+  details_json: Generated<unknown>;
+  trace_id: string | null;
+  resolved_by_user_id: string | null;
+  resolved_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  created_at: Generated<Date>;
+}
+
+export interface BackupVerificationRunsTable {
+  id: string;
+  trigger_type: 'MANUAL_CHECK' | 'SCHEDULED_CHECK' | 'SNAPSHOT_EXPORT';
+  triggered_by_user_id: string;
+  status: 'VERIFIED' | 'WARNING' | 'FAILED';
+  tables_verified: number;
+  rls_policies_verified: number;
+  ledger_checks_passed: boolean;
+  checksum_sha256: string;
+  duration_ms: number;
+  findings_json: Generated<unknown>;
+  created_at: Generated<Date>;
 }
 
 export interface UsersTable {
@@ -1853,6 +2117,17 @@ export interface NexStockDatabase {
   tenant_subscriptions: TenantSubscriptionsTable;
   subscription_invoices: SubscriptionInvoicesTable;
   subscription_payments: SubscriptionPaymentsTable;
+  subscription_plan_history: SubscriptionPlanHistoryTable;
+  subscription_branch_addons: SubscriptionBranchAddonsTable;
+  subscription_platform_settings: SubscriptionPlatformSettingsTable;
+  subscription_payment_submissions: SubscriptionPaymentSubmissionsTable;
+  subscription_gateway_webhook_logs: SubscriptionGatewayWebhookLogsTable;
+  platform_admin_accounts: PlatformAdminAccountsTable;
+  subscription_notifications: SubscriptionNotificationsTable;
+  subscription_plan_config_history: SubscriptionPlanConfigHistoryTable;
+  platform_audit_logs: PlatformAuditLogsTable;
+  platform_system_alerts: PlatformSystemAlertsTable;
+  backup_verification_runs: BackupVerificationRunsTable;
   users: UsersTable;
   tenant_memberships: TenantMembershipsTable;
   roles: RolesTable;

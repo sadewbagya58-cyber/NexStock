@@ -55,6 +55,11 @@ export class SqliteOfflineStorageAdapter implements OfflineStoragePort {
         name TEXT NOT NULL,
         applied_at TEXT NOT NULL
       ) STRICT;
+      CREATE TABLE IF NOT EXISTS local_subscription_entitlement (
+        tenant_id TEXT PRIMARY KEY,
+        snapshot_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      ) STRICT;
     `);
   }
 
@@ -100,6 +105,10 @@ export class SqliteOfflineStorageAdapter implements OfflineStoragePort {
       .prepare('SELECT code, name FROM local_branches WHERE tenant_id = ? AND id = ?')
       .get(devRow.tenant_id, devRow.branch_id) as { code: string; name: string } | undefined;
 
+    const subRow = this.db
+      .prepare('SELECT snapshot_json FROM local_subscription_entitlement WHERE tenant_id = ?')
+      .get(devRow.tenant_id) as { snapshot_json: string } | undefined;
+
     return {
       deviceId: devRow.device_id,
       tenantId: devRow.tenant_id,
@@ -117,6 +126,13 @@ export class SqliteOfflineStorageAdapter implements OfflineStoragePort {
       clientPlatform: (permRow?.client_platform as OfflineClientPlatform) ?? this.platform,
       enrolledAt: devRow.enrolled_at,
       offlineAuthExpiresAt: permRow?.offline_auth_expires_at ?? devRow.offline_auth_expires_at,
+      ...(subRow
+        ? {
+            subscriptionSnapshot: JSON.parse(
+              subRow.snapshot_json,
+            ) as NonNullable<OfflineDeviceContext['subscriptionSnapshot']>,
+          }
+        : {}),
     };
   }
 
@@ -158,6 +174,15 @@ export class SqliteOfflineStorageAdapter implements OfflineStoragePort {
           ctx.offlineAuthExpiresAt,
           now,
         );
+      if (ctx.subscriptionSnapshot) {
+        this.db
+          .prepare(
+            `INSERT OR REPLACE INTO local_subscription_entitlement
+             (tenant_id, snapshot_json, updated_at)
+             VALUES (?, ?, ?)`,
+          )
+          .run(ctx.tenantId, JSON.stringify(ctx.subscriptionSnapshot), now);
+      }
       this.db.exec('COMMIT');
     } catch (err) {
       this.db.exec('ROLLBACK');

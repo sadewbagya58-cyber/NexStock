@@ -627,6 +627,20 @@ export function loadPhase9OfflineDevicesAndConflictResolutionMigrationSql(): str
   return sqlText;
 }
 
+export function loadPhase10SubscriptionPlansLifecycleBillingMigrationSql(): string {
+  const filename = '0029_phase10_subscription_plans_lifecycle_billing.sql';
+  const sqlText = readFileSync(resolve(migrationsDir, filename), 'utf-8');
+  assertPostgresMigrationSqlCompatible(sqlText, filename);
+  return sqlText;
+}
+
+export function loadPhase105To9EnforcementAdminAnalyticsSecurityMigrationSql(): string {
+  const filename = '0030_phase10_5_9_enforcement_admin_analytics_security.sql';
+  const sqlText = readFileSync(resolve(migrationsDir, filename), 'utf-8');
+  assertPostgresMigrationSqlCompatible(sqlText, filename);
+  return sqlText;
+}
+
 export function getOrderedPostgresMigrations(): readonly PostgresMigrationSpec[] {
   return [
     {
@@ -824,6 +838,20 @@ export function getOrderedPostgresMigrations(): readonly PostgresMigrationSpec[]
       name: '0028_phase9_offline_devices_and_conflict_resolution',
       filename: '0028_phase9_offline_devices_and_conflict_resolution.sql',
       sql: loadPhase9OfflineDevicesAndConflictResolutionMigrationSql(),
+    },
+    {
+      dialect: 'postgres',
+      version: 29,
+      name: '0029_phase10_subscription_plans_lifecycle_billing',
+      filename: '0029_phase10_subscription_plans_lifecycle_billing.sql',
+      sql: loadPhase10SubscriptionPlansLifecycleBillingMigrationSql(),
+    },
+    {
+      dialect: 'postgres',
+      version: 30,
+      name: '0030_phase10_5_9_enforcement_admin_analytics_security',
+      filename: '0030_phase10_5_9_enforcement_admin_analytics_security.sql',
+      sql: loadPhase105To9EnforcementAdminAnalyticsSecurityMigrationSql(),
     },
   ];
 }

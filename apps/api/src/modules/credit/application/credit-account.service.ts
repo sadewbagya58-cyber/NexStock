@@ -16,12 +16,14 @@ import {
   appendAuditLog,
   generateUuidV7,
 } from '../../shared/index.js';
+import { assertSubscriptionEntitlement } from '../../sub/index.js';
 
 export async function createCustomerCreditAccount(
   trx: TenantTransactionContext,
   input: CreateCustomerCreditAccountRequest,
 ): Promise<CustomerCreditAccountResponse> {
   await assertAuthorized(trx, { permission: 'crm:credit:create', branchId: input.branchId ?? undefined });
+  await assertSubscriptionEntitlement(trx, { requireWriteAccess: true });
 
   // 1. Verify customer exists
   const customer = await trx.db
@@ -468,6 +470,7 @@ export async function updateCreditAccountStatus(
   input: UpdateCreditAccountStatusRequest,
 ): Promise<CustomerCreditAccountResponse> {
   await assertAuthorized(trx, { permission: 'crm:credit:hold' });
+  await assertSubscriptionEntitlement(trx, { requireWriteAccess: true });
 
   const account = await trx.db
     .selectFrom('customer_credit_accounts')
@@ -537,6 +540,7 @@ export async function manageCreditLimit(
   input: ManageCreditLimitRequest,
 ): Promise<CustomerCreditAccountResponse> {
   await assertAuthorized(trx, { permission: 'crm:limit:manage' });
+  await assertSubscriptionEntitlement(trx, { requireWriteAccess: true });
 
   const account = await trx.db
     .selectFrom('customer_credit_accounts')

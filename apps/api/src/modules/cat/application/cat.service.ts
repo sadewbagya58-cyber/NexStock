@@ -982,8 +982,23 @@ export async function createProduct(
     permission: 'cat:product:manage',
   });
 
+  const existingProductsCountRow = await trx.db
+    .selectFrom('products')
+    .select((eb) => eb.fn.count<string>('id').as('cnt'))
+    .where('tenant_id', '=', trx.tenantId)
+    .where('status', '!=', 'ARCHIVED')
+    .executeTakeFirst();
+  const activeProductsCount = Number.parseInt(
+    String(existingProductsCountRow?.cnt ?? '0'),
+    10,
+  );
+
   await assertSubscriptionEntitlement(trx, {
     requireWriteAccess: true,
+    quotaCheck: {
+      resource: 'PRODUCT',
+      currentActiveCount: activeProductsCount,
+    },
   });
 
   const sku = input.sku.trim().toUpperCase();
@@ -2223,8 +2238,23 @@ export async function restoreProduct(
     permission: 'cat:product:manage',
   });
 
+  const existingProductsCountRow = await trx.db
+    .selectFrom('products')
+    .select((eb) => eb.fn.count<string>('id').as('cnt'))
+    .where('tenant_id', '=', trx.tenantId)
+    .where('status', '!=', 'ARCHIVED')
+    .executeTakeFirst();
+  const activeProductsCount = Number.parseInt(
+    String(existingProductsCountRow?.cnt ?? '0'),
+    10,
+  );
+
   await assertSubscriptionEntitlement(trx, {
     requireWriteAccess: true,
+    quotaCheck: {
+      resource: 'PRODUCT',
+      currentActiveCount: activeProductsCount,
+    },
   });
 
   const existing = await trx.db

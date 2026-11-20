@@ -12,6 +12,7 @@ import {
   appendAuditLog,
   generateUuidV7,
 } from '../../shared/index.js';
+import { assertSubscriptionEntitlement } from '../../sub/index.js';
 
 export const DEFAULT_EXPENSE_CATEGORIES = [
   { code: 'RENT', name: 'Rent', description: 'Office, warehouse, and store lease/rental expenses' },
@@ -162,6 +163,7 @@ export async function createExpenseCategory(
       detail: 'User lacks required permission to manage expense categories',
     });
   }
+  await assertSubscriptionEntitlement(trx, { requireWriteAccess: true });
 
   const normalizedCode = input.code.trim().toUpperCase();
   const normalizedName = input.name.trim();
@@ -224,6 +226,7 @@ export async function updateExpenseCategory(
       detail: 'User lacks required permission to manage expense categories',
     });
   }
+  await assertSubscriptionEntitlement(trx, { requireWriteAccess: true });
 
   const existing = await trx.db
     .selectFrom('expense_categories')
@@ -289,6 +292,7 @@ export async function deleteExpenseCategory(
       detail: 'User lacks required permission to manage expense categories',
     });
   }
+  await assertSubscriptionEntitlement(trx, { requireWriteAccess: true });
 
   const existing = await trx.db
     .selectFrom('expense_categories')

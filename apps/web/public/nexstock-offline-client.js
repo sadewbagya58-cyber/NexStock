@@ -179,6 +179,7 @@
       clientPlatform: detectClientPlatform(),
       enrolledAt: ctx.enrolledAt || new Date().toISOString(),
       offlineAuthExpiresAt: ctx.offlineAuthExpiresAt || new Date(Date.now() + 24 * 3600_000).toISOString(),
+      ...(ctx.subscriptionSnapshot ? { subscriptionSnapshot: ctx.subscriptionSnapshot } : {}),
     };
     await idbPut(STORES.DEVICE, record);
     return record;
@@ -188,7 +189,7 @@
     return idbGet(STORES.DEVICE, 'active');
   }
 
-  async function assertAuthorizedOfflineScope(tenantId, branchId, requiredPermission) {
+  async function assertAuthorizedOfflineScope(tenantId, branchId, requiredPermission, isWriteOperation = false) {
     const dev = await getDeviceContext();
     if (!dev) return null;
     if (dev.securityStatus === 'REVOKED') {
@@ -205,6 +206,19 @@
     if (requiredPermission && !dev.roleCodes.includes('TENANT_OWNER') && !dev.roleCodes.includes('ORG_ADMIN')) {
       if (Array.isArray(dev.permissions) && dev.permissions.length > 0 && !dev.permissions.includes(requiredPermission)) {
         throw new Error(`Missing offline permission ${requiredPermission}`);
+      }
+    }
+    const meta = await getSyncMetaState(tenantId);
+    const snap = meta?.subscriptionState || dev.subscriptionSnapshot;
+    if (snap) {
+      if (snap.status === 'SUSPENDED' || snap.status === 'CANCELLED') {
+        throw new Error(`Subscription is ${snap.status}. Pending local transactions remain preserved safely until restored.`);
+      }
+      if (isWriteOperation && (snap.isReadOnly || snap.status === 'READ_ONLY' || snap.status === 'EXPIRED' || snap.status === 'PAST_DUE')) {
+        throw new Error(`Read-Only Mode (${snap.status}): New offline transactions are blocked. Renew your subscription to resume sales and stock adjustments.`);
+      }
+      if (isWriteOperation && snap.offlineEntitled === false) {
+        throw new Error(`Offline POS & Inventory requires Professional or Enterprise plan (current plan: ${snap.planCode}).`);
       }
     }
     return dev;
@@ -319,7 +333,7 @@
   }
 
   async function getPosProductsOffline(tenantId, branchId, warehouseId) {
-    await assertAuthorizedOfflineScope(tenantId, branchId, 'pos:sale:create');
+    await assertAuthorizedOfflineScope(tenantId, branchId, 'pos:sale:create', true);
     const snap = await getSnapshot(tenantId, branchId);
     if (!snap) return { products: [], categories: [], batches: [], taxRates: [], customers: [] };
 
@@ -570,7 +584,7 @@
       idempotencyKey,
     } = params;
 
-    await assertAuthorizedOfflineScope(tenantId, branchId, 'pos:sale:create');
+    await assertAuthorizedOfflineScope(tenantId, branchId, 'pos:sale:create', true);
     const now = new Date().toISOString();
     const invoiceId = idempotencyKey || (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()));
     const commandId = crypto.randomUUID ? crypto.randomUUID() : `${invoiceId}-cmd`;
@@ -763,7 +777,7 @@
       tenantId, branchId, warehouseId, userId, productId,
       movementType, quantity, batchId, serialId, reason, notes,
     } = params;
-    await assertAuthorizedOfflineScope(tenantId, branchId, 'inv:movement:post');
+    await assertAuthorizedOfflineScope(tenantId, branchId, 'inv:movement:post', true);
     const qtyNum = parseFloat(String(quantity || '0'));
     if (!(qtyNum > 0)) throw new Error('Adjustment quantity must be greater than zero.');
     if (!reason || String(reason).trim().length < 2) throw new Error('Adjustment reason is required.');
@@ -872,7 +886,7 @@
       tenantId, branchId, sourceWarehouseId, destinationBranchId,
       destinationWarehouseId, userId, lines, notes,
     } = params;
-    await assertAuthorizedOfflineScope(tenantId, branchId, 'inv:movement:post');
+    await assertAuthorizedOfflineScope(tenantId, branchId, 'inv:movement:post', true);
     if (destinationBranchId === branchId) {
       throw new Error('Destination branch must differ from source branch.');
     }
@@ -971,6 +985,10 @@
       await invokeTauri('desktop_recover_in_flight_outbox', { tenantId });
     }
     return recovered;
+  }
+
+  async function getSyncMetaState(tenantId) {
+    return idbGet(STORES.RECOVERY, `sync_meta::${tenantId}`);
   }
 
   async function saveSyncMetaState(tenantId, patch) {
@@ -1204,6 +1222,7 @@
         lastSyncAttemptAt: nowIso,
         lastSyncSuccessAt: nowIso,
         lastError: null,
+        ...(pullRes?.subscriptionState ? { subscriptionState: pullRes.subscriptionState } : {}),
       });
 
       return {

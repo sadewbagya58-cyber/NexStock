@@ -71,6 +71,14 @@ export const ErrorCodeSchema = Type.Union([
   Type.Literal('SUB_TRIAL_EXPIRED'),
   Type.Literal('SUB_QUOTA_EXCEEDED'),
   Type.Literal('SUB_FEATURE_NOT_ENTITLED'),
+  Type.Literal('SUB_INVALID_LIFECYCLE_TRANSITION'),
+  Type.Literal('SUB_TRIAL_ALREADY_USED'),
+  Type.Literal('SUB_PAYMENT_ALREADY_VERIFIED'),
+  Type.Literal('SUB_PAYMENT_AMOUNT_MISMATCH'),
+  Type.Literal('SUB_WEBHOOK_SIGNATURE_INVALID'),
+  Type.Literal('SUB_PLATFORM_ADMIN_REQUIRED'),
+  Type.Literal('SUB_READ_ONLY_MODE'),
+  Type.Literal('SUB_PLATFORM_MFA_REQUIRED'),
   Type.Literal('CAT_DUPLICATE_CATEGORY_NAME'),
   Type.Literal('CAT_CIRCULAR_CATEGORY_HIERARCHY'),
   Type.Literal('CAT_CATEGORY_HAS_ACTIVE_CHILDREN_OR_PRODUCTS'),
@@ -417,8 +425,13 @@ export const TaxPercentageStringSchema = Type.String({
 export const SubscriptionStatusSchema = Type.Union([
   Type.Literal('TRIALING'),
   Type.Literal('ACTIVE'),
-  Type.Literal('PAST_DUE'),
+  Type.Literal('PENDING_PAYMENT'),
+  Type.Literal('PAYMENT_VERIFICATION_REQUIRED'),
+  Type.Literal('RENEWAL_DUE'),
   Type.Literal('GRACE_PERIOD'),
+  Type.Literal('EXPIRED'),
+  Type.Literal('READ_ONLY'),
+  Type.Literal('PAST_DUE'),
   Type.Literal('SUSPENDED'),
   Type.Literal('CANCELLED'),
 ]);
@@ -2488,6 +2501,10 @@ export const AuthUserSummarySchema = Type.Object({
   id: UuidSchema,
   email: Type.String(),
   fullName: Type.String(),
+  isPlatformAdmin: Type.Optional(Type.Boolean()),
+  platformRole: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  mfaEnforced: Type.Optional(Type.Boolean()),
+  totpEnabled: Type.Optional(Type.Boolean()),
 });
 export type AuthUserSummary = Static<typeof AuthUserSummarySchema>;
 
@@ -5923,6 +5940,27 @@ export const LocalTransactionSyncStateSchema = Type.Union([
 ]);
 export type LocalTransactionSyncState = Static<typeof LocalTransactionSyncStateSchema>;
 
+export const SubscriptionRuntimeSnapshotSchema = Type.Object({
+  planCode: Type.String(),
+  planName: Type.String(),
+  status: SubscriptionStatusSchema,
+  isReadOnly: Type.Boolean(),
+  inGracePeriod: Type.Boolean(),
+  gracePeriodEndsAt: Type.Union([IsoTimestampSchema, Type.Null()]),
+  offlineEntitled: Type.Boolean(),
+  features: Type.Record(Type.String(), Type.Boolean()),
+  limits: Type.Object({
+    maxBranches: Type.Integer(),
+    maxUsers: Type.Integer(),
+    maxProducts: Type.Integer(),
+    maxStorageMb: Type.Integer(),
+  }),
+  evaluatedAt: IsoTimestampSchema,
+});
+export type SubscriptionRuntimeSnapshot = Static<
+  typeof SubscriptionRuntimeSnapshotSchema
+>;
+
 export const OfflineDeviceContextSchema = Type.Object({
   deviceId: UuidSchema,
   tenantId: UuidSchema,
@@ -5939,6 +5977,7 @@ export const OfflineDeviceContextSchema = Type.Object({
   clientPlatform: OfflineClientPlatformSchema,
   enrolledAt: IsoTimestampSchema,
   offlineAuthExpiresAt: IsoTimestampSchema,
+  subscriptionSnapshot: Type.Optional(SubscriptionRuntimeSnapshotSchema),
 });
 export type OfflineDeviceContext = Static<typeof OfflineDeviceContextSchema>;
 
@@ -6095,6 +6134,7 @@ export const SyncPullResponseSchema = Type.Object({
     }),
   ),
   snapshot: SyncCatalogPricingResponseSchema,
+  subscriptionState: Type.Optional(SubscriptionRuntimeSnapshotSchema),
 });
 export type SyncPullResponse = Static<typeof SyncPullResponseSchema>;
 
@@ -6124,6 +6164,488 @@ export const OfflineInventoryHistoryEntrySchema = Type.Object({
 export type OfflineInventoryHistoryEntry = Static<
   typeof OfflineInventoryHistoryEntrySchema
 >;
+
+// ============================================================================
+// PHASE 10.1–10.4: SUBSCRIPTION PLANS, ENTITLEMENTS, LIFECYCLE & BILLING
+// ============================================================================
+
+export const SubscriptionPlanCodeSchema = Type.Union([
+  Type.Literal('STARTER'),
+  Type.Literal('PROFESSIONAL'),
+  Type.Literal('ENTERPRISE'),
+  Type.Literal('GROWTH'),
+]);
+export type SubscriptionPlanCodeContract = Static<typeof SubscriptionPlanCodeSchema>;
+
+export const SubscriptionBillingCycleSchema = Type.Union([
+  Type.Literal('MONTHLY'),
+  Type.Literal('ANNUAL'),
+]);
+export type SubscriptionBillingCycle = Static<typeof SubscriptionBillingCycleSchema>;
+
+export const PaymentSubmissionStatusSchema = Type.Union([
+  Type.Literal('PENDING'),
+  Type.Literal('SUBMITTED'),
+  Type.Literal('UNDER_REVIEW'),
+  Type.Literal('VERIFIED'),
+  Type.Literal('REJECTED'),
+  Type.Literal('FAILED'),
+]);
+export type PaymentSubmissionStatus = Static<typeof PaymentSubmissionStatusSchema>;
+
+export const SubscriptionPlanCatalogItemSchema = Type.Object({
+  id: UuidSchema,
+  code: Type.String(),
+  name: Type.String(),
+  description: Type.String(),
+  displayOrder: Type.Integer(),
+  isPublic: Type.Boolean(),
+  isCustomPricing: Type.Boolean(),
+  currencyCode: CurrencyCodeSchema,
+  monthlyPriceAmount: DecimalMoneyStringSchema,
+  annualDiscountPct: Type.String(),
+  annualTotalAmount: DecimalMoneyStringSchema,
+  annualMonthlyEquivalent: DecimalMoneyStringSchema,
+  annualSavingsAmount: DecimalMoneyStringSchema,
+  additionalBranchMonthlyFee: Type.Union([DecimalMoneyStringSchema, Type.Null()]),
+  trialDays: Type.Integer(),
+  supportLevel: Type.String(),
+  limits: Type.Object({
+    maxBranches: Type.Integer(),
+    maxWarehouses: Type.Integer(),
+    maxRegisters: Type.Integer(),
+    maxUsers: Type.Integer(),
+    maxProducts: Type.Integer(),
+    maxStorageMb: Type.Integer(),
+  }),
+  features: Type.Record(Type.String(), Type.Boolean()),
+  version: Type.Integer(),
+});
+export type SubscriptionPlanCatalogItem = Static<
+  typeof SubscriptionPlanCatalogItemSchema
+>;
+
+export const CalculateSubscriptionPricingRequestSchema = Type.Object(
+  {
+    planCode: SubscriptionPlanCodeSchema,
+    billingCycle: SubscriptionBillingCycleSchema,
+    additionalBranchCount: Type.Optional(Type.Integer({ minimum: 0, maximum: 500 })),
+    prorateBranchDaysRemaining: Type.Optional(Type.Integer({ minimum: 0, maximum: 366 })),
+    prorateCycleTotalDays: Type.Optional(Type.Integer({ minimum: 1, maximum: 366 })),
+    customMonthlyPrice: Type.Optional(DecimalMoneyStringSchema),
+  },
+  { additionalProperties: false },
+);
+export type CalculateSubscriptionPricingRequest = Static<
+  typeof CalculateSubscriptionPricingRequestSchema
+>;
+
+export const SubscriptionPricingQuoteResponseSchema = Type.Object({
+  planCode: Type.String(),
+  planName: Type.String(),
+  billingCycle: SubscriptionBillingCycleSchema,
+  currencyCode: CurrencyCodeSchema,
+  isCustomPricing: Type.Boolean(),
+  monthlyBaseAmount: DecimalMoneyStringSchema,
+  planCycleGrossAmount: DecimalMoneyStringSchema,
+  annualDiscountPct: Type.String(),
+  annualDiscountAmount: DecimalMoneyStringSchema,
+  planCycleNetAmount: DecimalMoneyStringSchema,
+  additionalBranchCount: Type.Integer(),
+  additionalBranchMonthlyFee: Type.Union([DecimalMoneyStringSchema, Type.Null()]),
+  additionalBranchCycleAmount: DecimalMoneyStringSchema,
+  proratedAdditionalBranchAmount: DecimalMoneyStringSchema,
+  totalDueNow: DecimalMoneyStringSchema,
+  recurringNextCycleTotal: DecimalMoneyStringSchema,
+});
+export type SubscriptionPricingQuoteResponse = Static<
+  typeof SubscriptionPricingQuoteResponseSchema
+>;
+
+export const SubscriptionUsageSummarySchema = Type.Object({
+  tenantId: UuidSchema,
+  planCode: Type.String(),
+  planName: Type.String(),
+  status: SubscriptionStatusSchema,
+  billingCycle: SubscriptionBillingCycleSchema,
+  includedBranches: Type.Integer(),
+  additionalBranchSlots: Type.Integer(),
+  effectiveMaxBranches: Type.Integer(),
+  activeBranchesCount: Type.Integer(),
+  maxUsers: Type.Integer(),
+  distinctActiveUsersCount: Type.Integer(),
+  maxProducts: Type.Integer(),
+  distinctProductsCount: Type.Integer(),
+  maxStorageMb: Type.Integer(),
+  usedStorageBytes: Type.Integer(),
+  usedStorageMb: Type.String(),
+  trialStartedAt: Type.Union([IsoTimestampSchema, Type.Null()]),
+  trialEndsAt: Type.Union([IsoTimestampSchema, Type.Null()]),
+  trialDaysRemaining: Type.Integer(),
+  gracePeriodEndsAt: Type.Union([IsoTimestampSchema, Type.Null()]),
+  graceDaysRemaining: Type.Integer(),
+  scheduledDowngradePlanCode: Type.Union([Type.String(), Type.Null()]),
+  scheduledDowngradeBillingCycle: Type.Union([SubscriptionBillingCycleSchema, Type.Null()]),
+  scheduledDowngradeEffectiveAt: Type.Union([IsoTimestampSchema, Type.Null()]),
+});
+export type SubscriptionUsageSummary = Static<typeof SubscriptionUsageSummarySchema>;
+
+export const StartFreeTrialRequestSchema = Type.Object(
+  {
+    planCode: Type.Optional(SubscriptionPlanCodeSchema),
+  },
+  { additionalProperties: false },
+);
+export type StartFreeTrialRequest = Static<typeof StartFreeTrialRequestSchema>;
+
+export const UpgradeCheckoutRequestSchema = Type.Object(
+  {
+    targetPlanCode: SubscriptionPlanCodeSchema,
+    billingCycle: SubscriptionBillingCycleSchema,
+    additionalBranchCount: Type.Optional(Type.Integer({ minimum: 0, maximum: 500 })),
+    notes: Type.Optional(Type.String({ maxLength: 500 })),
+  },
+  { additionalProperties: false },
+);
+export type UpgradeCheckoutRequest = Static<typeof UpgradeCheckoutRequestSchema>;
+
+export const ScheduleDowngradeRequestSchema = Type.Object(
+  {
+    targetPlanCode: SubscriptionPlanCodeSchema,
+    billingCycle: Type.Optional(SubscriptionBillingCycleSchema),
+    reason: Type.Optional(Type.String({ maxLength: 500 })),
+  },
+  { additionalProperties: false },
+);
+export type ScheduleDowngradeRequest = Static<typeof ScheduleDowngradeRequestSchema>;
+
+export const PurchaseBranchAddonRequestSchema = Type.Object(
+  {
+    additionalBranches: Type.Integer({ minimum: 1, maximum: 200 }),
+    notes: Type.Optional(Type.String({ maxLength: 500 })),
+  },
+  { additionalProperties: false },
+);
+export type PurchaseBranchAddonRequest = Static<typeof PurchaseBranchAddonRequestSchema>;
+
+export const SubscriptionBankSettingsResponseSchema = Type.Object({
+  manualBankTransferEnabled: Type.Boolean(),
+  bankAccountName: Type.String(),
+  bankName: Type.String(),
+  bankBranch: Type.String(),
+  bankAccountNumber: Type.String(),
+  bankInstructions: Type.String(),
+  onlineGatewayEnabled: Type.Boolean(),
+  onlineGatewayProvider: Type.String(),
+  gracePeriodDays: Type.Integer(),
+  trialDaysDefault: Type.Integer(),
+  supportEmail: Type.Optional(Type.String()),
+  supportPhone: Type.Optional(Type.String()),
+  supportHours: Type.Optional(Type.String()),
+});
+export type SubscriptionBankSettingsResponse = Static<
+  typeof SubscriptionBankSettingsResponseSchema
+>;
+
+export const UpdatePlatformBankSettingsRequestSchema = Type.Object(
+  {
+    manualBankTransferEnabled: Type.Optional(Type.Boolean()),
+    bankAccountName: Type.Optional(Type.String({ minLength: 2, maxLength: 160 })),
+    bankName: Type.Optional(Type.String({ minLength: 2, maxLength: 160 })),
+    bankBranch: Type.Optional(Type.String({ minLength: 2, maxLength: 160 })),
+    bankAccountNumber: Type.Optional(Type.String({ minLength: 4, maxLength: 80 })),
+    bankInstructions: Type.Optional(Type.String({ minLength: 2, maxLength: 1000 })),
+    onlineGatewayEnabled: Type.Optional(Type.Boolean()),
+    onlineGatewayProvider: Type.Optional(
+      Type.Union([
+        Type.Literal('PAYHERE_LK'),
+        Type.Literal('STRIPE'),
+        Type.Literal('PADDLE'),
+      ]),
+    ),
+    gracePeriodDays: Type.Optional(Type.Integer({ minimum: 1, maximum: 60 })),
+    trialDaysDefault: Type.Optional(Type.Integer({ minimum: 1, maximum: 90 })),
+    supportEmail: Type.Optional(Type.String({ minLength: 3, maxLength: 160 })),
+    supportPhone: Type.Optional(Type.String({ minLength: 3, maxLength: 64 })),
+    supportHours: Type.Optional(Type.String({ minLength: 2, maxLength: 160 })),
+  },
+  { additionalProperties: false },
+);
+export type UpdatePlatformBankSettingsRequest = Static<
+  typeof UpdatePlatformBankSettingsRequestSchema
+>;
+
+export const SubmitManualBankTransferRequestSchema = Type.Object(
+  {
+    invoiceId: UuidSchema,
+    paymentReference: Type.String({ minLength: 3, maxLength: 120 }),
+    proofFileName: Type.String({ minLength: 3, maxLength: 255 }),
+    proofMimeType: Type.Union([
+      Type.Literal('image/jpeg'),
+      Type.Literal('image/jpg'),
+      Type.Literal('image/png'),
+      Type.Literal('image/webp'),
+      Type.Literal('application/pdf'),
+    ]),
+    proofDataBase64: Type.String({ minLength: 16 }),
+    notes: Type.Optional(Type.String({ maxLength: 500 })),
+    resubmitSubmissionId: Type.Optional(UuidSchema),
+  },
+  { additionalProperties: false },
+);
+export type SubmitManualBankTransferRequest = Static<
+  typeof SubmitManualBankTransferRequestSchema
+>;
+
+export const SubscriptionPaymentSubmissionResponseSchema = Type.Object({
+  id: UuidSchema,
+  tenantId: UuidSchema,
+  subscriptionId: UuidSchema,
+  invoiceId: UuidSchema,
+  invoiceNumber: Type.Optional(Type.String()),
+  targetPlanCode: Type.Optional(Type.String()),
+  targetBillingCycle: SubscriptionBillingCycleSchema,
+  paymentChannel: Type.Union([
+    Type.Literal('MANUAL_BANK_TRANSFER'),
+    Type.Literal('ONLINE_GATEWAY'),
+  ]),
+  gatewayProvider: Type.Union([Type.String(), Type.Null()]),
+  expectedAmount: DecimalMoneyStringSchema,
+  submittedAmount: DecimalMoneyStringSchema,
+  currencyCode: CurrencyCodeSchema,
+  paymentReference: Type.String(),
+  submissionNotes: Type.Union([Type.String(), Type.Null()]),
+  proofFileName: Type.Union([Type.String(), Type.Null()]),
+  proofMimeType: Type.Union([Type.String(), Type.Null()]),
+  proofFileSize: Type.Union([Type.Integer(), Type.Null()]),
+  status: PaymentSubmissionStatusSchema,
+  submittedByUserId: UuidSchema,
+  submittedAt: Type.Union([IsoTimestampSchema, Type.Null()]),
+  reviewedByUserId: Type.Union([UuidSchema, Type.Null()]),
+  reviewedAt: Type.Union([IsoTimestampSchema, Type.Null()]),
+  rejectionReason: Type.Union([Type.String(), Type.Null()]),
+  verifiedPaymentId: Type.Union([UuidSchema, Type.Null()]),
+  createdAt: IsoTimestampSchema,
+});
+export type SubscriptionPaymentSubmissionResponse = Static<
+  typeof SubscriptionPaymentSubmissionResponseSchema
+>;
+
+export const VerifyPaymentSubmissionRequestSchema = Type.Object(
+  {
+    tenantId: Type.Optional(UuidSchema),
+    decision: Type.Union([
+      Type.Literal('MARK_UNDER_REVIEW'),
+      Type.Literal('APPROVE'),
+      Type.Literal('REJECT'),
+    ]),
+    rejectionReason: Type.Optional(Type.String({ minLength: 5, maxLength: 500 })),
+  },
+  { additionalProperties: false },
+);
+export type VerifyPaymentSubmissionRequest = Static<
+  typeof VerifyPaymentSubmissionRequestSchema
+>;
+
+export const OnlineGatewayCheckoutRequestSchema = Type.Object(
+  {
+    invoiceId: UuidSchema,
+    providerCode: Type.Union([
+      Type.Literal('PAYHERE_LK'),
+      Type.Literal('STRIPE'),
+      Type.Literal('PADDLE'),
+    ]),
+    returnUrl: Type.Optional(Type.String({ maxLength: 500 })),
+    cancelUrl: Type.Optional(Type.String({ maxLength: 500 })),
+  },
+  { additionalProperties: false },
+);
+export type OnlineGatewayCheckoutRequest = Static<
+  typeof OnlineGatewayCheckoutRequestSchema
+>;
+
+export const OnlineGatewayWebhookRequestSchema = Type.Object(
+  {
+    providerEventId: Type.String({ minLength: 3, maxLength: 160 }),
+    submissionId: UuidSchema,
+    tenantId: UuidSchema,
+    gatewayTransactionId: Type.String({ minLength: 3, maxLength: 160 }),
+    status: Type.Union([
+      Type.Literal('VERIFIED'),
+      Type.Literal('FAILED'),
+      Type.Literal('CANCELLED'),
+      Type.Literal('PENDING'),
+    ]),
+    paidAmount: DecimalMoneyStringSchema,
+    currencyCode: CurrencyCodeSchema,
+    rawPayload: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
+  },
+  { additionalProperties: false },
+);
+export type OnlineGatewayWebhookRequest = Static<
+  typeof OnlineGatewayWebhookRequestSchema
+>;
+
+export const UpdatePlatformPlanConfigRequestSchema = Type.Object(
+  {
+    name: Type.Optional(Type.String({ minLength: 2, maxLength: 120 })),
+    description: Type.Optional(Type.String({ maxLength: 500 })),
+    monthlyPriceAmount: Type.Optional(DecimalMoneyStringSchema),
+    annualDiscountPct: Type.Optional(Type.String({ pattern: '^\\d+(\\.\\d{1,2})?$' })),
+    additionalBranchMonthlyFee: Type.Optional(
+      Type.Union([DecimalMoneyStringSchema, Type.Null()]),
+    ),
+    maxBranches: Type.Optional(Type.Integer({ minimum: 1 })),
+    maxUsers: Type.Optional(Type.Integer({ minimum: 1 })),
+    maxProducts: Type.Optional(Type.Integer({ minimum: 1 })),
+    maxStorageMb: Type.Optional(Type.Integer({ minimum: 1 })),
+    trialDays: Type.Optional(Type.Integer({ minimum: 0, maximum: 90 })),
+    isCustomPricing: Type.Optional(Type.Boolean()),
+    supportLevel: Type.Optional(Type.String({ minLength: 2, maxLength: 120 })),
+    features: Type.Optional(Type.Record(Type.String(), Type.Boolean())),
+    changeReason: Type.Optional(Type.String({ minLength: 3, maxLength: 500 })),
+  },
+  { additionalProperties: false },
+);
+export type UpdatePlatformPlanConfigRequest = Static<
+  typeof UpdatePlatformPlanConfigRequestSchema
+>;
+
+// ============================================================================
+// Phase 10.5–10.9 — Super Admin, Business Portal, Analytics, MFA & Audit
+// ============================================================================
+
+export const PlatformAdminRoleSchema = Type.Union([
+  Type.Literal('SUPER_ADMIN'),
+  Type.Literal('BILLING_ADMIN'),
+  Type.Literal('SUPPORT_ADMIN'),
+  Type.Literal('ANALYST'),
+]);
+export type PlatformAdminRole = Static<typeof PlatformAdminRoleSchema>;
+
+export const PlatformMfaVerifyRequestSchema = Type.Object(
+  {
+    code: Type.String({ pattern: '^[0-9]{6}$' }),
+  },
+  { additionalProperties: false },
+);
+export type PlatformMfaVerifyRequest = Static<
+  typeof PlatformMfaVerifyRequestSchema
+>;
+
+export const PlatformProvisionAdminRequestSchema = Type.Object(
+  {
+    email: Type.String({ minLength: 3, maxLength: 255 }),
+    platformRole: PlatformAdminRoleSchema,
+    mfaEnforced: Type.Optional(Type.Boolean()),
+  },
+  { additionalProperties: false },
+);
+export type PlatformProvisionAdminRequest = Static<
+  typeof PlatformProvisionAdminRequestSchema
+>;
+
+export const PlatformUpdateAdminRequestSchema = Type.Object(
+  {
+    platformRole: Type.Optional(PlatformAdminRoleSchema),
+    status: Type.Optional(
+      Type.Union([Type.Literal('ACTIVE'), Type.Literal('SUSPENDED')]),
+    ),
+    mfaEnforced: Type.Optional(Type.Boolean()),
+  },
+  { additionalProperties: false },
+);
+export type PlatformUpdateAdminRequest = Static<
+  typeof PlatformUpdateAdminRequestSchema
+>;
+
+export const PlatformSuspendBusinessRequestSchema = Type.Object(
+  {
+    reason: Type.String({ minLength: 5, maxLength: 500 }),
+  },
+  { additionalProperties: false },
+);
+export type PlatformSuspendBusinessRequest = Static<
+  typeof PlatformSuspendBusinessRequestSchema
+>;
+
+export const PlatformRestoreBusinessRequestSchema = Type.Object(
+  {
+    targetStatus: Type.Union([
+      Type.Literal('ACTIVE'),
+      Type.Literal('TRIALING'),
+      Type.Literal('READ_ONLY'),
+    ]),
+    reason: Type.String({ minLength: 5, maxLength: 500 }),
+  },
+  { additionalProperties: false },
+);
+export type PlatformRestoreBusinessRequest = Static<
+  typeof PlatformRestoreBusinessRequestSchema
+>;
+
+export const PlatformSubscriptionOverrideRequestSchema = Type.Object(
+  {
+    planCode: Type.Optional(SubscriptionPlanCodeSchema),
+    status: Type.Optional(SubscriptionStatusSchema),
+    billingCycle: Type.Optional(SubscriptionBillingCycleSchema),
+    extendDays: Type.Optional(Type.Integer({ minimum: 1, maximum: 3650 })),
+    extendGraceDays: Type.Optional(Type.Integer({ minimum: 1, maximum: 90 })),
+    additionalBranchSlots: Type.Optional(Type.Integer({ minimum: 0, maximum: 500 })),
+    customMonthlyPrice: Type.Optional(
+      Type.Union([DecimalMoneyStringSchema, Type.Null()]),
+    ),
+    customMaxBranches: Type.Optional(Type.Union([Type.Integer({ minimum: 1 }), Type.Null()])),
+    customMaxUsers: Type.Optional(Type.Union([Type.Integer({ minimum: 1 }), Type.Null()])),
+    customMaxProducts: Type.Optional(Type.Union([Type.Integer({ minimum: 1 }), Type.Null()])),
+    customMaxStorageMb: Type.Optional(Type.Union([Type.Integer({ minimum: 1 }), Type.Null()])),
+    allowAdminOverride: Type.Optional(Type.Boolean()),
+    reason: Type.String({ minLength: 5, maxLength: 500 }),
+  },
+  { additionalProperties: false },
+);
+export type PlatformSubscriptionOverrideRequest = Static<
+  typeof PlatformSubscriptionOverrideRequestSchema
+>;
+
+export const PlatformAnalyticsQuerySchema = Type.Object(
+  {
+    startDate: Type.Optional(DateOnlyStringSchema),
+    endDate: Type.Optional(DateOnlyStringSchema),
+    planCode: Type.Optional(SubscriptionPlanCodeSchema),
+    status: Type.Optional(SubscriptionStatusSchema),
+  },
+  { additionalProperties: false },
+);
+export type PlatformAnalyticsQuery = Static<typeof PlatformAnalyticsQuerySchema>;
+
+export const SubscriptionNotificationSeveritySchema = Type.Union([
+  Type.Literal('INFO'),
+  Type.Literal('WARNING'),
+  Type.Literal('CRITICAL'),
+  Type.Literal('SUCCESS'),
+]);
+export type SubscriptionNotificationSeverity = Static<
+  typeof SubscriptionNotificationSeveritySchema
+>;
+
+export const SubscriptionNotificationResponseSchema = Type.Object({
+  id: UuidSchema,
+  tenantId: UuidSchema,
+  subscriptionId: UuidSchema,
+  eventType: Type.String(),
+  severity: SubscriptionNotificationSeveritySchema,
+  title: Type.String(),
+  message: Type.String(),
+  isRead: Type.Boolean(),
+  readAt: Type.Union([IsoTimestampSchema, Type.Null()]),
+  createdAt: IsoTimestampSchema,
+});
+export type SubscriptionNotificationResponse = Static<
+  typeof SubscriptionNotificationResponseSchema
+>;
+
+
 
 
 

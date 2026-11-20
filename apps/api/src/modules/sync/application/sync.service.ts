@@ -29,6 +29,11 @@ import {
   appendAuditLog,
   generateUuidV7,
 } from '../../shared/index.js';
+import {
+  assertFeatureEntitlement,
+  assertSubscriptionEntitlement,
+  getTenantSubscriptionEntitlement,
+} from '../../sub/index.js';
 
 function asRecord(val: unknown): Record<string, unknown> {
   if (val && typeof val === 'object' && !Array.isArray(val)) {
@@ -361,6 +366,62 @@ async function executeDomainSyncCommand(
         note: 'Offline physical sale accepted; stock balance went negative.',
       },
     };
+  }
+
+  const isDomainSyncCommand =
+    rawCmdType === 'POS_RECORD_SALE' ||
+    rawCmdType === 'POS_RECORD_RETURN' ||
+    rawCmdType === 'INV_RECORD_ADJUSTMENT' ||
+    rawCmdType === 'INV_RECORD_MOVEMENT' ||
+    rawCmdType === 'INV_REQUEST_TRANSFER' ||
+    rawCmdType === 'INV_SERIAL_OPERATION';
+
+  if (isDomainSyncCommand) {
+    const devRow = await cmdTrx.db
+      .selectFrom('offline_devices')
+      .select(['client_platform'])
+      .where('tenant_id', '=', cmdTrx.tenantId)
+      .where('id', '=', envelope.deviceId)
+      .executeTakeFirst();
+    try {
+      await assertSubscriptionEntitlement(cmdTrx, { requireWriteAccess: true });
+      if (devRow) {
+        const isMobile =
+          devRow.client_platform === 'MOBILE_APP' ||
+          devRow.client_platform === 'MOBILE_PWA' ||
+          devRow.client_platform === 'FLUTTER_MOBILE';
+        await assertFeatureEntitlement(
+          cmdTrx,
+          isMobile ? 'mobileOfflinePos' : 'desktopOfflinePos',
+          'Offline device synchronization requires a Professional or Enterprise subscription plan.',
+        );
+      }
+      if (rawCmdType === 'INV_REQUEST_TRANSFER') {
+        await assertFeatureEntitlement(
+          cmdTrx,
+          'stockTransfers',
+          'Inter-branch stock transfers require a Professional or Enterprise plan.',
+        );
+      }
+      if (rawCmdType === 'INV_SERIAL_OPERATION') {
+        await assertFeatureEntitlement(
+          cmdTrx,
+          'serialTracking',
+          'Serial number tracking requires a Professional or Enterprise plan.',
+        );
+      }
+    } catch (err) {
+      if (err instanceof AppError) {
+        throw new SyncPoisonPillError(err.errorCode, err.message, {
+          commandType: envelope.commandType,
+          entityType: 'SUBSCRIPTION_ENFORCEMENT',
+          originalErrorCode: err.errorCode,
+          statusCode: err.statusCode,
+          originalPayload: envelope.payload,
+        });
+      }
+      throw err;
+    }
   }
 
   // 1. Offline POS Sale (Authoritative validation — NEVER silently forces negative stock!)
@@ -872,6 +933,20 @@ export async function pullSyncDeltaAndSnapshot(
     }
   }
 
+  const ent = await getTenantSubscriptionEntitlement(trx);
+  if (
+    !ent.allowAdminOverride &&
+    (ent.status === 'SUSPENDED' || ent.status === 'CANCELLED')
+  ) {
+    throw new AppError({
+      statusCode: 403,
+      errorCode: 'SUB_SUBSCRIPTION_INACTIVE',
+      title: 'Subscription Inactive or Suspended',
+      detail: `Subscription status is "${ent.status}" and offline sync pull is disabled until restored.`,
+      extensions: { status: ent.status },
+    });
+  }
+
   const snapshot = await getSyncCatalogPricingSnapshot(
     trx,
     query.branchId ? { branchId: query.branchId } : {},
@@ -926,5 +1001,35 @@ export async function pullSyncDeltaAndSnapshot(
       processedAt: new Date(c.processed_at).toISOString(),
     })),
     snapshot,
+    subscriptionState: {
+      planCode: ent.planCode,
+      planName: ent.planName,
+      status: ent.status,
+      isReadOnly:
+        !ent.allowAdminOverride &&
+        (ent.status === 'READ_ONLY' ||
+          ent.status === 'EXPIRED' ||
+          ent.status === 'PAST_DUE'),
+      inGracePeriod: ent.status === 'GRACE_PERIOD',
+      gracePeriodEndsAt: ent.gracePeriodEndsAt,
+      offlineEntitled:
+        ent.allowAdminOverride ||
+        Boolean(ent.features?.desktopOfflinePos || ent.features?.mobileOfflinePos),
+      features: {
+        desktopOfflinePos: Boolean(ent.features?.desktopOfflinePos),
+        mobileOfflinePos: Boolean(ent.features?.mobileOfflinePos),
+        offlineInventory: Boolean(ent.features?.offlineInventory),
+        stockTransfers: Boolean(ent.features?.stockTransfers),
+        batchTracking: Boolean(ent.features?.batchTracking),
+        serialTracking: Boolean(ent.features?.serialTracking),
+      },
+      limits: {
+        maxBranches: ent.limits.maxBranches,
+        maxUsers: ent.limits.maxUsers,
+        maxProducts: ent.limits.maxProducts,
+        maxStorageMb: ent.limits.maxStorageMb,
+      },
+      evaluatedAt: new Date().toISOString(),
+    },
   };
 }

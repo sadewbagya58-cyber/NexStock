@@ -1812,16 +1812,28 @@ export async function createStaffInvitation(
   const plan = await trx.db
     .selectFrom('tenant_subscriptions')
     .innerJoin('subscription_plans', 'subscription_plans.id', 'tenant_subscriptions.plan_id')
-    .select(['subscription_plans.max_users'])
+    .select([
+      'subscription_plans.max_users',
+      'tenant_subscriptions.custom_limits_json',
+      'tenant_subscriptions.allow_admin_override',
+    ])
     .where('tenant_subscriptions.tenant_id', '=', trx.tenantId)
     .executeTakeFirst();
 
-  if (plan?.max_users != null && activeMembers.length >= plan.max_users) {
+  let effectiveMaxUsers = plan?.max_users ?? null;
+  if (plan?.custom_limits_json && typeof plan.custom_limits_json === 'object') {
+    const cu = (plan.custom_limits_json as Record<string, unknown>).maxUsers;
+    if (typeof cu === 'number' && Number.isFinite(cu) && cu >= 1) {
+      effectiveMaxUsers = Math.floor(cu);
+    }
+  }
+
+  if (!plan?.allow_admin_override && effectiveMaxUsers != null && activeMembers.length >= effectiveMaxUsers) {
     throw new AppError({
       statusCode: 403,
       errorCode: 'SUB_QUOTA_EXCEEDED',
       title: 'Subscription Quota Exceeded',
-      detail: `Your organization has reached the maximum user limit (${plan.max_users}) allowed by your subscription plan.`,
+      detail: `Your organization has reached the maximum user limit (${effectiveMaxUsers}) allowed by your subscription plan.`,
     });
   }
 

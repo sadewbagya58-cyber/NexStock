@@ -1597,6 +1597,373 @@
       }
     }
 
+    /* Phase 10 SaaS Subscription & Billing Responsive UI */
+    .sub-hero-card {
+      background: linear-gradient(135deg, rgba(99, 102, 241, 0.12), rgba(16, 185, 129, 0.08));
+      border: 1px solid rgba(99, 102, 241, 0.25);
+      border-radius: 12px;
+      padding: 18px;
+      margin-bottom: 16px;
+    }
+    .sub-hero-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .sub-usage-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(185px, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+    .sub-usage-card {
+      background: var(--surface-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px;
+      padding: 12px 14px;
+    }
+    .sub-usage-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 12px;
+      color: var(--text-secondary);
+      margin-bottom: 6px;
+    }
+    .sub-usage-value {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--text-primary);
+      margin-bottom: 8px;
+    }
+    .sub-progress-track {
+      width: 100%;
+      height: 7px;
+      background: rgba(148, 163, 184, 0.2);
+      border-radius: 999px;
+      overflow: hidden;
+    }
+    .sub-progress-fill {
+      height: 100%;
+      border-radius: 999px;
+      background: var(--accent-primary);
+      transition: width 0.25s ease;
+    }
+    .sub-billing-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .sub-billing-toggle {
+      display: inline-flex;
+      background: rgba(148, 163, 184, 0.14);
+      border-radius: 8px;
+      padding: 4px;
+      gap: 4px;
+    }
+    .sub-cycle-btn {
+      border: none;
+      background: transparent;
+      color: var(--text-secondary);
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .sub-cycle-btn.active {
+      background: var(--accent-primary);
+      color: #fff;
+    }
+    .sub-plans-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+      margin-bottom: 18px;
+    }
+    .sub-plan-card {
+      background: var(--surface-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 12px;
+      min-width: 0;
+    }
+    .sub-plan-card.active-plan {
+      border-color: var(--accent-primary);
+      box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.3);
+    }
+    .sub-plan-price {
+      font-size: 22px;
+      font-weight: 800;
+      color: var(--text-primary);
+      line-height: 1.2;
+    }
+    .sub-plan-features {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+    .sub-bank-box {
+      background: rgba(16, 185, 129, 0.06);
+      border: 1px dashed rgba(16, 185, 129, 0.35);
+      border-radius: 10px;
+      padding: 14px;
+      margin-bottom: 14px;
+    }
+    .sub-bank-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+      gap: 10px;
+      margin-top: 8px;
+    }
+    .sub-addon-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .sub-mobile-cards {
+      display: none;
+    }
+    @media (max-width: 1024px) {
+      .sub-plans-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+    @media (max-width: 768px) {
+      .sub-plans-grid {
+        grid-template-columns: 1fr;
+      }
+      .sub-desktop-table {
+        display: none;
+      }
+      .sub-mobile-cards {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .sub-addon-bar {
+        flex-direction: column;
+        align-items: stretch;
+      }
+    }
+
+    /* Phase 10.5–10.9 Global Banner, Enhanced Business Portal & Platform Super Admin */
+    .sub-global-banner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 20px;
+      font-size: 13px;
+      font-weight: 500;
+      border-bottom: 1px solid rgba(239, 68, 68, 0.35);
+      background: linear-gradient(90deg, rgba(239, 68, 68, 0.16), rgba(245, 158, 11, 0.12));
+      color: var(--text-primary);
+      flex-wrap: wrap;
+      z-index: 40;
+    }
+    .sub-global-banner.banner-warning {
+      border-bottom-color: rgba(245, 158, 11, 0.45);
+      background: linear-gradient(90deg, rgba(245, 158, 11, 0.16), rgba(251, 191, 36, 0.08));
+    }
+    .sub-global-banner.banner-danger {
+      border-bottom-color: rgba(239, 68, 68, 0.5);
+      background: linear-gradient(90deg, rgba(239, 68, 68, 0.2), rgba(220, 38, 38, 0.08));
+    }
+    .sub-feature-matrix-wrap {
+      overflow-x: auto;
+      width: 100%;
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px;
+    }
+    .sub-feature-matrix-table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 560px;
+      font-size: 12px;
+    }
+    .sub-feature-matrix-table th,
+    .sub-feature-matrix-table td {
+      padding: 9px 12px;
+      border-bottom: 1px solid var(--border-subtle);
+      text-align: left;
+    }
+    .sub-feature-matrix-table th {
+      background: var(--bg-surface-alt, rgba(255, 255, 255, 0.03));
+      font-weight: 700;
+    }
+    .sub-notif-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--border-subtle);
+      background: var(--bg-surface-alt, rgba(255, 255, 255, 0.02));
+    }
+    .sub-notif-item.unread {
+      border-left: 3px solid var(--accent-primary);
+      background: rgba(99, 102, 241, 0.07);
+    }
+    .pa-header-card {
+      background: linear-gradient(135deg, rgba(59, 130, 246, 0.14), rgba(99, 102, 241, 0.08));
+      border: 1px solid rgba(59, 130, 246, 0.28);
+      border-radius: 12px;
+      padding: 18px;
+      margin-bottom: 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .pa-tabs {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding-bottom: 6px;
+      margin-bottom: 16px;
+      -webkit-overflow-scrolling: touch;
+    }
+    .pa-tab-btn {
+      padding: 8px 14px;
+      border-radius: 8px;
+      border: 1px solid var(--border-color);
+      background: var(--bg-card);
+      color: var(--text-secondary);
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .pa-tab-btn.active {
+      background: var(--accent-primary);
+      color: #fff;
+      border-color: var(--accent-primary);
+    }
+    .pa-kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .pa-kpi-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 10px;
+      padding: 14px;
+      min-width: 0;
+    }
+    .pa-kpi-label {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--text-secondary);
+    }
+    .pa-kpi-value {
+      font-size: 20px;
+      font-weight: 800;
+      margin-top: 6px;
+      word-break: break-word;
+    }
+    .pa-kpi-sub {
+      font-size: 11px;
+      color: var(--text-secondary);
+      margin-top: 4px;
+    }
+    .pa-filter-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 14px;
+    }
+    .pa-filter-bar > * {
+      min-width: 0;
+    }
+    .pa-split-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+      margin-bottom: 16px;
+    }
+    .pa-bar-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 8px;
+      font-size: 12px;
+    }
+    .pa-bar-track {
+      flex: 1;
+      height: 8px;
+      background: var(--border-subtle);
+      border-radius: 99px;
+      overflow: hidden;
+    }
+    .pa-bar-fill {
+      height: 100%;
+      background: var(--accent-primary);
+      border-radius: 99px;
+    }
+    .pa-desktop-table {
+      display: block;
+      overflow-x: auto;
+      width: 100%;
+    }
+    .pa-mobile-cards {
+      display: none;
+    }
+    @media (max-width: 1200px) {
+      .pa-kpi-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+    @media (max-width: 900px) {
+      .pa-split-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+    @media (max-width: 768px) {
+      .pa-desktop-table {
+        display: none;
+      }
+      .pa-mobile-cards {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .sub-global-banner {
+        padding: 10px 12px;
+        font-size: 12px;
+      }
+    }
+    @media (max-width: 480px) {
+      .pa-kpi-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
     /* Empty States */
     .empty-state {
       text-align: center;
@@ -2769,6 +3136,9 @@
     </div>
   </header>
 
+  <!-- Global Subscription Enforcement & Lifecycle Alert Banner -->
+  <div id="globalSubscriptionBanner" class="sub-global-banner" style="display: none;" role="alert"></div>
+
   <!-- App Body Layout -->
   <div class="app-container">
     <div class="sidebar-overlay" id="sidebarOverlay"></div>
@@ -3161,7 +3531,8 @@
       'branches',
       'accept-invitation',
       'roles-permissions',
-      'org-settings'
+      'org-settings',
+      'platform-admin'
     ];
 
     function getRouteFromLocation() {
@@ -3995,9 +4366,16 @@
         if (state.tenantId === targetTenantId) {
           Promise.all([
             apiFetch('/v1/org/branding', { silent: true }).catch(() => null),
-            apiFetch('/v1/pricing/settings', { silent: true }).catch(() => null)
-          ]).then(([branding, pricing]) => {
+            apiFetch('/v1/pricing/settings', { silent: true }).catch(() => null),
+            apiFetch('/v1/subscriptions/entitlement', { silent: true }).catch(() => null)
+          ]).then(([branding, pricing, entitlement]) => {
             if (state.tenantId !== targetTenantId) return;
+            if (entitlement) {
+              state.cachedSubscriptionEntitlement = entitlement;
+              if (typeof renderGlobalSubscriptionBanner === 'function') {
+                renderGlobalSubscriptionBanner();
+              }
+            }
             if (branding) {
               state.tenantBranding = {
                 shopDisplayName: branding.shopDisplayName || state.tenantName || null,
@@ -4782,6 +5160,9 @@
 
     function canAccessView(viewName) {
       if (AUTH_VIEWS.includes(viewName)) return true;
+      if (viewName === 'platform-admin') {
+        return Boolean(state.user && state.user.isPlatformAdmin === true);
+      }
       if (!isModuleEnabled('hrm') && HR_VIEWS.includes(viewName)) {
         return false;
       }
@@ -4870,7 +5251,8 @@
         'team-staff': 'Team & Staff Accounts',
         'branches': 'Branches & Locations',
         'roles-permissions': 'Roles & Permissions',
-        'org-settings': 'Settings & Quotas'
+        'org-settings': 'Settings & Quotas',
+        'platform-admin': 'Platform Super Admin'
       };
       return titles[viewName] || viewName;
     }
@@ -5140,6 +5522,18 @@
             permission: ['org:tenant:manage', 'org:branch:manage', 'org:warehouse:manage', 'sub:subscription:read', 'sub:subscription:manage', 'i18n:settings:read', 'i18n:settings:manage']
           }
         ]
+      },
+      {
+        category: 'Platform Governance',
+        platformAdminOnly: true,
+        items: [
+          {
+            view: 'platform-admin',
+            label: 'Platform Super Admin',
+            icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>`,
+            platformAdminOnly: true
+          }
+        ]
       }
     ];
 
@@ -5149,11 +5543,17 @@
 
       let html = '';
       for (const section of NAV_DEFINITIONS) {
+        if (section.platformAdminOnly && !(state.user && state.user.isPlatformAdmin === true)) {
+          continue;
+        }
         if (section.module === 'hrm' && !isModuleEnabled('hrm')) {
           continue;
         }
 
         const permittedItems = section.items.filter(item => {
+          if (item.platformAdminOnly) {
+            return Boolean(state.user && state.user.isPlatformAdmin === true);
+          }
           if (!isModuleEnabled('hrm') && HR_VIEWS.includes(item.view)) {
             return false;
           }
@@ -5394,7 +5794,11 @@
         case 'accept-invitation': renderAcceptInvitationView(); break;
         case 'roles-permissions': renderRolesPermissionsView(); break;
         case 'org-settings': renderOrgSettingsView(); break;
+        case 'platform-admin': renderPlatformAdminView(); break;
         default: renderDashboardView();
+      }
+      if (typeof renderGlobalSubscriptionBanner === 'function') {
+        renderGlobalSubscriptionBanner();
       }
     }
 
@@ -5798,10 +6202,20 @@
         const activeMemberships = (state.memberships || []).filter(m => m.membershipStatus === 'ACTIVE' || (!m.membershipStatus && m.status === 'ACTIVE'));
 
         if (state.memberships.length === 0) {
-          renderView('onboard-business');
+          if (state.user && state.user.isPlatformAdmin === true) {
+            if (typeof renderSidebarNav === 'function') renderSidebarNav();
+            renderView('platform-admin');
+          } else {
+            renderView('onboard-business');
+          }
         } else if (activeMemberships.length === 0) {
-          state.restrictedMembership = state.memberships[0];
-          renderView('membership-restricted');
+          if (state.user && state.user.isPlatformAdmin === true) {
+            if (typeof renderSidebarNav === 'function') renderSidebarNav();
+            renderView('platform-admin');
+          } else {
+            state.restrictedMembership = state.memberships[0];
+            renderView('membership-restricted');
+          }
         } else if (activeMemberships.length === 1) {
           await selectActiveTenant(activeMemberships[0]);
           renderView(resolveDefaultLandingView());
@@ -17506,14 +17920,35 @@
     async function renderOrgSettingsView() {
       const container = document.getElementById('mainContainer');
       try {
-        const [entRes, barcodeSettings, payrollSettings, branchesRes, brandingRes] = await Promise.all([
+        const [
+          entRes,
+          barcodeSettings,
+          payrollSettings,
+          branchesRes,
+          brandingRes,
+          subPlansRes,
+          subUsageRes,
+          subBankRes,
+          subInvoicesRes,
+          subPaymentsRes,
+          subHistoryRes,
+          subNotifRes,
+          subSupportRes
+        ] = await Promise.all([
           apiFetch('/v1/subscriptions/entitlement').catch(() => ({
-            planCode: 'GROWTH',
-            status: 'ACTIVE',
-            maxBranches: 10,
+            planCode: 'PROFESSIONAL',
+            planName: 'Professional',
+            status: 'TRIALING',
+            billingCycle: 'MONTHLY',
+            maxBranches: 5,
+            includedBranches: 5,
+            additionalBranchSlots: 0,
             maxWarehouses: 20,
-            maxUsers: 50,
-            maxSkus: 10000
+            maxUsers: 15,
+            maxSkus: 25000,
+            maxStorageMb: 51200,
+            trialDaysRemaining: 30,
+            features: {}
           })),
           apiFetch('/v1/settings/barcode').catch(() => ({
             barcodeManagementEnabled: true,
@@ -17539,8 +17974,48 @@
             showToast(`Could not load branches: ${err?.message || 'Unknown error'}`, 'error');
             return { data: [], _error: err?.message || 'Failed to load branches' };
           }),
-          apiFetch('/v1/org/branding', { silent: true }).catch(() => state.tenantBranding || { shopDisplayName: state.tenantName || null, logoUrl: null })
+          apiFetch('/v1/org/branding', { silent: true }).catch(() => state.tenantBranding || { shopDisplayName: state.tenantName || null, logoUrl: null }),
+          apiFetch('/v1/subscriptions/plans', { silent: true }).catch(() => ({ items: [] })),
+          apiFetch('/v1/subscriptions/usage', { silent: true }).catch(() => null),
+          apiFetch('/v1/subscriptions/bank-settings', { silent: true }).catch(() => ({
+            manualBankTransferEnabled: true,
+            bankAccountName: 'W.Swarnalatha',
+            bankName: "People's Bank",
+            bankBranch: 'Bingiriya Branch',
+            bankAccountNumber: '172200270058302',
+            bankInstructions: 'Transfer exact invoice amount in LKR and upload your receipt.',
+            onlineGatewayEnabled: false,
+            onlineGatewayProvider: 'PAYHERE_LK',
+            gracePeriodDays: 7,
+            trialDaysDefault: 30
+          })),
+          apiFetch('/v1/subscriptions/invoices', { silent: true }).catch(() => ({ items: [] })),
+          apiFetch('/v1/subscriptions/payments', { silent: true }).catch(() => ({ items: [] })),
+          apiFetch('/v1/subscriptions/history', { silent: true }).catch(() => ({ items: [] })),
+          apiFetch('/v1/subscriptions/notifications', { silent: true }).catch(() => ({ items: [] })),
+          apiFetch('/v1/subscriptions/support', { silent: true }).catch(() => null)
         ]);
+
+        state.subCache = {
+          entitlement: entRes,
+          plans: Array.isArray(subPlansRes?.items) ? subPlansRes.items : [],
+          usage: subUsageRes,
+          bankSettings: subBankRes,
+          invoices: Array.isArray(subInvoicesRes?.items) ? subInvoicesRes.items : [],
+          payments: Array.isArray(subPaymentsRes?.items) ? subPaymentsRes.items : [],
+          history: Array.isArray(subHistoryRes?.items) ? subHistoryRes.items : [],
+          notifications: Array.isArray(subNotifRes?.items) ? subNotifRes.items : [],
+          support: subSupportRes,
+        };
+        if (entRes && entRes.status) {
+          state.cachedSubscriptionEntitlement = entRes;
+          if (typeof renderGlobalSubscriptionBanner === 'function') {
+            renderGlobalSubscriptionBanner();
+          }
+        }
+        if (!state.subBillingCycleView) {
+          state.subBillingCycleView = entRes?.billingCycle || 'MONTHLY';
+        }
 
         if (brandingRes) {
           state.tenantBranding = {
@@ -17695,31 +18170,7 @@
 
               <!-- Category 2: Subscription -->
               <div class="settings-tab-panel" id="orgTab_sub" data-tab="sub" style="display: ${activeTab === 'sub' ? 'block' : 'none'};">
-                <div class="card" style="margin-bottom: 16px;">
-                  <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
-                    <span>Subscription Plan</span>
-                    <span class="badge-pill badge-green">${entRes.planCode} (${entRes.status})</span>
-                  </div>
-                  <div style="margin-bottom: 14px; font-size: 13px; color: var(--text-secondary);">
-                    Active enterprise subscription with multi-branch allocation and unrestricted POS checkout registers.
-                  </div>
-                  <div class="table-responsive">
-                    <table class="data-table">
-                      <thead>
-                        <tr>
-                          <th>Quota Resource</th>
-                          <th>Entitlement Limit</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        <tr><td>Max Store Branches</td><td><strong>${entRes.maxBranches}</strong></td></tr>
-                        <tr><td>Max Warehouses</td><td><strong>${entRes.maxWarehouses}</strong></td></tr>
-                        <tr><td>Max Team Members</td><td><strong>${entRes.maxUsers}</strong></td></tr>
-                        <tr><td>Max Product SKUs</td><td><strong>${entRes.maxSkus}</strong></td></tr>
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
+                ${renderSubscriptionTabMarkup()}
               </div>
 
               <!-- Category 3: Hardware -->
@@ -18044,6 +18495,1840 @@
         const panelTab = panel.getAttribute('data-tab');
         panel.style.display = panelTab === cleanTab ? 'block' : 'none';
       });
+    }
+
+    // =========================================================================
+    // PHASE 10.1-10.4 SUBSCRIPTION PLANS, QUOTAS & HYBRID BILLING UI
+    // =========================================================================
+    function formatSubLkr(amountStr) {
+      const n = Number.parseFloat(String(amountStr || '0')) || 0;
+      return 'LKR ' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    function formatSubStorageMb(bytesOrMb, isBytes = false) {
+      const mb = isBytes ? ((Number(bytesOrMb) || 0) / (1024 * 1024)) : (Number(bytesOrMb) || 0);
+      if (mb >= 1024) return (mb / 1024).toFixed(1) + ' GB';
+      return mb.toFixed(mb > 0 && mb < 10 ? 2 : 0) + ' MB';
+    }
+
+    function isTenantReadOnly() {
+      const ent = state.cachedSubscriptionEntitlement || state.subCache?.entitlement;
+      if (!ent) return false;
+      return ['READ_ONLY', 'EXPIRED', 'SUSPENDED', 'CANCELLED'].includes(ent.status);
+    }
+
+    function renderGlobalSubscriptionBanner() {
+      const el = document.getElementById('globalSubscriptionBanner');
+      if (!el) return;
+      if (!state.token || AUTH_VIEWS.includes(state.activeView) || state.activeView === 'platform-admin') {
+        el.style.display = 'none';
+        el.innerHTML = '';
+        return;
+      }
+      const ent = state.cachedSubscriptionEntitlement || state.subCache?.entitlement;
+      if (!ent) {
+        el.style.display = 'none';
+        return;
+      }
+
+      const st = ent.status;
+      const nowMs = Date.now();
+      const trialDays = ent.trialEndsAt ? Math.max(0, Math.ceil((new Date(ent.trialEndsAt).getTime() - nowMs) / 86400000)) : null;
+      const graceDays = ent.gracePeriodEndsAt ? Math.max(0, Math.ceil((new Date(ent.gracePeriodEndsAt).getTime() - nowMs) / 86400000)) : null;
+
+      let level = '';
+      let msg = '';
+      let ctaLabel = 'Open Billing & Renew';
+
+      if (st === 'READ_ONLY' || st === 'EXPIRED') {
+        level = 'banner-danger';
+        msg = `🔒 <strong>Read-Only Mode Active</strong> (${escapeHtml(ent.planName || ent.planCode)}): Subscription expired past grace period. Viewing data, reports, exports, and billing renewals remain available, while new sales/writes are blocked.`;
+        ctaLabel = 'Renew Subscription Now';
+      } else if (st === 'SUSPENDED' || st === 'CANCELLED') {
+        level = 'banner-danger';
+        msg = `⛔ <strong>Account ${escapeHtml(st)}</strong>: Write operations are restricted. Review subscription invoices or contact platform support.`;
+        ctaLabel = 'View Subscription';
+      } else if (st === 'GRACE_PERIOD' || st === 'PAST_DUE') {
+        level = 'banner-warning';
+        msg = `⚠️ <strong>Grace Period Active</strong>${graceDays != null ? ` (${graceDays} day${graceDays === 1 ? '' : 's'} remaining before Read-Only lock)` : ''}. Complete payment to avoid interruption.`;
+        ctaLabel = 'Pay & Renew Now';
+      } else if (st === 'PAYMENT_VERIFICATION_REQUIRED' || st === 'PENDING_PAYMENT') {
+        level = 'banner-warning';
+        msg = `🕒 <strong>Payment Verification Pending</strong>: Your bank transfer slip is queued for Platform Admin verification.`;
+        ctaLabel = 'View Payment Status';
+      } else if (st === 'TRIALING' && trialDays != null && trialDays <= 5) {
+        level = 'banner-warning';
+        msg = `⏳ <strong>Free Trial Ending Soon</strong>: ${trialDays} day${trialDays === 1 ? '' : 's'} left in your 30-day trial (${escapeHtml(ent.planName || ent.planCode)}).`;
+        ctaLabel = 'Activate Paid Plan';
+      }
+
+      if (!msg) {
+        el.style.display = 'none';
+        el.innerHTML = '';
+        return;
+      }
+
+      el.className = `sub-global-banner ${level}`;
+      el.style.display = 'flex';
+      el.innerHTML = `
+        <div style="flex: 1; min-width: 220px;">${msg}</div>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+          ${['READ_ONLY', 'EXPIRED', 'GRACE_PERIOD', 'PAST_DUE', 'RENEWAL_DUE'].includes(st) ? `<button type="button" class="btn btn-primary btn-sm" onclick="renewCurrentPlanNow()">${escapeHtml(ctaLabel)}</button>` : ''}
+          <button type="button" class="btn btn-secondary btn-sm" onclick="openSubscriptionBillingTab()">Subscription Portal</button>
+        </div>
+      `;
+    }
+
+    function openSubscriptionBillingTab() {
+      state.orgSettingsActiveTab = 'sub';
+      if (state.activeView === 'org-settings' && document.getElementById('orgTab_sub')) {
+        switchOrgSettingsTab('sub');
+      } else {
+        renderView('org-settings');
+      }
+    }
+
+    function getSubFallbackCatalog() {
+      return [
+        {
+          code: 'STARTER',
+          name: 'Starter',
+          description: 'Core online POS, single-branch inventory, and standard reports.',
+          isCustomPricing: false,
+          monthlyPriceAmount: '2990.0000',
+          annualDiscountPct: '15.00',
+          annualTotalAmount: '30498.0000',
+          annualMonthlyEquivalent: '2541.5000',
+          additionalBranchMonthlyFee: '750.0000',
+          limits: { maxBranches: 1, maxUsers: 3, maxProducts: 2500, maxStorageMb: 10240 },
+          trialDays: 30,
+          supportLevel: 'Email Support',
+          features: { desktopOfflinePos: false, multiBranchManagement: false, apiAccess: false, batchTracking: false, posPaymentCard: false, barcodeFull: true }
+        },
+        {
+          code: 'PROFESSIONAL',
+          name: 'Professional',
+          description: 'Multi-branch operations, Desktop & Mobile Offline POS, stock transfers, API access, and batch/serial tracking.',
+          isCustomPricing: false,
+          monthlyPriceAmount: '5990.0000',
+          annualDiscountPct: '15.00',
+          annualTotalAmount: '61098.0000',
+          annualMonthlyEquivalent: '5091.5000',
+          additionalBranchMonthlyFee: '500.0000',
+          limits: { maxBranches: 5, maxUsers: 15, maxProducts: 25000, maxStorageMb: 51200 },
+          trialDays: 30,
+          supportLevel: 'Priority Support',
+          features: { desktopOfflinePos: true, multiBranchManagement: true, apiAccess: true, batchTracking: true, posPaymentCard: true, barcodeFull: true }
+        },
+        {
+          code: 'ENTERPRISE',
+          name: 'Enterprise',
+          description: 'Custom quotas, custom reports, custom roles, automated backups, and dedicated SLA.',
+          isCustomPricing: true,
+          monthlyPriceAmount: '0.0000',
+          annualDiscountPct: '0.00',
+          annualTotalAmount: '0.0000',
+          annualMonthlyEquivalent: '0.0000',
+          additionalBranchMonthlyFee: null,
+          limits: { maxBranches: 100, maxUsers: 500, maxProducts: 1000000, maxStorageMb: 512000 },
+          trialDays: 30,
+          supportLevel: 'Dedicated Support + SLA',
+          features: { desktopOfflinePos: true, multiBranchManagement: true, apiAccess: true, batchTracking: true, posPaymentCard: true, barcodeFull: true }
+        }
+      ];
+    }
+
+    function renderSubscriptionTabMarkup() {
+      const cache = state.subCache || {};
+      const ent = cache.entitlement || { planCode: 'STARTER', planName: 'Starter', status: 'TRIALING', billingCycle: 'MONTHLY', additionalBranchSlots: 0, limits: { maxBranches: 1, includedBranches: 1, maxUsers: 3, maxProducts: 2500, maxStorageMb: 10240 }, features: {} };
+      const entLim = ent.limits || {};
+      const usage = cache.usage || {
+        activeBranchesCount: (state.cachedBranches || []).length || 1,
+        effectiveMaxBranches: entLim.maxBranches || ent.maxBranches || 1,
+        includedBranches: entLim.includedBranches || entLim.maxBranches || ent.maxBranches || 1,
+        additionalBranchSlots: ent.additionalBranchSlots || 0,
+        distinctActiveUsersCount: 1,
+        maxUsers: entLim.maxUsers || ent.maxUsers || 3,
+        distinctProductsCount: 0,
+        maxProducts: entLim.maxProducts || ent.maxSkus || 2500,
+        usedStorageBytes: 0,
+        maxStorageMb: entLim.maxStorageMb || 10240,
+        trialDaysRemaining: 30
+      };
+      const plans = (Array.isArray(cache.plans) && cache.plans.length > 0) ? cache.plans : getSubFallbackCatalog();
+      const bank = cache.bankSettings || { bankAccountName: 'W.Swarnalatha', bankName: "People's Bank", bankBranch: 'Bingiriya Branch', bankAccountNumber: '172200270058302', bankInstructions: 'Transfer the exact invoice amount in LKR and upload your transfer receipt.' };
+      const invoices = Array.isArray(cache.invoices) ? cache.invoices : [];
+      const payments = Array.isArray(cache.payments) ? cache.payments : [];
+      const history = Array.isArray(cache.history) ? cache.history : [];
+      const cycle = state.subBillingCycleView === 'ANNUAL' ? 'ANNUAL' : 'MONTHLY';
+
+      const statusBadgeMap = {
+        ACTIVE: 'badge-green',
+        TRIALING: 'badge-blue',
+        PAYMENT_VERIFICATION_REQUIRED: 'badge-yellow',
+        PENDING_PAYMENT: 'badge-yellow',
+        RENEWAL_DUE: 'badge-yellow',
+        GRACE_PERIOD: 'badge-red',
+        EXPIRED: 'badge-red',
+        READ_ONLY: 'badge-red',
+        PAST_DUE: 'badge-red',
+        SUSPENDED: 'badge-red',
+        CANCELLED: 'badge-red'
+      };
+      const statusBadge = statusBadgeMap[ent.status] || 'badge-blue';
+      const storagePct = usage.maxStorageMb > 0 ? Math.min(100, Math.round(((usage.usedStorageBytes / (1024 * 1024)) / usage.maxStorageMb) * 100)) : 0;
+      const pctOf = (used, limit) => (limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0);
+
+      const rankMap = { STARTER: 1, GROWTH: 2, PROFESSIONAL: 2, ENTERPRISE: 3 };
+      const curRank = rankMap[ent.planCode] || 1;
+      const addonQty = Number(state.subAddonQtyDraft || 1);
+      const curPlanObj = plans.find(p => p.code === ent.planCode) || plans[0];
+      const addonUnitFee = curPlanObj?.additionalBranchMonthlyFee;
+      const trialDaysRem = usage.trialDaysRemaining ?? (ent.trialEndsAt ? Math.max(0, Math.ceil((new Date(ent.trialEndsAt).getTime() - Date.now()) / 86400000)) : null);
+
+      return `
+        <div class="sub-hero-card">
+          <div class="sub-hero-top">
+            <div>
+              <div style="font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--accent-primary);">Subscription Plan &amp; Billing</div>
+              <div style="font-size: 20px; font-weight: 800; margin-top: 2px;">
+                ${escapeHtml(ent.planName || ent.planCode)}
+                <span class="badge-pill ${statusBadge}" style="margin-left: 8px; vertical-align: middle;">${escapeHtml(ent.planCode)} (${escapeHtml(ent.status)})</span>
+              </div>
+              <div style="font-size: 13px; color: var(--text-secondary); margin-top: 6px;">
+                Billing Cycle: <strong>${escapeHtml(ent.billingCycle || 'MONTHLY')}</strong>
+                ${ent.status === 'TRIALING' && trialDaysRem != null ? ` &bull; <strong>${trialDaysRem} days</strong> remaining in 30-day free trial` : ''}
+                ${ent.currentPeriodEnd ? ` &bull; Period Ends: <strong>${escapeHtml(new Date(ent.currentPeriodEnd).toLocaleDateString())}</strong>` : ''}
+              </div>
+              ${ent.scheduledDowngradePlanCode ? `
+                <div style="margin-top: 10px; padding: 10px 12px; background: rgba(245, 158, 11, 0.14); border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 8px; font-size: 12px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+                  <span>Scheduled downgrade to <strong>${escapeHtml(ent.scheduledDowngradePlanCode)}</strong> takes effect at cycle renewal (${ent.scheduledDowngradeEffectiveAt ? escapeHtml(new Date(ent.scheduledDowngradeEffectiveAt).toLocaleDateString()) : 'next renewal'}).</span>
+                  <button type="button" class="btn btn-secondary btn-sm" onclick="cancelPlanDowngradeAction()">Cancel Downgrade</button>
+                </div>
+              ` : ''}
+            </div>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+              ${!ent.trialStartedAt ? `<button type="button" class="btn btn-primary btn-sm" onclick="startBusinessFreeTrial('STARTER')">Start 30-Day Free Trial</button>` : ''}
+              ${['READ_ONLY', 'EXPIRED', 'GRACE_PERIOD', 'PAST_DUE', 'RENEWAL_DUE'].includes(ent.status) ? `<button type="button" class="btn btn-primary btn-sm" onclick="renewCurrentPlanNow()">Renew Plan Now</button>` : ''}
+              <button type="button" class="btn btn-secondary btn-sm" onclick="refreshSubscriptionTab()">↻ Refresh Billing</button>
+            </div>
+          </div>
+          ${['READ_ONLY', 'EXPIRED', 'GRACE_PERIOD', 'SUSPENDED'].includes(ent.status) ? `
+            <div style="margin-top: 10px; padding: 10px 12px; border-radius: 8px; background: rgba(239, 68, 68, 0.14); border: 1px solid rgba(239, 68, 68, 0.32); font-size: 12px;">
+              ${ent.status === 'GRACE_PERIOD'
+                ? `<strong>Grace Period Active:</strong> ${ent.gracePeriodEndsAt ? `Ends ${escapeHtml(new Date(ent.gracePeriodEndsAt).toLocaleString())}. ` : ''}Complete your renewal invoice to keep write operations enabled.`
+                : `<strong>Read-Only Mode (${escapeHtml(ent.status)}):</strong> Existing business records, analytics, exports, and renewal billing remain accessible. Creating new sales, products, or stock mutations is paused until payment verification restores active status.`}
+            </div>
+          ` : ''}
+        </div>
+
+        <div class="sub-usage-grid">
+          <div class="sub-usage-card">
+            <div class="sub-usage-head"><span>Branches Used</span><span>${usage.activeBranchesCount} / ${usage.effectiveMaxBranches}</span></div>
+            <div class="sub-usage-value">${usage.activeBranchesCount} <span style="font-size: 12px; font-weight: 500; color: var(--text-secondary);">(${usage.includedBranches} incl. + ${usage.additionalBranchSlots || 0} add-on)</span></div>
+            <div class="sub-progress-track"><div class="sub-progress-fill" style="width: ${pctOf(usage.activeBranchesCount, usage.effectiveMaxBranches)}%;"></div></div>
+          </div>
+          <div class="sub-usage-card">
+            <div class="sub-usage-head"><span>Distinct Team Users</span><span>${usage.distinctActiveUsersCount} / ${usage.maxUsers}</span></div>
+            <div class="sub-usage-value">${usage.distinctActiveUsersCount} <span style="font-size: 12px; font-weight: 500; color: var(--text-secondary);">of ${usage.maxUsers}</span></div>
+            <div class="sub-progress-track"><div class="sub-progress-fill" style="width: ${pctOf(usage.distinctActiveUsersCount, usage.maxUsers)}%;"></div></div>
+          </div>
+          <div class="sub-usage-card">
+            <div class="sub-usage-head"><span>Catalog Products</span><span>${usage.distinctProductsCount} / ${usage.maxProducts}</span></div>
+            <div class="sub-usage-value">${usage.distinctProductsCount} <span style="font-size: 12px; font-weight: 500; color: var(--text-secondary);">SKUs</span></div>
+            <div class="sub-progress-track"><div class="sub-progress-fill" style="width: ${pctOf(usage.distinctProductsCount, usage.maxProducts)}%;"></div></div>
+          </div>
+          <div class="sub-usage-card">
+            <div class="sub-usage-head"><span>Storage Usage</span><span>${formatSubStorageMb(usage.usedStorageBytes, true)} / ${formatSubStorageMb(usage.maxStorageMb, false)}</span></div>
+            <div class="sub-usage-value">${formatSubStorageMb(usage.usedStorageBytes, true)}</div>
+            <div class="sub-progress-track"><div class="sub-progress-fill" style="width: ${storagePct}%;"></div></div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-bottom: 16px;">
+          <div class="sub-billing-header">
+            <div>
+              <div style="font-size: 15px; font-weight: 700;">Compare Plans &amp; Upgrade</div>
+              <div style="font-size: 12px; color: var(--text-secondary);">30-day free trial, server-calculated LKR billing, and instant post-verification activation</div>
+            </div>
+            <div class="sub-billing-toggle" role="group" aria-label="Billing Cycle Toggle">
+              <button type="button" class="sub-cycle-btn ${cycle === 'MONTHLY' ? 'active' : ''}" onclick="setSubBillingCycleView('MONTHLY')">Monthly</button>
+              <button type="button" class="sub-cycle-btn ${cycle === 'ANNUAL' ? 'active' : ''}" onclick="setSubBillingCycleView('ANNUAL')">Annual (-15%)</button>
+            </div>
+          </div>
+
+          <div class="sub-plans-grid">
+            ${plans.map(plan => {
+              const isCurrent = ent.planCode === plan.code;
+              const pRank = rankMap[plan.code] || 1;
+              const pLim = plan.limits || {};
+              const priceDisplay = plan.isCustomPricing
+                ? 'Custom'
+                : (cycle === 'ANNUAL'
+                  ? `${formatSubLkr(plan.annualMonthlyEquivalent)}/mo`
+                  : `${formatSubLkr(plan.monthlyPriceAmount)}/mo`);
+              const subCaption = plan.isCustomPricing
+                ? 'Tailored enterprise commercial agreement'
+                : (cycle === 'ANNUAL'
+                  ? `Billed annually: ${formatSubLkr(plan.annualTotalAmount)} (${escapeHtml(plan.annualDiscountPct)}% off)`
+                  : `Extra branch: ${plan.additionalBranchMonthlyFee ? formatSubLkr(plan.additionalBranchMonthlyFee) + '/mo' : 'Custom'}`);
+              const feat = plan.features || {};
+              return `
+                <div class="sub-plan-card ${isCurrent ? 'active-plan' : ''}">
+                  <div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; gap: 6px; margin-bottom: 6px;">
+                      <strong style="font-size: 16px;">${escapeHtml(plan.name)}</strong>
+                      ${isCurrent ? '<span class="badge-pill badge-green">Current Plan</span>' : (plan.code === 'PROFESSIONAL' ? '<span class="badge-pill badge-blue">Popular</span>' : '')}
+                    </div>
+                    <div class="sub-plan-price">${priceDisplay}</div>
+                    <div style="font-size: 11px; color: var(--text-secondary); margin: 4px 0 10px;">${subCaption}</div>
+                    <ul class="sub-plan-features">
+                      <li>✓ Up to <strong>${plan.isCustomPricing ? 'Custom' : pLim.maxBranches}</strong> ${pLim.maxBranches === 1 ? 'branch' : 'branches'}</li>
+                      <li>✓ Up to <strong>${plan.isCustomPricing ? 'Custom' : pLim.maxUsers}</strong> distinct users</li>
+                      <li>✓ Up to <strong>${plan.isCustomPricing ? 'Custom' : Number(pLim.maxProducts || 0).toLocaleString()}</strong> products</li>
+                      <li>✓ <strong>${plan.isCustomPricing ? 'Custom' : formatSubStorageMb(pLim.maxStorageMb, false)}</strong> storage</li>
+                      <li>${feat.desktopOfflinePos ? '✓ Offline Desktop &amp; Mobile POS' : '• Online POS &amp; Core Inventory'}</li>
+                      <li>${feat.multiBranchManagement ? '✓ Multi-Branch &amp; Transfers + API' : '• Barcode &amp; Standard Exports'}</li>
+                      <li>${feat.batchTracking ? '✓ Batch, Expiry, Serial &amp; FEFO' : '• Cash POS Checkout'}</li>
+                      <li>✓ ${escapeHtml(plan.supportLevel || 'Support')}</li>
+                    </ul>
+                  </div>
+                  <div style="margin-top: 8px;">
+                    ${plan.isCustomPricing ? `
+                      <button type="button" class="btn btn-secondary btn-sm" style="width: 100%;" onclick="showToast('Contact NexStock Enterprise Sales for custom pricing setup.', 'info')">Contact Sales</button>
+                    ` : isCurrent ? `
+                      <button type="button" class="btn btn-primary btn-sm" style="width: 100%;" onclick="initiateUpgradeCheckout('${escapeHtml(plan.code)}', '${cycle}')">${ent.status === 'ACTIVE' ? 'Renew Current Plan' : 'Pay & Activate Plan'}</button>
+                    ` : pRank >= curRank ? `
+                      <button type="button" class="btn btn-primary btn-sm" style="width: 100%;" onclick="initiateUpgradeCheckout('${escapeHtml(plan.code)}', '${cycle}')">Upgrade to ${escapeHtml(plan.name)}</button>
+                    ` : `
+                      <button type="button" class="btn btn-secondary btn-sm" style="width: 100%;" onclick="schedulePlanDowngrade('${escapeHtml(plan.code)}')">Schedule Downgrade</button>
+                    `}
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </div>
+
+        <div class="card" style="margin-bottom: 16px;">
+          <div class="sub-addon-bar">
+            <div style="flex: 1; min-width: 220px;">
+              <div style="font-size: 14px; font-weight: 700;">Additional Branch Capacity (Hybrid Add-On)</div>
+              <div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">
+                ${addonUnitFee ? `Extra branches on <strong>${escapeHtml(ent.planName || ent.planCode)}</strong> cost <strong>${formatSubLkr(addonUnitFee)}/mo</strong> each (prorated for remaining cycle days).` : 'Custom enterprise branch pricing.'}
+                Note: Adding branches increases branch quota only and does not unlock Professional features.
+              </div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+              <input type="number" id="subAddonBranchQty" class="form-input" min="1" max="50" value="${addonQty}" style="width: 82px;">
+              <button type="button" class="btn btn-primary btn-sm" id="btnPurchaseBranchAddon" ${!addonUnitFee ? 'disabled' : ''} onclick="purchaseBranchAddons()">Add Branches &amp; Pay</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-bottom: 16px;">
+          <div class="card-title" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+            <span>Manual Bank Transfer Details (Sri Lanka LKR)</span>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="copyAllSubBankDetails()">Copy All Bank Details</button>
+          </div>
+          <div class="sub-bank-box">
+            <div style="font-size: 12px; color: var(--text-secondary);">${escapeHtml(bank.bankInstructions || '')}</div>
+            <div class="sub-bank-grid">
+              <div><div style="font-size: 11px; color: var(--text-secondary);">Account Name</div><strong>${escapeHtml(bank.bankAccountName)}</strong></div>
+              <div><div style="font-size: 11px; color: var(--text-secondary);">Bank Name</div><strong>${escapeHtml(bank.bankName)}</strong></div>
+              <div><div style="font-size: 11px; color: var(--text-secondary);">Branch</div><strong>${escapeHtml(bank.bankBranch)}</strong></div>
+              <div>
+                <div style="font-size: 11px; color: var(--text-secondary);">Account Number</div>
+                <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                  <strong style="font-family: monospace; font-size: 14px;">${escapeHtml(bank.bankAccountNumber)}</strong>
+                  <button type="button" class="btn btn-secondary btn-sm" onclick="copyBankDetail('${escapeHtml(bank.bankAccountNumber)}', 'Account number')">Copy</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div style="font-size: 14px; font-weight: 700; margin-bottom: 10px;">Invoices &amp; Payment Verification History</div>
+          ${invoices.length === 0 && payments.length === 0 ? `
+            <div style="padding: 16px; text-align: center; font-size: 13px; color: var(--text-secondary); border: 1px dashed var(--border-subtle); border-radius: 8px;">
+              No subscription invoices yet. Choose a plan upgrade or extra branch add-on above to generate an invoice.
+            </div>
+          ` : `
+            <div class="table-responsive sub-desktop-table">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Invoice</th>
+                    <th>Type</th>
+                    <th>Amount</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${invoices.map(inv => {
+                    const relatedSubs = payments.filter(p => p.invoiceId === inv.id);
+                    const latestSub = relatedSubs[0] || null;
+                    const needsPay = inv.status !== 'PAID' && inv.status !== 'VOID';
+                    return `
+                      <tr>
+                        <td><strong>${escapeHtml(inv.invoiceNumber)}</strong><div style="font-size: 11px; color: var(--text-secondary);">Due ${escapeHtml(inv.dueDate)}</div></td>
+                        <td>${escapeHtml(inv.invoiceType)} (${escapeHtml(inv.billingCycle)})</td>
+                        <td><strong>${formatSubLkr(inv.totalAmount)}</strong></td>
+                        <td>
+                          <span class="badge-pill ${inv.status === 'PAID' ? 'badge-green' : (inv.status === 'PAYMENT_VERIFICATION_REQUIRED' ? 'badge-yellow' : 'badge-blue')}">${escapeHtml(inv.status)}</span>
+                          ${latestSub?.status === 'REJECTED' ? `<div style="font-size: 11px; color: var(--status-danger); margin-top: 4px;">Rejected: ${escapeHtml(latestSub.rejectionReason || 'Verification rejected')}</div>` : ''}
+                        </td>
+                        <td>
+                          <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                            ${needsPay && latestSub?.status === 'REJECTED' ? `<button type="button" class="btn btn-primary btn-sm" onclick="openSubscriptionPaymentModal('${escapeHtml(inv.id)}', '${escapeHtml(latestSub.id)}')">Resubmit Proof</button>` : needsPay ? `<button type="button" class="btn btn-primary btn-sm" onclick="openSubscriptionPaymentModal('${escapeHtml(inv.id)}')">Pay / Upload Proof</button>` : ''}
+                            ${latestSub?.proofFileName || latestSub?.proofFileSize ? `<button type="button" class="btn btn-secondary btn-sm" onclick="viewSubscriptionProofBlob('${escapeHtml(latestSub.id)}', '${escapeHtml(latestSub.proofFileName || 'receipt')}', '${escapeHtml(latestSub.proofMimeType || 'image/png')}')">View Proof</button>` : ''}
+                          </div>
+                        </td>
+                      </tr>
+                    `;
+                  }).join('')}
+                </tbody>
+              </table>
+            </div>
+            <div class="sub-mobile-cards">
+              ${invoices.map(inv => {
+                const latestSub = payments.find(p => p.invoiceId === inv.id) || null;
+                const needsPay = inv.status !== 'PAID' && inv.status !== 'VOID';
+                return `
+                  <div style="border: 1px solid var(--border-subtle); border-radius: 8px; padding: 12px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+                      <strong>${escapeHtml(inv.invoiceNumber)}</strong>
+                      <span class="badge-pill ${inv.status === 'PAID' ? 'badge-green' : 'badge-yellow'}">${escapeHtml(inv.status)}</span>
+                    </div>
+                    <div style="font-size: 13px; margin: 6px 0;"><strong>${formatSubLkr(inv.totalAmount)}</strong> &bull; ${escapeHtml(inv.invoiceType)}</div>
+                    ${latestSub?.status === 'REJECTED' ? `<div style="font-size: 12px; color: var(--status-danger); margin-bottom: 6px;">Rejected: ${escapeHtml(latestSub.rejectionReason || '')}</div>` : ''}
+                    <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                      ${needsPay ? `<button type="button" class="btn btn-primary btn-sm" onclick="openSubscriptionPaymentModal('${escapeHtml(inv.id)}', '${latestSub?.status === 'REJECTED' ? escapeHtml(latestSub.id) : ''}')">${latestSub?.status === 'REJECTED' ? 'Resubmit Proof' : 'Pay / Upload'}</button>` : ''}
+                      ${latestSub?.proofFileName || latestSub?.proofFileSize ? `<button type="button" class="btn btn-secondary btn-sm" onclick="viewSubscriptionProofBlob('${escapeHtml(latestSub.id)}', '${escapeHtml(latestSub.proofFileName || 'receipt')}', '${escapeHtml(latestSub.proofMimeType || 'image/png')}')">View Proof</button>` : ''}
+                    </div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          `}
+        </div>
+
+        ${renderSubPortalNotificationsAndSupportMarkup(cache)}
+
+        ${history.length > 0 ? `
+          <div class="card" style="margin-bottom: 0;">
+            <div class="card-title">Subscription Audit Timeline</div>
+            <div style="display: flex; flex-direction: column; gap: 8px;">
+              ${history.slice(0, 6).map(h => `
+                <div style="display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; font-size: 12px; padding-bottom: 6px; border-bottom: 1px solid var(--border-subtle);">
+                  <span><strong>${escapeHtml(h.changeType)}</strong> ${h.notes ? '&bull; ' + escapeHtml(h.notes) : ''}</span>
+                  <span style="color: var(--text-secondary);">${escapeHtml(new Date(h.effectiveAt).toLocaleString())}</span>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        ` : ''}
+      `;
+    }
+
+    function renderSubPortalNotificationsAndSupportMarkup(cache) {
+      const notifications = Array.isArray(cache.notifications) ? cache.notifications : [];
+      const support = cache.support || { supportTier: 'Email Support', responseSla: 'Standard business hours email support', channels: [] };
+      const plans = (Array.isArray(cache.plans) && cache.plans.length > 0) ? cache.plans : getSubFallbackCatalog();
+      const matrixFeatures = [
+        { key: 'onlinePos', label: 'Online POS & Sales Register' },
+        { key: 'desktopOfflinePos', label: 'Desktop Offline POS & Sync' },
+        { key: 'mobileOfflinePos', label: 'Mobile Offline POS & Sync' },
+        { key: 'multiBranchManagement', label: 'Multi-Branch & Stock Transfers' },
+        { key: 'batchTracking', label: 'Batch, Expiry, Serial & FEFO' },
+        { key: 'posPaymentCard', label: 'Card, Bank Transfer & Split POS Payments' },
+        { key: 'advancedReports', label: 'Advanced & Multi-Branch Reports' },
+        { key: 'apiAccess', label: 'API Access & Automated Backups' }
+      ];
+      const unreadCount = notifications.filter(n => !n.isRead).length;
+      return `
+        <div class="card" style="margin-bottom: 16px;">
+          <div class="card-title" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+            <span>Plan Feature Comparison Matrix</span>
+            <span style="font-size: 11px; color: var(--text-secondary);">Live entitlement definitions from NexStock server</span>
+          </div>
+          <div class="sub-feature-matrix-wrap">
+            <table class="sub-feature-matrix-table">
+              <thead>
+                <tr>
+                  <th>Capability / Quota</th>
+                  ${plans.map(p => `<th>${escapeHtml(p.name)}</th>`).join('')}
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><strong>Branches Included</strong></td>
+                  ${plans.map(p => `<td>${p.isCustomPricing ? 'Custom' : escapeHtml(String(p.limits?.maxBranches ?? '-'))}</td>`).join('')}
+                </tr>
+                <tr>
+                  <td><strong>Distinct Users / SKUs</strong></td>
+                  ${plans.map(p => `<td>${p.isCustomPricing ? 'Custom' : `${escapeHtml(String(p.limits?.maxUsers ?? '-'))} / ${Number(p.limits?.maxProducts || 0).toLocaleString()}`}</td>`).join('')}
+                </tr>
+                <tr>
+                  <td><strong>Support Tier</strong></td>
+                  ${plans.map(p => `<td>${escapeHtml(p.supportLevel || '-')}</td>`).join('')}
+                </tr>
+                ${matrixFeatures.map(f => `
+                  <tr>
+                    <td>${escapeHtml(f.label)}</td>
+                    ${plans.map(p => {
+                      const on = Boolean(p.features?.[f.key]);
+                      return `<td><span class="badge-pill ${on ? 'badge-green' : 'badge-yellow'}">${on ? '✓ Included' : '—'}</span></td>`;
+                    }).join('')}
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="pa-split-grid">
+          <div class="card" style="margin-bottom: 0;">
+            <div class="card-title" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+              <span>Subscription Notifications ${unreadCount > 0 ? `<span class="badge-pill badge-red">${unreadCount} unread</span>` : ''}</span>
+              ${unreadCount > 0 ? `<button type="button" class="btn btn-secondary btn-sm" onclick="markAllSubNotificationsRead()">Mark All Read</button>` : ''}
+            </div>
+            ${notifications.length === 0 ? `
+              <div style="font-size: 12px; color: var(--text-secondary);">No subscription lifecycle alerts yet.</div>
+            ` : `
+              <div style="display: flex; flex-direction: column; gap: 8px;">
+                ${notifications.slice(0, 8).map(n => `
+                  <div class="sub-notif-item ${n.isRead ? '' : 'unread'}">
+                    <div style="min-width: 0;">
+                      <div style="font-size: 13px; font-weight: 700;">${escapeHtml(n.title)}</div>
+                      <div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">${escapeHtml(n.message)}</div>
+                      <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">${escapeHtml(new Date(n.createdAt).toLocaleString())}</div>
+                    </div>
+                    ${!n.isRead ? `<button type="button" class="btn btn-secondary btn-sm" onclick="markSubNotificationRead('${escapeHtml(n.id)}')">Mark Read</button>` : '<span style="font-size: 11px; color: var(--text-secondary);">Read</span>'}
+                  </div>
+                `).join('')}
+              </div>
+            `}
+          </div>
+
+          <div class="card" style="margin-bottom: 0;">
+            <div class="card-title">Support &amp; SLA Entitlement</div>
+            <div style="font-size: 13px; margin-bottom: 10px;">
+              Active Support Tier: <span class="badge-pill badge-blue">${escapeHtml(support.supportTier || 'Email Support')}</span>
+            </div>
+            <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 12px;">${escapeHtml(support.responseSla || '')}</div>
+            <div style="display: flex; flex-direction: column; gap: 8px;">
+              ${(support.channels || []).map(ch => `
+                <div style="padding: 8px 10px; border: 1px solid var(--border-subtle); border-radius: 8px; display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap;">
+                  <div>
+                    <div style="font-size: 12px; font-weight: 700;">${escapeHtml(ch.label)}</div>
+                    <div style="font-size: 12px; color: var(--text-secondary);">${escapeHtml(ch.value)}</div>
+                  </div>
+                  <span class="badge-pill ${ch.enabled ? 'badge-green' : 'badge-yellow'}">${ch.enabled ? 'Available' : 'Upgrade Plan'}</span>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    async function renewCurrentPlanNow() {
+      if (state._subActionBusy) return;
+      state._subActionBusy = true;
+      try {
+        const res = await apiFetch('/v1/subscriptions/renewals/invoice', {
+          method: 'POST',
+          body: JSON.stringify({})
+        });
+        openSubscriptionBillingTab();
+        await refreshSubscriptionTab();
+        const invoiceId = res?.invoiceId || res?.invoice?.id || res?.id;
+        if (invoiceId) {
+          openSubscriptionPaymentModal(invoiceId);
+        }
+      } catch (err) {
+        showToast(err?.message || 'Unable to generate renewal invoice', 'error');
+      } finally {
+        state._subActionBusy = false;
+      }
+    }
+
+    async function markSubNotificationRead(notificationId) {
+      try {
+        await apiFetch(`/v1/subscriptions/notifications/${encodeURIComponent(notificationId)}/read`, {
+          method: 'POST',
+          body: JSON.stringify({})
+        });
+        await refreshSubscriptionTab();
+      } catch (err) {
+        showToast(err?.message || 'Failed to mark notification read', 'error');
+      }
+    }
+
+    async function markAllSubNotificationsRead() {
+      try {
+        await apiFetch('/v1/subscriptions/notifications/read-all', {
+          method: 'POST',
+          body: JSON.stringify({})
+        });
+        await refreshSubscriptionTab();
+      } catch (err) {
+        showToast(err?.message || 'Failed to update notifications', 'error');
+      }
+    }
+
+    // =========================================================================
+    // Phase 10.6 / 10.8 / 10.9 Platform Owner / Super Admin Console
+    // =========================================================================
+
+    function ensurePlatformAdminState() {
+      if (!state.paCache || typeof state.paCache !== 'object') {
+        state.paCache = {
+          tab: 'overview',
+          securityMe: null,
+          analytics: null,
+          analyticsFilters: { startDate: '', endDate: '', planCode: '', status: '' },
+          businesses: [],
+          businessFilters: { search: '', status: '', planCode: '' },
+          payments: [],
+          paymentFilters: { status: 'SUBMITTED', search: '' },
+          plans: [],
+          planHistory: [],
+          bankSettings: null,
+          admins: [],
+          auditLogs: [],
+          alerts: [],
+          backups: [],
+          mfaSetupData: null,
+          busy: false
+        };
+      }
+      return state.paCache;
+    }
+
+    function paStatusBadgeClass(status) {
+      const s = String(status || '').toUpperCase();
+      if (['ACTIVE', 'VERIFIED', 'PAID', 'RESOLVED', 'LOW'].includes(s)) return 'badge-green';
+      if (['TRIALING', 'INFO'].includes(s)) return 'badge-blue';
+      if (['PAYMENT_VERIFICATION_REQUIRED', 'PENDING_PAYMENT', 'SUBMITTED', 'UNDER_REVIEW', 'RENEWAL_DUE', 'WARNING', 'MEDIUM'].includes(s)) return 'badge-yellow';
+      return 'badge-red';
+    }
+
+    function paFmtLkr(val) {
+      return 'LKR ' + Number(val || 0).toLocaleString('en-LK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    async function renderPlatformAdminView() {
+      const container = document.getElementById('mainContainer');
+      if (!container) return;
+      if (!state.user || state.user.isPlatformAdmin !== true) {
+        container.innerHTML = `
+          <div class="card">
+            <h2 style="margin-bottom: 8px; color: var(--status-danger);">Platform Owner Authorization Required</h2>
+            <p style="font-size: 13px; color: var(--text-secondary);">Your account does not hold verified Platform Super Admin privileges.</p>
+          </div>
+        `;
+        return;
+      }
+
+      const pa = ensurePlatformAdminState();
+      container.innerHTML = `<div class="card"><div style="font-size: 13px; color: var(--text-secondary);">Loading Platform Super Admin Console...</div></div>`;
+      await loadPlatformAdminTabData(pa.tab || 'overview');
+      drawPlatformAdminConsole();
+    }
+
+    async function switchPlatformAdminTab(tabName) {
+      const pa = ensurePlatformAdminState();
+      pa.tab = tabName;
+      drawPlatformAdminConsole();
+      await loadPlatformAdminTabData(tabName);
+      drawPlatformAdminConsole();
+    }
+
+    async function loadPlatformAdminTabData(tabName) {
+      const pa = ensurePlatformAdminState();
+      try {
+        pa.securityMe = await apiFetch('/v1/platform/security/me', { silent: true }).catch(() => pa.securityMe);
+        if (tabName === 'overview') {
+          const f = pa.analyticsFilters || {};
+          const qs = new URLSearchParams();
+          if (f.startDate) qs.set('startDate', f.startDate);
+          if (f.endDate) qs.set('endDate', f.endDate);
+          if (f.planCode) qs.set('planCode', f.planCode);
+          if (f.status) qs.set('status', f.status);
+          pa.analytics = await apiFetch('/v1/platform/analytics/overview' + (qs.toString() ? '?' + qs.toString() : ''));
+        } else if (tabName === 'businesses') {
+          const f = pa.businessFilters || {};
+          const qs = new URLSearchParams({ limit: '50', offset: '0' });
+          if (f.search) qs.set('search', f.search);
+          if (f.status) qs.set('status', f.status);
+          if (f.planCode) qs.set('planCode', f.planCode);
+          const res = await apiFetch('/v1/platform/businesses?' + qs.toString());
+          pa.businesses = res?.items || [];
+        } else if (tabName === 'payments') {
+          const f = pa.paymentFilters || {};
+          const qs = new URLSearchParams({ limit: '100', offset: '0' });
+          if (f.status) qs.set('status', f.status);
+          if (f.search) qs.set('search', f.search);
+          const res = await apiFetch('/v1/platform/subscriptions/payments?' + qs.toString());
+          pa.payments = res?.items || [];
+        } else if (tabName === 'plans') {
+          const [plansRes, histRes] = await Promise.all([
+            apiFetch('/v1/subscriptions/plans'),
+            apiFetch('/v1/platform/subscriptions/plans/history?limit=40')
+          ]);
+          pa.plans = plansRes?.items || [];
+          pa.planHistory = histRes?.items || [];
+        } else if (tabName === 'settings') {
+          pa.bankSettings = await apiFetch('/v1/subscriptions/bank-settings');
+        } else if (tabName === 'security') {
+          const [adminsRes, logsRes] = await Promise.all([
+            apiFetch('/v1/platform/security/admins').catch(() => ({ items: [] })),
+            apiFetch('/v1/platform/audit-logs?limit=80').catch(() => ({ items: [] }))
+          ]);
+          pa.admins = adminsRes?.items || [];
+          pa.auditLogs = logsRes?.items || [];
+        } else if (tabName === 'health') {
+          const [alertsRes, backupRes] = await Promise.all([
+            apiFetch('/v1/platform/monitoring/alerts'),
+            apiFetch('/v1/platform/backups/status')
+          ]);
+          pa.alerts = alertsRes?.items || [];
+          pa.backups = backupRes?.items || [];
+        }
+      } catch (err) {
+        showToast(err?.message || 'Failed to load platform governance data', 'error');
+      }
+    }
+
+    function drawPlatformAdminConsole() {
+      const container = document.getElementById('mainContainer');
+      if (!container || state.activeView !== 'platform-admin') return;
+      const pa = ensurePlatformAdminState();
+      const me = pa.securityMe || {};
+      const tabs = [
+        { id: 'overview', label: 'SaaS Overview & Analytics' },
+        { id: 'businesses', label: 'Businesses Directory' },
+        { id: 'payments', label: 'Payments Center' },
+        { id: 'plans', label: 'Plans & Pricing' },
+        { id: 'settings', label: 'Bank & Platform Settings' },
+        { id: 'security', label: 'Audit & Security (2FA)' },
+        { id: 'health', label: 'Monitoring & Backups' }
+      ];
+
+      container.innerHTML = `
+        <div class="pa-header-card">
+          <div>
+            <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--accent-primary);">NexStock SaaS Governance</div>
+            <h1 style="font-size: 20px; font-weight: 800; margin: 2px 0 4px;">Platform Super Admin Console</h1>
+            <div style="font-size: 12px; color: var(--text-secondary);">
+              Operator: <strong>${escapeHtml(me.email || state.userEmail || 'Platform Admin')}</strong>
+              &bull; Role: <span class="badge-pill badge-blue">${escapeHtml(me.role || state.user?.platformRole || 'SUPER_ADMIN')}</span>
+              &bull; MFA: <span class="badge-pill ${me.mfaVerified ? 'badge-green' : 'badge-yellow'}">${me.mfaVerified ? '2FA Verified' : (me.totpEnabled ? 'Step-Up Required' : 'Setup 2FA')}</span>
+            </div>
+          </div>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            ${!me.mfaVerified ? `<button type="button" class="btn btn-primary btn-sm" onclick="switchPlatformAdminTab('security')">Verify / Setup 2FA</button>` : ''}
+            <button type="button" class="btn btn-secondary btn-sm" onclick="switchPlatformAdminTab('${escapeHtml(pa.tab)}')">↻ Refresh View</button>
+          </div>
+        </div>
+
+        <div class="pa-tabs" role="tablist" aria-label="Platform Admin Sections">
+          ${tabs.map(t => `<button type="button" class="pa-tab-btn ${pa.tab === t.id ? 'active' : ''}" data-pa-tab="${escapeHtml(t.id)}" onclick="switchPlatformAdminTab('${escapeHtml(t.id)}')">${escapeHtml(t.label)}</button>`).join('')}
+        </div>
+
+        <div id="paTabBody">
+          ${renderPlatformAdminTabBody(pa)}
+        </div>
+      `;
+    }
+
+    function renderPlatformAdminTabBody(pa) {
+      switch (pa.tab) {
+        case 'overview': return renderPaOverviewTab(pa);
+        case 'businesses': return renderPaBusinessesTab(pa);
+        case 'payments': return renderPaPaymentsTab(pa);
+        case 'plans': return renderPaPlansTab(pa);
+        case 'settings': return renderPaSettingsTab(pa);
+        case 'security': return renderPaSecurityTab(pa);
+        case 'health': return renderPaHealthTab(pa);
+        default: return renderPaOverviewTab(pa);
+      }
+    }
+
+    function renderPaOverviewTab(pa) {
+      const a = pa.analytics;
+      const f = pa.analyticsFilters || {};
+      if (!a) return '<div class="card"><div style="font-size: 13px; color: var(--text-secondary);">Loading analytics metrics...</div></div>';
+      const biz = a.businessKpis || {};
+      const subK = a.subscriptionKpis || {};
+      const rev = a.revenueKpis || {};
+      const paySum = a.paymentSummary || {};
+      const conv = a.trialAnalytics || {};
+      const churn = a.churnAnalytics || {};
+      const plansDist = Array.isArray(a.planDistribution) ? a.planDistribution : [];
+      const maxPlanCount = Math.max(1, ...plansDist.map(x => Number(x.businessesCount || 0)));
+      const monthlyTrend = Array.isArray(a.monthlyTrends) ? a.monthlyTrends : [];
+      const maxTrend = Math.max(1, ...monthlyTrend.map(x => Number(x.verifiedRevenueAmount || 0)));
+
+      return `
+        <div class="card" style="margin-bottom: 16px;">
+          <div class="pa-filter-bar">
+            <input type="date" id="paFilterStartDate" class="form-input" value="${escapeHtml(f.startDate || '')}" title="Start Date" style="width: 150px;">
+            <input type="date" id="paFilterEndDate" class="form-input" value="${escapeHtml(f.endDate || '')}" title="End Date" style="width: 150px;">
+            <select id="paFilterPlanCode" class="form-input" style="width: 160px;">
+              <option value="">All Plans</option>
+              <option value="STARTER" ${f.planCode === 'STARTER' ? 'selected' : ''}>Starter</option>
+              <option value="PROFESSIONAL" ${f.planCode === 'PROFESSIONAL' ? 'selected' : ''}>Professional</option>
+              <option value="ENTERPRISE" ${f.planCode === 'ENTERPRISE' ? 'selected' : ''}>Enterprise</option>
+            </select>
+            <select id="paFilterStatus" class="form-input" style="width: 180px;">
+              <option value="">All Statuses</option>
+              <option value="ACTIVE" ${f.status === 'ACTIVE' ? 'selected' : ''}>ACTIVE</option>
+              <option value="TRIALING" ${f.status === 'TRIALING' ? 'selected' : ''}>TRIALING</option>
+              <option value="GRACE_PERIOD" ${f.status === 'GRACE_PERIOD' ? 'selected' : ''}>GRACE_PERIOD</option>
+              <option value="READ_ONLY" ${f.status === 'READ_ONLY' ? 'selected' : ''}>READ_ONLY</option>
+              <option value="SUSPENDED" ${f.status === 'SUSPENDED' ? 'selected' : ''}>SUSPENDED</option>
+            </select>
+            <button type="button" class="btn btn-primary btn-sm" onclick="applyPaAnalyticsFilter()">Apply Filters</button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="exportPaAnalyticsCsv()">⬇ Export Analytics CSV</button>
+          </div>
+        </div>
+
+        <div class="pa-kpi-grid">
+          <div class="pa-kpi-card"><div class="pa-kpi-label">Total Businesses</div><div class="pa-kpi-value">${biz.totalBusinesses ?? 0}</div><div class="pa-kpi-sub">+${biz.newRegistrationsInRange ?? 0} signups in period</div></div>
+          <div class="pa-kpi-card"><div class="pa-kpi-label">Active Paid / Live</div><div class="pa-kpi-value">${biz.activeBusinesses ?? 0}</div><div class="pa-kpi-sub">Active Trials: ${biz.trialBusinesses ?? 0}</div></div>
+          <div class="pa-kpi-card"><div class="pa-kpi-label">Pending Payments</div><div class="pa-kpi-value">${paySum.pendingReviewCount ?? biz.pendingPaymentBusinesses ?? 0}</div><div class="pa-kpi-sub">${paFmtLkr(rev.pendingVerificationAmount)} awaiting review</div></div>
+          <div class="pa-kpi-card"><div class="pa-kpi-label">Read-Only / Susp.</div><div class="pa-kpi-value">${(biz.expiredOrReadOnlyBusinesses || 0) + (biz.suspendedBusinesses || 0)}</div><div class="pa-kpi-sub">Expired/RO: ${biz.expiredOrReadOnlyBusinesses || 0} &bull; Susp: ${biz.suspendedBusinesses || 0}</div></div>
+          <div class="pa-kpi-card"><div class="pa-kpi-label">Verified Collected Revenue</div><div class="pa-kpi-value">${paFmtLkr(rev.totalVerifiedRevenueAmount)}</div><div class="pa-kpi-sub">Verified Slips: ${paySum.verifiedCount ?? 0} (Excl. Pending/Failed)</div></div>
+          <div class="pa-kpi-card"><div class="pa-kpi-label">Estimated MRR / ARR</div><div class="pa-kpi-value">${paFmtLkr(rev.mrrAmount)}</div><div class="pa-kpi-sub">ARR: ${paFmtLkr(rev.arrAmount)}</div></div>
+          <div class="pa-kpi-card"><div class="pa-kpi-label">Trial Conversion Rate</div><div class="pa-kpi-value">${escapeHtml(String(conv.trialConversionRatePct ?? 0))}%</div><div class="pa-kpi-sub">${conv.convertedToPaidCount ?? 0} / ${conv.totalTrialsStarted ?? 0} converted</div></div>
+          <div class="pa-kpi-card"><div class="pa-kpi-label">Churn &amp; Expansions</div><div class="pa-kpi-value">${escapeHtml(String(churn.businessChurnRatePct ?? 0))}%</div><div class="pa-kpi-sub">Upgrades: ${subK.upgradeEventsCount ?? 0} &bull; Renewals: ${subK.renewalEventsCount ?? 0}</div></div>
+        </div>
+
+        <div class="pa-split-grid">
+          <div class="card" style="margin-bottom: 0;">
+            <div class="card-title">Plans Distribution &amp; Verified Plan Revenue</div>
+            ${plansDist.length === 0 ? '<div style="font-size: 12px; color: var(--text-secondary);">No plan distribution data for filter.</div>' : plansDist.map(p => {
+              const w = Math.round((Number(p.businessesCount || 0) / maxPlanCount) * 100);
+              return `
+                <div class="pa-bar-row">
+                  <div style="width: 110px; font-weight: 600;">${escapeHtml(p.planCode)} (${p.businessesCount ?? 0})</div>
+                  <div class="pa-bar-track"><div class="pa-bar-fill" style="width: ${w}%;"></div></div>
+                  <div style="min-width: 110px; text-align: right;">${paFmtLkr(p.verifiedRevenueInRangeAmount)}</div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+
+          <div class="card" style="margin-bottom: 0;">
+            <div class="card-title">Monthly Verified Revenue Trend</div>
+            ${monthlyTrend.length === 0 ? '<div style="font-size: 12px; color: var(--text-secondary);">No verified payments recorded yet.</div>' : monthlyTrend.map(m => {
+              const w = Math.round((Number(m.verifiedRevenueAmount || 0) / maxTrend) * 100);
+              return `
+                <div class="pa-bar-row">
+                  <div style="width: 85px; font-weight: 600;">${escapeHtml(m.month)}</div>
+                  <div class="pa-bar-track"><div class="pa-bar-fill" style="width: ${w}%; background: #10b981;"></div></div>
+                  <div style="min-width: 110px; text-align: right;">${paFmtLkr(m.verifiedRevenueAmount)}</div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </div>
+
+        <div class="card" style="margin-top: 16px; margin-bottom: 0;">
+          <div class="card-title">Lifecycle Status Breakdown</div>
+          <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+            <span class="badge-pill badge-green">ACTIVE: ${biz.activeBusinesses ?? 0}</span>
+            <span class="badge-pill badge-blue">TRIALING: ${biz.trialBusinesses ?? 0}</span>
+            <span class="badge-pill badge-yellow">PENDING PAYMENT: ${biz.pendingPaymentBusinesses ?? 0}</span>
+            <span class="badge-pill badge-red">READ-ONLY / EXPIRED: ${biz.expiredOrReadOnlyBusinesses ?? 0}</span>
+            <span class="badge-pill badge-red">SUSPENDED: ${biz.suspendedBusinesses ?? 0}</span>
+          </div>
+        </div>
+      `;
+    }
+
+    async function applyPaAnalyticsFilter() {
+      const pa = ensurePlatformAdminState();
+      pa.analyticsFilters = {
+        startDate: document.getElementById('paFilterStartDate')?.value || '',
+        endDate: document.getElementById('paFilterEndDate')?.value || '',
+        planCode: document.getElementById('paFilterPlanCode')?.value || '',
+        status: document.getElementById('paFilterStatus')?.value || ''
+      };
+      await loadPlatformAdminTabData('overview');
+      drawPlatformAdminConsole();
+    }
+
+    async function exportPaAnalyticsCsv() {
+      const pa = ensurePlatformAdminState();
+      const f = pa.analyticsFilters || {};
+      const qs = new URLSearchParams();
+      if (f.startDate) qs.set('startDate', f.startDate);
+      if (f.endDate) qs.set('endDate', f.endDate);
+      if (f.planCode) qs.set('planCode', f.planCode);
+      if (f.status) qs.set('status', f.status);
+      try {
+        const rawBase = (state.apiBaseUrl || resolveApiBaseUrl()).replace(/\/+$/, '');
+        const res = await fetch(`${rawBase}/v1/platform/analytics/export${qs.toString() ? '?' + qs.toString() : ''}`, {
+          headers: { ...(state.token ? { Authorization: `Bearer ${state.token}` } : {}) }
+        });
+        if (!res.ok) throw new Error('Failed to export CSV analytics');
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `nexstock-saas-analytics-${new Date().toISOString().slice(0, 10)}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        showToast('SaaS Analytics CSV exported', 'success');
+      } catch (err) {
+        showToast(err?.message || 'CSV export failed', 'error');
+      }
+    }
+
+    function renderPaBusinessesTab(pa) {
+      const f = pa.businessFilters || {};
+      const items = pa.businesses || [];
+      return `
+        <div class="card" style="margin-bottom: 16px;">
+          <div class="pa-filter-bar">
+            <input type="text" id="paBizSearchInput" class="form-input" placeholder="Search business name or slug..." value="${escapeHtml(f.search || '')}" style="flex: 1; min-width: 180px;">
+            <select id="paBizPlanSelect" class="form-input" style="width: 150px;">
+              <option value="">All Plans</option>
+              <option value="STARTER" ${f.planCode === 'STARTER' ? 'selected' : ''}>Starter</option>
+              <option value="PROFESSIONAL" ${f.planCode === 'PROFESSIONAL' ? 'selected' : ''}>Professional</option>
+              <option value="ENTERPRISE" ${f.planCode === 'ENTERPRISE' ? 'selected' : ''}>Enterprise</option>
+            </select>
+            <select id="paBizStatusSelect" class="form-input" style="width: 170px;">
+              <option value="">All Statuses</option>
+              <option value="ACTIVE" ${f.status === 'ACTIVE' ? 'selected' : ''}>ACTIVE</option>
+              <option value="TRIALING" ${f.status === 'TRIALING' ? 'selected' : ''}>TRIALING</option>
+              <option value="GRACE_PERIOD" ${f.status === 'GRACE_PERIOD' ? 'selected' : ''}>GRACE_PERIOD</option>
+              <option value="READ_ONLY" ${f.status === 'READ_ONLY' ? 'selected' : ''}>READ_ONLY</option>
+              <option value="SUSPENDED" ${f.status === 'SUSPENDED' ? 'selected' : ''}>SUSPENDED</option>
+            </select>
+            <button type="button" class="btn btn-primary btn-sm" onclick="filterPaBusinesses()">Search</button>
+          </div>
+
+          <div class="pa-desktop-table">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Business</th>
+                  <th>Plan / Cycle</th>
+                  <th>Lifecycle Status</th>
+                  <th>Tenant Status</th>
+                  <th>Period End</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${items.length === 0 ? '<tr><td colspan="6" style="text-align: center; color: var(--text-secondary);">No matching businesses found.</td></tr>' : items.map(b => `
+                  <tr>
+                    <td><strong>${escapeHtml(b.legalName)}</strong><div style="font-size: 11px; color: var(--text-secondary);">${escapeHtml(b.slug)} &bull; ${escapeHtml(b.baseCurrency)}</div></td>
+                    <td><strong>${escapeHtml(b.planCode || '-')}</strong><div style="font-size: 11px; color: var(--text-secondary);">${escapeHtml(b.billingCycle || 'MONTHLY')} ${b.isCustomPricing ? '&bull; Custom' : ''}</div></td>
+                    <td><span class="badge-pill ${paStatusBadgeClass(b.subscriptionStatus)}">${escapeHtml(b.subscriptionStatus || 'NONE')}</span></td>
+                    <td><span class="badge-pill ${paStatusBadgeClass(b.tenantStatus)}">${escapeHtml(b.tenantStatus)}</span></td>
+                    <td style="font-size: 12px;">${b.currentPeriodEnd ? escapeHtml(new Date(b.currentPeriodEnd).toLocaleDateString()) : '—'}</td>
+                    <td>
+                      <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="openPaBusinessDetailModal('${escapeHtml(b.tenantId)}')">Inspect</button>
+                        <button type="button" class="btn btn-primary btn-sm" onclick="openPaOverrideModal('${escapeHtml(b.tenantId)}', '${escapeHtml(b.legalName)}', '${escapeHtml(b.planCode || 'STARTER')}', '${escapeHtml(b.subscriptionStatus || 'ACTIVE')}')">Override</button>
+                        ${b.tenantStatus === 'SUSPENDED'
+                          ? `<button type="button" class="btn btn-secondary btn-sm" onclick="openPaSuspendRestoreModal('${escapeHtml(b.tenantId)}', '${escapeHtml(b.legalName)}', 'restore')">Restore</button>`
+                          : `<button type="button" class="btn btn-danger btn-sm" onclick="openPaSuspendRestoreModal('${escapeHtml(b.tenantId)}', '${escapeHtml(b.legalName)}', 'suspend')">Suspend</button>`}
+                      </div>
+                    </td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+
+          <div class="pa-mobile-cards">
+            ${items.map(b => `
+              <div style="border: 1px solid var(--border-subtle); border-radius: 10px; padding: 12px;">
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+                  <div><strong>${escapeHtml(b.legalName)}</strong><div style="font-size: 11px; color: var(--text-secondary);">${escapeHtml(b.slug)}</div></div>
+                  <span class="badge-pill ${paStatusBadgeClass(b.subscriptionStatus)}">${escapeHtml(b.subscriptionStatus || 'NONE')}</span>
+                </div>
+                <div style="font-size: 12px; margin: 6px 0;">Plan: <strong>${escapeHtml(b.planCode || '-')}</strong> &bull; Account: <strong>${escapeHtml(b.tenantStatus)}</strong></div>
+                <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px;">
+                  <button type="button" class="btn btn-secondary btn-sm" onclick="openPaBusinessDetailModal('${escapeHtml(b.tenantId)}')">Inspect</button>
+                  <button type="button" class="btn btn-primary btn-sm" onclick="openPaOverrideModal('${escapeHtml(b.tenantId)}', '${escapeHtml(b.legalName)}', '${escapeHtml(b.planCode || 'STARTER')}', '${escapeHtml(b.subscriptionStatus || 'ACTIVE')}')">Override</button>
+                  ${b.tenantStatus === 'SUSPENDED'
+                    ? `<button type="button" class="btn btn-secondary btn-sm" onclick="openPaSuspendRestoreModal('${escapeHtml(b.tenantId)}', '${escapeHtml(b.legalName)}', 'restore')">Restore</button>`
+                    : `<button type="button" class="btn btn-danger btn-sm" onclick="openPaSuspendRestoreModal('${escapeHtml(b.tenantId)}', '${escapeHtml(b.legalName)}', 'suspend')">Suspend</button>`}
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `;
+    }
+
+    async function filterPaBusinesses() {
+      const pa = ensurePlatformAdminState();
+      pa.businessFilters = {
+        search: document.getElementById('paBizSearchInput')?.value || '',
+        planCode: document.getElementById('paBizPlanSelect')?.value || '',
+        status: document.getElementById('paBizStatusSelect')?.value || ''
+      };
+      await loadPlatformAdminTabData('businesses');
+      drawPlatformAdminConsole();
+    }
+
+    async function openPaBusinessDetailModal(tenantId) {
+      try {
+        const detail = await apiFetch(`/v1/platform/businesses/${encodeURIComponent(tenantId)}`);
+        const u = detail.usage || {};
+        openModal({
+          title: `Business Detail — ${detail.business?.legalName || tenantId}`,
+          maxWidth: '760px',
+          bodyHtml: `
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 14px;">
+              <div><div style="font-size: 11px; color: var(--text-secondary);">Plan</div><strong>${escapeHtml(detail.entitlement?.planCode || '-')} (${escapeHtml(detail.entitlement?.status || '-')})</strong></div>
+              <div><div style="font-size: 11px; color: var(--text-secondary);">Branches</div><strong>${u.activeBranchesCount ?? 0} / ${u.effectiveMaxBranches ?? '-'}</strong></div>
+              <div><div style="font-size: 11px; color: var(--text-secondary);">Users</div><strong>${u.distinctActiveUsersCount ?? 0} / ${u.maxUsers ?? '-'}</strong></div>
+              <div><div style="font-size: 11px; color: var(--text-secondary);">Products</div><strong>${u.distinctProductsCount ?? 0} / ${u.maxProducts ?? '-'}</strong></div>
+            </div>
+            <div style="font-size: 13px; font-weight: 700; margin: 10px 0 6px;">Branches (${(detail.branches || []).length})</div>
+            <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px;">
+              ${(detail.branches || []).map(br => `<span class="badge-pill badge-blue">${escapeHtml(br.name)} (${escapeHtml(br.code)})</span>`).join('')}
+            </div>
+            <div style="font-size: 13px; font-weight: 700; margin: 10px 0 6px;">Recent Invoices (${(detail.invoices || []).length})</div>
+            <div style="max-height: 180px; overflow-y: auto; border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px; font-size: 12px;">
+              ${(detail.invoices || []).map(i => `<div style="display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid var(--border-subtle);"><span>${escapeHtml(i.invoiceNumber)} &bull; ${escapeHtml(i.invoiceType)}</span><span><strong>${paFmtLkr(i.totalAmount)}</strong> (${escapeHtml(i.status)})</span></div>`).join('') || 'No invoices'}
+            </div>
+          `,
+          footerHtml: `<button type="button" class="btn btn-secondary" onclick="closeModal()">Close</button>`
+        });
+      } catch (err) {
+        showToast(err?.message || 'Unable to inspect business detail', 'error');
+      }
+    }
+
+    function openPaSuspendRestoreModal(tenantId, name, mode) {
+      const isSuspend = mode === 'suspend';
+      openModal({
+        title: `${isSuspend ? 'Suspend Business' : 'Restore Business'} — ${name}`,
+        bodyHtml: `
+          <form onsubmit="submitPaSuspendRestore(event, '${escapeHtml(tenantId)}', '${escapeHtml(mode)}')">
+            <div class="form-group">
+              <label class="form-label">Mandatory Audit Reason</label>
+              <input type="text" id="paSuspendReasonInput" class="form-input" required minlength="3" placeholder="Explain reason for ${isSuspend ? 'suspension' : 'restoration'}">
+            </div>
+            <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px;">
+              <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+              <button type="submit" id="btnPaSuspendConfirm" class="btn ${isSuspend ? 'btn-danger' : 'btn-primary'}">${isSuspend ? 'Confirm Suspend' : 'Confirm Restore'}</button>
+            </div>
+          </form>
+        `,
+        footerHtml: ''
+      });
+    }
+
+    async function submitPaSuspendRestore(event, tenantId, mode) {
+      event.preventDefault();
+      const btn = document.getElementById('btnPaSuspendConfirm');
+      const reason = document.getElementById('paSuspendReasonInput')?.value?.trim() || '';
+      if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
+      try {
+        const body = mode === 'restore' ? { targetStatus: 'ACTIVE', reason } : { reason };
+        await apiFetch(`/v1/platform/businesses/${encodeURIComponent(tenantId)}/${mode}`, {
+          method: 'POST',
+          body: JSON.stringify(body)
+        });
+        closeModal();
+        showToast(`Business ${mode === 'suspend' ? 'suspended' : 'restored'} successfully.`, 'success');
+        await loadPlatformAdminTabData('businesses');
+        drawPlatformAdminConsole();
+      } catch (err) {
+        showToast(err?.message || 'Action failed (verify 2FA step-up in Security tab if prompted)', 'error');
+        if (btn) { btn.disabled = false; btn.textContent = 'Retry'; }
+      }
+    }
+
+    function openPaOverrideModal(tenantId, name, curPlan, curStatus) {
+      openModal({
+        title: `Subscription Override — ${name}`,
+        maxWidth: '620px',
+        bodyHtml: `
+          <form onsubmit="submitPaOverride(event, '${escapeHtml(tenantId)}')">
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px;">
+              <div class="form-group"><label class="form-label">Plan</label>
+                <select id="paOvPlan" class="form-input">
+                  <option value="STARTER" ${curPlan === 'STARTER' ? 'selected' : ''}>STARTER</option>
+                  <option value="PROFESSIONAL" ${curPlan === 'PROFESSIONAL' ? 'selected' : ''}>PROFESSIONAL</option>
+                  <option value="ENTERPRISE" ${curPlan === 'ENTERPRISE' ? 'selected' : ''}>ENTERPRISE</option>
+                </select>
+              </div>
+              <div class="form-group"><label class="form-label">Status</label>
+                <select id="paOvStatus" class="form-input">
+                  <option value="ACTIVE" ${curStatus === 'ACTIVE' ? 'selected' : ''}>ACTIVE</option>
+                  <option value="TRIALING" ${curStatus === 'TRIALING' ? 'selected' : ''}>TRIALING</option>
+                  <option value="GRACE_PERIOD" ${curStatus === 'GRACE_PERIOD' ? 'selected' : ''}>GRACE_PERIOD</option>
+                  <option value="READ_ONLY" ${curStatus === 'READ_ONLY' ? 'selected' : ''}>READ_ONLY</option>
+                  <option value="SUSPENDED" ${curStatus === 'SUSPENDED' ? 'selected' : ''}>SUSPENDED</option>
+                </select>
+              </div>
+              <div class="form-group"><label class="form-label">Extend Period (Days)</label><input type="number" id="paOvExtendDays" class="form-input" min="0" max="1095" placeholder="e.g. 30"></div>
+              <div class="form-group"><label class="form-label">Custom Monthly Price (LKR)</label><input type="text" id="paOvCustomPrice" class="form-input" placeholder="Optional e.g. 15000.00"></div>
+              <div class="form-group"><label class="form-label">Custom Max Branches</label><input type="number" id="paOvMaxBranches" class="form-input" min="1" placeholder="Optional"></div>
+              <div class="form-group"><label class="form-label">Custom Max Users</label><input type="number" id="paOvMaxUsers" class="form-input" min="1" placeholder="Optional"></div>
+            </div>
+            <div class="form-group"><label class="form-label">Audit Reason (Mandatory)</label><input type="text" id="paOvReason" class="form-input" required minlength="3" placeholder="Enterprise agreement / manual extension"></div>
+            <div style="display: flex; justify-content: flex-end; gap: 8px;">
+              <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+              <button type="submit" id="btnPaOvSave" class="btn btn-primary">Apply Override</button>
+            </div>
+          </form>
+        `,
+        footerHtml: ''
+      });
+    }
+
+    async function submitPaOverride(event, tenantId) {
+      event.preventDefault();
+      const btn = document.getElementById('btnPaOvSave');
+      if (btn) { btn.disabled = true; btn.textContent = 'Applying...'; }
+      try {
+        const extendDaysVal = document.getElementById('paOvExtendDays')?.value;
+        const customPriceRaw = document.getElementById('paOvCustomPrice')?.value?.trim();
+        const customPriceVal = customPriceRaw && !Number.isNaN(Number(customPriceRaw))
+          ? Number(customPriceRaw).toFixed(4)
+          : '';
+        const maxBranchesVal = document.getElementById('paOvMaxBranches')?.value;
+        const maxUsersVal = document.getElementById('paOvMaxUsers')?.value;
+        await apiFetch(`/v1/platform/businesses/${encodeURIComponent(tenantId)}/subscription/override`, {
+          method: 'POST',
+          body: JSON.stringify({
+            planCode: document.getElementById('paOvPlan')?.value,
+            status: document.getElementById('paOvStatus')?.value,
+            ...(extendDaysVal ? { extendDays: Number(extendDaysVal) } : {}),
+            ...(customPriceVal ? { customMonthlyPrice: customPriceVal } : {}),
+            ...(maxBranchesVal ? { customMaxBranches: Number(maxBranchesVal) } : {}),
+            ...(maxUsersVal ? { customMaxUsers: Number(maxUsersVal) } : {}),
+            reason: document.getElementById('paOvReason')?.value?.trim()
+          })
+        });
+        closeModal();
+        showToast('Subscription override saved.', 'success');
+        await loadPlatformAdminTabData('businesses');
+        drawPlatformAdminConsole();
+      } catch (err) {
+        showToast(err?.message || 'Failed to apply override', 'error');
+        if (btn) { btn.disabled = false; btn.textContent = 'Apply Override'; }
+      }
+    }
+
+    function renderPaPaymentsTab(pa) {
+      const f = pa.paymentFilters || {};
+      const items = pa.payments || [];
+      return `
+        <div class="card" style="margin-bottom: 16px;">
+          <div class="pa-filter-bar">
+            <select id="paPayStatusSelect" class="form-input" style="width: 190px;">
+              <option value="SUBMITTED" ${f.status === 'SUBMITTED' ? 'selected' : ''}>Pending Review (SUBMITTED)</option>
+              <option value="" ${!f.status ? 'selected' : ''}>All Submissions</option>
+              <option value="VERIFIED" ${f.status === 'VERIFIED' ? 'selected' : ''}>VERIFIED</option>
+              <option value="REJECTED" ${f.status === 'REJECTED' ? 'selected' : ''}>REJECTED</option>
+            </select>
+            <input type="text" id="paPaySearchInput" class="form-input" placeholder="Filter by business, invoice, or ref..." value="${escapeHtml(f.search || '')}" style="flex: 1; min-width: 180px;">
+            <button type="button" class="btn btn-primary btn-sm" onclick="filterPaPayments()">Filter Payments</button>
+          </div>
+
+          <div class="pa-desktop-table">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Business / Invoice</th>
+                  <th>Plan</th>
+                  <th>Expected LKR</th>
+                  <th>Bank Ref</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${items.length === 0 ? '<tr><td colspan="6" style="text-align: center; color: var(--text-secondary);">No matching payment submissions.</td></tr>' : items.map(s => `
+                  <tr>
+                    <td><strong>${escapeHtml(s.businessName || s.tenantId)}</strong><div style="font-size: 11px; color: var(--text-secondary);">${escapeHtml(s.invoiceNumber || s.invoiceId)}</div></td>
+                    <td>${escapeHtml(s.targetPlanCode || '-')}</td>
+                    <td><strong>${paFmtLkr(s.expectedAmount)}</strong></td>
+                    <td><code>${escapeHtml(s.paymentReference || '—')}</code></td>
+                    <td><span class="badge-pill ${paStatusBadgeClass(s.status)}">${escapeHtml(s.status)}</span></td>
+                    <td>
+                      <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                        ${s.proofFileName ? `<button type="button" class="btn btn-secondary btn-sm" onclick="openPaProofModal('${escapeHtml(s.id)}', '${escapeHtml(s.proofFileName)}', '${escapeHtml(s.proofMimeType || 'image/png')}')">Preview Proof</button>` : ''}
+                        ${['SUBMITTED', 'UNDER_REVIEW', 'PENDING'].includes(s.status) ? `
+                          <button type="button" class="btn btn-primary btn-sm" id="btnApprovePay_${escapeHtml(s.id)}" onclick="verifyPaPayment('${escapeHtml(s.id)}', 'APPROVE')">Approve</button>
+                          <button type="button" class="btn btn-danger btn-sm" onclick="openPaRejectPaymentModal('${escapeHtml(s.id)}')">Reject</button>
+                        ` : ''}
+                      </div>
+                    </td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+
+          <div class="pa-mobile-cards">
+            ${items.map(s => `
+              <div style="border: 1px solid var(--border-subtle); border-radius: 10px; padding: 12px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+                  <strong>${escapeHtml(s.businessName || s.tenantId)}</strong>
+                  <span class="badge-pill ${paStatusBadgeClass(s.status)}">${escapeHtml(s.status)}</span>
+                </div>
+                <div style="font-size: 12px; margin: 6px 0;">${escapeHtml(s.invoiceNumber || s.invoiceId)} &bull; <strong>${paFmtLkr(s.expectedAmount)}</strong> &bull; Ref: <code>${escapeHtml(s.paymentReference || '-')}</code></div>
+                <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                  ${s.proofFileName ? `<button type="button" class="btn btn-secondary btn-sm" onclick="openPaProofModal('${escapeHtml(s.id)}', '${escapeHtml(s.proofFileName)}', '${escapeHtml(s.proofMimeType || 'image/png')}')">Preview Proof</button>` : ''}
+                  ${['SUBMITTED', 'UNDER_REVIEW', 'PENDING'].includes(s.status) ? `
+                    <button type="button" class="btn btn-primary btn-sm" onclick="verifyPaPayment('${escapeHtml(s.id)}', 'APPROVE')">Approve</button>
+                    <button type="button" class="btn btn-danger btn-sm" onclick="openPaRejectPaymentModal('${escapeHtml(s.id)}')">Reject</button>
+                  ` : ''}
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `;
+    }
+
+    async function filterPaPayments() {
+      const pa = ensurePlatformAdminState();
+      pa.paymentFilters = {
+        status: document.getElementById('paPayStatusSelect')?.value || '',
+        search: document.getElementById('paPaySearchInput')?.value || ''
+      };
+      await loadPlatformAdminTabData('payments');
+      drawPlatformAdminConsole();
+    }
+
+    async function openPaProofModal(submissionId, fileName, mimeType) {
+      try {
+        const rawBase = (state.apiBaseUrl || resolveApiBaseUrl()).replace(/\/+$/, '');
+        const res = await fetch(`${rawBase}/v1/platform/subscriptions/payments/${encodeURIComponent(submissionId)}/proof`, {
+          headers: { ...(state.token ? { Authorization: `Bearer ${state.token}` } : {}) }
+        });
+        if (!res.ok) throw new Error('Unable to load authorized payment proof');
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const isPdf = String(mimeType || '').includes('pdf');
+        openModal({
+          title: `Bank Slip Proof — ${fileName}`,
+          maxWidth: '720px',
+          bodyHtml: isPdf
+            ? `<iframe src="${url}" style="width: 100%; height: 480px; border: 1px solid var(--border-subtle); border-radius: 8px;"></iframe>`
+            : `<div style="text-align: center;"><img src="${url}" alt="Bank Slip Proof" style="max-width: 100%; max-height: 520px; border-radius: 8px; border: 1px solid var(--border-subtle);"></div>`,
+          footerHtml: `<a href="${url}" download="${escapeHtml(fileName)}" class="btn btn-secondary">Download</a><button type="button" class="btn btn-primary" onclick="closeModal()">Close</button>`
+        });
+      } catch (err) {
+        showToast(err?.message || 'Failed to load payment proof', 'error');
+      }
+    }
+
+    async function verifyPaPayment(submissionId, decision, rejectionReason = '') {
+      const pa = ensurePlatformAdminState();
+      if (pa.busy) return;
+      pa.busy = true;
+      const btn = document.getElementById(`btnApprovePay_${submissionId}`);
+      if (btn) { btn.disabled = true; btn.textContent = 'Processing...'; }
+      try {
+        await apiFetch(`/v1/platform/subscriptions/payments/${encodeURIComponent(submissionId)}/verify`, {
+          method: 'POST',
+          body: JSON.stringify({
+            decision,
+            ...(decision === 'REJECT' ? { rejectionReason } : {})
+          })
+        });
+        closeModal();
+        showToast(decision === 'APPROVE' ? 'Payment verified & subscription activated!' : 'Payment submission rejected.', 'success');
+        await loadPlatformAdminTabData('payments');
+        drawPlatformAdminConsole();
+      } catch (err) {
+        showToast(err?.message || 'Verification failed (check 2FA verification in Security tab)', 'error');
+        if (btn) { btn.disabled = false; btn.textContent = 'Approve'; }
+      } finally {
+        pa.busy = false;
+      }
+    }
+
+    function openPaRejectPaymentModal(submissionId) {
+      openModal({
+        title: 'Reject Bank Transfer Submission',
+        bodyHtml: `
+          <form onsubmit="event.preventDefault(); verifyPaPayment('${escapeHtml(submissionId)}', 'REJECT', document.getElementById('paRejectReasonInput').value.trim())">
+            <div class="form-group">
+              <label class="form-label">Rejection Reason (visible to business)</label>
+              <input type="text" id="paRejectReasonInput" class="form-input" required minlength="3" placeholder="e.g. Slip unreadable or amount mismatch">
+            </div>
+            <div style="display: flex; justify-content: flex-end; gap: 8px;">
+              <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+              <button type="submit" class="btn btn-danger">Confirm Rejection</button>
+            </div>
+          </form>
+        `,
+        footerHtml: ''
+      });
+    }
+
+    function renderPaPlansTab(pa) {
+      const plans = pa.plans || [];
+      const history = pa.planHistory || [];
+      return `
+        <div class="pa-split-grid">
+          ${plans.map(p => `
+            <div class="card" style="margin-bottom: 0;">
+              <div class="card-title">${escapeHtml(p.name)} (${escapeHtml(p.code)})</div>
+              <form onsubmit="savePaPlanConfig(event, '${escapeHtml(p.code)}')">
+                <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px;">
+                  <div class="form-group"><label class="form-label">Monthly Price (LKR)</label><input type="text" id="paPlanPrice_${escapeHtml(p.code)}" class="form-input" value="${escapeHtml(p.monthlyPriceAmount || '0.0000')}"></div>
+                  <div class="form-group"><label class="form-label">Annual Discount %</label><input type="text" id="paPlanDisc_${escapeHtml(p.code)}" class="form-input" value="${escapeHtml(p.annualDiscountPct || '15.00')}"></div>
+                  <div class="form-group"><label class="form-label">Extra Branch Fee/mo</label><input type="text" id="paPlanBranchFee_${escapeHtml(p.code)}" class="form-input" value="${escapeHtml(p.additionalBranchMonthlyFee || '')}"></div>
+                  <div class="form-group"><label class="form-label">Max Branches</label><input type="number" id="paPlanMaxBr_${escapeHtml(p.code)}" class="form-input" value="${escapeHtml(String(p.limits?.maxBranches ?? 1))}"></div>
+                  <div class="form-group"><label class="form-label">Max Users</label><input type="number" id="paPlanMaxUsr_${escapeHtml(p.code)}" class="form-input" value="${escapeHtml(String(p.limits?.maxUsers ?? 3))}"></div>
+                  <div class="form-group"><label class="form-label">Max Products</label><input type="number" id="paPlanMaxPrd_${escapeHtml(p.code)}" class="form-input" value="${escapeHtml(String(p.limits?.maxProducts ?? 2500))}"></div>
+                </div>
+                <div class="form-group"><label class="form-label">Support Tier Label</label><input type="text" id="paPlanSup_${escapeHtml(p.code)}" class="form-input" value="${escapeHtml(p.supportLevel || '')}"></div>
+                <div class="form-group"><label class="form-label">Config Change Reason</label><input type="text" id="paPlanReason_${escapeHtml(p.code)}" class="form-input" required placeholder="Pricing / quota adjustment reason"></div>
+                <button type="submit" class="btn btn-primary btn-sm">Save &amp; Version ${escapeHtml(p.code)}</button>
+              </form>
+            </div>
+          `).join('')}
+        </div>
+
+        <div class="card" style="margin-top: 16px; margin-bottom: 0;">
+          <div class="card-title">Plan Configuration Change History</div>
+          ${history.length === 0 ? '<div style="font-size: 12px; color: var(--text-secondary);">No plan config changes logged yet.</div>' : `
+            <div style="display: flex; flex-direction: column; gap: 6px; font-size: 12px;">
+              ${history.slice(0, 15).map(h => `<div style="display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding-bottom: 6px; border-bottom: 1px solid var(--border-subtle);"><span><strong>${escapeHtml(h.planCode)}</strong> &bull; ${escapeHtml(h.changeReason || 'Updated')}</span><span style="color: var(--text-secondary);">${escapeHtml(new Date(h.createdAt).toLocaleString())}</span></div>`).join('')}
+            </div>
+          `}
+        </div>
+      `;
+    }
+
+    async function savePaPlanConfig(event, planCode) {
+      event.preventDefault();
+      try {
+        const fee = document.getElementById(`paPlanBranchFee_${planCode}`)?.value?.trim();
+        await apiFetch(`/v1/platform/subscriptions/plans/${encodeURIComponent(planCode)}`, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            monthlyPriceAmount: document.getElementById(`paPlanPrice_${planCode}`)?.value?.trim(),
+            annualDiscountPct: document.getElementById(`paPlanDisc_${planCode}`)?.value?.trim(),
+            additionalBranchMonthlyFee: fee || null,
+            maxBranches: Number(document.getElementById(`paPlanMaxBr_${planCode}`)?.value || 1),
+            maxUsers: Number(document.getElementById(`paPlanMaxUsr_${planCode}`)?.value || 3),
+            maxProducts: Number(document.getElementById(`paPlanMaxPrd_${planCode}`)?.value || 2500),
+            supportLevel: document.getElementById(`paPlanSup_${planCode}`)?.value?.trim(),
+            changeReason: document.getElementById(`paPlanReason_${planCode}`)?.value?.trim()
+          })
+        });
+        showToast(`Plan ${planCode} updated & versioned!`, 'success');
+        await loadPlatformAdminTabData('plans');
+        drawPlatformAdminConsole();
+      } catch (err) {
+        showToast(err?.message || 'Failed to update plan', 'error');
+      }
+    }
+
+    function renderPaSettingsTab(pa) {
+      const s = pa.bankSettings || {};
+      return `
+        <div class="card" style="margin-bottom: 0;">
+          <div class="card-title">Central Bank Details &amp; Platform Rules</div>
+          <form onsubmit="savePaSettings(event)">
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px;">
+              <div class="form-group"><label class="form-label">Bank Account Name</label><input type="text" id="paSetAccName" class="form-input" value="${escapeHtml(s.bankAccountName || 'W.Swarnalatha')}" required></div>
+              <div class="form-group"><label class="form-label">Bank Name</label><input type="text" id="paSetBankName" class="form-input" value="${escapeHtml(s.bankName || "People's Bank")}" required></div>
+              <div class="form-group"><label class="form-label">Bank Branch</label><input type="text" id="paSetBankBranch" class="form-input" value="${escapeHtml(s.bankBranch || 'Bingiriya Branch')}" required></div>
+              <div class="form-group"><label class="form-label">Bank Account Number</label><input type="text" id="paSetAccNum" class="form-input" value="${escapeHtml(s.bankAccountNumber || '172200270058302')}" required></div>
+              <div class="form-group"><label class="form-label">Trial Duration (Days)</label><input type="number" id="paSetTrialDays" class="form-input" value="${escapeHtml(String(s.trialDurationDays ?? 30))}" min="1" max="90"></div>
+              <div class="form-group"><label class="form-label">Grace Period (Days)</label><input type="number" id="paSetGraceDays" class="form-input" value="${escapeHtml(String(s.gracePeriodDays ?? 7))}" min="0" max="60"></div>
+              <div class="form-group"><label class="form-label">Support Email</label><input type="email" id="paSetSupEmail" class="form-input" value="${escapeHtml(s.supportEmail || 'support@nexstock.lk')}"></div>
+              <div class="form-group"><label class="form-label">Support Phone</label><input type="text" id="paSetSupPhone" class="form-input" value="${escapeHtml(s.supportPhone || '')}"></div>
+            </div>
+            <div class="form-group"><label class="form-label">Bank Transfer Instructions</label><input type="text" id="paSetBankInst" class="form-input" value="${escapeHtml(s.bankInstructions || '')}"></div>
+            <button type="submit" class="btn btn-primary">Save Platform Settings</button>
+          </form>
+        </div>
+      `;
+    }
+
+    async function savePaSettings(event) {
+      event.preventDefault();
+      try {
+        await apiFetch('/v1/platform/subscriptions/settings', {
+          method: 'PATCH',
+          body: JSON.stringify({
+            bankAccountName: document.getElementById('paSetAccName')?.value?.trim(),
+            bankName: document.getElementById('paSetBankName')?.value?.trim(),
+            bankBranch: document.getElementById('paSetBankBranch')?.value?.trim(),
+            bankAccountNumber: document.getElementById('paSetAccNum')?.value?.trim(),
+            trialDurationDays: Number(document.getElementById('paSetTrialDays')?.value || 30),
+            gracePeriodDays: Number(document.getElementById('paSetGraceDays')?.value || 7),
+            supportEmail: document.getElementById('paSetSupEmail')?.value?.trim(),
+            supportPhone: document.getElementById('paSetSupPhone')?.value?.trim(),
+            bankInstructions: document.getElementById('paSetBankInst')?.value?.trim()
+          })
+        });
+        showToast('Platform settings saved!', 'success');
+        await loadPlatformAdminTabData('settings');
+        drawPlatformAdminConsole();
+      } catch (err) {
+        showToast(err?.message || 'Failed to save settings', 'error');
+      }
+    }
+
+    function renderPaSecurityTab(pa) {
+      const me = pa.securityMe || {};
+      const admins = pa.admins || [];
+      const logs = pa.auditLogs || [];
+      return `
+        <div class="pa-split-grid">
+          <div class="card" style="margin-bottom: 0;">
+            <div class="card-title">Platform Admin 2FA / TOTP Verification</div>
+            <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 10px;">
+              Sensitive governance operations require active MFA verification. Status: <strong style="color: var(--text-primary);">${me.mfaVerified ? 'Verified Session' : 'Verification Needed'}</strong>
+            </div>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px;">
+              <button type="button" class="btn btn-secondary btn-sm" onclick="setupPaTotp()">Generate / Reset TOTP Secret</button>
+            </div>
+            ${pa.mfaSetupData ? `
+              <div style="padding: 10px; border: 1px dashed var(--accent-primary); border-radius: 8px; margin-bottom: 12px; font-size: 12px;">
+                <div>Secret Key: <code style="user-select: all;">${escapeHtml(pa.mfaSetupData.secretBase32 || pa.mfaSetupData.secret || '')}</code></div>
+                <div style="margin-top: 4px; word-break: break-all;">URI: <code>${escapeHtml(pa.mfaSetupData.otpauthUri)}</code></div>
+              </div>
+            ` : ''}
+            <form onsubmit="verifyPaTotpSubmit(event)" style="display: flex; gap: 8px; flex-wrap: wrap;">
+              <input type="text" id="paTotpCodeInput" class="form-input" placeholder="6-digit authenticator code" minlength="6" maxlength="8" required style="width: 190px;">
+              <button type="submit" class="btn btn-primary btn-sm">Verify 2FA Code</button>
+            </form>
+          </div>
+
+          <div class="card" style="margin-bottom: 0;">
+            <div class="card-title">Platform Admin Roles (${admins.length})</div>
+            <div style="display: flex; flex-direction: column; gap: 8px; font-size: 12px;">
+                ${admins.map(a => `
+                <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; padding-bottom: 6px; border-bottom: 1px solid var(--border-subtle);">
+                  <div><strong>${escapeHtml(a.email)}</strong><div>Role: ${escapeHtml(a.platformRole || a.roleCode || 'ADMIN')} &bull; MFA: ${a.mfaEnforced ? 'Required' : 'Optional'}</div></div>
+                  <span class="badge-pill ${paStatusBadgeClass(a.status)}">${escapeHtml(a.status)}</span>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top: 16px; margin-bottom: 0;">
+          <div class="card-title">Immutable Platform Audit Logs</div>
+          <div style="display: flex; flex-direction: column; gap: 6px; font-size: 12px; max-height: 360px; overflow-y: auto;">
+            ${logs.length === 0 ? '<div style="color: var(--text-secondary);">No platform audit entries recorded yet.</div>' : logs.map(l => `
+              <div style="display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; padding: 6px 0; border-bottom: 1px solid var(--border-subtle);">
+                <span><strong>${escapeHtml(l.action)}</strong> &bull; ${escapeHtml(l.resourceType)} ${l.targetTenantId ? '(Tenant: ' + escapeHtml(l.targetTenantId.slice(0, 8)) + '...)' : ''}</span>
+                <span style="color: var(--text-secondary);">${escapeHtml(l.actorRole)} &bull; ${escapeHtml(new Date(l.createdAt).toLocaleString())}</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `;
+    }
+
+    async function setupPaTotp() {
+      const pa = ensurePlatformAdminState();
+      try {
+        pa.mfaSetupData = await apiFetch('/v1/platform/security/mfa/setup', { method: 'POST', body: JSON.stringify({}) });
+        showToast('TOTP secret generated. Enter a 6-digit code from your authenticator app.', 'info');
+        drawPlatformAdminConsole();
+      } catch (err) {
+        showToast(err?.message || 'Unable to initialize TOTP setup', 'error');
+      }
+    }
+
+    async function verifyPaTotpSubmit(event) {
+      event.preventDefault();
+      try {
+        const code = document.getElementById('paTotpCodeInput')?.value?.trim() || '';
+        await apiFetch('/v1/platform/security/mfa/verify', { method: 'POST', body: JSON.stringify({ code }) });
+        showToast('Platform Admin 2FA verified!', 'success');
+        await loadPlatformAdminTabData('security');
+        drawPlatformAdminConsole();
+      } catch (err) {
+        showToast(err?.message || 'Invalid TOTP verification code', 'error');
+      }
+    }
+
+    function renderPaHealthTab(pa) {
+      const alerts = pa.alerts || [];
+      const backups = pa.backups || [];
+      return `
+        <div class="pa-split-grid">
+          <div class="card" style="margin-bottom: 0;">
+            <div class="card-title">System Security &amp; Failure Alerts (${alerts.length})</div>
+            <div style="display: flex; flex-direction: column; gap: 8px; font-size: 12px;">
+              ${alerts.length === 0 ? '<div style="color: var(--text-secondary);">No system alerts triggered.</div>' : alerts.slice(0, 20).map(al => `
+                <div style="padding: 8px; border: 1px solid var(--border-subtle); border-radius: 8px; display: flex; justify-content: space-between; gap: 8px; align-items: flex-start;">
+                  <div>
+                    <span class="badge-pill ${paStatusBadgeClass(al.severity)}">${escapeHtml(al.severity)}</span>
+                    <strong>${escapeHtml(al.eventCategory || al.alertType || 'SYSTEM')}</strong>
+                    <div style="margin-top: 4px; color: var(--text-secondary);">${escapeHtml(al.summary || al.message || '')}</div>
+                  </div>
+                  ${al.status !== 'RESOLVED' && !al.resolvedAt ? `<button type="button" class="btn btn-secondary btn-sm" onclick="resolvePaAlert('${escapeHtml(al.id)}')">Resolve</button>` : '<span class="badge-pill badge-green">Resolved</span>'}
+                </div>
+              `).join('')}
+            </div>
+          </div>
+
+          <div class="card" style="margin-bottom: 0;">
+            <div class="card-title" style="display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap;">
+              <span>Database Backup &amp; Integrity Checks</span>
+              <button type="button" class="btn btn-primary btn-sm" onclick="triggerPaBackupCheck()">Run Verification Now</button>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 8px; font-size: 12px;">
+              ${backups.length === 0 ? '<div style="color: var(--text-secondary);">No backup verification runs recorded yet.</div>' : backups.slice(0, 12).map(b => `
+                <div style="padding: 8px; border: 1px solid var(--border-subtle); border-radius: 8px;">
+                  <div style="display: flex; justify-content: space-between; gap: 8px;">
+                    <strong>${escapeHtml(b.triggerType)} &bull; <span class="badge-pill ${paStatusBadgeClass(b.status)}">${escapeHtml(b.status)}</span></strong>
+                    <span style="color: var(--text-secondary);">${escapeHtml(new Date(b.createdAt).toLocaleString())}</span>
+                  </div>
+                  <div style="margin-top: 4px; color: var(--text-secondary);">
+                    RLS Tables: <strong>${b.tablesVerified}</strong> &bull; Policies: <strong>${b.rlsPoliciesVerified}</strong> &bull; Ledger: <strong>${b.ledgerChecksPassed ? 'PASSED' : 'CHECK'}</strong> &bull; ${b.durationMs}ms
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    async function resolvePaAlert(alertId) {
+      try {
+        await apiFetch(`/v1/platform/monitoring/alerts/${encodeURIComponent(alertId)}/resolve`, { method: 'POST', body: JSON.stringify({}) });
+        showToast('System alert resolved.', 'success');
+        await loadPlatformAdminTabData('health');
+        drawPlatformAdminConsole();
+      } catch (err) {
+        showToast(err?.message || 'Failed to resolve alert', 'error');
+      }
+    }
+
+    async function triggerPaBackupCheck() {
+      try {
+        await apiFetch('/v1/platform/backups/verify', { method: 'POST', body: JSON.stringify({}) });
+        showToast('Database RLS & Ledger integrity verification complete!', 'success');
+        await loadPlatformAdminTabData('health');
+        drawPlatformAdminConsole();
+      } catch (err) {
+        showToast(err?.message || 'Backup verification failed', 'error');
+      }
+    }
+
+    function setSubBillingCycleView(cycle) {
+      state.subBillingCycleView = cycle === 'ANNUAL' ? 'ANNUAL' : 'MONTHLY';
+      const panel = document.getElementById('orgTab_sub');
+      if (panel) panel.innerHTML = renderSubscriptionTabMarkup();
+    }
+
+    async function refreshSubscriptionTab() {
+      try {
+        const [entitlement, plansRes, usage, bankSettings, invRes, payRes, histRes, notifRes, supportRes] = await Promise.all([
+          apiFetch('/v1/subscriptions/entitlement'),
+          apiFetch('/v1/subscriptions/plans', { silent: true }).catch(() => ({ items: [] })),
+          apiFetch('/v1/subscriptions/usage', { silent: true }).catch(() => null),
+          apiFetch('/v1/subscriptions/bank-settings', { silent: true }).catch(() => state.subCache?.bankSettings),
+          apiFetch('/v1/subscriptions/invoices', { silent: true }).catch(() => ({ items: [] })),
+          apiFetch('/v1/subscriptions/payments', { silent: true }).catch(() => ({ items: [] })),
+          apiFetch('/v1/subscriptions/history', { silent: true }).catch(() => ({ items: [] })),
+          apiFetch('/v1/subscriptions/notifications', { silent: true }).catch(() => ({ items: [] })),
+          apiFetch('/v1/subscriptions/support', { silent: true }).catch(() => null)
+        ]);
+        state.subCache = {
+          entitlement,
+          plans: plansRes?.items || [],
+          usage,
+          bankSettings,
+          invoices: invRes?.items || [],
+          payments: payRes?.items || [],
+          history: histRes?.items || [],
+          notifications: notifRes?.items || [],
+          support: supportRes
+        };
+        state.cachedSubscriptionEntitlement = entitlement;
+        renderGlobalSubscriptionBanner();
+        const panel = document.getElementById('orgTab_sub');
+        if (panel) panel.innerHTML = renderSubscriptionTabMarkup();
+      } catch (err) {
+        showToast(err?.message || 'Failed to refresh subscription state', 'error');
+      }
+    }
+
+    async function copyBankDetail(text, label = 'Value') {
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(String(text));
+        } else {
+          const ta = document.createElement('textarea');
+          ta.value = String(text);
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          ta.remove();
+        }
+        showToast(`${label} copied to clipboard`, 'success');
+      } catch {
+        showToast('Unable to copy automatically — please copy manually.', 'warning');
+      }
+    }
+
+    function copyAllSubBankDetails() {
+      const bank = state.subCache?.bankSettings || { bankAccountName: 'W.Swarnalatha', bankName: "People's Bank", bankBranch: 'Bingiriya Branch', bankAccountNumber: '172200270058302' };
+      const full = `Account Name: ${bank.bankAccountName}\nBank: ${bank.bankName}\nBranch: ${bank.bankBranch}\nAccount Number: ${bank.bankAccountNumber}`;
+      copyBankDetail(full, 'All bank transfer details');
+    }
+
+    async function startBusinessFreeTrial(planCode = 'STARTER') {
+      if (state._subActionBusy) return;
+      state._subActionBusy = true;
+      try {
+        await apiFetch('/v1/subscriptions/trial/start', { method: 'POST', body: JSON.stringify({ planCode }) });
+        showToast('30-day free trial activated!', 'success');
+        await refreshSubscriptionTab();
+      } catch (err) {
+        showToast(err?.message || 'Could not start free trial', 'error');
+      } finally {
+        state._subActionBusy = false;
+      }
+    }
+
+    async function initiateUpgradeCheckout(targetPlanCode, billingCycle) {
+      if (state._subActionBusy) return;
+      state._subActionBusy = true;
+      try {
+        const res = await apiFetch('/v1/subscriptions/checkout/upgrade', {
+          method: 'POST',
+          body: JSON.stringify({ targetPlanCode, billingCycle })
+        });
+        await refreshSubscriptionTab();
+        const createdInvoiceId = res?.invoice?.id || res?.invoiceId;
+        if (createdInvoiceId) {
+          openSubscriptionPaymentModal(createdInvoiceId);
+        }
+      } catch (err) {
+        showToast(err?.message || 'Failed to create checkout invoice', 'error');
+      } finally {
+        state._subActionBusy = false;
+      }
+    }
+
+    async function schedulePlanDowngrade(targetPlanCode) {
+      if (state._subActionBusy) return;
+      state._subActionBusy = true;
+      try {
+        await apiFetch('/v1/subscriptions/downgrade/schedule', {
+          method: 'POST',
+          body: JSON.stringify({ targetPlanCode, billingCycle: state.subBillingCycleView || 'MONTHLY' })
+        });
+        showToast(`Downgrade to ${targetPlanCode} scheduled for next renewal.`, 'info');
+        await refreshSubscriptionTab();
+      } catch (err) {
+        showToast(err?.message || 'Failed to schedule downgrade', 'error');
+      } finally {
+        state._subActionBusy = false;
+      }
+    }
+
+    async function cancelPlanDowngradeAction() {
+      if (state._subActionBusy) return;
+      state._subActionBusy = true;
+      try {
+        await apiFetch('/v1/subscriptions/downgrade/cancel', { method: 'POST', body: JSON.stringify({}) });
+        showToast('Scheduled downgrade cancelled.', 'success');
+        await refreshSubscriptionTab();
+      } catch (err) {
+        showToast(err?.message || 'Failed to cancel scheduled downgrade', 'error');
+      } finally {
+        state._subActionBusy = false;
+      }
+    }
+
+    async function purchaseBranchAddons() {
+      if (state._subActionBusy) return;
+      const qtyInput = document.getElementById('subAddonBranchQty');
+      const additionalBranches = Math.max(1, Number.parseInt(qtyInput?.value || '1', 10) || 1);
+      state.subAddonQtyDraft = additionalBranches;
+      state._subActionBusy = true;
+      try {
+        const res = await apiFetch('/v1/subscriptions/branch-addons/checkout', {
+          method: 'POST',
+          body: JSON.stringify({ additionalBranches })
+        });
+        await refreshSubscriptionTab();
+        const createdInvoiceId = res?.invoice?.id || res?.invoiceId;
+        if (createdInvoiceId) {
+          openSubscriptionPaymentModal(createdInvoiceId);
+        }
+      } catch (err) {
+        showToast(err?.message || 'Failed to create branch add-on invoice', 'error');
+      } finally {
+        state._subActionBusy = false;
+      }
+    }
+
+    function closeSubscriptionPaymentModal() {
+      const el = document.getElementById('subPaymentModalOverlay');
+      if (el) el.remove();
+    }
+
+    function openSubscriptionPaymentModal(invoiceId, resubmitSubmissionId = '') {
+      const inv = (state.subCache?.invoices || []).find(i => i.id === invoiceId);
+      const bank = state.subCache?.bankSettings || { bankAccountName: 'W.Swarnalatha', bankName: "People's Bank", bankBranch: 'Bingiriya Branch', bankAccountNumber: '172200270058302' };
+      const amountVal = inv?.totalAmount || '0.0000';
+      let modal = document.getElementById('subPaymentModalOverlay');
+      if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'subPaymentModalOverlay';
+        modal.className = 'modal-overlay active';
+        modal.style.zIndex = '9999';
+        document.body.appendChild(modal);
+      }
+      modal.innerHTML = `
+        <div class="modal-content" style="max-width: 600px; width: 95%; max-height: 90vh; overflow-y: auto;">
+          <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; border-bottom: 1px solid var(--border-color);">
+            <div>
+              <h3 style="margin: 0; font-size: 16px; font-weight: 700;">Complete Subscription Payment</h3>
+              <div style="font-size: 12px; color: var(--text-secondary);">Invoice: ${escapeHtml(inv?.invoiceNumber || invoiceId)} &bull; Due: <strong>${formatSubLkr(amountVal)}</strong></div>
+            </div>
+            <button type="button" class="btn-icon" onclick="closeSubscriptionPaymentModal()">&times;</button>
+          </div>
+          <div class="modal-body" style="padding: 16px;">
+            <div class="sub-bank-box">
+              <div style="font-weight: 700; font-size: 13px; margin-bottom: 6px;">Bank Transfer Destination</div>
+              <div style="font-size: 12px; line-height: 1.6;">
+                <div>Account Name: <strong>${escapeHtml(bank.bankAccountName)}</strong></div>
+                <div>Bank: <strong>${escapeHtml(bank.bankName)}</strong> &bull; Branch: <strong>${escapeHtml(bank.bankBranch)}</strong></div>
+                <div>Account No: <strong style="font-family: monospace;">${escapeHtml(bank.bankAccountNumber)}</strong> <button type="button" class="btn btn-secondary btn-sm" onclick="copyBankDetail('${escapeHtml(bank.bankAccountNumber)}', 'Account number')">Copy</button></div>
+              </div>
+            </div>
+            <form onsubmit="submitSubscriptionBankTransfer(event, '${escapeHtml(invoiceId)}', '${escapeHtml(resubmitSubmissionId)}')">
+              <div class="form-group">
+                <label class="form-label">Server-Calculated Amount Due (${escapeHtml(inv?.currencyCode || 'LKR')})</label>
+                <input type="text" id="subPayAmountInput" class="form-input" value="${escapeHtml(formatSubLkr(amountVal))}" readonly>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Bank Reference / Slip Number</label>
+                <input type="text" id="subPayRefInput" class="form-input" placeholder="e.g. PB-20261120-991" required minlength="2">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Upload Bank Slip Proof (JPEG, PNG, WebP, or PDF &le; 5 MB)</label>
+                <input type="file" id="subPayProofFileInput" class="form-input" accept="image/jpeg,image/png,image/webp,application/pdf" required>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Notes (Optional)</label>
+                <input type="text" id="subPayNotesInput" class="form-input" placeholder="Depositor branch or transfer remarks">
+              </div>
+              <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 12px;">
+                <button type="button" class="btn btn-secondary btn-sm" onclick="tryOnlineGatewayCheckout('${escapeHtml(invoiceId)}')">Pay Online (PayHere / Card)</button>
+                <div style="display: flex; gap: 8px;">
+                  <button type="button" class="btn btn-secondary" onclick="closeSubscriptionPaymentModal()">Cancel</button>
+                  <button type="submit" id="btnSubmitSubBankTransfer" class="btn btn-primary">Submit Receipt for Verification</button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      `;
+    }
+
+    async function tryOnlineGatewayCheckout(invoiceId) {
+      const providerCode = state.subCache?.bankSettings?.onlineGatewayProvider || 'PAYHERE_LK';
+      try {
+        const res = await apiFetch('/v1/subscriptions/checkout/online', {
+          method: 'POST',
+          body: JSON.stringify({ invoiceId, providerCode })
+        });
+        if (res?.configured && res?.checkoutUrl) {
+          window.open(res.checkoutUrl, '_blank', 'noopener,noreferrer');
+        } else {
+          showToast(res?.message || 'Online gateway is not configured yet. Please complete payment using Manual Bank Transfer above.', 'info');
+        }
+      } catch (err) {
+        showToast(err?.message || 'Online gateway checkout unavailable', 'error');
+      }
+    }
+
+    function readFileAsDataUrl(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ''));
+        reader.onerror = () => reject(new Error('Failed to read selected receipt file'));
+        reader.readAsDataURL(file);
+      });
+    }
+
+    async function submitSubscriptionBankTransfer(event, invoiceId, resubmitSubmissionId) {
+      event.preventDefault();
+      if (state._subUploadBusy) return;
+      const submitBtn = document.getElementById('btnSubmitSubBankTransfer');
+      const fileEl = document.getElementById('subPayProofFileInput');
+      const file = fileEl?.files?.[0];
+      if (!file) {
+        showToast('Please select a payment receipt image or PDF.', 'error');
+        return;
+      }
+      state._subUploadBusy = true;
+      if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Uploading...'; }
+      try {
+        const dataUrl = await readFileAsDataUrl(file);
+        const paymentReference = String(document.getElementById('subPayRefInput')?.value || '').trim();
+        const notes = String(document.getElementById('subPayNotesInput')?.value || '').trim();
+        await apiFetch('/v1/subscriptions/payments/bank-transfer', {
+          method: 'POST',
+          body: JSON.stringify({
+            invoiceId,
+            paymentReference,
+            ...(notes ? { notes } : {}),
+            proofFileName: file.name,
+            proofMimeType: file.type || 'image/png',
+            proofDataBase64: dataUrl,
+            ...(resubmitSubmissionId ? { resubmitSubmissionId } : {})
+          })
+        });
+        closeSubscriptionPaymentModal();
+        showToast('Bank transfer slip submitted! Verification is pending Platform Admin review.', 'success');
+        await refreshSubscriptionTab();
+      } catch (err) {
+        showToast(err?.message || 'Failed to upload payment slip', 'error');
+        if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Submit Receipt for Verification'; }
+      } finally {
+        state._subUploadBusy = false;
+      }
+    }
+
+    async function viewSubscriptionProofBlob(submissionId, fileName, mimeType) {
+      try {
+        const rawBase = (state.apiBaseUrl && typeof state.apiBaseUrl === 'string' && state.apiBaseUrl.trim() !== '')
+          ? state.apiBaseUrl.trim().replace(/\/+$/, '')
+          : resolveApiBaseUrl().replace(/\/+$/, '');
+        const res = await fetch(`${rawBase}/v1/subscriptions/payments/${submissionId}/proof`, {
+          headers: {
+            ...(state.token ? { Authorization: `Bearer ${state.token}` } : {}),
+            ...(state.tenantId ? { 'x-tenant-id': state.tenantId } : {})
+          }
+        });
+        if (!res.ok) throw new Error('Unable to download authorized payment proof');
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        window.open(url, '_blank', 'noopener,noreferrer');
+      } catch (err) {
+        showToast(err?.message || 'Failed to load payment proof', 'error');
+      }
     }
 
     function updateBrandingPreviewLabel() {
@@ -30212,6 +32497,7 @@
       }
 
       setAppInitPhase(APP_INIT_STATES.RESTORING_SESSION, 'Restoring session...');
+      const bootRequestedRoute = getRouteFromLocation();
 
       // Fast-path synchronous render if membership cache exists (BUG-030)
       const hasCachedMembership = Boolean(state.tenantId && state.userRole);
@@ -30220,8 +32506,15 @@
         updateTopbarContext();
         renderSidebarNav();
         const locRoute = getRouteFromLocation();
-        const initialRoute = state.pendingTargetView || (locRoute && canAccessView(locRoute) ? locRoute : resolveDefaultLandingView());
-        state.pendingTargetView = null;
+        if (locRoute === 'platform-admin' && !canAccessView('platform-admin')) {
+          state.pendingTargetView = 'platform-admin';
+        }
+        const initialRoute = (locRoute && canAccessView(locRoute)) ? locRoute : resolveDefaultLandingView();
+        if (initialRoute !== 'platform-admin') {
+          if (state.pendingTargetView !== 'platform-admin') state.pendingTargetView = null;
+        } else {
+          state.pendingTargetView = null;
+        }
         if (!AUTH_VIEWS.includes(initialRoute)) {
           setAppInitPhase(APP_INIT_STATES.LOADING_DASHBOARD, initialRoute === 'dashboard' ? 'Loading dashboard...' : 'Loading NexStock...');
         }
@@ -30350,15 +32643,25 @@
 
           if (state.memberships.length === 0) {
             setAppInitPhase(APP_INIT_STATES.READY);
-            renderView('onboard-business');
+            if (state.user && state.user.isPlatformAdmin === true) {
+              if (typeof renderSidebarNav === 'function') renderSidebarNav();
+              renderView('platform-admin');
+            } else {
+              renderView('onboard-business');
+            }
             window._appPerf.mark('fully_ready');
             return;
           }
 
           if (activeMemberships.length === 0) {
             setAppInitPhase(APP_INIT_STATES.READY);
-            state.restrictedMembership = state.memberships[0];
-            renderView('membership-restricted');
+            if (state.user && state.user.isPlatformAdmin === true) {
+              if (typeof renderSidebarNav === 'function') renderSidebarNav();
+              renderView('platform-admin');
+            } else {
+              state.restrictedMembership = state.memberships[0];
+              renderView('membership-restricted');
+            }
             window._appPerf.mark('fully_ready');
             return;
           }
@@ -30367,11 +32670,16 @@
           const activeMembership = activeMemberships.find(m => m.tenantId === savedTenantId) || activeMemberships[0];
           await selectActiveTenant(activeMembership);
           updateTopbarContext();
+          if (typeof renderSidebarNav === 'function') {
+            renderSidebarNav();
+          }
 
+          const locRoute = getRouteFromLocation() || bootRequestedRoute;
+          const candidateRoute = state.pendingTargetView || locRoute;
+          const needAdminRoute = candidateRoute === 'platform-admin' && state.user?.isPlatformAdmin === true && state.activeView !== 'platform-admin';
           // Only re-navigate if we have not already rendered the view via cached fast-path
-          if (!hasCachedMembership || state.activeView === 'welcome') {
-            const locRoute = getRouteFromLocation();
-            const targetRoute = state.pendingTargetView || (locRoute && canAccessView(locRoute) ? locRoute : resolveDefaultLandingView());
+          if (!hasCachedMembership || state.activeView === 'welcome' || needAdminRoute) {
+            const targetRoute = (candidateRoute && canAccessView(candidateRoute)) ? candidateRoute : resolveDefaultLandingView();
             state.pendingTargetView = null;
             if (!AUTH_VIEWS.includes(targetRoute)) {
               setAppInitPhase(APP_INIT_STATES.LOADING_DASHBOARD, targetRoute === 'dashboard' ? 'Loading dashboard...' : 'Loading NexStock...');
@@ -32497,8 +34805,13 @@
         updateTopbarContext();
         renderSidebarNav();
         const locRoute = getRouteFromLocation();
-        const targetRoute = state.pendingTargetView || (locRoute && canAccessView(locRoute) ? locRoute : resolveDefaultLandingView());
-        state.pendingTargetView = null;
+        if (locRoute === 'platform-admin' && !canAccessView('platform-admin')) {
+          state.pendingTargetView = 'platform-admin';
+        }
+        const targetRoute = (locRoute && canAccessView(locRoute)) ? locRoute : resolveDefaultLandingView();
+        if (state.pendingTargetView !== 'platform-admin') {
+          state.pendingTargetView = null;
+        }
         renderView(targetRoute);
         window._appPerf.mark('initial_view_painted');
       }

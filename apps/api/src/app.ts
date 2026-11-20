@@ -267,6 +267,26 @@ import {
   SyncConflictRecordSchema,
   SyncConflictStatusSchema,
   SyncPullResponseSchema,
+  SubscriptionPlanCodeSchema,
+  CalculateSubscriptionPricingRequestSchema,
+  StartFreeTrialRequestSchema,
+  UpgradeCheckoutRequestSchema,
+  ScheduleDowngradeRequestSchema,
+  PurchaseBranchAddonRequestSchema,
+  SubmitManualBankTransferRequestSchema,
+  VerifyPaymentSubmissionRequestSchema,
+  UpdatePlatformBankSettingsRequestSchema,
+  UpdatePlatformPlanConfigRequestSchema,
+  OnlineGatewayCheckoutRequestSchema,
+  OnlineGatewayWebhookRequestSchema,
+  PaymentSubmissionStatusSchema,
+  PlatformAnalyticsQuerySchema,
+  PlatformMfaVerifyRequestSchema,
+  PlatformProvisionAdminRequestSchema,
+  PlatformRestoreBusinessRequestSchema,
+  PlatformSubscriptionOverrideRequestSchema,
+  PlatformSuspendBusinessRequestSchema,
+  PlatformUpdateAdminRequestSchema,
 } from '@nexstock/contracts';
 import { Type } from '@sinclair/typebox';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -568,17 +588,68 @@ import {
   sanitizeLogMessage,
   type TenantTransactionContext,
   withTenantTransaction,
+  withAppUserTransaction,
+  withPlatformAdminTransaction,
   realtimeEventHub,
   type RealtimeEventPayload,
 } from './modules/shared/index.js';
 import {
   type SubscriptionPlanCode,
+  type OnlineGatewayProviderCode,
+  adminOverrideBusinessSubscription,
+  assertFeatureEntitlement,
   assertModuleEntitlement,
   assertSubscriptionEntitlement,
+  calculateServerSubscriptionPricing,
+  cancelScheduledSubscriptionDowngrade,
+  createBranchAddonCheckout,
+  createOnlineGatewayPaymentSession,
+  createRenewalInvoice,
+  createSubscriptionCheckoutInvoice,
   defaultManualBillingAdapter,
+  evaluateSubscriptionLifecycle,
+  exportPlatformAnalyticsCsv,
+  getAuthorizedPaymentProofBytes,
+  getOnlineGatewayAdapter,
+  getPlatformAdminSecurityProfile,
+  getPlatformAnalyticsOverview,
+  getPlatformBankSettings,
+  getPlatformBusinessDetail,
   getTenantSubscriptionEntitlement,
+  getTenantSubscriptionUsage,
+  getTenantSupportOptions,
   issueSubscriptionInvoice,
+  listBackupVerificationRuns,
+  listPlatformAdminAccounts,
+  listPlatformAuditLogs,
+  listPlatformBusinesses,
+  listPlatformPaymentSubmissions,
+  listPlatformPlanConfigHistory,
+  listPlatformSystemAlerts,
+  listSubscriptionPlans,
+  listTenantPaymentSubmissions,
+  listTenantPlanHistory,
+  listTenantSubscriptionInvoices,
+  listTenantSubscriptionNotifications,
+  markAllSubscriptionNotificationsRead,
+  markSubscriptionNotificationRead,
+  processOnlineGatewayWebhook,
+  provisionPlatformAdminAccount,
+  recordSystemAlertSafe,
+  resolvePlatformSystemAlert,
+  restorePlatformBusiness,
+  runBackupAndIntegrityVerification,
+  scheduleSubscriptionDowngrade,
+  setupPlatformAdminTotp,
+  startTenantFreeTrial,
+  submitManualBankTransferPayment,
+  suspendPlatformBusiness,
+  updatePlatformAdminAccount,
+  updatePlatformBankSettings,
+  updatePlatformPlanConfig,
   updateSubscriptionLifecycleAndOverride,
+  verifyManualPaymentSubmission,
+  verifyPlatformAdminTotp,
 } from './modules/sub/index.js';
 
 export { DEFAULT_SUPABASE_URL };
@@ -737,6 +808,35 @@ export async function buildApp(
           status: error.statusCode,
           errorCode: error.errorCode,
           detail: sanitizeLogMessage(error.message),
+        });
+      }
+
+      if (
+        error.errorCode === 'SUB_PLATFORM_ADMIN_REQUIRED' ||
+        error.errorCode === 'SUB_PLATFORM_MFA_REQUIRED'
+      ) {
+        void recordSystemAlertSafe(options.db, {
+          eventCategory: 'UNAUTHORIZED_ACCESS',
+          severity: 'WARNING',
+          summary: `${error.errorCode} on ${request.method} ${request.url}`,
+          details: { errorCode: error.errorCode, route: request.url },
+          traceId,
+        });
+      } else if (error.errorCode === 'SUB_WEBHOOK_SIGNATURE_INVALID') {
+        void recordSystemAlertSafe(options.db, {
+          eventCategory: 'WEBHOOK_FAILURE',
+          severity: 'WARNING',
+          summary: `Invalid payment gateway webhook signature on ${request.url}`,
+          details: { route: request.url },
+          traceId,
+        });
+      } else if (error.statusCode >= 500) {
+        void recordSystemAlertSafe(options.db, {
+          eventCategory: 'DB_ERROR',
+          severity: 'CRITICAL',
+          summary: `Server error (${error.statusCode}) on ${request.method} ${request.url}`,
+          details: { errorCode: error.errorCode, detail: sanitizeLogMessage(error.message) },
+          traceId,
         });
       }
 
@@ -1648,7 +1748,22 @@ export async function buildApp(
           deviceId: request.body.deviceId,
           traceId,
         },
-        (trx) => enrollOfflineDevice(trx, request.body),
+        (trx) =>
+          (async () => {
+            const isMobilePlatform =
+              request.body.clientPlatform === 'MOBILE_APP' ||
+              request.body.clientPlatform === 'MOBILE_PWA' ||
+              request.body.clientPlatform === 'FLUTTER_MOBILE';
+            const featureKey = isMobilePlatform
+              ? 'mobileOfflinePos'
+              : 'desktopOfflinePos';
+            await assertFeatureEntitlement(
+              trx,
+              featureKey,
+              'Offline device sync requires a Professional or Enterprise subscription plan.',
+            );
+            return enrollOfflineDevice(trx, request.body);
+          })(),
       );
     },
   );
@@ -1708,6 +1823,7 @@ export async function buildApp(
             planCode: Type.Optional(
               Type.Union([
                 Type.Literal('STARTER'),
+                Type.Literal('PROFESSIONAL'),
                 Type.Literal('GROWTH'),
                 Type.Literal('ENTERPRISE'),
               ]),
@@ -2406,7 +2522,10 @@ export async function buildApp(
       const created = await withTenantTransaction(
         options.db,
         { tenantId, userId: principal.userId, traceId },
-        (trx) => createRole(trx, request.body),
+        async (trx) => {
+          await assertSubscriptionEntitlement(trx, { requireWriteAccess: true });
+          return createRole(trx, request.body);
+        },
       );
 
       return reply.status(201).send(created);
@@ -2475,7 +2594,10 @@ export async function buildApp(
       return withTenantTransaction(
         options.db,
         { tenantId, userId: principal.userId, traceId },
-        (trx) => updateRole(trx, request.params.roleId, request.body),
+        async (trx) => {
+          await assertSubscriptionEntitlement(trx, { requireWriteAccess: true });
+          return updateRole(trx, request.params.roleId, request.body);
+        },
       );
     },
   );
@@ -2606,12 +2728,14 @@ export async function buildApp(
       return withTenantTransaction(
         options.db,
         { tenantId, userId: principal.userId, traceId },
-        (trx) =>
-          assignMemberRoles(
+        async (trx) => {
+          await assertSubscriptionEntitlement(trx, { requireWriteAccess: true });
+          return assignMemberRoles(
             trx,
             request.params.membershipId,
             request.body.roleIds,
-          ),
+          );
+        },
       );
     },
   );
@@ -2686,12 +2810,14 @@ export async function buildApp(
       return withTenantTransaction(
         options.db,
         { tenantId, userId: principal.userId, traceId },
-        (trx) =>
-          updateMemberLocationScopes(
+        async (trx) => {
+          await assertSubscriptionEntitlement(trx, { requireWriteAccess: true });
+          return updateMemberLocationScopes(
             trx,
             request.params.membershipId,
             request.body,
-          ),
+          );
+        },
       );
     },
   );
@@ -2725,12 +2851,14 @@ export async function buildApp(
       return withTenantTransaction(
         options.db,
         { tenantId, userId: principal.userId, traceId },
-        (trx) =>
-          updateMemberStatus(
+        async (trx) => {
+          await assertSubscriptionEntitlement(trx, { requireWriteAccess: true });
+          return updateMemberStatus(
             trx,
             request.params.membershipId,
             request.body,
-          ),
+          );
+        },
       );
     },
   );
@@ -2797,7 +2925,10 @@ export async function buildApp(
       const invitation = await withTenantTransaction(
         options.db,
         { tenantId, userId: principal.userId, traceId },
-        (trx) => createStaffInvitation(trx, request.body),
+        async (trx) => {
+          await assertSubscriptionEntitlement(trx, { requireWriteAccess: true });
+          return createStaffInvitation(trx, request.body);
+        },
       );
 
       return reply.status(201).send(invitation);
@@ -2933,6 +3064,7 @@ export async function buildApp(
           await assertAuthorized(trx, {
             permission: 'sub:subscription:read',
           });
+          await evaluateSubscriptionLifecycle(trx);
           return getTenantSubscriptionEntitlement(trx);
         },
       );
@@ -2950,6 +3082,7 @@ export async function buildApp(
             planCode: Type.Optional(
               Type.Union([
                 Type.Literal('STARTER'),
+                Type.Literal('PROFESSIONAL'),
                 Type.Literal('GROWTH'),
                 Type.Literal('ENTERPRISE'),
               ]),
@@ -3088,6 +3221,1276 @@ export async function buildApp(
       );
 
       return reply.status(201).send(result);
+    },
+  );
+
+  // 15B. Phase 10.1-10.4 SaaS Subscription Catalog, Pricing, Usage, Lifecycle & Billing
+  app.get(
+    '/v1/subscriptions/plans',
+    {
+      schema: {
+        querystring: Type.Object(
+          {
+            includeHidden: Type.Optional(Type.Boolean()),
+          },
+          { additionalProperties: false },
+        ),
+      },
+    },
+    async (request) => {
+      return withAppUserTransaction(
+        options.db,
+        { traceId: String(request.id) },
+        async (trx) => {
+          const items = await listSubscriptionPlans(
+            trx,
+            Boolean(request.query.includeHidden),
+          );
+          return { items };
+        },
+      );
+    },
+  );
+
+  app.post(
+    '/v1/subscriptions/calculate-pricing',
+    {
+      schema: {
+        body: CalculateSubscriptionPricingRequestSchema,
+      },
+    },
+    async (request) => {
+      return withAppUserTransaction(
+        options.db,
+        { traceId: String(request.id) },
+        async (trx) => calculateServerSubscriptionPricing(trx, request.body),
+      );
+    },
+  );
+
+  app.get(
+    '/v1/subscriptions/bank-settings',
+    async (request) => {
+      return withAppUserTransaction(
+        options.db,
+        { traceId: String(request.id) },
+        async (trx) => getPlatformBankSettings(trx),
+      );
+    },
+  );
+
+  app.get(
+    '/v1/subscriptions/usage',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      return withTenantTransaction(
+        options.db,
+        {
+          tenantId: request.headers['x-tenant-id'],
+          userId: principal.userId,
+          traceId: String(request.id),
+        },
+        async (trx) => {
+          await assertAuthorized(trx, { permission: 'sub:subscription:read' });
+          return getTenantSubscriptionUsage(trx);
+        },
+      );
+    },
+  );
+
+  app.post(
+    '/v1/subscriptions/trial/start',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        body: StartFreeTrialRequestSchema,
+      },
+    },
+    async (request, reply) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const result = await withTenantTransaction(
+        options.db,
+        {
+          tenantId: request.headers['x-tenant-id'],
+          userId: principal.userId,
+          traceId: String(request.id),
+        },
+        async (trx) => {
+          await assertAuthorized(trx, {
+            permission: 'sub:subscription:manage',
+            requireAllLocationsAccess: true,
+          });
+          return startTenantFreeTrial(trx, request.body);
+        },
+      );
+      return reply.status(201).send(result);
+    },
+  );
+
+  app.post(
+    '/v1/subscriptions/checkout/upgrade',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        body: UpgradeCheckoutRequestSchema,
+      },
+    },
+    async (request, reply) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const result = await withTenantTransaction(
+        options.db,
+        {
+          tenantId: request.headers['x-tenant-id'],
+          userId: principal.userId,
+          traceId: String(request.id),
+        },
+        async (trx) => {
+          await assertAuthorized(trx, {
+            permission: 'sub:subscription:manage',
+            requireAllLocationsAccess: true,
+          });
+          return createSubscriptionCheckoutInvoice(trx, request.body);
+        },
+      );
+      return reply.status(201).send(result);
+    },
+  );
+
+  app.post(
+    '/v1/subscriptions/downgrade/schedule',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        body: ScheduleDowngradeRequestSchema,
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      return withTenantTransaction(
+        options.db,
+        {
+          tenantId: request.headers['x-tenant-id'],
+          userId: principal.userId,
+          traceId: String(request.id),
+        },
+        async (trx) => {
+          await assertAuthorized(trx, {
+            permission: 'sub:subscription:manage',
+            requireAllLocationsAccess: true,
+          });
+          return scheduleSubscriptionDowngrade(trx, request.body);
+        },
+      );
+    },
+  );
+
+  app.post(
+    '/v1/subscriptions/downgrade/cancel',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      return withTenantTransaction(
+        options.db,
+        {
+          tenantId: request.headers['x-tenant-id'],
+          userId: principal.userId,
+          traceId: String(request.id),
+        },
+        async (trx) => {
+          await assertAuthorized(trx, {
+            permission: 'sub:subscription:manage',
+            requireAllLocationsAccess: true,
+          });
+          return cancelScheduledSubscriptionDowngrade(trx);
+        },
+      );
+    },
+  );
+
+  app.post(
+    '/v1/subscriptions/branch-addons/checkout',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        body: PurchaseBranchAddonRequestSchema,
+      },
+    },
+    async (request, reply) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const result = await withTenantTransaction(
+        options.db,
+        {
+          tenantId: request.headers['x-tenant-id'],
+          userId: principal.userId,
+          traceId: String(request.id),
+        },
+        async (trx) => {
+          await assertAuthorized(trx, {
+            permission: 'sub:subscription:manage',
+            requireAllLocationsAccess: true,
+          });
+          return createBranchAddonCheckout(trx, request.body);
+        },
+      );
+      return reply.status(201).send(result);
+    },
+  );
+
+  app.post(
+    '/v1/subscriptions/renewals/invoice',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        body: Type.Object(
+          {
+            billingCycle: Type.Optional(
+              Type.Union([Type.Literal('MONTHLY'), Type.Literal('ANNUAL')]),
+            ),
+          },
+          { additionalProperties: false },
+        ),
+      },
+    },
+    async (request, reply) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const result = await withTenantTransaction(
+        options.db,
+        {
+          tenantId: request.headers['x-tenant-id'],
+          userId: principal.userId,
+          traceId: String(request.id),
+        },
+        async (trx) => {
+          await assertAuthorized(trx, {
+            permission: 'sub:subscription:manage',
+            requireAllLocationsAccess: true,
+          });
+          return createRenewalInvoice(trx, request.body.billingCycle);
+        },
+      );
+      return reply.status(201).send(result);
+    },
+  );
+
+  app.post(
+    '/v1/subscriptions/evaluate-lifecycle',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      return withTenantTransaction(
+        options.db,
+        {
+          tenantId: request.headers['x-tenant-id'],
+          userId: principal.userId,
+          traceId: String(request.id),
+        },
+        async (trx) => {
+          await assertAuthorized(trx, { permission: 'sub:subscription:read' });
+          return evaluateSubscriptionLifecycle(trx);
+        },
+      );
+    },
+  );
+
+  app.get(
+    '/v1/subscriptions/invoices',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      return withTenantTransaction(
+        options.db,
+        {
+          tenantId: request.headers['x-tenant-id'],
+          userId: principal.userId,
+          traceId: String(request.id),
+        },
+        async (trx) => {
+          await assertAuthorized(trx, { permission: 'sub:subscription:read' });
+          const items = await listTenantSubscriptionInvoices(trx);
+          return { items };
+        },
+      );
+    },
+  );
+
+  app.get(
+    '/v1/subscriptions/history',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      return withTenantTransaction(
+        options.db,
+        {
+          tenantId: request.headers['x-tenant-id'],
+          userId: principal.userId,
+          traceId: String(request.id),
+        },
+        async (trx) => {
+          await assertAuthorized(trx, { permission: 'sub:subscription:read' });
+          const items = await listTenantPlanHistory(trx);
+          return { items };
+        },
+      );
+    },
+  );
+
+  app.post(
+    '/v1/subscriptions/payments/bank-transfer',
+    {
+      schema: {
+        headers: AuthenticatedIdempotentHeadersSchema,
+        body: SubmitManualBankTransferRequestSchema,
+      },
+    },
+    async (request, reply) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const idempotencyKey = request.headers['idempotency-key'];
+      const result = await withTenantTransaction(
+        options.db,
+        {
+          tenantId: request.headers['x-tenant-id'],
+          userId: principal.userId,
+          traceId: String(request.id),
+        },
+        async (trx) => {
+          await assertAuthorized(trx, {
+            permission: 'sub:subscription:manage',
+            requireAllLocationsAccess: true,
+          });
+          return submitManualBankTransferPayment(trx, request.body, idempotencyKey);
+        },
+      );
+      return reply.status(201).send(result);
+    },
+  );
+
+  app.get(
+    '/v1/subscriptions/payments',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      return withTenantTransaction(
+        options.db,
+        {
+          tenantId: request.headers['x-tenant-id'],
+          userId: principal.userId,
+          traceId: String(request.id),
+        },
+        async (trx) => {
+          await assertAuthorized(trx, { permission: 'sub:subscription:read' });
+          const items = await listTenantPaymentSubmissions(trx);
+          return { items };
+        },
+      );
+    },
+  );
+
+  app.get(
+    '/v1/subscriptions/payments/:submissionId/proof',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object(
+          { submissionId: UuidSchema },
+          { additionalProperties: false },
+        ),
+      },
+    },
+    async (request, reply) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const proof = await withTenantTransaction(
+        options.db,
+        {
+          tenantId: request.headers['x-tenant-id'],
+          userId: principal.userId,
+          traceId: String(request.id),
+        },
+        async (trx) => {
+          await assertAuthorized(trx, { permission: 'sub:subscription:read' });
+          return getAuthorizedPaymentProofBytes(
+            trx,
+            request.params.submissionId,
+            false,
+          );
+        },
+      );
+      const safeName = proof.fileName.replace(/[^\w.-]/g, '_');
+      return reply
+        .header('Content-Type', proof.mimeType)
+        .header('Content-Disposition', `inline; filename="${safeName}"`)
+        .header('Cache-Control', 'no-store')
+        .send(proof.buffer);
+    },
+  );
+
+  app.post(
+    '/v1/subscriptions/checkout/online',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        body: OnlineGatewayCheckoutRequestSchema,
+      },
+    },
+    async (request, reply) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const result = await withTenantTransaction(
+        options.db,
+        {
+          tenantId: request.headers['x-tenant-id'],
+          userId: principal.userId,
+          traceId: String(request.id),
+        },
+        async (trx) => {
+          await assertAuthorized(trx, {
+            permission: 'sub:subscription:manage',
+            requireAllLocationsAccess: true,
+          });
+          return createOnlineGatewayPaymentSession(trx, request.body);
+        },
+      );
+      return reply.status(201).send(result);
+    },
+  );
+
+  app.post(
+    '/v1/subscriptions/webhooks/:providerCode',
+    {
+      schema: {
+        params: Type.Object(
+          {
+            providerCode: Type.Union([
+              Type.Literal('PAYHERE_LK'),
+              Type.Literal('STRIPE'),
+              Type.Literal('PADDLE'),
+            ]),
+          },
+          { additionalProperties: false },
+        ),
+        body: OnlineGatewayWebhookRequestSchema,
+      },
+    },
+    async (request) => {
+      const providerCode = request.params.providerCode as OnlineGatewayProviderCode;
+      const rawBodyString = JSON.stringify(request.body);
+      const sigHeaderRaw =
+        request.headers['x-gateway-signature'] ??
+        request.headers['x-webhook-signature'] ??
+        request.headers['stripe-signature'] ??
+        request.headers['paddle-signature'];
+      const signatureHeader = Array.isArray(sigHeaderRaw)
+        ? sigHeaderRaw[0]
+        : sigHeaderRaw;
+
+      const adapter = getOnlineGatewayAdapter(providerCode);
+      if (
+        !adapter.verifyWebhookSignature({
+          rawPayload: rawBodyString,
+          signatureHeader,
+        })
+      ) {
+        throw new AppError({
+          statusCode: 401,
+          errorCode: 'SUB_WEBHOOK_SIGNATURE_INVALID',
+          title: 'Invalid Gateway Webhook Signature',
+          detail: 'Gateway callback signature verification failed.',
+        });
+      }
+
+      return withTenantTransaction(
+        options.db,
+        {
+          tenantId: request.body.tenantId,
+          userId: request.body.tenantId,
+          traceId: String(request.id),
+        },
+        async (trx) =>
+          processOnlineGatewayWebhook(trx, {
+            providerCode,
+            rawBodyString,
+            signatureHeader,
+            body: request.body,
+          }),
+      );
+    },
+  );
+
+  // 15C. Platform Super Admin Subscription Governance Endpoints (strictly users.is_platform_admin = true)
+  app.get(
+    '/v1/platform/subscriptions/payments',
+    {
+      schema: {
+        headers: Type.Object(
+          {
+            authorization: Type.String({ minLength: 1 }),
+          },
+          { additionalProperties: true },
+        ),
+        querystring: Type.Object(
+          {
+            status: Type.Optional(PaymentSubmissionStatusSchema),
+            search: Type.Optional(Type.String({ maxLength: 160 })),
+            limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 200 })),
+            offset: Type.Optional(Type.Integer({ minimum: 0 })),
+          },
+          { additionalProperties: false },
+        ),
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      return withPlatformAdminTransaction(
+        options.db,
+        {
+          userId: principal.userId,
+          traceId: String(request.id),
+          jwtAal: principal.aal,
+          jwtAmr: principal.amr,
+        },
+        async (trx) => {
+          const items = await listPlatformPaymentSubmissions(
+            trx,
+            request.query.status,
+            request.query.search,
+            request.query.limit,
+            request.query.offset,
+          );
+          return { items };
+        },
+      );
+    },
+  );
+
+  app.get(
+    '/v1/platform/subscriptions/payments/:submissionId/proof',
+    {
+      schema: {
+        headers: Type.Object(
+          {
+            authorization: Type.String({ minLength: 1 }),
+          },
+          { additionalProperties: true },
+        ),
+        params: Type.Object(
+          { submissionId: UuidSchema },
+          { additionalProperties: false },
+        ),
+      },
+    },
+    async (request, reply) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const proof = await withPlatformAdminTransaction(
+        options.db,
+        { userId: principal.userId, traceId: String(request.id) },
+        async (trx) =>
+          getAuthorizedPaymentProofBytes(trx, request.params.submissionId, true),
+      );
+      const safeName = proof.fileName.replace(/[^\w.-]/g, '_');
+      return reply
+        .header('Content-Type', proof.mimeType)
+        .header('Content-Disposition', `inline; filename="${safeName}"`)
+        .header('Cache-Control', 'no-store')
+        .send(proof.buffer);
+    },
+  );
+
+  app.post(
+    '/v1/platform/subscriptions/payments/:submissionId/verify',
+    {
+      schema: {
+        headers: Type.Object(
+          {
+            authorization: Type.String({ minLength: 1 }),
+          },
+          { additionalProperties: true },
+        ),
+        params: Type.Object(
+          { submissionId: UuidSchema },
+          { additionalProperties: false },
+        ),
+        body: VerifyPaymentSubmissionRequestSchema,
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      return withPlatformAdminTransaction(
+        options.db,
+        {
+          userId: principal.userId,
+          traceId: String(request.id),
+          allowedRoles: ['SUPER_ADMIN', 'BILLING_ADMIN'],
+          requireMfaStepUp: true,
+          jwtAal: principal.aal,
+          jwtAmr: principal.amr,
+        },
+        async (trx) =>
+          verifyManualPaymentSubmission(
+            trx,
+            request.params.submissionId,
+            request.body,
+          ),
+      );
+    },
+  );
+
+  app.patch(
+    '/v1/platform/subscriptions/settings',
+    {
+      schema: {
+        headers: Type.Object(
+          {
+            authorization: Type.String({ minLength: 1 }),
+          },
+          { additionalProperties: true },
+        ),
+        body: UpdatePlatformBankSettingsRequestSchema,
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      return withPlatformAdminTransaction(
+        options.db,
+        {
+          userId: principal.userId,
+          traceId: String(request.id),
+          allowedRoles: ['SUPER_ADMIN', 'BILLING_ADMIN'],
+          requireMfaStepUp: true,
+          jwtAal: principal.aal,
+          jwtAmr: principal.amr,
+        },
+        async (trx) => updatePlatformBankSettings(trx, request.body),
+      );
+    },
+  );
+
+  app.patch(
+    '/v1/platform/subscriptions/plans/:planCode',
+    {
+      schema: {
+        headers: Type.Object(
+          {
+            authorization: Type.String({ minLength: 1 }),
+          },
+          { additionalProperties: true },
+        ),
+        params: Type.Object(
+          { planCode: SubscriptionPlanCodeSchema },
+          { additionalProperties: false },
+        ),
+        body: UpdatePlatformPlanConfigRequestSchema,
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      return withPlatformAdminTransaction(
+        options.db,
+        {
+          userId: principal.userId,
+          traceId: String(request.id),
+          allowedRoles: ['SUPER_ADMIN', 'BILLING_ADMIN'],
+          requireMfaStepUp: true,
+          jwtAal: principal.aal,
+          jwtAmr: principal.amr,
+        },
+        async (trx) =>
+          updatePlatformPlanConfig(
+            trx,
+            request.params.planCode,
+            request.body,
+          ),
+      );
+    },
+  );
+
+  // 15D. Business Subscription Notifications & Support Channels (Phase 10.7)
+  app.get(
+    '/v1/subscriptions/notifications',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      return withTenantTransaction(
+        options.db,
+        {
+          tenantId: request.headers['x-tenant-id'],
+          userId: principal.userId,
+          traceId: String(request.id),
+        },
+        async (trx) => {
+          await assertAuthorized(trx, { permission: 'sub:subscription:read' });
+          const items = await listTenantSubscriptionNotifications(trx);
+          return { items };
+        },
+      );
+    },
+  );
+
+  app.post(
+    '/v1/subscriptions/notifications/:notificationId/read',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object(
+          { notificationId: UuidSchema },
+          { additionalProperties: false },
+        ),
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      return withTenantTransaction(
+        options.db,
+        {
+          tenantId: request.headers['x-tenant-id'],
+          userId: principal.userId,
+          traceId: String(request.id),
+        },
+        async (trx) => {
+          await assertAuthorized(trx, { permission: 'sub:subscription:read' });
+          return markSubscriptionNotificationRead(
+            trx,
+            request.params.notificationId,
+          );
+        },
+      );
+    },
+  );
+
+  app.post(
+    '/v1/subscriptions/notifications/read-all',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      return withTenantTransaction(
+        options.db,
+        {
+          tenantId: request.headers['x-tenant-id'],
+          userId: principal.userId,
+          traceId: String(request.id),
+        },
+        async (trx) => {
+          await assertAuthorized(trx, { permission: 'sub:subscription:read' });
+          return markAllSubscriptionNotificationsRead(trx);
+        },
+      );
+    },
+  );
+
+  app.get(
+    '/v1/subscriptions/support',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      return withTenantTransaction(
+        options.db,
+        {
+          tenantId: request.headers['x-tenant-id'],
+          userId: principal.userId,
+          traceId: String(request.id),
+        },
+        async (trx) => {
+          await assertAuthorized(trx, { permission: 'sub:subscription:read' });
+          return getTenantSupportOptions(trx);
+        },
+      );
+    },
+  );
+
+  // 15E. Platform Super Admin Security, MFA, Businesses, Analytics, Audit & Backups (Phase 10.6, 10.8, 10.9)
+  app.get(
+    '/v1/platform/security/me',
+    {
+      schema: {
+        headers: Type.Object({ authorization: Type.String({ minLength: 1 }) }, { additionalProperties: true }),
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(request.headers.authorization, jwksProvider, jwtOptions);
+      return withPlatformAdminTransaction(
+        options.db,
+        { userId: principal.userId, traceId: String(request.id), jwtAal: principal.aal, jwtAmr: principal.amr },
+        (trx) => getPlatformAdminSecurityProfile(trx),
+      );
+    },
+  );
+
+  app.post(
+    '/v1/platform/security/mfa/setup',
+    {
+      schema: {
+        headers: Type.Object({ authorization: Type.String({ minLength: 1 }) }, { additionalProperties: true }),
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(request.headers.authorization, jwksProvider, jwtOptions);
+      return withPlatformAdminTransaction(
+        options.db,
+        { userId: principal.userId, traceId: String(request.id), jwtAal: principal.aal, jwtAmr: principal.amr },
+        (trx) => setupPlatformAdminTotp(trx),
+      );
+    },
+  );
+
+  app.post(
+    '/v1/platform/security/mfa/verify',
+    {
+      schema: {
+        headers: Type.Object({ authorization: Type.String({ minLength: 1 }) }, { additionalProperties: true }),
+        body: PlatformMfaVerifyRequestSchema,
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(request.headers.authorization, jwksProvider, jwtOptions);
+      return withPlatformAdminTransaction(
+        options.db,
+        { userId: principal.userId, traceId: String(request.id), jwtAal: principal.aal, jwtAmr: principal.amr },
+        (trx) => verifyPlatformAdminTotp(trx, request.body.code),
+      );
+    },
+  );
+
+  app.get(
+    '/v1/platform/security/admins',
+    {
+      schema: {
+        headers: Type.Object({ authorization: Type.String({ minLength: 1 }) }, { additionalProperties: true }),
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(request.headers.authorization, jwksProvider, jwtOptions);
+      return withPlatformAdminTransaction(
+        options.db,
+        { userId: principal.userId, traceId: String(request.id), allowedRoles: ['SUPER_ADMIN'], jwtAal: principal.aal, jwtAmr: principal.amr },
+        async (trx) => ({ items: await listPlatformAdminAccounts(trx) }),
+      );
+    },
+  );
+
+  app.post(
+    '/v1/platform/security/admins',
+    {
+      schema: {
+        headers: Type.Object({ authorization: Type.String({ minLength: 1 }) }, { additionalProperties: true }),
+        body: PlatformProvisionAdminRequestSchema,
+      },
+    },
+    async (request, reply) => {
+      const principal = await verifySupabaseJwt(request.headers.authorization, jwksProvider, jwtOptions);
+      const items = await withPlatformAdminTransaction(
+        options.db,
+        { userId: principal.userId, traceId: String(request.id), allowedRoles: ['SUPER_ADMIN'], requireMfaStepUp: true, jwtAal: principal.aal, jwtAmr: principal.amr },
+        (trx) => provisionPlatformAdminAccount(trx, request.body),
+      );
+      return reply.status(201).send({ items });
+    },
+  );
+
+  app.patch(
+    '/v1/platform/security/admins/:userId',
+    {
+      schema: {
+        headers: Type.Object({ authorization: Type.String({ minLength: 1 }) }, { additionalProperties: true }),
+        params: Type.Object({ userId: UuidSchema }, { additionalProperties: false }),
+        body: PlatformUpdateAdminRequestSchema,
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(request.headers.authorization, jwksProvider, jwtOptions);
+      return withPlatformAdminTransaction(
+        options.db,
+        { userId: principal.userId, traceId: String(request.id), allowedRoles: ['SUPER_ADMIN'], requireMfaStepUp: true, jwtAal: principal.aal, jwtAmr: principal.amr },
+        async (trx) => ({ items: await updatePlatformAdminAccount(trx, request.params.userId, request.body) }),
+      );
+    },
+  );
+
+  app.get(
+    '/v1/platform/analytics/overview',
+    {
+      schema: {
+        headers: Type.Object({ authorization: Type.String({ minLength: 1 }) }, { additionalProperties: true }),
+        querystring: PlatformAnalyticsQuerySchema,
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(request.headers.authorization, jwksProvider, jwtOptions);
+      return withPlatformAdminTransaction(
+        options.db,
+        { userId: principal.userId, traceId: String(request.id), jwtAal: principal.aal, jwtAmr: principal.amr },
+        (trx) => getPlatformAnalyticsOverview(trx, request.query),
+      );
+    },
+  );
+
+  app.get(
+    '/v1/platform/analytics/export',
+    {
+      schema: {
+        headers: Type.Object({ authorization: Type.String({ minLength: 1 }) }, { additionalProperties: true }),
+        querystring: PlatformAnalyticsQuerySchema,
+      },
+    },
+    async (request, reply) => {
+      const principal = await verifySupabaseJwt(request.headers.authorization, jwksProvider, jwtOptions);
+      const csv = await withPlatformAdminTransaction(
+        options.db,
+        { userId: principal.userId, traceId: String(request.id), jwtAal: principal.aal, jwtAmr: principal.amr },
+        (trx) => exportPlatformAnalyticsCsv(trx, request.query),
+      );
+      return reply
+        .header('Content-Type', 'text/csv; charset=utf-8')
+        .header('Content-Disposition', 'attachment; filename="nexstock-saas-analytics.csv"')
+        .header('Cache-Control', 'no-store')
+        .send(csv);
+    },
+  );
+
+  app.get(
+    '/v1/platform/businesses',
+    {
+      schema: {
+        headers: Type.Object({ authorization: Type.String({ minLength: 1 }) }, { additionalProperties: true }),
+        querystring: Type.Object(
+          {
+            search: Type.Optional(Type.String({ maxLength: 160 })),
+            status: Type.Optional(SubscriptionStatusSchema),
+            planCode: Type.Optional(SubscriptionPlanCodeSchema),
+            limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
+            offset: Type.Optional(Type.Integer({ minimum: 0 })),
+          },
+          { additionalProperties: false },
+        ),
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(request.headers.authorization, jwksProvider, jwtOptions);
+      return withPlatformAdminTransaction(
+        options.db,
+        { userId: principal.userId, traceId: String(request.id), jwtAal: principal.aal, jwtAmr: principal.amr },
+        (trx) => listPlatformBusinesses(trx, request.query),
+      );
+    },
+  );
+
+  app.get(
+    '/v1/platform/businesses/:tenantId',
+    {
+      schema: {
+        headers: Type.Object({ authorization: Type.String({ minLength: 1 }) }, { additionalProperties: true }),
+        params: Type.Object({ tenantId: UuidSchema }, { additionalProperties: false }),
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(request.headers.authorization, jwksProvider, jwtOptions);
+      return withPlatformAdminTransaction(
+        options.db,
+        { userId: principal.userId, targetTenantId: request.params.tenantId, traceId: String(request.id), jwtAal: principal.aal, jwtAmr: principal.amr },
+        (trx) => getPlatformBusinessDetail(trx, request.params.tenantId),
+      );
+    },
+  );
+
+  app.post(
+    '/v1/platform/businesses/:tenantId/suspend',
+    {
+      schema: {
+        headers: Type.Object({ authorization: Type.String({ minLength: 1 }) }, { additionalProperties: true }),
+        params: Type.Object({ tenantId: UuidSchema }, { additionalProperties: false }),
+        body: PlatformSuspendBusinessRequestSchema,
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(request.headers.authorization, jwksProvider, jwtOptions);
+      return withPlatformAdminTransaction(
+        options.db,
+        { userId: principal.userId, targetTenantId: request.params.tenantId, traceId: String(request.id), allowedRoles: ['SUPER_ADMIN', 'SUPPORT_ADMIN'], requireMfaStepUp: true, jwtAal: principal.aal, jwtAmr: principal.amr },
+        (trx) => suspendPlatformBusiness(trx, request.params.tenantId, request.body.reason),
+      );
+    },
+  );
+
+  app.post(
+    '/v1/platform/businesses/:tenantId/restore',
+    {
+      schema: {
+        headers: Type.Object({ authorization: Type.String({ minLength: 1 }) }, { additionalProperties: true }),
+        params: Type.Object({ tenantId: UuidSchema }, { additionalProperties: false }),
+        body: PlatformRestoreBusinessRequestSchema,
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(request.headers.authorization, jwksProvider, jwtOptions);
+      return withPlatformAdminTransaction(
+        options.db,
+        { userId: principal.userId, targetTenantId: request.params.tenantId, traceId: String(request.id), allowedRoles: ['SUPER_ADMIN', 'SUPPORT_ADMIN'], requireMfaStepUp: true, jwtAal: principal.aal, jwtAmr: principal.amr },
+        (trx) => restorePlatformBusiness(trx, request.params.tenantId, request.body),
+      );
+    },
+  );
+
+  app.post(
+    '/v1/platform/businesses/:tenantId/subscription/override',
+    {
+      schema: {
+        headers: Type.Object({ authorization: Type.String({ minLength: 1 }) }, { additionalProperties: true }),
+        params: Type.Object({ tenantId: UuidSchema }, { additionalProperties: false }),
+        body: PlatformSubscriptionOverrideRequestSchema,
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(request.headers.authorization, jwksProvider, jwtOptions);
+      return withPlatformAdminTransaction(
+        options.db,
+        { userId: principal.userId, targetTenantId: request.params.tenantId, traceId: String(request.id), allowedRoles: ['SUPER_ADMIN', 'BILLING_ADMIN'], requireMfaStepUp: true, jwtAal: principal.aal, jwtAmr: principal.amr },
+        (trx) => adminOverrideBusinessSubscription(trx, request.params.tenantId, request.body),
+      );
+    },
+  );
+
+  app.get(
+    '/v1/platform/subscriptions/plans/history',
+    {
+      schema: {
+        headers: Type.Object({ authorization: Type.String({ minLength: 1 }) }, { additionalProperties: true }),
+        querystring: Type.Object({ planCode: Type.Optional(SubscriptionPlanCodeSchema) }, { additionalProperties: false }),
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(request.headers.authorization, jwksProvider, jwtOptions);
+      return withPlatformAdminTransaction(
+        options.db,
+        { userId: principal.userId, traceId: String(request.id), jwtAal: principal.aal, jwtAmr: principal.amr },
+        async (trx) => ({ items: await listPlatformPlanConfigHistory(trx, request.query.planCode) }),
+      );
+    },
+  );
+
+  app.get(
+    '/v1/platform/audit-logs',
+    {
+      schema: {
+        headers: Type.Object({ authorization: Type.String({ minLength: 1 }) }, { additionalProperties: true }),
+        querystring: Type.Object(
+          {
+            tenantId: Type.Optional(UuidSchema),
+            action: Type.Optional(Type.String({ maxLength: 120 })),
+            limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
+            offset: Type.Optional(Type.Integer({ minimum: 0 })),
+          },
+          { additionalProperties: false },
+        ),
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(request.headers.authorization, jwksProvider, jwtOptions);
+      return withPlatformAdminTransaction(
+        options.db,
+        { userId: principal.userId, targetTenantId: request.query.tenantId, traceId: String(request.id), jwtAal: principal.aal, jwtAmr: principal.amr },
+        (trx) => listPlatformAuditLogs(trx, request.query),
+      );
+    },
+  );
+
+  app.get(
+    '/v1/platform/monitoring/alerts',
+    {
+      schema: {
+        headers: Type.Object({ authorization: Type.String({ minLength: 1 }) }, { additionalProperties: true }),
+        querystring: Type.Object(
+          {
+            status: Type.Optional(Type.Union([Type.Literal('OPEN'), Type.Literal('ACKNOWLEDGED'), Type.Literal('RESOLVED')])),
+          },
+          { additionalProperties: false },
+        ),
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(request.headers.authorization, jwksProvider, jwtOptions);
+      return withPlatformAdminTransaction(
+        options.db,
+        { userId: principal.userId, traceId: String(request.id), jwtAal: principal.aal, jwtAmr: principal.amr },
+        (trx) => listPlatformSystemAlerts(trx, request.query.status),
+      );
+    },
+  );
+
+  app.post(
+    '/v1/platform/monitoring/alerts/:alertId/resolve',
+    {
+      schema: {
+        headers: Type.Object({ authorization: Type.String({ minLength: 1 }) }, { additionalProperties: true }),
+        params: Type.Object({ alertId: UuidSchema }, { additionalProperties: false }),
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(request.headers.authorization, jwksProvider, jwtOptions);
+      return withPlatformAdminTransaction(
+        options.db,
+        { userId: principal.userId, traceId: String(request.id), jwtAal: principal.aal, jwtAmr: principal.amr },
+        (trx) => resolvePlatformSystemAlert(trx, request.params.alertId),
+      );
+    },
+  );
+
+  app.get(
+    '/v1/platform/backups/status',
+    {
+      schema: {
+        headers: Type.Object({ authorization: Type.String({ minLength: 1 }) }, { additionalProperties: true }),
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(request.headers.authorization, jwksProvider, jwtOptions);
+      return withPlatformAdminTransaction(
+        options.db,
+        { userId: principal.userId, traceId: String(request.id), jwtAal: principal.aal, jwtAmr: principal.amr },
+        (trx) => listBackupVerificationRuns(trx),
+      );
+    },
+  );
+
+  app.post(
+    '/v1/platform/backups/verify',
+    {
+      schema: {
+        headers: Type.Object({ authorization: Type.String({ minLength: 1 }) }, { additionalProperties: true }),
+      },
+    },
+    async (request, reply) => {
+      const principal = await verifySupabaseJwt(request.headers.authorization, jwksProvider, jwtOptions);
+      const run = await withPlatformAdminTransaction(
+        options.db,
+        { userId: principal.userId, traceId: String(request.id), allowedRoles: ['SUPER_ADMIN'], jwtAal: principal.aal, jwtAmr: principal.amr },
+        (trx) => runBackupAndIntegrityVerification(trx, 'MANUAL_CHECK'),
+      );
+      return reply.status(201).send(run);
     },
   );
 
@@ -5337,6 +6740,11 @@ export async function buildApp(
               endpoint: 'POST /v1/inventory/batches',
               requestPayload: request.body,
               execute: async (innerTrx) => {
+                await assertFeatureEntitlement(
+                  innerTrx,
+                  'batchTracking',
+                  'Batch & Expiry tracking requires a Professional or Enterprise subscription plan.',
+                );
                 const body = await createBatch(
                   innerTrx,
                   request.body,
@@ -5356,7 +6764,14 @@ export async function buildApp(
       const result = await withTenantTransaction(
         options.db,
         { tenantId, userId: principal.userId, traceId },
-        (trx) => createBatch(trx, request.body),
+        async (trx) => {
+          await assertFeatureEntitlement(
+            trx,
+            'batchTracking',
+            'Batch & Expiry tracking requires a Professional or Enterprise subscription plan.',
+          );
+          return createBatch(trx, request.body);
+        },
       );
 
       reply.status(201);
@@ -5696,7 +7111,14 @@ export async function buildApp(
       const created = await withTenantTransaction(
         options.db,
         { tenantId, userId: principal.userId, traceId },
-        (trx) => createStockTransfer(trx, request.body),
+        async (trx) => {
+          await assertFeatureEntitlement(
+            trx,
+            'stockTransfers',
+            'Inter-branch stock transfers require a Professional or Enterprise subscription plan.',
+          );
+          return createStockTransfer(trx, request.body);
+        },
       );
       return reply.status(201).send(created);
     },
@@ -5869,6 +7291,11 @@ export async function buildApp(
               endpoint: 'POST /v1/inventory/serials',
               requestPayload: request.body,
               execute: async (innerTrx) => {
+                await assertFeatureEntitlement(
+                  innerTrx,
+                  'serialTracking',
+                  'Serial number tracking requires a Professional or Enterprise subscription plan.',
+                );
                 const body = await registerSerialStock(
                   innerTrx,
                   idempotencyKey,
@@ -5888,7 +7315,14 @@ export async function buildApp(
       const result = await withTenantTransaction(
         options.db,
         { tenantId, userId: principal.userId, traceId },
-        (trx) => registerSerialStock(trx, generateUuidV7(), request.body),
+        async (trx) => {
+          await assertFeatureEntitlement(
+            trx,
+            'serialTracking',
+            'Serial number tracking requires a Professional or Enterprise subscription plan.',
+          );
+          return registerSerialStock(trx, generateUuidV7(), request.body);
+        },
       );
 
       reply.status(201);
@@ -10776,6 +12210,97 @@ export async function buildApp(
             request.query as BusinessReportDrilldownQuery,
           ),
       );
+    },
+  );
+
+  app.get(
+    '/v1/reports/business/export',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        querystring: Type.Object(
+          {
+            category: Type.Optional(
+              Type.Union([
+                Type.Literal('SALES'),
+                Type.Literal('INVENTORY'),
+                Type.Literal('PROFITABILITY'),
+                Type.Literal('PURCHASING'),
+                Type.Literal('CUSTOMER_CREDIT'),
+                Type.Literal('FINANCIAL_EXPENSE'),
+                Type.Literal('AUDIT_OPERATIONAL'),
+              ]),
+            ),
+            granularity: Type.Optional(
+              Type.Union([
+                Type.Literal('DAILY'),
+                Type.Literal('WEEKLY'),
+                Type.Literal('MONTHLY'),
+              ]),
+            ),
+            startDate: Type.Optional(Type.String()),
+            endDate: Type.Optional(Type.String()),
+            branchId: Type.Optional(UuidSchema),
+            warehouseId: Type.Optional(UuidSchema),
+          },
+          { additionalProperties: false },
+        ),
+      },
+    },
+    async (request, reply) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      const report = await withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        async (trx) => {
+          await assertFeatureEntitlement(
+            trx,
+            'basicCsvExport',
+            'CSV report export is not enabled on this plan.',
+          );
+          return getBusinessReport(trx, request.query as BusinessReportQuery);
+        },
+      );
+
+      const safeCsv = (v: unknown) => {
+        const s = String(v ?? '');
+        const g = /^[=+\-@\t\r]/.test(s) ? `'${s}` : s;
+        return `"${g.replace(/"/g, '""')}"`;
+      };
+
+      const rows: string[][] = [
+        ['Section', 'Label', 'Value', 'Previous / Context'],
+      ];
+      const summary = report as unknown as {
+        readonly kpis?: ReadonlyArray<{ label?: string; value?: unknown; previousValue?: unknown }>;
+        readonly summary?: Record<string, unknown>;
+      };
+      if (Array.isArray(summary.kpis)) {
+        for (const k of summary.kpis) {
+          rows.push(['KPI', k.label ?? '', String(k.value ?? ''), String(k.previousValue ?? '')]);
+        }
+      }
+      if (summary.summary && typeof summary.summary === 'object') {
+        for (const [k, v] of Object.entries(summary.summary)) {
+          if (typeof v !== 'object' || v === null) {
+            rows.push(['Summary', k, String(v ?? ''), '']);
+          }
+        }
+      }
+
+      const csvBody = rows.map((r) => r.map(safeCsv).join(',')).join('\r\n');
+      return reply
+        .header('Content-Type', 'text/csv; charset=utf-8')
+        .header('Content-Disposition', 'attachment; filename="nexstock-business-report.csv"')
+        .header('Cache-Control', 'no-store')
+        .send(csvBody);
     },
   );
 

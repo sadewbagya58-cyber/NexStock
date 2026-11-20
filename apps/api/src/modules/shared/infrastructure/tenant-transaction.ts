@@ -16,6 +16,7 @@ export type TenantTransaction = Transaction<NexStockDatabase> & {
   readonly db: Transaction<NexStockDatabase>;
   readonly tenantId: string;
   readonly userId: string;
+  readonly platformRole?: 'SUPER_ADMIN' | 'BILLING_ADMIN' | 'SUPPORT_ADMIN' | 'ANALYST' | undefined;
   readonly _trxCache?: Map<string, unknown>;
 };
 
@@ -131,6 +132,141 @@ export async function withUserTransaction<T>(
     `.execute(trx);
 
     return fn(trx);
+  });
+}
+
+/**
+ * Executes `fn` inside a transaction scoped as Platform Super Admin (`users.is_platform_admin = true` strictly verified in DB).
+ * Never auto-elevates from email string or HTTP headers; sets `app.is_platform_admin = 'true'` with `SET LOCAL` ONLY after verification.
+ */
+export async function withPlatformAdminTransaction<T>(
+  db: Kysely<NexStockDatabase>,
+  ctx: {
+    readonly userId: string;
+    readonly targetTenantId?: string | undefined;
+    readonly traceId: string;
+    readonly allowedRoles?: readonly (
+      | 'SUPER_ADMIN'
+      | 'BILLING_ADMIN'
+      | 'SUPPORT_ADMIN'
+      | 'ANALYST'
+    )[] | undefined;
+    readonly requireMfaStepUp?: boolean | undefined;
+    readonly jwtAal?: string | undefined;
+    readonly jwtAmr?: readonly string[] | undefined;
+  },
+  fn: (trx: TenantTransaction) => Promise<T>,
+): Promise<T> {
+  assertValidUserExecutionContext({ userId: ctx.userId, traceId: ctx.traceId });
+  if (ctx.targetTenantId && !UUID_REGEX.test(ctx.targetTenantId)) {
+    throw new AppError({
+      statusCode: 400,
+      errorCode: 'ERR_TENANT_CONTEXT_MISSING',
+      title: 'Invalid Target Tenant ID',
+      detail: 'Target tenantId must be a valid UUID.',
+    });
+  }
+
+  return db.transaction().execute(async (trx) => {
+    await sql`SET LOCAL ROLE nexstock_app_user`.execute(trx);
+    await sql`
+      SELECT
+        set_config('app.current_user_id', ${ctx.userId}, true),
+        set_config('app.current_tenant_id', ${ctx.targetTenantId ?? ''}, true),
+        set_config('app.is_platform_admin', 'false', true)
+    `.execute(trx);
+
+    const userRow = await trx
+      .selectFrom('users')
+      .select(['id', 'email', 'is_platform_admin'])
+      .where('id', '=', ctx.userId)
+      .executeTakeFirst();
+
+    if (!userRow || userRow.is_platform_admin !== true) {
+      throw new AppError({
+        statusCode: 403,
+        errorCode: 'SUB_PLATFORM_ADMIN_REQUIRED',
+        title: 'Platform Super Admin Authorization Required',
+        detail:
+          'This operation requires an authenticated Platform Super Admin account (is_platform_admin = true).',
+      });
+    }
+
+    await sql`SELECT set_config('app.is_platform_admin', 'true', true)`.execute(trx);
+
+    const adminAcct = await trx
+      .selectFrom('platform_admin_accounts')
+      .select([
+        'platform_role',
+        'status',
+        'mfa_enforced',
+        'totp_enabled',
+        'mfa_verified_until',
+      ])
+      .where('user_id', '=', ctx.userId)
+      .executeTakeFirst()
+      .catch(() => undefined);
+
+    if (adminAcct?.status === 'SUSPENDED') {
+      throw new AppError({
+        statusCode: 403,
+        errorCode: 'SUB_PLATFORM_ADMIN_REQUIRED',
+        title: 'Platform Admin Account Suspended',
+        detail: 'Your Platform Admin account has been suspended.',
+      });
+    }
+
+    const effectiveRole = adminAcct?.platform_role ?? 'SUPER_ADMIN';
+    if (ctx.allowedRoles && !ctx.allowedRoles.includes(effectiveRole)) {
+      throw new AppError({
+        statusCode: 403,
+        errorCode: 'SUB_PLATFORM_ADMIN_REQUIRED',
+        title: 'Insufficient Platform Admin Role',
+        detail: `This operation requires one of: ${ctx.allowedRoles.join(', ')}.`,
+      });
+    }
+
+    const mfaRequired =
+      Boolean(ctx.requireMfaStepUp) &&
+      (Boolean(adminAcct?.mfa_enforced) ||
+        process.env['NEXSTOCK_REQUIRE_PLATFORM_MFA'] === 'true');
+
+    if (mfaRequired) {
+      const hasJwtMfa =
+        ctx.jwtAal === 'aal2' || Boolean(ctx.jwtAmr?.includes('totp'));
+      const hasBackendMfa =
+        Boolean(adminAcct?.totp_enabled) &&
+        Boolean(adminAcct?.mfa_verified_until) &&
+        new Date(adminAcct!.mfa_verified_until!).getTime() > Date.now();
+
+      if (!hasJwtMfa && !hasBackendMfa) {
+        throw new AppError({
+          statusCode: 403,
+          errorCode: 'SUB_PLATFORM_MFA_REQUIRED',
+          title: 'Multi-Factor Verification Required',
+          detail:
+            'Sensitive Platform Super Admin operations require an active TOTP/MFA step-up verification.',
+        });
+      }
+    }
+
+    const tenantCtx: TenantExecutionContext = {
+      tenantId: ctx.targetTenantId ?? ctx.userId,
+      userId: ctx.userId,
+      traceId: ctx.traceId,
+    };
+
+    const brandedTrx = Object.assign(trx, {
+      [TENANT_TRX_BRAND]: true as const,
+      tenantContext: tenantCtx,
+      db: trx,
+      tenantId: tenantCtx.tenantId,
+      userId: ctx.userId,
+      platformRole: effectiveRole,
+      _trxCache: new Map<string, unknown>(),
+    }) as TenantTransaction;
+
+    return fn(brandedTrx);
   });
 }
 

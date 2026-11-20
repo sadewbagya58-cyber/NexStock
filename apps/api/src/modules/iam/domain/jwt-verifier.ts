@@ -36,6 +36,8 @@ export interface VerifiedJwtPrincipal {
   readonly notBefore?: number | undefined;
   readonly keyId?: string | undefined;
   readonly algorithm: AllowedJwtAlg;
+  readonly aal?: string | undefined;
+  readonly amr?: readonly string[] | undefined;
 }
 
 export interface JwtVerificationOptions {
@@ -466,6 +468,19 @@ export async function verifySupabaseJwt(
       ? payload['email']
       : undefined;
 
+  const rawAmr = payload['amr'];
+  const parsedAmr = Array.isArray(rawAmr)
+    ? rawAmr
+        .map((entry) =>
+          typeof entry === 'string'
+            ? entry
+            : entry && typeof entry === 'object' && typeof (entry as { method?: unknown }).method === 'string'
+              ? (entry as { method: string }).method
+              : null,
+        )
+        .filter((v): v is string => Boolean(v))
+    : undefined;
+
   return {
     userId: sub,
     email,
@@ -476,6 +491,8 @@ export async function verifySupabaseJwt(
     notBefore: typeof nbf === 'number' ? nbf : undefined,
     keyId: kid,
     algorithm: alg as AllowedJwtAlg,
+    aal: typeof payload['aal'] === 'string' ? payload['aal'] : undefined,
+    amr: parsedAmr,
   };
 }
 
@@ -518,6 +535,8 @@ export function signDevJwt(payload: {
   readonly expiresInSeconds?: number | undefined;
   readonly appMetadata?: Record<string, unknown> | undefined;
   readonly userMetadata?: Record<string, unknown> | undefined;
+  readonly aal?: string | undefined;
+  readonly amr?: readonly { readonly method: string }[] | readonly string[] | undefined;
 }): string {
   const keys = getOrCreateDevKeyMaterial();
   const header = {
@@ -527,6 +546,8 @@ export function signDevJwt(payload: {
   };
   const nowSec = Math.floor(Date.now() / 1000);
   const jwtPayload = {
+    ...(payload.aal ? { aal: payload.aal } : {}),
+    ...(payload.amr ? { amr: payload.amr } : {}),
     iss:
       payload.issuer ??
       'https://tokylhdgzyoxiqwvncis.supabase.co/auth/v1',

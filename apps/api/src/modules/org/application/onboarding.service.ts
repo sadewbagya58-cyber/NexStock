@@ -290,11 +290,11 @@ export async function onboardBusinessAtomic(
         })
         .execute();
 
-      // 9. Provision Subscription Plan (STARTER)
+      // 9. Provision Subscription Plan (STARTER, 30-day no-card free trial)
       await provisionTenantSubscription(trx, {
         planCode: 'STARTER',
         status: 'TRIALING',
-        trialDays: 14,
+        trialDays: 30,
       });
 
       // 10. Upsert Localization Settings

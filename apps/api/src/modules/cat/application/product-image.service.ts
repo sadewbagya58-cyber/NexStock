@@ -11,6 +11,10 @@ import {
   appendAuditLog,
   generateUuidV7,
 } from '../../shared/index.js';
+import {
+  calculateTenantStorageUsageBytes,
+  getTenantSubscriptionEntitlement,
+} from '../../sub/index.js';
 
 export const MAX_IMAGE_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
 export const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;
@@ -177,6 +181,27 @@ export async function uploadProductImage(
 
   // Use the verified binary format (reconciles client/browser MIME discrepancies)
   const effectiveMime: AllowedMimeType = detectedMime;
+
+  const ent = await getTenantSubscriptionEntitlement(trx);
+  if (!ent.allowAdminOverride) {
+    const usedBytes = await calculateTenantStorageUsageBytes(trx);
+    const maxBytes = ent.limits.maxStorageMb * 1024 * 1024;
+    if (usedBytes + buffer.length > maxBytes) {
+      throw new AppError({
+        statusCode: 403,
+        errorCode: 'SUB_QUOTA_EXCEEDED',
+        title: 'Storage Quota Exceeded',
+        detail: `Uploading ${(buffer.length / (1024 * 1024)).toFixed(2)} MB would exceed your plan storage limit of ${ent.limits.maxStorageMb} MB (currently using ${(usedBytes / (1024 * 1024)).toFixed(2)} MB). Upgrade your plan to upload additional media.`,
+        extensions: {
+          planCode: ent.planCode,
+          resource: 'STORAGE_MB',
+          usedStorageBytes: usedBytes,
+          incomingBytes: buffer.length,
+          maxStorageMb: ent.limits.maxStorageMb,
+        },
+      });
+    }
+  }
 
   const ext =
     effectiveMime === 'image/jpeg' ? 'jpg' : effectiveMime === 'image/png' ? 'png' : 'webp';

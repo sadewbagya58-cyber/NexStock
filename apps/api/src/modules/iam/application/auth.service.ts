@@ -686,12 +686,18 @@ export async function getUserProfileAndMemberships(
 ): Promise<UserMeResponse> {
   return withUserTransaction(db, { userId, traceId }, async (trx) => {
     // 1. Fetch user record and all memberships in parallel (deduplicating by tenant_id)
-    const [userRow, rawMembershipRows] = await Promise.all([
+    const [userRow, platformAdminAcct, rawMembershipRows] = await Promise.all([
       trx
         .selectFrom('users')
-        .select(['id', 'email', 'full_name'])
+        .select(['id', 'email', 'full_name', 'is_platform_admin'])
         .where('id', '=', userId)
         .executeTakeFirst(),
+      trx
+        .selectFrom('platform_admin_accounts')
+        .select(['platform_role', 'status', 'mfa_enforced', 'totp_enabled'])
+        .where('user_id', '=', userId)
+        .executeTakeFirst()
+        .catch(() => undefined),
       trx
         .selectFrom('tenant_memberships')
         .innerJoin('tenants', 'tenants.id', 'tenant_memberships.tenant_id')
@@ -723,10 +729,20 @@ export async function getUserProfileAndMemberships(
     }
     const membershipRows = Array.from(membershipByTenant.values());
 
+    const isPlatformAdmin =
+      Boolean(userRow?.is_platform_admin) &&
+      platformAdminAcct?.status !== 'SUSPENDED';
+
     const user: AuthUserSummary = {
       id: userRow?.id ?? userId,
       email: userRow?.email ?? '',
       fullName: userRow?.full_name ?? '',
+      isPlatformAdmin,
+      platformRole: isPlatformAdmin
+        ? (platformAdminAcct?.platform_role ?? 'SUPER_ADMIN')
+        : null,
+      mfaEnforced: Boolean(platformAdminAcct?.mfa_enforced),
+      totpEnabled: Boolean(platformAdminAcct?.totp_enabled),
     };
 
     if (membershipRows.length === 0) {

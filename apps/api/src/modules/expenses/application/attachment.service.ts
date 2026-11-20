@@ -10,6 +10,10 @@ import {
   appendAuditLog,
   generateUuidV7,
 } from '../../shared/index.js';
+import {
+  assertSubscriptionEntitlement,
+  calculateTenantStorageUsageBytes,
+} from '../../sub/index.js';
 
 export const MAX_EXPENSE_ATTACHMENT_SIZE = 10 * 1024 * 1024; // 10 MB
 
@@ -191,6 +195,26 @@ export async function uploadExpenseAttachment(
     });
   }
 
+  const ent = await assertSubscriptionEntitlement(trx, { requireWriteAccess: true });
+  if (!ent.allowAdminOverride) {
+    const usedBytes = await calculateTenantStorageUsageBytes(trx);
+    const maxBytes = ent.limits.maxStorageMb * 1024 * 1024;
+    if (usedBytes + buffer.length > maxBytes) {
+      throw new AppError({
+        statusCode: 403,
+        errorCode: 'SUB_QUOTA_EXCEEDED',
+        title: 'Storage Quota Exceeded',
+        detail: `Uploading attachment exceeds plan storage limit of ${ent.limits.maxStorageMb} MB.`,
+        extensions: {
+          planCode: ent.planCode,
+          resource: 'STORAGE_MB',
+          usedStorageBytes: usedBytes,
+          maxStorageMb: ent.limits.maxStorageMb,
+        },
+      });
+    }
+  }
+
   const attachmentId = generateUuidV7();
   const safeFileName = input.fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
   const storagePath = `expenses/${trx.tenantId}/${expenseId}/${attachmentId}_${safeFileName}`;
@@ -329,6 +353,7 @@ export async function deleteExpenseAttachment(
       detail: 'User lacks required permission to delete expense attachments',
     });
   }
+  await assertSubscriptionEntitlement(trx, { requireWriteAccess: true });
 
   const existing = await trx.db
     .selectFrom('expense_attachments')

@@ -190,5 +190,70 @@ export function assertOfflineSecurityAndCapability(params: {
     );
   }
 
+  // Phase 10.5 — Offline Subscription Status & Feature Entitlement Enforcement
+  const snap = ctx.subscriptionSnapshot;
+  if (snap) {
+    const isWriteOp =
+      params.operation === 'POS_CASH_CHECKOUT' ||
+      params.operation === 'POS_CARD_GATEWAY' ||
+      params.operation === 'POS_CREDIT_CHECKOUT' ||
+      params.operation === 'INV_OFFLINE_ADJUSTMENT' ||
+      params.operation === 'INV_OFFLINE_MOVEMENT' ||
+      params.operation === 'INV_OFFLINE_TRANSFER_REQUEST' ||
+      params.operation === 'INV_OFFLINE_SERIAL_OPS';
+
+    if (snap.status === 'SUSPENDED' || snap.status === 'CANCELLED') {
+      throw new OfflineEngineError(
+        'OFFLINE_SUBSCRIPTION_INACTIVE',
+        `Subscription is "${snap.status}". Unsynchronized transactions are preserved safely until subscription restoration.`,
+        403,
+      );
+    }
+
+    if (
+      isWriteOp &&
+      (snap.isReadOnly ||
+        snap.status === 'READ_ONLY' ||
+        snap.status === 'EXPIRED' ||
+        snap.status === 'PAST_DUE')
+    ) {
+      throw new OfflineEngineError(
+        'OFFLINE_SUBSCRIPTION_READ_ONLY',
+        `Subscription is in Read-Only Mode (${snap.status}). Existing offline records and pending transactions are preserved safely; renew subscription to resume writes.`,
+        403,
+      );
+    }
+
+    if (!params.isOnline && isWriteOp && snap.offlineEntitled === false) {
+      throw new OfflineEngineError(
+        'OFFLINE_SUBSCRIPTION_NOT_ENTITLED',
+        `Offline POS & Inventory requires a Professional or Enterprise plan (current plan: ${snap.planCode}).`,
+        403,
+      );
+    }
+
+    if (
+      params.operation === 'INV_OFFLINE_TRANSFER_REQUEST' &&
+      snap.features?.stockTransfers === false
+    ) {
+      throw new OfflineEngineError(
+        'OFFLINE_SUBSCRIPTION_NOT_ENTITLED',
+        'Offline stock transfer requests require a Professional or Enterprise plan.',
+        403,
+      );
+    }
+
+    if (
+      params.operation === 'INV_OFFLINE_SERIAL_OPS' &&
+      snap.features?.serialTracking === false
+    ) {
+      throw new OfflineEngineError(
+        'OFFLINE_SUBSCRIPTION_NOT_ENTITLED',
+        'Serial number tracking requires a Professional or Enterprise plan.',
+        403,
+      );
+    }
+  }
+
   return ctx;
 }

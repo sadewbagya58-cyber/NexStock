@@ -49,7 +49,10 @@ import {
   generateUuidV7,
   realtimeEventHub,
 } from '../../shared/index.js';
-import { assertSubscriptionEntitlement } from '../../sub/index.js';
+import {
+  assertFeatureEntitlement,
+  assertSubscriptionEntitlement,
+} from '../../sub/index.js';
 import { formatReceiptData } from '../domain/receipt-formatter.js';
 
 // ============================================================================
@@ -2649,6 +2652,28 @@ export async function checkoutSale(
       title: 'Payment Required',
       detail: 'At least one payment method is required to complete the sale.',
     });
+  }
+
+  if (input.payments.length > 1) {
+    await assertFeatureEntitlement(
+      trx,
+      'posPaymentSplit',
+      'Split POS payments require the Professional plan or higher.',
+    );
+  }
+  if (input.payments.some((p) => p.paymentMethod === 'CARD')) {
+    await assertFeatureEntitlement(
+      trx,
+      'posPaymentCard',
+      'Card POS payments require the Professional plan or higher.',
+    );
+  }
+  if (input.payments.some((p) => p.paymentMethod === 'BANK_TRANSFER')) {
+    await assertFeatureEntitlement(
+      trx,
+      'posPaymentBankTransfer',
+      'Bank transfer POS payments require the Professional plan or higher.',
+    );
   }
 
   // Pre-validate Customer Credit if paying by CREDIT

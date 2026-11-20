@@ -13,6 +13,7 @@ import {
   appendAuditLog,
   generateUuidV7,
 } from '../../shared/index.js';
+import { assertSubscriptionEntitlement } from '../../sub/index.js';
 
 export async function createCustomer(
   trx: TenantTransactionContext,
@@ -25,6 +26,7 @@ export async function createCustomer(
     await assertAuthorized(trx, { permission: 'crm:customer:read' });
     await assertAuthorized(trx, { permission: 'pos:sale:create' });
   }
+  await assertSubscriptionEntitlement(trx, { requireWriteAccess: true });
 
   // Canonical address resolution
   let resolvedAddress = input.address?.trim() || null;
@@ -262,6 +264,7 @@ export async function updateCustomer(
   input: UpdateCustomerRequest,
 ): Promise<CustomerResponse> {
   await assertAuthorized(trx, { permission: 'crm:customer:manage' });
+  await assertSubscriptionEntitlement(trx, { requireWriteAccess: true });
 
   const existing = await trx.db
     .selectFrom('customers')

@@ -26,6 +26,7 @@ import {
   appendAuditLog,
   generateUuidV7,
 } from '../../shared/index.js';
+import { assertSubscriptionEntitlement } from '../../sub/index.js';
 
 export interface ExpenseRow {
   id: string;
@@ -136,6 +137,9 @@ async function assertExpensePermission(
       detail: 'You are not authorized for this branch location',
     });
   }
+
+  const isWrite = permission !== 'exp:expense:read' && permission !== 'exp:report:view';
+  await assertSubscriptionEntitlement(trx, { requireWriteAccess: isWrite });
 
   return auth;
 }

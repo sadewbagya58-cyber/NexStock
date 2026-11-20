@@ -375,6 +375,16 @@ describe('@nexstock/api — Milestone 0 Foundation, RLS, Idempotency & Sync Inva
           name: '0028_phase9_offline_devices_and_conflict_resolution',
           filename: '0028_phase9_offline_devices_and_conflict_resolution.sql',
         },
+        {
+          version: 29,
+          name: '0029_phase10_subscription_plans_lifecycle_billing',
+          filename: '0029_phase10_subscription_plans_lifecycle_billing.sql',
+        },
+        {
+          version: 30,
+          name: '0030_phase10_5_9_enforcement_admin_analytics_security',
+          filename: '0030_phase10_5_9_enforcement_admin_analytics_security.sql',
+        },
       ]);
     });
 
@@ -461,6 +471,8 @@ describe('@nexstock/api — Milestone 0 Foundation, RLS, Idempotency & Sync Inva
         '0026_smart_pricing_management.sql',
         '0027_batch_pricing_hybrid_barcodes_and_transfers.sql',
         '0028_phase9_offline_devices_and_conflict_resolution.sql',
+        '0029_phase10_subscription_plans_lifecycle_billing.sql',
+        '0030_phase10_5_9_enforcement_admin_analytics_security.sql',
       ]);
 
       await expect(

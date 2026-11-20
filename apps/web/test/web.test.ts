@@ -3312,4 +3312,100 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       expect(html).toContain('± Stock Adjustment');
     });
   });
+
+  // ============================================================================
+  // PHASE 10.1-10.4 SUBSCRIPTION PLANS, QUOTAS & HYBRID BILLING UI
+  // ============================================================================
+  describe('35. Phase 10.1-10.4 Subscription Plans, Quota Usage & Hybrid Billing UI', () => {
+    it('renders responsive plan comparison, quota usage meters, bank transfer modal, copy details & private proof viewer', () => {
+      const html = readFileSync(resolve(WEB_ROOT, 'public/index.html'), 'utf8');
+
+      // Responsive CSS breakpoints across desktop, tablet & mobile
+      expect(html).toContain('.sub-plans-grid');
+      expect(html).toContain('@media (max-width: 1024px)');
+      expect(html).toContain('@media (max-width: 768px)');
+      expect(html).toContain('.sub-mobile-cards');
+
+      // Plan Catalog & Billing Cycle Toggle (Monthly vs Annual -15%)
+      expect(html).toContain('/v1/subscriptions/plans');
+      expect(html).toContain('/v1/subscriptions/usage');
+      expect(html).toContain('/v1/subscriptions/bank-settings');
+      expect(html).toContain('setSubBillingCycleView(\'MONTHLY\')');
+      expect(html).toContain('setSubBillingCycleView(\'ANNUAL\')');
+      expect(html).toContain('Annual (-15%)');
+
+      // Exact plan fallback / catalog attributes (LKR pricing & limits, no Loyalty V1)
+      expect(html).toContain('2990.0000');
+      expect(html).toContain('5990.0000');
+      expect(html).toContain('750.0000');
+      expect(html).toContain('500.0000');
+
+      // Prorated additional branch add-on & feature disclaimer
+      expect(html).toContain('Additional Branch Capacity (Hybrid Add-On)');
+      expect(html).toContain('/v1/subscriptions/branch-addons/checkout');
+      expect(html).toContain('does not unlock Professional features');
+
+      // Manual Bank Transfer Details & Private Proof Flow
+      expect(html).toContain('W.Swarnalatha');
+      expect(html).toContain("People's Bank");
+      expect(html).toContain('Bingiriya Branch');
+      expect(html).toContain('172200270058302');
+      expect(html).toContain('/v1/subscriptions/payments/bank-transfer');
+      expect(html).toContain('function openSubscriptionPaymentModal(');
+      expect(html).toContain('async function submitSubscriptionBankTransfer(');
+      expect(html).toContain('async function viewSubscriptionProofBlob(');
+      expect(html).toContain('Resubmit Proof');
+      expect(html).toContain('/v1/subscriptions/checkout/online');
+    });
+  });
+
+  // ============================================================================
+  // PHASE 10.5-10.9 ENFORCEMENT BANNER, BUSINESS PORTAL & SUPER ADMIN CONSOLE
+  // ============================================================================
+  describe('36. Phase 10.5-10.9 Global Read-Only Enforcement, Business Portal & Platform Super Admin Console', () => {
+    it('renders global subscription enforcement banner, notifications/support portal, and isolated DB-gated Platform Super Admin Console', () => {
+      const html = readFileSync(resolve(WEB_ROOT, 'public/index.html'), 'utf8');
+
+      // Global Read-Only / Grace Banner & Renewal Action
+      expect(html).toContain('id="globalSubscriptionBanner"');
+      expect(html).toContain('function renderGlobalSubscriptionBanner(');
+      expect(html).toContain('function isTenantReadOnly(');
+      expect(html).toContain('async function renewCurrentPlanNow(');
+      expect(html).toContain('/v1/subscriptions/renewals/invoice');
+      expect(html).toContain('Read-Only Mode Active');
+      expect(html).toContain('Grace Period Active');
+
+      // Business Portal Notifications, Feature Matrix & Plan-Scoped Support
+      expect(html).toContain('/v1/subscriptions/notifications');
+      expect(html).toContain('/v1/subscriptions/support');
+      expect(html).toContain('Plan Feature Comparison Matrix');
+      expect(html).toContain('Support &amp; SLA Entitlement');
+      expect(html).toContain('async function markSubNotificationRead(');
+      expect(html).toContain('async function markAllSubNotificationsRead(');
+
+      // Platform Super Admin Console (strictly gated by state.user?.isPlatformAdmin === true)
+      expect(html).toContain("'platform-admin'");
+      expect(html).toContain('platformAdminOnly: true');
+      expect(html).toContain('if (viewName === \'platform-admin\') {');
+      expect(html).toContain('state.user.isPlatformAdmin === true');
+      expect(html).toContain('async function renderPlatformAdminView(');
+      expect(html).toContain('/v1/platform/analytics/overview');
+      expect(html).toContain('/v1/platform/analytics/export');
+      expect(html).toContain('/v1/platform/businesses');
+      expect(html).toContain('/v1/platform/subscriptions/payments');
+      expect(html).toContain('/v1/platform/subscriptions/plans/');
+      expect(html).toContain('/v1/platform/subscriptions/settings');
+      expect(html).toContain('/v1/platform/security/mfa/setup');
+      expect(html).toContain('/v1/platform/security/mfa/verify');
+      expect(html).toContain('/v1/platform/audit-logs');
+      expect(html).toContain('/v1/platform/monitoring/alerts');
+      expect(html).toContain('/v1/platform/backups/verify');
+
+      // Responsive CSS breakpoints for Super Admin Console across Desktop, Tablet, Mobile
+      expect(html).toContain('.pa-kpi-grid');
+      expect(html).toContain('.pa-split-grid');
+      expect(html).toContain('.pa-mobile-cards');
+      expect(html).toContain('@media (max-width: 480px)');
+    });
+  });
 });
