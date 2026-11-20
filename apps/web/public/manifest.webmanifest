@@ -1,0 +1,10 @@
+{
+  "name": "NexStock ERP & POS",
+  "short_name": "NexStock POS",
+  "start_url": "/index.html",
+  "display": "standalone",
+  "background_color": "#0B1120",
+  "theme_color": "#2563EB",
+  "description": "Cross-Platform Offline-Ready Multi-Branch Inventory & POS System",
+  "orientation": "any"
+}

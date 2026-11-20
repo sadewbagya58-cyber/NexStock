@@ -4,6 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>NexStock — Universal Inventory &amp; POS SaaS</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <script src="/nexstock-offline-client.js"></script>
   <style>
     :root {
       --bg-primary: #F8FAFC;
@@ -2746,7 +2748,7 @@
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
         </button>
 
-        <div class="badge-pill badge-green" id="topbarSyncStatus" title="System Status">
+        <div class="badge-pill badge-green" id="topbarSyncStatus" onclick="openOfflineSyncQueueModal()" style="cursor: pointer;" title="Open Sync & Offline Queue Center">
           ● Connected
         </div>
       </div>
@@ -9710,8 +9712,24 @@
 
       try {
         const whParam = state.warehouseId ? `warehouseId=${encodeURIComponent(state.warehouseId)}&` : '';
-        const movementsRes = await apiFetch(`/v1/inventory/movements?${whParam}limit=50`).catch(() => ({ data: [] }));
-        const movements = movementsRes?.data || (Array.isArray(movementsRes) ? movementsRes : []);
+        let movements = [];
+        if (!isDeviceOffline()) {
+          const movementsRes = await apiFetch(`/v1/inventory/movements?${whParam}limit=50`).catch(() => ({ data: [] }));
+          movements = movementsRes?.data || (Array.isArray(movementsRes) ? movementsRes : []);
+        }
+        if (window.NexStockOfflineClient && state.tenantId && state.branchId) {
+          const localMovs = await window.NexStockOfflineClient.listOfflineMovements(state.tenantId, state.branchId).catch(() => []);
+          const pendingLocal = localMovs.filter(m => !m.serverReferenceId || m.syncState !== 'SERVER_CONFIRMED').map(m => ({
+            ...m,
+            occurredAt: m.createdAt,
+            unitCost: '0.0000',
+            balanceAfter: 0,
+            referenceType: `OFFLINE_${m.syncState || 'PENDING_SYNC'}`,
+            entrySource: 'MANUAL',
+            _isOfflineQueue: true,
+          }));
+          movements = [...pendingLocal, ...movements];
+        }
 
         const productsMap = new Map();
         if (movements.some(m => !m.productSku || !m.productName)) {
@@ -9873,13 +9891,25 @@
 
     async function renderTransfersTab(container) {
       try {
+        const offline = isDeviceOffline();
         const [transfersRes, branchesRes, whRes] = await Promise.all([
-          apiFetch('/v1/inventory/transfers?limit=50', { silent: true }).catch(() => ({ items: [] })),
-          apiFetch('/v1/org/branches?status=ACTIVE', { silent: true }).catch(() => ({ items: [] })),
-          apiFetch('/v1/org/warehouses', { silent: true }).catch(() => ({ items: [] }))
+          offline ? Promise.resolve({ items: [] }) : apiFetch('/v1/inventory/transfers?limit=50', { silent: true }).catch(() => ({ items: [] })),
+          offline ? Promise.resolve({ items: state.cachedBranches || [] }) : apiFetch('/v1/org/branches?status=ACTIVE', { silent: true }).catch(() => ({ items: state.cachedBranches || [] })),
+          offline ? Promise.resolve({ items: [] }) : apiFetch('/v1/org/warehouses', { silent: true }).catch(() => ({ items: [] }))
         ]);
 
-        const transfers = transfersRes?.items || transfersRes?.data || (Array.isArray(transfersRes) ? transfersRes : []);
+        let transfers = transfersRes?.items || transfersRes?.data || (Array.isArray(transfersRes) ? transfersRes : []);
+        if (window.NexStockOfflineClient && state.tenantId && state.branchId) {
+          const localTrfs = await window.NexStockOfflineClient.listOfflineTransfers(state.tenantId, state.branchId).catch(() => []);
+          const localPending = localTrfs
+            .filter(lt => !lt.serverTransferId)
+            .map(lt => ({
+              ...lt,
+              transferNumber: `REQ-OFF-${lt.id.slice(0, 6).toUpperCase()}`,
+              createdByName: state.fullName || 'Offline Request',
+            }));
+          transfers = [...localPending, ...transfers];
+        }
         state.cachedTransfers = transfers;
         const branches = (branchesRes?.items || branchesRes?.data || (Array.isArray(branchesRes) ? branchesRes : [])).filter(b => b.isActive !== false);
         const warehouses = whRes?.items || whRes?.data || (Array.isArray(whRes) ? whRes : []);
@@ -9931,8 +9961,9 @@
                         const lines = Array.isArray(t.lines) ? t.lines : [];
                         const firstDestBatch = lines.find(l => l.destinationBatchId)?.destinationBatchId;
                         let stBadge = '<span class="badge-pill badge-yellow">DRAFT</span>';
-                        if (t.status === 'IN_TRANSIT') stBadge = '<span class="badge-pill badge-blue">IN TRANSIT</span>';
-                        else if (t.status === 'RECEIVED') stBadge = '<span class="badge-pill badge-green">COMPLETED</span>';
+                        if (t.status === 'TRANSFER_REQUEST_PENDING') stBadge = '<span class="badge-pill badge-yellow">TRANSFER_REQUEST_PENDING (OFFLINE)</span>';
+                        else if (t.status === 'IN_TRANSIT') stBadge = '<span class="badge-pill badge-blue">IN TRANSIT</span>';
+                        else if (t.status === 'RECEIVED' || t.status === 'SERVER_CONFIRMED') stBadge = '<span class="badge-pill badge-green">COMPLETED</span>';
 
                         return `
                           <tr>
@@ -9973,8 +10004,9 @@
                   const lines = Array.isArray(t.lines) ? t.lines : [];
                   const firstDestBatch = lines.find(l => l.destinationBatchId)?.destinationBatchId;
                   let stBadge = '<span class="badge-pill badge-yellow">DRAFT</span>';
-                  if (t.status === 'IN_TRANSIT') stBadge = '<span class="badge-pill badge-blue">IN TRANSIT</span>';
-                  else if (t.status === 'RECEIVED') stBadge = '<span class="badge-pill badge-green">COMPLETED</span>';
+                  if (t.status === 'TRANSFER_REQUEST_PENDING') stBadge = '<span class="badge-pill badge-yellow">TRANSFER_REQUEST_PENDING</span>';
+                  else if (t.status === 'IN_TRANSIT') stBadge = '<span class="badge-pill badge-blue">IN TRANSIT</span>';
+                  else if (t.status === 'RECEIVED' || t.status === 'SERVER_CONFIRMED') stBadge = '<span class="badge-pill badge-green">COMPLETED</span>';
                   return `
                     <div class="entity-card">
                       <div class="entity-card-header">
@@ -10289,6 +10321,37 @@
         submitBtn.disabled = true;
         const origLabel = submitBtn.innerText;
         submitBtn.innerText = autoComplete ? 'Transferring Stock...' : 'Creating Transfer...';
+
+        if (isDeviceOffline() && window.NexStockOfflineClient && state.tenantId && state.branchId) {
+          try {
+            const trReq = await window.NexStockOfflineClient.createOfflineTransferRequest({
+              tenantId: state.tenantId,
+              branchId: sourceBranchId,
+              sourceWarehouseId: srcBr?.defaultWarehouseId || state.warehouseId || '',
+              destinationBranchId,
+              destinationWarehouseId: dstBr?.defaultWarehouseId || null,
+              userId: state.userId || state.email || 'staff',
+              notes,
+              lines: [{
+                productId,
+                ...(sourceBatchId ? { batchId: sourceBatchId } : {}),
+                quantity: qtyVal.toFixed(6),
+              }],
+            });
+            showToast(`Offline Transfer Request saved (${trReq.status}). Final stock moves only after server sync.`, 'info');
+            await updatePosOfflineFreshnessBadge();
+            closeModal();
+            if (state.activeView === 'movements') renderMovementsView('transfers');
+            else renderView(state.activeView);
+            return;
+          } catch (offErr) {
+            showToast(`Offline transfer request failed: ${offErr.message}`, 'error');
+            delete submitBtn.dataset.submitting;
+            submitBtn.disabled = false;
+            submitBtn.innerText = origLabel;
+            return;
+          }
+        }
 
         try {
           const res = await apiFetch('/v1/inventory/transfers', {
@@ -10608,7 +10671,11 @@
     }
 
     async function openRecordStockMovementModal() {
-      const cachedProds = window._productsCache || [];
+      let cachedProds = window._productsCache || [];
+      if (cachedProds.length === 0 && window.NexStockOfflineClient && state.tenantId && state.branchId) {
+        const offData = await window.NexStockOfflineClient.getPosProductsOffline(state.tenantId, state.branchId, state.warehouseId || '').catch(() => null);
+        if (offData && Array.isArray(offData.products)) cachedProds = offData.products;
+      }
       const firstProd = cachedProds[0] || null;
       const initialUoms = getCompatibleUomsForProduct(firstProd);
 
@@ -10717,7 +10784,27 @@
           : 'MANUAL';
       const idempotencyKey = crypto.randomUUID();
 
+      const isOfflineNow = isDeviceOffline();
       try {
+        if (isOfflineNow && window.NexStockOfflineClient && state.tenantId && state.branchId) {
+          await window.NexStockOfflineClient.recordOfflineStockAdjustment({
+            tenantId: state.tenantId,
+            branchId: state.branchId,
+            warehouseId: state.warehouseId || '',
+            userId: state.userId || state.email || 'staff',
+            productId,
+            movementType,
+            quantity: rawQty.toFixed(6),
+            reason: notes || movementType,
+            notes,
+          });
+          await updatePosOfflineFreshnessBadge();
+          showToast('Saved locally (PENDING_SYNC). Will validate on server sync.', 'info');
+          closeModal();
+          renderMovementsView();
+          return;
+        }
+
         await apiFetch('/v1/inventory/movements', {
           method: 'POST',
           headers: {
@@ -10741,7 +10828,26 @@
         closeModal();
         renderMovementsView();
       } catch (err) {
-        // error toast already shown
+        if (window.NexStockOfflineClient && err && (err.name === 'TypeError' || /fetch|network/i.test(err.message || ''))) {
+          try {
+            await window.NexStockOfflineClient.recordOfflineStockAdjustment({
+              tenantId: state.tenantId,
+              branchId: state.branchId,
+              warehouseId: state.warehouseId || '',
+              userId: state.userId || state.email || 'staff',
+              productId,
+              movementType,
+              quantity: rawQty.toFixed(6),
+              reason: notes || movementType,
+              notes,
+            });
+            await updatePosOfflineFreshnessBadge();
+            showToast('Network unreachable — saved movement to Offline Sync Queue.', 'warning');
+            closeModal();
+            renderMovementsView();
+            return;
+          } catch {}
+        }
       } finally {
         state.isSubmittingMovement = false;
         if (submitBtn) {
@@ -10781,6 +10887,7 @@
             </div>
             <div style="display: flex; gap: 8px; flex-wrap: wrap;">
               <button class="btn btn-secondary" onclick="openBranchSwitcherModal()">⇄ ${escapeHtml(state.branchId ? (state.branchName || 'Switch Branch') : 'All Branches')}</button>
+              ${hasAnyPermission(['inv:movement:post']) ? `<button class="btn btn-secondary" onclick="openRecordStockMovementModal()">± Stock Adjustment</button>` : ''}
               ${hasAnyPermission(['inv:movement:post', 'inv:movement:read']) ? `<button class="btn btn-primary" onclick="openCreateTransferModal(null, null, state.branchId || null)">⇄ Transfer Stock</button>` : ''}
             </div>
           </div>
@@ -10904,16 +11011,46 @@
       }
 
       try {
-        const scopeParam = state.branchId
-          ? `branchId=${encodeURIComponent(state.branchId)}&`
-          : (state.warehouseId ? `warehouseId=${encodeURIComponent(state.warehouseId)}&` : '');
-        const res = await apiFetch(`/v1/inventory/balances?${scopeParam}limit=100`).catch(() => ({ data: [] }));
+        let balances = [];
+        if (isDeviceOffline() && window.NexStockOfflineClient && state.tenantId && state.branchId) {
+          const off = await window.NexStockOfflineClient.getPosProductsOffline(state.tenantId, state.branchId, state.warehouseId || '');
+          balances = (off.products || []).map(p => ({
+            productId: p.id,
+            sku: p.sku,
+            productName: p.name,
+            baseUom: p.baseUom,
+            qtyOnHand: p.serverAvailableQuantity || p.availableQuantity || '0',
+            qtyReserved: '0',
+            availableQty: p.availableQuantity || '0',
+            reorderPoint: '0',
+            branchName: state.branchName || 'Branch',
+            warehouseName: state.warehouseName || 'Warehouse (Offline Projection)',
+          }));
+        } else {
+          const scopeParam = state.branchId
+            ? `branchId=${encodeURIComponent(state.branchId)}&`
+            : (state.warehouseId ? `warehouseId=${encodeURIComponent(state.warehouseId)}&` : '');
+          const res = await apiFetch(`/v1/inventory/balances?${scopeParam}limit=100`).catch(() => ({ data: [] }));
+          if (!isCurrentViewRender('balances', renderSeq)) return;
+          balances = res?.data || (Array.isArray(res) ? res : []);
+          setViewCache('balances', balances);
+        }
         if (!isCurrentViewRender('balances', renderSeq)) return;
-        const balances = res?.data || (Array.isArray(res) ? res : []);
-        setViewCache('balances', balances);
         container.innerHTML = buildBalancesHtml(balances);
       } catch (err) {
         if (!isCurrentViewRender('balances', renderSeq)) return;
+        if (window.NexStockOfflineClient && state.tenantId && state.branchId) {
+          const off = await window.NexStockOfflineClient.getPosProductsOffline(state.tenantId, state.branchId, state.warehouseId || '').catch(() => null);
+          if (off && Array.isArray(off.products)) {
+            container.innerHTML = buildBalancesHtml(off.products.map(p => ({
+              productId: p.id, sku: p.sku, productName: p.name, baseUom: p.baseUom,
+              qtyOnHand: p.serverAvailableQuantity || p.availableQuantity || '0',
+              qtyReserved: '0', availableQty: p.availableQuantity || '0', reorderPoint: '0',
+              branchName: state.branchName || 'Branch', warehouseName: state.warehouseName || 'Offline Projection',
+            })));
+            return;
+          }
+        }
         if (!cachedBalances || !cachedBalances.data) {
           container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load balances: ${escapeHtml(err.message)}</div>`;
         }
@@ -10954,6 +11091,415 @@
         if (floatCart) floatCart.classList.add('mobile-hidden');
         if (catBtn) catBtn.classList.remove('active');
         if (cartBtn) cartBtn.classList.add('active');
+      }
+    }
+
+    function isDeviceOffline() {
+      return (typeof navigator !== 'undefined' && navigator.onLine === false) || Boolean(state.forceOfflineMode);
+    }
+
+    function savePosDraftCartAuto() {
+      if (!window.NexStockOfflineClient || !state.tenantId || !state.branchId) return;
+      const uid = state.userId || state.email || 'cashier';
+      window.NexStockOfflineClient.saveDraftCart({
+        tenantId: state.tenantId,
+        branchId: state.branchId,
+        userId: uid,
+        registerId: state.registerId || null,
+        customerId: state.selectedCheckoutCustomerId || null,
+        customerName: state.selectedCheckoutCustomerName || null,
+        cart: state.cart || [],
+      }).catch(() => {});
+    }
+
+    async function updatePosOfflineFreshnessBadge() {
+      if (!window.NexStockOfflineClient || !state.tenantId || !state.branchId) return;
+      try {
+        const fresh = await window.NexStockOfflineClient.getDataFreshness(state.tenantId, state.branchId);
+        const offline = isDeviceOffline();
+        const summary = window.NexStockOfflineClient.getSyncStatusSummary
+          ? await window.NexStockOfflineClient.getSyncStatusSummary(state.tenantId, state.branchId, !offline)
+          : null;
+        state.offlineFreshness = fresh;
+        state.syncStatusSummary = summary;
+
+        const connState = summary?.connectionState || (offline ? 'OFFLINE' : (fresh.pendingOutboxCount > 0 ? 'PENDING_SYNC' : 'ONLINE'));
+        const pendingCount = summary?.pendingCount ?? fresh.pendingOutboxCount ?? 0;
+        const conflictCount = summary?.openConflictCount ?? 0;
+        const failedCount = summary?.failedCount ?? 0;
+
+        const topbarEl = document.getElementById('topbarSyncStatus');
+        if (topbarEl) {
+          if (summary?.deviceSecurityStatus === 'REVOKED') {
+            topbarEl.className = 'badge-pill badge-red';
+            topbarEl.innerText = '🔒 Device Revoked';
+          } else if (connState === 'SYNCING') {
+            topbarEl.className = 'badge-pill badge-blue';
+            topbarEl.innerText = '↻ Syncing...';
+          } else if (connState === 'CONFLICT') {
+            topbarEl.className = 'badge-pill badge-red';
+            topbarEl.innerText = `⚠ Conflict (${conflictCount})`;
+          } else if (connState === 'SYNC_FAILED') {
+            topbarEl.className = 'badge-pill badge-red';
+            topbarEl.innerText = `✕ Sync Failed (${failedCount || pendingCount})`;
+          } else if (connState === 'OFFLINE') {
+            topbarEl.className = 'badge-pill badge-yellow';
+            topbarEl.innerText = pendingCount > 0 ? `📴 Offline (${pendingCount} Pending)` : '📴 Offline';
+          } else if (connState === 'PENDING_SYNC') {
+            topbarEl.className = 'badge-pill badge-yellow';
+            topbarEl.innerText = `⏳ Pending Sync (${pendingCount})`;
+          } else {
+            topbarEl.className = 'badge-pill badge-green';
+            topbarEl.innerText = '● Online';
+          }
+        }
+
+        const badgeEl = document.getElementById('posOfflineStatusBar');
+        if (badgeEl) {
+          const pendingText = pendingCount > 0 ? ` • ${pendingCount} Pending Sync` : '';
+          const conflictText = conflictCount > 0 ? ` • ${conflictCount} Conflict(s)` : '';
+          const ageText = summary?.lastSyncSuccessAt
+            ? `Last sync ${new Date(summary.lastSyncSuccessAt).toLocaleTimeString()}`
+            : (fresh.syncedAt ? `Snapshot ${new Date(fresh.syncedAt).toLocaleTimeString()}` : 'No offline snapshot yet');
+          let stateBadge = `<span class="badge-pill badge-green">🟢 Online${escapeHtml(pendingText)}</span>`;
+          if (summary?.deviceSecurityStatus === 'REVOKED') {
+            stateBadge = `<span class="badge-pill badge-red">🔒 Device Revoked — Pending data preserved read-only</span>`;
+          } else if (connState === 'SYNCING') {
+            stateBadge = `<span class="badge-pill badge-blue">↻ Syncing Queue...</span>`;
+          } else if (connState === 'CONFLICT') {
+            stateBadge = `<span class="badge-pill badge-red">⚠️ Sync Conflict (${conflictCount})${escapeHtml(pendingText)}</span>`;
+          } else if (connState === 'SYNC_FAILED') {
+            stateBadge = `<span class="badge-pill badge-red">❌ Sync Failed${escapeHtml(pendingText)}</span>`;
+          } else if (offline) {
+            stateBadge = `<span class="badge-pill badge-yellow">📴 Offline Mode Active${escapeHtml(pendingText)}</span>`;
+          } else if (pendingCount > 0) {
+            stateBadge = `<span class="badge-pill badge-yellow">⏳ Pending Sync (${pendingCount})</span>`;
+          }
+          const syncNowInlineBtn = (!offline && (pendingCount > 0 || conflictCount === 0))
+            ? `<button type="button" class="btn btn-secondary btn-sm" style="font-size:11px;padding:2px 8px;" onclick="syncOfflineTransactionsNow(true)">↻ Sync Now</button>`
+            : '';
+          badgeEl.innerHTML = `${stateBadge} <span style="font-size:11px;color:var(--text-secondary);">${escapeHtml(ageText)}${escapeHtml(conflictText)} (${fresh.counts.products} items)</span> ${syncNowInlineBtn}`;
+        }
+        const qBtn = document.getElementById('btnOpenOfflineQueue');
+        if (qBtn) {
+          const totalAttention = pendingCount + conflictCount;
+          qBtn.innerText = conflictCount > 0
+            ? `Sync Center (${pendingCount} / ${conflictCount} ⚠)`
+            : `Sync Center (${totalAttention})`;
+        }
+      } catch {}
+    }
+
+    async function syncOfflineTransactionsNow(showFeedback = true) {
+      if (!window.NexStockOfflineClient || !state.tenantId || !state.branchId) return null;
+      if (isDeviceOffline()) {
+        if (showFeedback) showToast('Cannot synchronize while offline — local changes remain safely queued.', 'warning');
+        return null;
+      }
+      await updatePosOfflineFreshnessBadge();
+      try {
+        const result = await window.NexStockOfflineClient.syncNow({
+          tenantId: state.tenantId,
+          branchId: state.branchId,
+          warehouseId: state.warehouseId || '',
+          apiFetchFn: apiFetch,
+        });
+        await updatePosOfflineFreshnessBadge();
+        if (showFeedback && !result?.skipped) {
+          if (result.quarantinedCount > 0 || result.openConflicts > 0) {
+            showToast(`Sync finished with ${result.quarantinedCount || result.openConflicts} conflict(s) requiring review.`, 'warning');
+          } else {
+            showToast(`Synced ${result.appliedCount} queued command(s) cleanly.`, 'success');
+          }
+        }
+        return result;
+      } catch (err) {
+        await updatePosOfflineFreshnessBadge();
+        if (showFeedback) {
+          showToast(`Sync paused: ${err.message || 'Server unreachable'}`, 'warning');
+        }
+        return null;
+      }
+    }
+
+    async function resolveSyncConflictFromUi(conflictId, action) {
+      if (!window.NexStockOfflineClient || !state.tenantId || !state.branchId) return;
+      if (isDeviceOffline()) {
+        showToast('Connect to the internet to resolve sync conflicts.', 'warning');
+        return;
+      }
+      const notes = prompt(`Optional supervisor notes for ${action}:`, '') || undefined;
+      try {
+        await window.NexStockOfflineClient.resolveLocalConflict({
+          tenantId: state.tenantId,
+          branchId: state.branchId,
+          conflictId,
+          action,
+          notes,
+          apiFetchFn: apiFetch,
+        });
+        showToast(`Conflict resolved (${action}).`, 'success');
+        await updatePosOfflineFreshnessBadge();
+        openOfflineSyncQueueModal();
+      } catch (err) {
+        showToast(`Resolution failed: ${err.message || 'Conflict resolution error'}`, 'error');
+      }
+    }
+
+    async function downloadOfflineRecoveryBackupUi() {
+      if (!window.NexStockOfflineClient || !state.tenantId || !state.branchId) return;
+      const backup = await window.NexStockOfflineClient.exportRecoveryBackup(state.tenantId, state.branchId);
+      const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `nexstock-offline-backup-${state.branchId.slice(0, 8)}-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast(`Exported checksummed recovery backup (${backup.pendingOutbox.length} queued commands).`, 'success');
+    }
+
+    async function syncOfflineSnapshotForActiveBranch(showFeedback = true) {
+      if (!window.NexStockOfflineClient || !state.tenantId || !state.branchId) return null;
+      if (isDeviceOffline()) {
+        if (showFeedback) showToast('Cannot refresh snapshot while offline — using local stored data.', 'warning');
+        return null;
+      }
+      const syncBtn = document.getElementById('btnSyncOfflineSnapshot');
+      if (syncBtn) { syncBtn.disabled = true; syncBtn.innerText = 'Syncing...'; }
+      try {
+        const snap = await apiFetch(`/v1/sync/catalog-pricing?branchId=${encodeURIComponent(state.branchId)}`, { silent: true });
+        if (snap && snap.tenantId) {
+          const res = await window.NexStockOfflineClient.ingestServerSnapshot({
+            tenantId: state.tenantId,
+            branchId: state.branchId,
+            warehouseId: state.warehouseId || '',
+            snapshot: snap,
+          });
+          if (Array.isArray(snap.customers) && snap.customers.length > 0) {
+            state.cachedCustomers = snap.customers;
+          }
+          await updatePosOfflineFreshnessBadge();
+          if (showFeedback) {
+            showToast(`Offline data updated: ${res.productsCount} products, ${res.customersCount} customers`, 'success');
+          }
+          return res;
+        }
+      } catch (err) {
+        if (showFeedback) showToast(`Snapshot refresh skipped: ${err.message || 'Offline'}`, 'warning');
+      } finally {
+        if (syncBtn) { syncBtn.disabled = false; syncBtn.innerText = 'Refresh Local Data'; }
+      }
+      return null;
+    }
+
+    async function openOfflineSyncQueueModal() {
+      if (!window.NexStockOfflineClient || !state.tenantId || !state.branchId) return;
+      const offline = isDeviceOffline();
+      const fresh = await window.NexStockOfflineClient.getDataFreshness(state.tenantId, state.branchId);
+      const summary = window.NexStockOfflineClient.getSyncStatusSummary
+        ? await window.NexStockOfflineClient.getSyncStatusSummary(state.tenantId, state.branchId, !offline)
+        : null;
+      const localInvoices = await window.NexStockOfflineClient.listLocalInvoices(state.tenantId, state.branchId);
+      const outbox = await window.NexStockOfflineClient.listOutboxCommands(state.tenantId);
+      const movements = window.NexStockOfflineClient.listOfflineMovements
+        ? await window.NexStockOfflineClient.listOfflineMovements(state.tenantId, state.branchId)
+        : [];
+      const transfers = window.NexStockOfflineClient.listOfflineTransfers
+        ? await window.NexStockOfflineClient.listOfflineTransfers(state.tenantId, state.branchId)
+        : [];
+      const conflicts = window.NexStockOfflineClient.listLocalConflicts
+        ? await window.NexStockOfflineClient.listLocalConflicts(state.tenantId, state.branchId)
+        : [];
+      const openConflicts = conflicts.filter(c => c.status === 'OPEN' || c.status === 'QUARANTINED');
+      const failedItems = outbox.filter(o => o.status === 'PENDING' && o.retryCount > 0 && o.lastError);
+      const platformLabel = window.NexStockOfflineClient.hasTauriIpc()
+        ? 'Desktop Offline Engine (SQLite + IndexedDB)'
+        : 'Mobile / Browser Offline Engine (IndexedDB)';
+      const stateLabel = summary?.connectionState || (offline ? 'OFFLINE' : 'ONLINE');
+
+      openModal({
+        title: 'Offline Sync Center & Conflict Resolution',
+        maxWidth: '720px',
+        bodyHtml: `
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;padding:12px;border-radius:8px;background:var(--bg-primary);border:1px solid var(--border-subtle);margin-bottom:14px;">
+            <div>
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <span style="font-weight:700;font-size:13px;">${escapeHtml(platformLabel)}</span>
+                <span class="badge-pill ${stateLabel === 'ONLINE' ? 'badge-green' : (stateLabel === 'CONFLICT' || stateLabel === 'SYNC_FAILED' ? 'badge-red' : 'badge-yellow')}">${escapeHtml(stateLabel)}</span>
+              </div>
+              <div style="font-size:12px;color:var(--text-secondary);margin-top:4px;">
+                Branch: <strong>${escapeHtml(state.branchName || 'Active Branch')}</strong> &bull;
+                Last Sync: ${summary?.lastSyncSuccessAt ? new Date(summary.lastSyncSuccessAt).toLocaleString() : (fresh.syncedAt ? new Date(fresh.syncedAt).toLocaleString() : 'Never')}
+              </div>
+              <div style="font-size:11px;color:var(--text-secondary);margin-top:2px;">
+                Pending: <strong>${summary?.pendingCount ?? 0}</strong> &bull;
+                Failed Retries: <strong>${failedItems.length}</strong> &bull;
+                Open Conflicts: <strong>${openConflicts.length}</strong> &bull;
+                Cached: ${fresh.counts.products} products, ${fresh.counts.batches} batches
+              </div>
+            </div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;">
+              <button type="button" class="btn btn-primary btn-sm" onclick="syncOfflineTransactionsNow(true).then(() => openOfflineSyncQueueModal())" ${offline ? 'disabled' : ''}>
+                ↻ Sync Now
+              </button>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="syncOfflineSnapshotForActiveBranch(true)" ${offline ? 'disabled' : ''}>
+                Refresh Cache
+              </button>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="downloadOfflineRecoveryBackupUi()">
+                Export Backup
+              </button>
+            </div>
+          </div>
+
+          ${summary?.deviceSecurityStatus === 'REVOKED' ? `
+            <div style="margin-bottom:14px;padding:10px 12px;border-radius:6px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.35);font-size:12px;">
+              🔒 <strong>Device Revoked:</strong> ${escapeHtml(summary.revokedReason || 'Administrator revoked offline authorization.')} New offline transactions are locked; queued local records remain preserved for export.
+            </div>
+          ` : ''}
+
+          ${openConflicts.length > 0 ? `
+            <div style="margin-bottom:14px;">
+              <div style="font-weight:700;font-size:13px;color:var(--status-danger);margin-bottom:8px;">⚠️ Sync Conflicts Requiring Review (${openConflicts.length})</div>
+              <div style="display:flex;flex-direction:column;gap:8px;max-height:220px;overflow-y:auto;">
+                ${openConflicts.map(c => `
+                  <div style="padding:10px 12px;border:1px solid rgba(239,68,68,0.35);background:rgba(239,68,68,0.05);border-radius:8px;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+                      <div>
+                        <span class="badge-pill badge-red" style="font-size:10px;">${escapeHtml(c.conflictCode || 'CONFLICT')}</span>
+                        <strong style="font-size:12px;margin-left:6px;">${escapeHtml(c.localReferenceNumber || c.commandType || 'Offline Record')}</strong>
+                      </div>
+                      <span style="font-size:11px;color:var(--text-secondary);">${new Date(c.createdAt).toLocaleString()}</span>
+                    </div>
+                    <div style="font-size:12px;margin-top:6px;color:var(--text-primary);">${escapeHtml(c.details?.message || 'Server inventory validation blocked blind commit; original local sale & payment preserved.')}</div>
+                    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
+                      <button type="button" class="btn btn-primary btn-sm" onclick="resolveSyncConflictFromUi('${escapeHtml(c.id)}', 'ACCEPT_WITH_STOCK_OVERRIDE')" ${offline ? 'disabled' : ''}>Override &amp; Accept</button>
+                      <button type="button" class="btn btn-secondary btn-sm" onclick="resolveSyncConflictFromUi('${escapeHtml(c.id)}', 'RETRY_REPLAY')" ${offline ? 'disabled' : ''}>Retry After Restock</button>
+                      <button type="button" class="btn btn-secondary btn-sm" onclick="resolveSyncConflictFromUi('${escapeHtml(c.id)}', 'MARK_VOIDED_REFUND_REQUIRED')" ${offline ? 'disabled' : ''}>Void / Customer Refund</button>
+                    </div>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          ` : ''}
+
+          <div style="font-weight:700;font-size:13px;margin-bottom:8px;">Locally Recorded POS Invoices (${localInvoices.length})</div>
+          ${localInvoices.length === 0 ? `
+            <div class="empty-state-card" style="padding:14px;margin-bottom:12px;">No locally saved POS invoices in this branch yet.</div>
+          ` : `
+            <div style="display:flex;flex-direction:column;gap:8px;max-height:190px;overflow-y:auto;margin-bottom:12px;">
+              ${localInvoices.map(inv => {
+                const st = inv.syncState || (inv.serverConfirmed ? 'SERVER_CONFIRMED' : 'PENDING_SYNC');
+                const cls = st === 'SERVER_CONFIRMED' ? 'badge-green' : (st === 'QUARANTINED' || st === 'CONFLICT_FLAGGED' ? 'badge-red' : 'badge-yellow');
+                return `
+                  <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 12px;border:1px solid var(--border-subtle);border-radius:8px;flex-wrap:wrap;">
+                    <div>
+                      <div style="font-weight:700;font-size:12px;">
+                        <code>${escapeHtml(inv.serverInvoiceNumber || inv.invoiceNumber)}</code>
+                        <span class="badge-pill ${cls}" style="font-size:10px;margin-left:6px;">${escapeHtml(st)}</span>
+                      </div>
+                      <div style="font-size:11px;color:var(--text-secondary);margin-top:2px;">
+                        ${escapeHtml(inv.customerName || 'Walk-in')} &bull; ${new Date(inv.createdAt).toLocaleString()}
+                      </div>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:8px;">
+                      <strong>${formatTenantMoney(inv.grandTotal, inv.currencyCode)}</strong>
+                      <button type="button" class="btn btn-secondary btn-sm" onclick="openLocalOfflineReceipt('${escapeHtml(inv.invoiceId)}')">Receipt</button>
+                    </div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          `}
+
+          <div style="font-weight:700;font-size:13px;margin-bottom:8px;">Queued Offline Adjustments &amp; Transfer Requests (${movements.length + transfers.length})</div>
+          ${(movements.length + transfers.length) === 0 ? `
+            <div class="empty-state-card" style="padding:14px;">No offline stock adjustments or transfer requests queued.</div>
+          ` : `
+            <div style="display:flex;flex-direction:column;gap:6px;max-height:160px;overflow-y:auto;">
+              ${movements.map(m => `
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;border:1px solid var(--border-subtle);border-radius:6px;font-size:12px;flex-wrap:wrap;gap:6px;">
+                  <div><strong>${escapeHtml(m.productSku || m.productName || 'Item')}</strong> &bull; ${escapeHtml(m.movementType)} (${parseFloat(m.qtyDelta) > 0 ? '+' : ''}${formatQty(m.qtyDelta)})</div>
+                  <span class="badge-pill ${m.syncState === 'SERVER_CONFIRMED' ? 'badge-green' : (m.syncState === 'QUARANTINED' ? 'badge-red' : 'badge-yellow')}" style="font-size:10px;">${escapeHtml(m.syncState || 'PENDING_SYNC')}</span>
+                </div>
+              `).join('')}
+              ${transfers.map(t => `
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;border:1px solid var(--border-subtle);border-radius:6px;font-size:12px;flex-wrap:wrap;gap:6px;">
+                  <div><strong>Transfer Request</strong> (${(t.lines || []).length} line(s)) ${t.serverTransferNumber ? `<code>${escapeHtml(t.serverTransferNumber)}</code>` : ''}</div>
+                  <span class="badge-pill ${t.syncState === 'SERVER_CONFIRMED' ? 'badge-green' : 'badge-yellow'}" style="font-size:10px;">${escapeHtml(t.status || 'TRANSFER_REQUEST_PENDING')}</span>
+                </div>
+              `).join('')}
+            </div>
+          `}
+        `,
+        footerHtml: `<button type="button" class="btn btn-secondary" onclick="closeModal()">Close</button>`
+      });
+    }
+
+    async function openLocalOfflineReceipt(invoiceId) {
+      if (!window.NexStockOfflineClient || !state.tenantId || !state.branchId) return;
+      const list = await window.NexStockOfflineClient.listLocalInvoices(state.tenantId, state.branchId);
+      const found = list.find(x => x.invoiceId === invoiceId || x.id === invoiceId);
+      if (!found) return showToast('Local receipt not found', 'error');
+      const receiptData = {
+        invoiceNumber: found.invoiceNumber,
+        businessName: state.tenantName || 'NexStock Retail',
+        branchName: state.branchName || 'Main Store',
+        registerCode: state.registerCode || 'OFFLINE-REG',
+        cashierName: state.fullName || 'Cashier',
+        formattedTimestamp: new Date(found.createdAt).toLocaleString(),
+        customerName: found.customerName || null,
+        currencyCode: found.currencyCode || getTenantCurrency(),
+        currency: found.currencyCode || getTenantCurrency(),
+        subtotalAmount: found.subtotalAmount,
+        taxAmount: found.taxAmount,
+        grandTotal: found.grandTotal,
+        totalPaid: found.totalPaid,
+        changeGiven: found.changeGiven,
+        isOfflinePending: !found.serverConfirmed,
+        serverConfirmed: Boolean(found.serverConfirmed),
+        syncState: found.syncState || 'PENDING_SYNC',
+        lines: (found.lines || []).map(l => ({
+          name: l.productName || l.name || l.sku,
+          quantity: l.quantity,
+          unitPrice: l.unitPrice || '0.0000',
+          lineTotal: l.lineTotal || '0.0000',
+        })),
+        payments: found.payments || [{ paymentMethod: 'CASH', amount: found.totalPaid }],
+        notes: found.serverConfirmed ? 'Thank you for your business!' : 'SAVED LOCALLY — PENDING SERVER SYNC'
+      };
+      cachedReceipts.set(invoiceId, receiptData);
+      closeModal();
+      openReceiptModal(invoiceId, receiptData);
+    }
+
+    function openOfflineLocalShiftSession() {
+      state.activeShift = {
+        id: 'offline-local-shift',
+        registerId: state.registerId || 'offline-reg',
+        openingCashFloat: '0.0000',
+        status: 'OPEN',
+        isOfflineLocal: true,
+        isOwnShift: true,
+        openedAt: new Date().toISOString()
+      };
+      if (window.NexStockOfflineClient && state.tenantId && state.branchId) {
+        window.NexStockOfflineClient.saveCachedShift(state.tenantId, state.branchId, state.activeShift).catch(() => {});
+      }
+      showToast('Started Local Offline POS Session', 'success');
+      renderPosCheckoutView({ registerSwitched: true });
+    }
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('online', () => {
+        updatePosOfflineFreshnessBadge();
+        syncOfflineTransactionsNow(false).catch(() => {});
+      });
+      window.addEventListener('offline', () => { updatePosOfflineFreshnessBadge(); });
+      if ('serviceWorker' in navigator && !window.__TAURI_INTERNALS__ && window.location && window.location.protocol.startsWith('http')) {
+        navigator.serviceWorker.register('/sw.js').catch(() => {});
       }
     }
 
@@ -11077,9 +11623,39 @@
         const categories = Array.isArray(catRes) ? catRes : (catRes?.data || []);
         state.cachedCategories = categories;
 
+        // Offline Fallback & Restart Recovery (Phase 9.2 - 9.4)
+        let products = Array.isArray(productsRes) ? productsRes : (productsRes?.data || productsRes?.items || []);
+        let offlineLoadedData = null;
+        if ((isDeviceOffline() || products.length === 0) && window.NexStockOfflineClient && state.tenantId && state.branchId) {
+          try {
+            offlineLoadedData = await window.NexStockOfflineClient.getPosProductsOffline(
+              state.tenantId,
+              state.branchId,
+              state.warehouseId || ''
+            );
+            if (offlineLoadedData && offlineLoadedData.products && offlineLoadedData.products.length > 0 && (isDeviceOffline() || products.length === 0)) {
+              products = offlineLoadedData.products;
+              if (categories.length === 0 && offlineLoadedData.categories.length > 0) {
+                state.cachedCategories = offlineLoadedData.categories;
+              }
+              if ((!state.cachedCustomers || state.cachedCustomers.length === 0) && offlineLoadedData.customers.length > 0) {
+                state.cachedCustomers = offlineLoadedData.customers;
+              }
+              if (registers.length === 0 && offlineLoadedData.registers.length > 0) {
+                registers = offlineLoadedData.registers;
+                state.cachedRegisters = registers;
+                if (!state.registerId) {
+                  state.registerId = registers[0].id;
+                  state.registerCode = registers[0].code;
+                }
+              }
+            }
+          } catch {}
+        }
+
         // BUG-089: Only check generic /v1/pos/shifts/active fallback on initial auto-entry when NO register was explicitly selected.
         // Never overwrite an explicitly selected idle register back to another register!
-        if (!activeShift && !shiftStatusError && !requestedRegisterId && !isRegisterSwitch && state.branchId) {
+        if (!activeShift && !shiftStatusError && !requestedRegisterId && !isRegisterSwitch && state.branchId && !isDeviceOffline()) {
           try {
             const userActiveShift = await apiFetch(`/v1/pos/shifts/active?branchId=${encodeURIComponent(state.branchId)}`, { silent: true });
             if (userActiveShift && userActiveShift.id) {
@@ -11093,13 +11669,34 @@
           }
         }
 
-        state.activeShift = activeShift;
-        state.shiftStatusError = shiftStatusError;
+        if (activeShift && window.NexStockOfflineClient && state.tenantId && state.branchId) {
+          window.NexStockOfflineClient.saveCachedShift(state.tenantId, state.branchId, activeShift).catch(() => {});
+        } else if (!activeShift && isDeviceOffline() && window.NexStockOfflineClient && state.tenantId && state.branchId) {
+          try {
+            const savedShift = await window.NexStockOfflineClient.loadCachedShift(state.tenantId, state.branchId);
+            if (savedShift) activeShift = savedShift;
+          } catch {}
+        }
 
-        let products = Array.isArray(productsRes) ? productsRes : (productsRes?.data || productsRes?.items || []);
+        // Recover unfinished draft cart after app restart (Phase 9.3 / 9.4)
+        if ((!state.cart || state.cart.length === 0) && window.NexStockOfflineClient && state.tenantId && state.branchId) {
+          try {
+            const uid = state.userId || state.email || 'cashier';
+            const draft = await window.NexStockOfflineClient.loadDraftCart(state.tenantId, state.branchId, uid);
+            if (draft && Array.isArray(draft.cart) && draft.cart.length > 0) {
+              state.cart = draft.cart;
+              if (draft.customerId) state.selectedCheckoutCustomerId = draft.customerId;
+              if (draft.customerName) state.selectedCheckoutCustomerName = draft.customerName;
+            }
+          } catch {}
+        }
+
+        state.activeShift = activeShift;
+        state.shiftStatusError = isDeviceOffline() ? false : shiftStatusError;
+
         state.posCachedProducts = products;
         state.posCatalogWarehouseId = state.warehouseId;
-        state.posCachedCategories = categories;
+        state.posCachedCategories = state.cachedCategories || categories;
         state.posSearchFilter = '';
         state.posProductsMap = new Map();
         for (const p of products) {
@@ -11114,8 +11711,10 @@
           }
         }
 
-        if (batchesRes !== null) {
-          const rawBatches = Array.isArray(batchesRes) ? batchesRes : (batchesRes?.data || []);
+        if (batchesRes !== null || (offlineLoadedData && Array.isArray(offlineLoadedData.batches))) {
+          const rawBatches = (offlineLoadedData && offlineLoadedData.batches && offlineLoadedData.batches.length > 0 && isDeviceOffline())
+            ? offlineLoadedData.batches
+            : (Array.isArray(batchesRes) ? batchesRes : (batchesRes?.data || []));
           const todayIso = new Date().toISOString().slice(0, 10);
           const byProd = new Map();
           for (const b of rawBatches) {
@@ -11177,7 +11776,10 @@
                 <span>&bull; Register <strong>${escapeHtml(state.registerCode || (registers[0]?.code || 'No Register'))}</strong></span>
                 <button class="btn btn-secondary btn-sm" onclick="openSwitchRegisterModal()" style="font-size: 11px; padding: 2px 8px;">Change Register</button>
                 <button class="btn btn-secondary btn-sm" id="posScaleStatusBtn" onclick="openPosScaleSettingsModal()" style="font-size: 11px; padding: 2px 8px;">${typeof getScaleStatusBadgeText === 'function' ? getScaleStatusBadgeText() : '⚖️ Scale: Manual'}</button>
+                <button class="btn btn-secondary btn-sm" id="btnOpenOfflineQueue" onclick="openOfflineSyncQueueModal()" style="font-size: 11px; padding: 2px 8px;">Offline Queue</button>
+                <button class="btn btn-secondary btn-sm" id="btnSyncOfflineSnapshot" onclick="syncOfflineSnapshotForActiveBranch(true)" style="font-size: 11px; padding: 2px 8px;">Refresh Local Data</button>
               </div>
+              <div id="posOfflineStatusBar" style="margin-top: 6px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;"></div>
             </div>
             <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
               ${state.shiftStatusError ? `
@@ -11192,10 +11794,13 @@
                     <button class="btn btn-secondary btn-sm" onclick="openSwitchRegisterModal()">Switch Register</button>
                   `}
                 ` : `
-                  <div class="badge-pill badge-green">● Shift Open (Opened: ${formatTenantMoney(state.activeShift.openingCashFloat)})</div>
-                  <button class="btn btn-secondary btn-sm" onclick="openCloseShiftModal('${state.activeShift.id}')">Close Shift</button>
+                  <div class="badge-pill badge-green">● ${state.activeShift.isOfflineLocal ? 'Offline Session Open' : `Shift Open (Opened: ${formatTenantMoney(state.activeShift.openingCashFloat)})`}</div>
+                  ${!state.activeShift.isOfflineLocal ? `<button class="btn btn-secondary btn-sm" onclick="openCloseShiftModal('${state.activeShift.id}')">Close Shift</button>` : ''}
                 `
-              ) : `
+              ) : isDeviceOffline() && hasPermission('pos:sale:create') ? `
+                <div class="badge-pill badge-yellow">Offline Session Needed</div>
+                <button class="btn btn-primary btn-sm" onclick="openOfflineLocalShiftSession()">Start Offline Cash Session</button>
+              ` : `
                 <div class="badge-pill badge-yellow">Shift Closed</div>
                 ${hasPermission('pos:shift:open') ? `
                   <button class="btn btn-primary btn-sm" onclick="openShiftModal()">Open Shift to Sell</button>
@@ -11309,6 +11914,10 @@
 
         // Render product sections immediately
         renderPosProductSections();
+        updatePosOfflineFreshnessBadge();
+        if (!isDeviceOffline() && !isRegisterSwitch) {
+          syncOfflineSnapshotForActiveBranch(false);
+        }
 
         // Barcode Scanner & Live Instant Catalog Search Listener
         const scannerInput = document.getElementById('posBarcodeScannerInput');
@@ -11947,7 +12556,48 @@
         // Network error or 404 from /v1/barcodes/resolve -> fall back to local cache / text search below
       }
 
-      // 2. FAST-PATH: Instant in-memory index lookup (offline / non-batch cache fallback)
+      // 2. FAST-PATH: Persistent Offline SQLite/IndexedDB Barcode Resolver (FEFO + internal batch NB- lock)
+      if ((isDeviceOffline() || !scanOpts.forceOnlineResolve) && window.NexStockOfflineClient && state.tenantId && state.branchId) {
+        try {
+          const offRes = await window.NexStockOfflineClient.resolveBarcodeOffline(state.tenantId, state.branchId, state.warehouseId || '', cleanCode);
+          if (offRes) {
+            if (offRes.isBlocked) {
+              playScanChime(false);
+              showToast(offRes.message || 'Batch blocked in offline catalog', 'error');
+              return;
+            }
+            if (offRes.lockedBatch && offRes.product) {
+              const b = offRes.lockedBatch;
+              const p = offRes.product;
+              playScanChime(true);
+              addToCart(p.id, p.sku, p.name, offRes.effectiveUnitPrice || p.retailPrice, p.baseUom || 'PCS', p.trackInventory !== false, b.availableQuantity, {
+                batchId: b.batchId,
+                batchNumber: b.batchNumber,
+                internalBarcode: b.internalBarcode || cleanCode,
+                expiryDate: b.expiryDate || null,
+                isExactBatchLocked: true,
+                scannedBarcode: cleanCode,
+                priceSource: offRes.priceSource || 'BATCH_EXPLICIT',
+                entrySource: 'BARCODE_SCAN'
+              });
+              showToast(`Locked Batch ${b.batchNumber} (${formatTenantMoney(offRes.effectiveUnitPrice || p.retailPrice)})`, 'success');
+              return;
+            }
+            if (Array.isArray(offRes.fefoPreview) && offRes.fefoPreview.length > 0 && offRes.product) {
+              const p = offRes.product;
+              const added = await addNextFefoBatchLine(p, offRes.fefoPreview, scanOpts.fromTileProduct ? null : cleanCode, 1, p.baseUom || 'PCS');
+              if (added) {
+                playScanChime(true);
+                const firstB = offRes.fefoPreview[0];
+                showToast(`Scanned offline: ${p.name} — Batch ${firstB.batchNumber}`, 'success');
+                return;
+              }
+            }
+          }
+        } catch {}
+      }
+
+      // 2b. FAST-PATH: Instant in-memory index lookup (offline / non-batch cache fallback)
       if (state.posProductsMap && state.posProductsMap.has(lowerCode)) {
         const p = state.posProductsMap.get(lowerCode);
         const price = p.retailPrice || p.sellingPrice || '0.0000';
@@ -13727,6 +14377,8 @@
       if (floatCart) {
         floatCart.innerHTML = `<span>🛒 Cart (${state.cart.length} items)</span><span>${formatTenantMoney(grandTotal)} &rarr;</span>`;
       }
+
+      savePosDraftCartAuto();
     }
 
     // Checkout & Payment Modal
@@ -13756,29 +14408,49 @@
 
       const grandTotal = calculateCartGrandTotal();
       const decimals = getCurrencyMinorUnits();
+      const offlineActive = isDeviceOffline();
 
-      // Ensure customer cache is populated
+      // Ensure customer cache is populated (online or from persistent offline snapshot)
       if (!state.cachedCustomers || state.cachedCustomers.length === 0) {
-        apiFetch('/v1/customers?limit=100', { silent: true }).then(res => {
-          state.cachedCustomers = res?.items || [];
-          const selectEl = document.getElementById('payCustomerSelect');
-          if (selectEl) {
-            const currentVal = selectEl.value;
-            selectEl.innerHTML = `
-              <option value="">-- Walk-in / Anonymous Customer --</option>
-              ${state.cachedCustomers.map(c => `
-                <option value="${c.id}" ${currentVal === c.id ? 'selected' : ''}>
-                  ${escapeHtml(c.customerNumber)} — ${escapeHtml(c.name)}
-                </option>
-              `).join('')}
-            `;
-          }
-        }).catch(() => {});
+        if (offlineActive && window.NexStockOfflineClient && state.tenantId && state.branchId) {
+          window.NexStockOfflineClient.getPosProductsOffline(state.tenantId, state.branchId, state.warehouseId || '').then(offData => {
+            if (offData && Array.isArray(offData.customers) && offData.customers.length > 0) {
+              state.cachedCustomers = offData.customers;
+              const selectEl = document.getElementById('payCustomerSelect');
+              if (selectEl) {
+                selectEl.innerHTML = `<option value="">-- Walk-in / Anonymous Customer --</option>` +
+                  state.cachedCustomers.map(c => `<option value="${c.id}">${escapeHtml(c.customerNumber)} — ${escapeHtml(c.name)}</option>`).join('');
+              }
+            }
+          }).catch(() => {});
+        } else {
+          apiFetch('/v1/customers?limit=100', { silent: true }).then(res => {
+            state.cachedCustomers = res?.items || [];
+            const selectEl = document.getElementById('payCustomerSelect');
+            if (selectEl) {
+              const currentVal = selectEl.value;
+              selectEl.innerHTML = `
+                <option value="">-- Walk-in / Anonymous Customer --</option>
+                ${state.cachedCustomers.map(c => `
+                  <option value="${c.id}" ${currentVal === c.id ? 'selected' : ''}>
+                    ${escapeHtml(c.customerNumber)} — ${escapeHtml(c.name)}
+                  </option>
+                `).join('')}
+              `;
+            }
+          }).catch(() => {});
+        }
       }
 
       openModal({
-        title: 'Complete Sale Checkout',
+        title: offlineActive ? 'Complete Offline Cash Checkout' : 'Complete Sale Checkout',
         bodyHtml: `
+          ${offlineActive ? `
+            <div style="margin-bottom: 12px; padding: 10px 12px; border-radius: 6px; background: rgba(245, 158, 11, 0.12); border: 1px solid var(--status-warning); font-size: 12px;">
+              📴 <strong>Offline Mode (Option A):</strong> Only <strong>Cash Payments</strong> can be recorded offline. Card &amp; Credit gateways require live connectivity. Sale will be saved locally as <strong>Pending Sync</strong>.
+            </div>
+          ` : ''}
+
           <div style="text-align: center; margin-bottom: 20px; padding: 14px; background: var(--bg-primary); border-radius: var(--radius);">
             <div style="font-size: 13px; color: var(--text-secondary);">Amount Due</div>
             <div style="font-size: 32px; font-weight: 800; color: var(--accent-primary);">${formatTenantMoney(grandTotal)}</div>
@@ -13795,7 +14467,7 @@
                   </option>
                 `).join('')}
               </select>
-              <button class="btn btn-secondary btn-sm" type="button" onclick="openCustomerModal()" title="Add New Customer">+</button>
+              <button class="btn btn-secondary btn-sm" type="button" onclick="openCustomerModal()" title="Add New Customer" ${offlineActive ? 'disabled title="Customer creation requires online connectivity"' : ''}>+</button>
             </div>
             <div id="payCustomerCreditBadge" style="margin-top: 6px; font-size: 12px;"></div>
           </div>
@@ -13803,11 +14475,18 @@
           <div class="form-group">
             <label class="form-label">Payment Method</label>
             <select class="form-select" id="payMethod" onchange="togglePaymentInputs()">
-              <option value="CASH">Cash Payment</option>
-              <option value="CARD">Credit / Debit Card</option>
-              <option value="CREDIT">Customer Credit Account (On Account)</option>
-              <option value="SPLIT_CASH_CARD">Split Tender: Cash + Card</option>
-              <option value="SPLIT_CASH_CREDIT">Split Tender: Cash + Customer Credit</option>
+              <option value="CASH">Cash Payment ${offlineActive ? '(Offline Ready)' : ''}</option>
+              ${offlineActive ? `
+                <option value="CARD" disabled>Credit / Debit Card (Online Connection Required)</option>
+                <option value="CREDIT" disabled>Customer Credit Account (Online Connection Required)</option>
+                <option value="SPLIT_CASH_CARD" disabled>Split Tender: Cash + Card (Online Only)</option>
+                <option value="SPLIT_CASH_CREDIT" disabled>Split Tender: Cash + Customer Credit (Online Only)</option>
+              ` : `
+                <option value="CARD">Credit / Debit Card</option>
+                <option value="CREDIT">Customer Credit Account (On Account)</option>
+                <option value="SPLIT_CASH_CARD">Split Tender: Cash + Card</option>
+                <option value="SPLIT_CASH_CREDIT">Split Tender: Cash + Customer Credit</option>
+              `}
             </select>
           </div>
 
@@ -14343,6 +15022,114 @@
       }
       const idempotencyKey = state.activeCheckoutKey;
 
+      const executeOfflineCashSave = async () => {
+        if (!window.NexStockOfflineClient) {
+          throw new Error('Offline storage client unavailable.');
+        }
+        const subtotalAmt = calculateCartSubtotal();
+        const taxAmt = calculateCartTax();
+        const tenderedVal = parseFloat(document.getElementById('payCashTendered')?.value || grandTotal.toString());
+        const changeVal = Math.max(0, tenderedVal - grandTotal);
+        const enrichedLines = state.cart.map(c => ({
+          productId: c.productId,
+          sku: c.sku || '',
+          productName: c.name || '',
+          batchId: c.batchId || null,
+          quantity: Number(c.qty).toFixed(6),
+          normalizedBaseQty: Number(c.qty).toFixed(6),
+          uomCode: c.uomCode || 'PCS',
+          unitPrice: Number(c.unitPrice || c.overrideSellingPrice || 0).toFixed(4),
+          lineTotal: computeCartLineTotal(c).toFixed(4),
+          entrySource: c.entrySource || (c.productQtyMode === 'VARIABLE' ? 'MANUAL_WEIGHT' : 'MANUAL'),
+        }));
+        const offSale = await window.NexStockOfflineClient.recordOfflineCashSale({
+          tenantId: state.tenantId,
+          branchId: state.branchId,
+          warehouseId: state.warehouseId || '',
+          registerId: state.registerId || 'offline-reg',
+          shiftId: (state.activeShift && !state.activeShift.isOfflineLocal) ? state.activeShift.id : null,
+          cashierUserId: state.userId || state.email || 'cashier',
+          currencyCode: getTenantCurrency(),
+          customerId: state.selectedCheckoutCustomerId || null,
+          customerName,
+          lines: enrichedLines,
+          subtotalAmount: subtotalAmt,
+          taxAmount: taxAmt,
+          grandTotal,
+          tenderedAmount: tenderedVal,
+          changeGiven: changeVal,
+          idempotencyKey,
+        });
+
+        showToast(`Offline Cash Sale Saved Locally (${offSale.invoiceNumber}) — Pending Sync`, 'warning');
+        state.activeCheckoutKey = null;
+        state.cart = [];
+        renderPosCartPanel();
+
+        for (const l of enrichedLines) {
+          const prod = (state.posCachedProducts || []).find(p => p.id === l.productId);
+          if (prod && prod.availableQuantity != null) {
+            const delta = parseFloat(l.normalizedBaseQty || l.quantity || '0');
+            if (Number.isFinite(delta) && delta > 0) {
+              prod.availableQuantity = Math.max(0, parseFloat(prod.availableQuantity) - delta).toString();
+            }
+          }
+        }
+        if (typeof renderPosProductSections === 'function') renderPosProductSections();
+        await updatePosOfflineFreshnessBadge();
+
+        const offReceiptData = {
+          invoiceNumber: offSale.invoiceNumber,
+          businessName: state.tenantName || 'NexStock Retail',
+          branchName: state.branchName || 'Main Store',
+          registerCode: state.registerCode || 'OFFLINE-REG',
+          cashierName: state.fullName || 'Cashier',
+          formattedTimestamp: new Date(offSale.createdAt).toLocaleString(),
+          customerName: offSale.customerName || null,
+          currencyCode: offSale.currencyCode,
+          currency: offSale.currencyCode,
+          subtotalAmount: offSale.subtotalAmount,
+          taxAmount: offSale.taxAmount,
+          grandTotal: offSale.grandTotal,
+          totalPaid: offSale.totalPaid,
+          changeGiven: offSale.changeGiven,
+          isOfflinePending: true,
+          serverConfirmed: false,
+          syncState: 'PENDING_SYNC',
+          lines: enrichedLines.map(l => ({
+            name: l.productName,
+            quantity: l.quantity,
+            unitPrice: l.unitPrice,
+            lineTotal: l.lineTotal,
+          })),
+          payments: offSale.payments,
+          notes: 'SAVED LOCALLY — PENDING SERVER SYNC (Option A)'
+        };
+        cachedReceipts.set(offSale.invoiceId, offReceiptData);
+        closeModal();
+        openReceiptModal(offSale.invoiceId, offReceiptData);
+      };
+
+      if (isDeviceOffline()) {
+        if (method !== 'CASH') {
+          showToast('Online Connection Required: Card and Credit gateway payments cannot be processed while offline.', 'error');
+          state.isSubmittingCheckout = false;
+          if (submitBtn) { submitBtn.disabled = false; submitBtn.innerText = `Online Required for ${method}`; }
+          if (cancelBtn) cancelBtn.disabled = false;
+          return;
+        }
+        try {
+          await executeOfflineCashSave();
+        } catch (offErr) {
+          showToast(`Offline checkout failed: ${offErr.message}`, 'error');
+          if (submitBtn) { submitBtn.disabled = false; submitBtn.innerText = `Retry Offline Cash (${formatTenantMoney(grandTotal)})`; }
+          if (cancelBtn) cancelBtn.disabled = false;
+        } finally {
+          state.isSubmittingCheckout = false;
+        }
+        return;
+      }
+
       try {
         const sale = await apiFetch('/v1/pos/sales', {
           method: 'POST',
@@ -14459,6 +15246,17 @@
         closeModal();
         openReceiptModal(sale.id, receiptData);
       } catch (err) {
+        const isNetErr = !navigator.onLine || err?.name === 'TypeError' || /failed to fetch|network|offline/i.test(String(err?.message || ''));
+        if (isNetErr && method === 'CASH' && window.NexStockOfflineClient) {
+          try {
+            await executeOfflineCashSave();
+            return;
+          } catch (fallbackErr) {
+            showToast(`Offline fallback failed: ${fallbackErr.message}`, 'error');
+          }
+        } else if (isNetErr && method !== 'CASH') {
+          showToast('Network lost: Card/Credit payments cannot be completed offline. Do NOT mark paid.', 'error');
+        }
         const errDetail = err.detail || err.message || 'Payment processing failed';
         showToast(`Checkout failed: ${errDetail}`, 'error');
         // Restore safe retry path with the SAME stable checkout key
@@ -14744,6 +15542,11 @@
           </div>
 
           <div class="receipt-container" id="printableReceipt">
+            ${(receipt.isOfflinePending || receipt.serverConfirmed === false) ? `
+              <div style="margin-bottom:8px;padding:6px 10px;border-radius:6px;background:rgba(245, 158, 11, 0.14);border:1px solid var(--status-warning);text-align:center;font-size:11px;font-weight:700;">
+                ⏳ PENDING SYNC — Saved Locally (Unconfirmed by Server)
+              </div>
+            ` : ''}
             <div class="receipt-center">
               <div class="receipt-bold" style="font-size: 15px;">${escapeHtml(receipt.businessName || state.tenantName || 'NexStock Retail')}</div>
               <div style="font-size: 11px;">${escapeHtml(receipt.branchName || state.branchName || 'Main Store')}</div>

@@ -258,6 +258,7 @@ export const ErrorCodeSchema = Type.Union([
   Type.Literal('INV_TRANSFER_INVALID_STATUS'),
   Type.Literal('INV_TRANSFER_BRANCH_CONFLICT'),
   Type.Literal('ERR_INTERNAL_SERVER_ERROR'),
+  Type.Literal('SYNC_DEVICE_REVOKED'),
 ]);
 export type ErrorCode = Static<typeof ErrorCodeSchema>;
 
@@ -315,6 +316,10 @@ export const SyncCommandTypeSchema = Type.Union([
   Type.Literal('POS_CLOSE_SHIFT'),
   Type.Literal('INV_SUBMIT_STOCKTAKE_COUNT'),
   Type.Literal('INV_RECEIVE_TRANSFER'),
+  Type.Literal('INV_RECORD_ADJUSTMENT'),
+  Type.Literal('INV_RECORD_MOVEMENT'),
+  Type.Literal('INV_REQUEST_TRANSFER'),
+  Type.Literal('INV_SERIAL_OPERATION'),
 ]);
 export type SyncCommandType = Static<typeof SyncCommandTypeSchema>;
 
@@ -356,8 +361,12 @@ export const SyncPushBatchResponseSchema = Type.Object({
       commandId: UuidSchema,
       localSeq: Type.Integer({ minimum: 1 }),
       status: SyncCommandAckStatusSchema,
+      conflictId: Type.Optional(UuidSchema),
       conflictCode: Type.Optional(Type.String()),
       errorMessage: Type.Optional(Type.String()),
+      serverReferenceId: Type.Optional(Type.String()),
+      serverReferenceNumber: Type.Optional(Type.String()),
+      serverDetails: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
       serverProcessedAt: IsoTimestampSchema,
     }),
   ),
@@ -5154,14 +5163,24 @@ export const SyncCatalogPricingResponseSchema = Type.Object({
       productId: UuidSchema,
       sku: Type.String(),
       name: Type.String(),
+      categoryId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
       baseUom: Type.String(),
       priceUom: Type.String(),
+      purchaseCost: Type.Optional(DecimalMoneyStringSchema),
       sellingPrice: DecimalMoneyStringSchema,
       minSellingPrice: Type.Union([DecimalMoneyStringSchema, Type.Null()]),
       maxDiscountPct: Type.Union([DecimalPctStringSchema, Type.Null()]),
+      valuationMethod: Type.Optional(ValuationMethodSchema),
       trackingMode: Type.Optional(TrackingModeSchema),
       allocationPolicy: Type.Optional(BatchAllocationPolicySchema),
       requireBatchSellingPrice: Type.Optional(Type.Boolean()),
+      productQtyMode: Type.Optional(ProductQtyModeSchema),
+      measurementCategory: Type.Optional(Type.Union([MeasurementCategorySchema, Type.Null()])),
+      allowedSellingUoms: Type.Optional(Type.Array(Type.String())),
+      qtyDecimalPrecision: Type.Optional(Type.Integer()),
+      taxGroupId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
+      trackInventory: Type.Optional(Type.Boolean()),
+      primaryBarcode: Type.Optional(Type.Union([Type.String(), Type.Null()])),
       syncVersion: Type.Integer(),
     }),
   ),
@@ -5186,6 +5205,150 @@ export const SyncCatalogPricingResponseSchema = Type.Object({
         status: BatchStatusSchema,
       }),
     ),
+  ),
+  categories: Type.Optional(
+    Type.Array(
+      Type.Object({
+        id: UuidSchema,
+        parentId: Type.Union([UuidSchema, Type.Null()]),
+        name: Type.String(),
+        status: Type.Union([Type.Literal('ACTIVE'), Type.Literal('ARCHIVED')]),
+        syncVersion: Type.Integer(),
+      }),
+    ),
+  ),
+  barcodes: Type.Optional(
+    Type.Array(
+      Type.Object({
+        id: UuidSchema,
+        productId: UuidSchema,
+        barcode: Type.String(),
+        barcodeType: Type.String(),
+        uomCode: Type.String(),
+        isPrimary: Type.Boolean(),
+      }),
+    ),
+  ),
+  unitConversions: Type.Optional(
+    Type.Array(
+      Type.Object({
+        id: UuidSchema,
+        productId: UuidSchema,
+        uomCode: Type.String(),
+        uomName: Type.String(),
+        conversionFactorToBase: DecimalQuantityStringSchema,
+        isActive: Type.Boolean(),
+      }),
+    ),
+  ),
+  taxGroups: Type.Optional(
+    Type.Array(
+      Type.Object({
+        id: UuidSchema,
+        code: Type.String(),
+        name: Type.String(),
+        isActive: Type.Boolean(),
+      }),
+    ),
+  ),
+  taxRates: Type.Optional(
+    Type.Array(
+      Type.Object({
+        id: UuidSchema,
+        taxGroupId: UuidSchema,
+        code: Type.String(),
+        name: Type.String(),
+        ratePercentage: Type.String(),
+        isCompound: Type.Boolean(),
+        priority: Type.Integer(),
+        isActive: Type.Boolean(),
+      }),
+    ),
+  ),
+  customers: Type.Optional(
+    Type.Array(
+      Type.Object({
+        id: UuidSchema,
+        customerNumber: Type.String(),
+        name: Type.String(),
+        phone: Type.Union([Type.String(), Type.Null()]),
+        email: Type.Union([Type.String(), Type.Null()]),
+        status: Type.Union([Type.Literal('ACTIVE'), Type.Literal('INACTIVE'), Type.Literal('ARCHIVED')]),
+      }),
+    ),
+  ),
+  branches: Type.Optional(
+    Type.Array(
+      Type.Object({
+        id: UuidSchema,
+        code: Type.String(),
+        name: Type.String(),
+        isMainBranch: Type.Boolean(),
+        isActive: Type.Boolean(),
+        defaultWarehouseId: Type.Union([UuidSchema, Type.Null()]),
+      }),
+    ),
+  ),
+  warehouses: Type.Optional(
+    Type.Array(
+      Type.Object({
+        id: UuidSchema,
+        branchId: Type.Union([UuidSchema, Type.Null()]),
+        code: Type.String(),
+        name: Type.String(),
+        allowNegativeStock: Type.Boolean(),
+        isActive: Type.Boolean(),
+      }),
+    ),
+  ),
+  registers: Type.Optional(
+    Type.Array(
+      Type.Object({
+        id: UuidSchema,
+        branchId: UuidSchema,
+        warehouseId: UuidSchema,
+        code: Type.String(),
+        name: Type.String(),
+        isActive: Type.Boolean(),
+      }),
+    ),
+  ),
+  balances: Type.Optional(
+    Type.Array(
+      Type.Object({
+        branchId: UuidSchema,
+        warehouseId: UuidSchema,
+        productId: UuidSchema,
+        qtyOnHand: DecimalQuantityStringSchema,
+        qtyReserved: DecimalQuantityStringSchema,
+        availableQty: DecimalQuantityStringSchema,
+        movingAvgCost: DecimalMoneyStringSchema,
+      }),
+    ),
+  ),
+  serials: Type.Optional(
+    Type.Array(
+      Type.Object({
+        id: UuidSchema,
+        productId: UuidSchema,
+        warehouseId: UuidSchema,
+        branchId: UuidSchema,
+        batchId: Type.Union([UuidSchema, Type.Null()]),
+        serialNumber: Type.String(),
+        status: Type.String(),
+        unitCost: DecimalMoneyStringSchema,
+      }),
+    ),
+  ),
+  deviceAuthorization: Type.Optional(
+    Type.Object({
+      actorUserId: UuidSchema,
+      allLocationsAccess: Type.Boolean(),
+      allowedBranchIds: Type.Array(UuidSchema),
+      roleCodes: Type.Array(Type.String()),
+      permissions: Type.Array(Type.String()),
+      offlineAuthTtlHours: Type.Integer(),
+    }),
   ),
 });
 export type SyncCatalogPricingResponse = Static<
@@ -5708,4 +5871,259 @@ export const DashboardSummaryResponseSchema = Type.Object({
   recentActivities: Type.Array(DashboardActivityItemSchema),
 });
 export type DashboardSummaryResponse = Static<typeof DashboardSummaryResponseSchema>;
+
+// ============================================================================
+// PHASE 9.1 - 9.4: CROSS-PLATFORM OFFLINE FOUNDATION & LOCAL POS CONTRACTS
+// ============================================================================
+
+export const OfflineClientPlatformSchema = Type.Union([
+  Type.Literal('TAURI_DESKTOP'),
+  Type.Literal('MOBILE_APP'),
+  Type.Literal('MOBILE_PWA'),
+  Type.Literal('FLUTTER_MOBILE'),
+  Type.Literal('WEB_BROWSER'),
+]);
+export type OfflineClientPlatform = Static<typeof OfflineClientPlatformSchema>;
+
+export const OfflineCapabilityClassSchema = Type.Union([
+  Type.Literal('OFFLINE_CAPABLE'),
+  Type.Literal('ONLINE_ONLY'),
+]);
+export type OfflineCapabilityClass = Static<typeof OfflineCapabilityClassSchema>;
+
+export const OfflineOperationKeySchema = Type.Union([
+  Type.Literal('POS_SEARCH_CATALOG'),
+  Type.Literal('POS_SCAN_BARCODE'),
+  Type.Literal('POS_CART_MANAGE'),
+  Type.Literal('POS_CASH_CHECKOUT'),
+  Type.Literal('POS_LOCAL_RECEIPT'),
+  Type.Literal('POS_RECOVERY'),
+  Type.Literal('POS_CARD_GATEWAY'),
+  Type.Literal('POS_CREDIT_CHECKOUT'),
+  Type.Literal('PRICING_APPROVAL'),
+  Type.Literal('INV_TRANSFER_APPROVAL'),
+  Type.Literal('IAM_STAFF_INVITE'),
+  Type.Literal('REPORT_DRILLDOWN'),
+  Type.Literal('INV_OFFLINE_ADJUSTMENT'),
+  Type.Literal('INV_OFFLINE_MOVEMENT'),
+  Type.Literal('INV_OFFLINE_TRANSFER_REQUEST'),
+  Type.Literal('INV_OFFLINE_BATCH_INSPECT'),
+  Type.Literal('INV_OFFLINE_SERIAL_OPS'),
+  Type.Literal('SYNC_RESOLVE_CONFLICT'),
+]);
+export type OfflineOperationKey = Static<typeof OfflineOperationKeySchema>;
+
+export const LocalTransactionSyncStateSchema = Type.Union([
+  Type.Literal('LOCAL_SAVED'),
+  Type.Literal('PENDING_SYNC'),
+  Type.Literal('SYNC_IN_FLIGHT'),
+  Type.Literal('SERVER_CONFIRMED'),
+  Type.Literal('CONFLICT_FLAGGED'),
+  Type.Literal('QUARANTINED'),
+]);
+export type LocalTransactionSyncState = Static<typeof LocalTransactionSyncStateSchema>;
+
+export const OfflineDeviceContextSchema = Type.Object({
+  deviceId: UuidSchema,
+  tenantId: UuidSchema,
+  branchId: UuidSchema,
+  branchCode: Type.Optional(Type.String()),
+  branchName: Type.Optional(Type.String()),
+  warehouseId: UuidSchema,
+  registerId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
+  actorUserId: UuidSchema,
+  roleCodes: Type.Array(Type.String()),
+  permissions: Type.Array(Type.String()),
+  allLocationsAccess: Type.Boolean(),
+  allowedBranchIds: Type.Array(UuidSchema),
+  clientPlatform: OfflineClientPlatformSchema,
+  enrolledAt: IsoTimestampSchema,
+  offlineAuthExpiresAt: IsoTimestampSchema,
+});
+export type OfflineDeviceContext = Static<typeof OfflineDeviceContextSchema>;
+
+export const OfflineDataFreshnessSchema = Type.Object({
+  tenantId: UuidSchema,
+  branchId: UuidSchema,
+  lastSuccessfulRefreshAt: Type.Union([IsoTimestampSchema, Type.Null()]),
+  snapshotVersion: Type.Integer(),
+  staleAfterMinutes: Type.Integer(),
+  isStale: Type.Boolean(),
+  counts: Type.Object({
+    products: Type.Integer(),
+    categories: Type.Integer(),
+    barcodes: Type.Integer(),
+    customers: Type.Integer(),
+    batches: Type.Integer(),
+    serials: Type.Integer(),
+    pendingOutbox: Type.Integer(),
+  }),
+});
+export type OfflineDataFreshness = Static<typeof OfflineDataFreshnessSchema>;
+
+export const OfflineLocalInvoiceSchema = Type.Object({
+  invoiceId: UuidSchema,
+  tenantId: UuidSchema,
+  branchId: UuidSchema,
+  warehouseId: UuidSchema,
+  registerId: UuidSchema,
+  shiftId: Type.Union([UuidSchema, Type.Null()]),
+  customerId: Type.Union([UuidSchema, Type.Null()]),
+  customerName: Type.Union([Type.String(), Type.Null()]),
+  cashierUserId: UuidSchema,
+  invoiceNumber: Type.String(),
+  currencyCode: CurrencyCodeSchema,
+  subtotalAmount: DecimalMoneyStringSchema,
+  discountAmount: DecimalMoneyStringSchema,
+  taxAmount: DecimalMoneyStringSchema,
+  grandTotal: DecimalMoneyStringSchema,
+  totalPaid: DecimalMoneyStringSchema,
+  changeGiven: DecimalMoneyStringSchema,
+  syncState: LocalTransactionSyncStateSchema,
+  serverConfirmed: Type.Boolean(),
+  outboxCommandId: Type.Union([UuidSchema, Type.Null()]),
+  conflictReason: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  createdAt: IsoTimestampSchema,
+});
+export type OfflineLocalInvoice = Static<typeof OfflineLocalInvoiceSchema>;
+
+// ============================================================================
+// Phase 9.5–9.9 — Offline Inventory, Sync Conflicts, Reconciliation & Security
+// ============================================================================
+
+export const SyncConflictStatusSchema = Type.Union([
+  Type.Literal('OPEN'),
+  Type.Literal('QUARANTINED'),
+  Type.Literal('RESOLVED'),
+  Type.Literal('DISMISSED'),
+]);
+export type SyncConflictStatus = Static<typeof SyncConflictStatusSchema>;
+
+export const SyncConflictResolutionActionSchema = Type.Union([
+  Type.Literal('ACCEPT_WITH_STOCK_OVERRIDE'),
+  Type.Literal('RETRY_REPLAY'),
+  Type.Literal('MARK_VOIDED_REFUND_REQUIRED'),
+  Type.Literal('DISMISS'),
+]);
+export type SyncConflictResolutionAction = Static<
+  typeof SyncConflictResolutionActionSchema
+>;
+
+export const SyncConflictRecordSchema = Type.Object({
+  id: UuidSchema,
+  tenantId: UuidSchema,
+  branchId: UuidSchema,
+  deviceId: UuidSchema,
+  commandId: UuidSchema,
+  commandType: Type.Optional(Type.String()),
+  conflictType: Type.String(),
+  status: SyncConflictStatusSchema,
+  details: Type.Record(Type.String(), Type.Unknown()),
+  originalPayload: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
+  resolutionAction: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  resolutionNotes: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  resolvedByUserId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
+  createdAt: IsoTimestampSchema,
+  resolvedAt: Type.Union([IsoTimestampSchema, Type.Null()]),
+});
+export type SyncConflictRecord = Static<typeof SyncConflictRecordSchema>;
+
+export const ResolveSyncConflictRequestSchema = Type.Object({
+  action: SyncConflictResolutionActionSchema,
+  notes: Type.Optional(Type.String({ maxLength: 1000 })),
+});
+export type ResolveSyncConflictRequest = Static<
+  typeof ResolveSyncConflictRequestSchema
+>;
+
+export const ResolveSyncConflictResponseSchema = Type.Object({
+  conflict: SyncConflictRecordSchema,
+  replayedReferenceId: Type.Optional(Type.String()),
+  replayedReferenceNumber: Type.Optional(Type.String()),
+});
+export type ResolveSyncConflictResponse = Static<
+  typeof ResolveSyncConflictResponseSchema
+>;
+
+export const EnrollOfflineDeviceRequestSchema = Type.Object({
+  deviceId: UuidSchema,
+  branchId: UuidSchema,
+  clientPlatform: OfflineClientPlatformSchema,
+  deviceName: Type.Optional(Type.String({ minLength: 1, maxLength: 160 })),
+  appVersion: Type.Optional(Type.String({ maxLength: 64 })),
+});
+export type EnrollOfflineDeviceRequest = Static<
+  typeof EnrollOfflineDeviceRequestSchema
+>;
+
+export const OfflineDeviceRecordSchema = Type.Object({
+  deviceId: UuidSchema,
+  tenantId: UuidSchema,
+  branchId: UuidSchema,
+  userId: UuidSchema,
+  clientPlatform: OfflineClientPlatformSchema,
+  deviceName: Type.Union([Type.String(), Type.Null()]),
+  status: Type.Union([Type.Literal('ACTIVE'), Type.Literal('REVOKED')]),
+  revokedReason: Type.Union([Type.String(), Type.Null()]),
+  enrolledAt: IsoTimestampSchema,
+  lastSeenAt: IsoTimestampSchema,
+  revokedAt: Type.Union([IsoTimestampSchema, Type.Null()]),
+});
+export type OfflineDeviceRecord = Static<typeof OfflineDeviceRecordSchema>;
+
+export const RevokeOfflineDeviceRequestSchema = Type.Object({
+  reason: Type.String({ minLength: 2, maxLength: 500 }),
+});
+export type RevokeOfflineDeviceRequest = Static<
+  typeof RevokeOfflineDeviceRequestSchema
+>;
+
+export const SyncPullResponseSchema = Type.Object({
+  serverTimestamp: IsoTimestampSchema,
+  deviceAuthorized: Type.Boolean(),
+  revokedReason: Type.Union([Type.String(), Type.Null()]),
+  openConflictsCount: Type.Integer({ minimum: 0 }),
+  openConflicts: Type.Array(SyncConflictRecordSchema),
+  recentConfirmedCommands: Type.Array(
+    Type.Object({
+      commandId: UuidSchema,
+      commandType: Type.String(),
+      status: Type.String(),
+      conflictCode: Type.Union([Type.String(), Type.Null()]),
+      response: Type.Record(Type.String(), Type.Unknown()),
+      processedAt: IsoTimestampSchema,
+    }),
+  ),
+  snapshot: SyncCatalogPricingResponseSchema,
+});
+export type SyncPullResponse = Static<typeof SyncPullResponseSchema>;
+
+export const OfflineInventoryHistoryEntrySchema = Type.Object({
+  id: UuidSchema,
+  commandId: UuidSchema,
+  entryKind: Type.Union([
+    Type.Literal('ADJUSTMENT'),
+    Type.Literal('MOVEMENT'),
+    Type.Literal('TRANSFER_REQUEST'),
+    Type.Literal('SERIAL_OP'),
+  ]),
+  branchId: UuidSchema,
+  warehouseId: UuidSchema,
+  productId: UuidSchema,
+  productSku: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  productName: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  batchId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
+  serialId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
+  qtyDeltaMicro: Type.Integer(),
+  reason: Type.Union([Type.String(), Type.Null()]),
+  syncState: LocalTransactionSyncStateSchema,
+  serverReferenceId: Type.Union([Type.String(), Type.Null()]),
+  conflictReason: Type.Union([Type.String(), Type.Null()]),
+  createdAt: IsoTimestampSchema,
+});
+export type OfflineInventoryHistoryEntry = Static<
+  typeof OfflineInventoryHistoryEntrySchema
+>;
+
+
 

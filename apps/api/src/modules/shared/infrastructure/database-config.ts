@@ -620,6 +620,13 @@ export function loadBatchPricingHybridBarcodesAndTransfersMigrationSql(): string
   return sqlText;
 }
 
+export function loadPhase9OfflineDevicesAndConflictResolutionMigrationSql(): string {
+  const filename = '0028_phase9_offline_devices_and_conflict_resolution.sql';
+  const sqlText = readFileSync(resolve(migrationsDir, filename), 'utf-8');
+  assertPostgresMigrationSqlCompatible(sqlText, filename);
+  return sqlText;
+}
+
 export function getOrderedPostgresMigrations(): readonly PostgresMigrationSpec[] {
   return [
     {
@@ -810,6 +817,13 @@ export function getOrderedPostgresMigrations(): readonly PostgresMigrationSpec[]
       name: '0027_batch_pricing_hybrid_barcodes_and_transfers',
       filename: '0027_batch_pricing_hybrid_barcodes_and_transfers.sql',
       sql: loadBatchPricingHybridBarcodesAndTransfersMigrationSql(),
+    },
+    {
+      dialect: 'postgres',
+      version: 28,
+      name: '0028_phase9_offline_devices_and_conflict_resolution',
+      filename: '0028_phase9_offline_devices_and_conflict_resolution.sql',
+      sql: loadPhase9OfflineDevicesAndConflictResolutionMigrationSql(),
     },
   ];
 }

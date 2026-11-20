@@ -19,7 +19,12 @@ export interface StatusBannerDescriptor {
 
 export function createSyncStatusBannerDescriptor(params: {
   readonly isOnline: boolean;
-  readonly clientPlatform: 'WEB_BROWSER' | 'TAURI_DESKTOP' | 'FLUTTER_MOBILE';
+  readonly clientPlatform:
+    | 'WEB_BROWSER'
+    | 'TAURI_DESKTOP'
+    | 'MOBILE_APP'
+    | 'MOBILE_PWA'
+    | 'FLUTTER_MOBILE';
   readonly pendingOutboxCount: number;
   readonly isSyncInFlight: boolean;
 }): StatusBannerDescriptor {
@@ -29,14 +34,14 @@ export function createSyncStatusBannerDescriptor(params: {
         state: 'OFFLINE_BROWSER_BLOCKED',
         variant: 'danger',
         label:
-          'Connection lost. Browser POS & Backoffice require an active connection. Use NexStock Desktop or Mobile for offline checkout.',
+          'Connection lost. Online-only actions require an active connection. Use NexStock Desktop or Mobile Offline POS for uninterrupted checkout.',
         pendingOutboxCount: 0,
       };
     }
     return {
       state: 'OFFLINE_LOCAL_QUEUE_ACTIVE',
       variant: 'warning',
-      label: `Offline Mode Active — Transactions saved to local SQLite outbox (${params.pendingOutboxCount} pending).`,
+      label: `Offline Mode Active — Transactions saved locally (${params.pendingOutboxCount} pending sync).`,
       pendingOutboxCount: params.pendingOutboxCount,
     };
   }

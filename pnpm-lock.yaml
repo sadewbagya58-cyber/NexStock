@@ -236,6 +236,37 @@ importers:
       '@nexstock/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@nexstock/domain-core':
+        specifier: workspace:*
+        version: link:../../packages/domain-core
+      '@nexstock/offline-engine':
+        specifier: workspace:*
+        version: link:../../packages/offline-engine
+      '@nexstock/sqlite-schema':
+        specifier: workspace:*
+        version: link:../../packages/sqlite-schema
+      '@nexstock/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
+    devDependencies:
+      typescript:
+        specifier: ^5.8.2
+        version: 5.9.3
+      vitest:
+        specifier: ^3.0.8
+        version: 3.2.7(@types/node@22.20.5)(supports-color@7.2.0)(yaml@2.9.1)
+
+  apps/mobile:
+    dependencies:
+      '@nexstock/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
+      '@nexstock/domain-core':
+        specifier: workspace:*
+        version: link:../../packages/domain-core
+      '@nexstock/offline-engine':
+        specifier: workspace:*
+        version: link:../../packages/offline-engine
       '@nexstock/sqlite-schema':
         specifier: workspace:*
         version: link:../../packages/sqlite-schema
@@ -299,6 +330,25 @@ importers:
       '@types/node':
         specifier: ^22.13.10
         version: 22.20.5
+      typescript:
+        specifier: ^5.8.2
+        version: 5.9.3
+      vitest:
+        specifier: ^3.0.8
+        version: 3.2.7(@types/node@22.20.5)(supports-color@7.2.0)(yaml@2.9.1)
+
+  packages/offline-engine:
+    dependencies:
+      '@nexstock/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@nexstock/domain-core':
+        specifier: workspace:*
+        version: link:../domain-core
+      '@nexstock/sqlite-schema':
+        specifier: workspace:*
+        version: link:../sqlite-schema
+    devDependencies:
       typescript:
         specifier: ^5.8.2
         version: 5.9.3

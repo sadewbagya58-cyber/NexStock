@@ -34,6 +34,10 @@ export function getCanonicalSqliteMigrations(): readonly SqliteMigrationSpec[] {
   const sql6 = readFileSync(resolve(migrationsDir, filename6), 'utf-8');
   const filename7 = '0007_local_batch_pricing_and_barcodes.sql';
   const sql7 = readFileSync(resolve(migrationsDir, filename7), 'utf-8');
+  const filename8 = '0008_offline_pos_data_and_recovery.sql';
+  const sql8 = readFileSync(resolve(migrationsDir, filename8), 'utf-8');
+  const filename9 = '0009_offline_inventory_sync_and_recovery.sql';
+  const sql9 = readFileSync(resolve(migrationsDir, filename9), 'utf-8');
   return [
     {
       dialect: 'sqlite',
@@ -83,6 +87,20 @@ export function getCanonicalSqliteMigrations(): readonly SqliteMigrationSpec[] {
       name: '0007_local_batch_pricing_and_barcodes',
       filename: filename7,
       sql: sql7,
+    },
+    {
+      dialect: 'sqlite',
+      version: 8,
+      name: '0008_offline_pos_data_and_recovery',
+      filename: filename8,
+      sql: sql8,
+    },
+    {
+      dialect: 'sqlite',
+      version: 9,
+      name: '0009_offline_inventory_sync_and_recovery',
+      filename: filename9,
+      sql: sql9,
     },
   ];
 }

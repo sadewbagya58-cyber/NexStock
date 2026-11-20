@@ -370,6 +370,11 @@ describe('@nexstock/api — Milestone 0 Foundation, RLS, Idempotency & Sync Inva
           name: '0027_batch_pricing_hybrid_barcodes_and_transfers',
           filename: '0027_batch_pricing_hybrid_barcodes_and_transfers.sql',
         },
+        {
+          version: 28,
+          name: '0028_phase9_offline_devices_and_conflict_resolution',
+          filename: '0028_phase9_offline_devices_and_conflict_resolution.sql',
+        },
       ]);
     });
 
@@ -455,6 +460,7 @@ describe('@nexstock/api — Milestone 0 Foundation, RLS, Idempotency & Sync Inva
         '0025_uom_foundation_and_variable_products.sql',
         '0026_smart_pricing_management.sql',
         '0027_batch_pricing_hybrid_barcodes_and_transfers.sql',
+        '0028_phase9_offline_devices_and_conflict_resolution.sql',
       ]);
 
       await expect(

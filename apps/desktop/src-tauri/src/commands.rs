@@ -808,3 +808,189 @@ pub async fn desktop_flush_sync_outbox(
         errors: err_msgs,
     })
 }
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopDraftCartRequest {
+    pub id: String,
+    pub tenant_id: String,
+    pub branch_id: String,
+    pub user_id: String,
+    pub register_id: Option<String>,
+    pub customer_id: Option<String>,
+    pub customer_name: Option<String>,
+    pub cart_lines_json: String,
+    pub notes: Option<String>,
+}
+
+#[tauri::command]
+pub fn desktop_save_draft_cart(
+    db: State<'_, DesktopDbState>,
+    req: DesktopDraftCartRequest,
+) -> Result<Value, String> {
+    let conn = db.conn.lock().map_err(|_| "DB lock poisoned".to_string())?;
+    let now = Utc::now().to_rfc3339();
+    conn.execute(
+        "INSERT OR REPLACE INTO local_pos_draft_carts
+         (id, tenant_id, branch_id, user_id, register_id, customer_id, customer_name, cart_lines_json, notes, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        params![
+            req.id,
+            req.tenant_id,
+            req.branch_id,
+            req.user_id,
+            req.register_id,
+            req.customer_id,
+            req.customer_name,
+            req.cart_lines_json,
+            req.notes,
+            now
+        ],
+    )
+    .map_err(|e| format!("Failed saving draft cart: {e}"))?;
+
+    Ok(json!({ "saved": true, "updatedAt": now }))
+}
+
+#[tauri::command]
+pub fn desktop_load_draft_cart(
+    db: State<'_, DesktopDbState>,
+    tenant_id: String,
+    branch_id: String,
+    user_id: String,
+) -> Result<Option<Value>, String> {
+    let conn = db.conn.lock().map_err(|_| "DB lock poisoned".to_string())?;
+    let row = conn
+        .query_row(
+            "SELECT id, register_id, customer_id, customer_name, cart_lines_json, notes, updated_at
+             FROM local_pos_draft_carts
+             WHERE tenant_id = ?1 AND branch_id = ?2 AND user_id = ?3",
+            params![tenant_id, branch_id, user_id],
+            |r| {
+                Ok(json!({
+                    "id": r.get::<_, String>(0)?,
+                    "registerId": r.get::<_, Option<String>>(1)?,
+                    "customerId": r.get::<_, Option<String>>(2)?,
+                    "customerName": r.get::<_, Option<String>>(3)?,
+                    "cartLinesJson": r.get::<_, String>(4)?,
+                    "notes": r.get::<_, Option<String>>(5)?,
+                    "updatedAt": r.get::<_, String>(6)?,
+                }))
+            },
+        )
+        .optional()
+        .map_err(|e| format!("Failed loading draft cart: {e}"))?;
+
+    Ok(row)
+}
+
+#[tauri::command]
+pub fn desktop_list_local_invoices(
+    db: State<'_, DesktopDbState>,
+    tenant_id: String,
+    branch_id: String,
+) -> Result<Vec<Value>, String> {
+    let conn = db.conn.lock().map_err(|_| "DB lock poisoned".to_string())?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT i.id, i.invoice_number, i.grand_total, i.customer_name, i.created_at,
+                    COALESCE(sm.sync_state, 'PENDING_SYNC'), COALESCE(sm.server_confirmed, 0)
+             FROM local_sales_invoices i
+             LEFT JOIN local_sales_invoice_sync_meta sm
+               ON sm.tenant_id = i.tenant_id AND sm.invoice_id = i.id
+             WHERE i.tenant_id = ?1 AND i.branch_id = ?2
+             ORDER BY i.created_at DESC
+             LIMIT 100",
+        )
+        .map_err(|e| format!("Failed preparing local invoices query: {e}"))?;
+
+    let rows = stmt
+        .query_map(params![tenant_id, branch_id], |r| {
+            Ok(json!({
+                "invoiceId": r.get::<_, String>(0)?,
+                "invoiceNumber": r.get::<_, String>(1)?,
+                "grandTotal": r.get::<_, String>(2)?,
+                "customerName": r.get::<_, Option<String>>(3)?,
+                "createdAt": r.get::<_, String>(4)?,
+                "syncState": r.get::<_, String>(5)?,
+                "serverConfirmed": r.get::<_, i64>(6)? == 1,
+            }))
+        })
+        .map_err(|e| format!("Failed reading local invoices: {e}"))?;
+
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("Failed collecting local invoices: {e}"))
+}
+
+#[tauri::command]
+pub fn desktop_recover_in_flight_outbox(
+    db: State<'_, DesktopDbState>,
+    tenant_id: String,
+) -> Result<Value, String> {
+    let conn = db.conn.lock().map_err(|_| "DB lock poisoned".to_string())?;
+    let affected = conn
+        .execute(
+            "UPDATE local_sync_outbox
+             SET status = 'PENDING', retry_count = retry_count + 1,
+                 last_error = COALESCE(last_error, 'Recovered from interrupted sync session')
+             WHERE tenant_id = ?1 AND status = 'IN_FLIGHT'",
+            params![tenant_id],
+        )
+        .map_err(|e| format!("Failed recovering in-flight outbox: {e}"))?;
+
+    let _ = conn.execute(
+        "UPDATE local_sales_invoice_sync_meta
+         SET sync_state = 'PENDING_SYNC'
+         WHERE tenant_id = ?1 AND sync_state = 'SYNC_IN_FLIGHT'",
+        params![tenant_id],
+    );
+
+    Ok(json!({ "recoveredCount": affected }))
+}
+
+#[tauri::command]
+pub fn desktop_check_integrity(db: State<'_, DesktopDbState>) -> Result<Value, String> {
+    let conn = db.conn.lock().map_err(|_| "DB lock poisoned".to_string())?;
+    let status: String = conn
+        .query_row("PRAGMA integrity_check;", [], |r| r.get(0))
+        .map_err(|e| format!("Integrity check failed: {e}"))?;
+    let ok = status.eq_ignore_ascii_case("ok");
+    Ok(json!({ "ok": ok, "details": status }))
+}
+
+#[tauri::command]
+pub fn desktop_list_conflicts(
+    db: State<'_, DesktopDbState>,
+    tenant_id: String,
+    branch_id: String,
+) -> Result<Vec<Value>, String> {
+    let conn = db.conn.lock().map_err(|_| "DB lock poisoned".to_string())?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, command_id, command_type, conflict_code, status,
+                    details_json, original_payload_json, created_at, resolved_at
+             FROM local_sync_conflicts
+             WHERE tenant_id = ?1 AND branch_id = ?2
+             ORDER BY created_at DESC LIMIT 100",
+        )
+        .map_err(|e| format!("Failed preparing conflicts query: {e}"))?;
+
+    let rows = stmt
+        .query_map(params![tenant_id, branch_id], |r| {
+            Ok(json!({
+                "id": r.get::<_, String>(0)?,
+                "commandId": r.get::<_, String>(1)?,
+                "commandType": r.get::<_, String>(2)?,
+                "conflictCode": r.get::<_, String>(3)?,
+                "status": r.get::<_, String>(4)?,
+                "detailsJson": r.get::<_, String>(5)?,
+                "originalPayloadJson": r.get::<_, String>(6)?,
+                "createdAt": r.get::<_, String>(7)?,
+                "resolvedAt": r.get::<_, Option<String>>(8)?,
+            }))
+        })
+        .map_err(|e| format!("Failed reading conflicts: {e}"))?;
+
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("Failed collecting conflicts: {e}"))
+}

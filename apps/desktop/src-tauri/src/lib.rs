@@ -23,6 +23,12 @@ pub fn run() {
             commands::desktop_queue_offline_sale,
             commands::desktop_queue_print_job,
             commands::desktop_flush_sync_outbox,
+            commands::desktop_save_draft_cart,
+            commands::desktop_load_draft_cart,
+            commands::desktop_list_local_invoices,
+            commands::desktop_recover_in_flight_outbox,
+            commands::desktop_check_integrity,
+            commands::desktop_list_conflicts,
         ])
         .run(tauri::generate_context!())
         .expect("error while running NexStock Tauri desktop runtime");

@@ -66,11 +66,32 @@ export interface SyncConflictsTable {
   branch_id: string;
   device_id: string;
   command_id: string;
+  command_type: string | null;
   conflict_type: string;
   status: Generated<'OPEN' | 'QUARANTINED' | 'RESOLVED' | 'DISMISSED'>;
   details_json: unknown;
+  original_payload_json: Generated<unknown>;
+  resolution_action: string | null;
+  resolution_notes: string | null;
+  resolved_by_user_id: string | null;
   created_at: Generated<Date>;
   resolved_at: Date | null;
+}
+
+export interface OfflineDevicesTable {
+  id: string;
+  tenant_id: string;
+  branch_id: string;
+  user_id: string;
+  client_platform: 'WEB_BROWSER' | 'TAURI_DESKTOP' | 'MOBILE_APP' | 'MOBILE_PWA' | 'FLUTTER_MOBILE';
+  device_name: string | null;
+  app_version: string | null;
+  status: Generated<'ACTIVE' | 'REVOKED'>;
+  revoked_reason: string | null;
+  revoked_by_user_id: string | null;
+  revoked_at: Date | null;
+  enrolled_at: Generated<Date>;
+  last_seen_at: Generated<Date>;
 }
 
 // ============================================================================
@@ -1816,6 +1837,7 @@ export interface NexStockDatabase {
   audit_logs: AuditLogsTable;
   sync_command_log: SyncCommandLogTable;
   sync_conflicts: SyncConflictsTable;
+  offline_devices: OfflineDevicesTable;
   currencies: CurrenciesTable;
   units_of_measure: UnitsOfMeasureTable;
   tenants: TenantsTable;

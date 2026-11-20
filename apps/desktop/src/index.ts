@@ -1,6 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import {
+  OfflineInventoryEngine,
+  OfflinePosEngine,
+  OfflineSyncEngine,
+  SqliteOfflineStorageAdapter,
+  type OfflineStoragePort,
+  type OfflineSyncTransportPort,
+} from '@nexstock/offline-engine';
+import {
   getCanonicalSqliteMigrations,
   initializeLocalSqliteDatabase,
 } from '@nexstock/sqlite-schema';
@@ -8,6 +16,43 @@ import {
   type StatusBannerDescriptor,
   createSyncStatusBannerDescriptor,
 } from '@nexstock/ui';
+
+export * from '@nexstock/offline-engine';
+
+/**
+ * High-level Tauri Desktop Offline POS, Inventory & Sync Runtime (Phase 9.1 - 9.9).
+ * Uses canonical SQLite 0001..0009 storage and @nexstock/offline-engine business rules.
+ */
+export class DesktopOfflinePosRuntime {
+  readonly storage: OfflineStoragePort;
+  readonly engine: OfflinePosEngine;
+  readonly inventory: OfflineInventoryEngine;
+  sync: OfflineSyncEngine;
+
+  constructor(
+    storage: OfflineStoragePort,
+    currencyCode = 'LKR',
+    syncTransport?: OfflineSyncTransportPort,
+  ) {
+    this.storage = storage;
+    this.engine = new OfflinePosEngine(storage, currencyCode);
+    this.inventory = new OfflineInventoryEngine(storage);
+    this.sync = new OfflineSyncEngine(storage, syncTransport);
+  }
+
+  attachSyncTransport(transport: OfflineSyncTransportPort): void {
+    this.sync = new OfflineSyncEngine(this.storage, transport);
+  }
+
+  static fromSqlite(
+    db: DatabaseSync,
+    currencyCode = 'LKR',
+    syncTransport?: OfflineSyncTransportPort,
+  ): DesktopOfflinePosRuntime {
+    const adapter = new SqliteOfflineStorageAdapter(db, 'TAURI_DESKTOP');
+    return new DesktopOfflinePosRuntime(adapter, currencyCode, syncTransport);
+  }
+}
 
 /**
  * @nexstock/desktop — Offline-First Tauri v2 Desktop Runtime & SQLite Store.

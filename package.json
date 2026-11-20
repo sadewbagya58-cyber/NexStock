@@ -11,7 +11,8 @@
     "packages/*",
     "apps/api",
     "apps/web",
-    "apps/desktop"
+    "apps/desktop",
+    "apps/mobile"
   ],
   "scripts": {
     "lint": "eslint . --max-warnings=0",

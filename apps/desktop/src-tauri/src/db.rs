@@ -49,6 +49,16 @@ const CANONICAL_MIGRATIONS: &[EmbeddedMigration] = &[
         name: "0007_local_batch_pricing_and_barcodes",
         sql: include_str!("../../../../packages/sqlite-schema/migrations/0007_local_batch_pricing_and_barcodes.sql"),
     },
+    EmbeddedMigration {
+        version: 8,
+        name: "0008_offline_pos_data_and_recovery",
+        sql: include_str!("../../../../packages/sqlite-schema/migrations/0008_offline_pos_data_and_recovery.sql"),
+    },
+    EmbeddedMigration {
+        version: 9,
+        name: "0009_offline_inventory_sync_and_recovery",
+        sql: include_str!("../../../../packages/sqlite-schema/migrations/0009_offline_inventory_sync_and_recovery.sql"),
+    },
 ];
 
 pub fn open_and_migrate(db_path: PathBuf) -> Result<DesktopDbState, String> {

@@ -259,12 +259,28 @@ import {
   UomCorrectionPreviewResponseSchema,
   UomCorrectionExecuteRequestSchema,
   UomCorrectionExecuteResponseSchema,
-  type CreatePosSaleRequest,
-  type CreatePosReturnRequest,
+  EnrollOfflineDeviceRequestSchema,
+  OfflineDeviceRecordSchema,
+  ResolveSyncConflictRequestSchema,
+  ResolveSyncConflictResponseSchema,
+  RevokeOfflineDeviceRequestSchema,
+  SyncConflictRecordSchema,
+  SyncConflictStatusSchema,
+  SyncPullResponseSchema,
 } from '@nexstock/contracts';
 import { Type } from '@sinclair/typebox';
 import Fastify, { type FastifyInstance } from 'fastify';
-import { sql, type Kysely } from 'kysely';
+import { type Kysely } from 'kysely';
+import {
+  assertDeviceAuthorizedForSync,
+  enrollOfflineDevice,
+  handleSyncCommand,
+  listOfflineDevices,
+  listSyncConflicts,
+  pullSyncDeltaAndSnapshot,
+  resolveSyncConflict,
+  revokeOfflineDevice,
+} from './modules/sync/index.js';
 import {
   acknowledgeOrDeactivateBranchOverride,
   addProductBarcode,
@@ -543,7 +559,6 @@ import {
 import {
   AppError,
   type NexStockDatabase,
-  SyncPoisonPillError,
   appendAuditLog,
   assertActiveRoleEnforcesRls,
   enqueueOutboxEvent,
@@ -1380,8 +1395,19 @@ export async function buildApp(
     },
     async (request) => {
       const tenantId = request.headers['x-tenant-id'];
-      const userId =
+      let userId =
         request.headers['x-user-id'] ?? '0192b4a0-0000-7000-8000-000000000001';
+      if (
+        typeof request.headers.authorization === 'string' &&
+        request.headers.authorization.startsWith('Bearer ')
+      ) {
+        const principal = await verifySupabaseJwt(
+          request.headers.authorization,
+          jwksProvider,
+          jwtOptions,
+        );
+        userId = principal.userId;
+      }
       const traceId = String(request.id);
 
       return withTenantTransaction(
@@ -1393,152 +1419,13 @@ export async function buildApp(
           traceId,
         },
         async (trx) => {
+          await assertDeviceAuthorizedForSync(trx, request.body.deviceId);
           return processSyncCommandBatch({
             trx,
             deviceId: request.body.deviceId,
             branchId: request.body.branchId,
             commands: request.body.commands,
-            handler: async (cmdTrx, envelope) => {
-              await appendAuditLog(cmdTrx, {
-                action: `SYNC_${envelope.commandType}`,
-                resourceType: 'SYNC_COMMAND',
-                resourceId: envelope.commandId,
-                metadata: envelope.payload,
-              });
-
-              const rawCmdType = envelope.commandType as string;
-              if (
-                rawCmdType === 'PRICING_APPROVE_SUGGESTION' ||
-                rawCmdType === 'PRICING_UPDATE_GLOBAL' ||
-                envelope.payload['pricingApproval'] === true ||
-                envelope.payload['action'] === 'APPROVE_PRICE' ||
-                envelope.payload['action'] === 'UPDATE_GLOBAL_PRICE'
-              ) {
-                throw new SyncPoisonPillError(
-                  'PRICING_OFFLINE_APPROVAL_FORBIDDEN',
-                  'Price approvals must be executed online by an authorized approver.',
-                  { commandType: envelope.commandType },
-                );
-              }
-
-              if (envelope.payload['simulatePoisonPill'] === true) {
-                throw new SyncPoisonPillError(
-                  'INVALID_OFFLINE_COMMAND_PAYLOAD',
-                  `Command "${envelope.commandId}" failed domain invariant validation and was quarantined.`,
-                  { commandType: envelope.commandType },
-                );
-              }
-
-              if (
-                envelope.payload['droveStockNegativeOffline'] === true &&
-                !Array.isArray(envelope.payload['lines'])
-              ) {
-                return {
-                  status: 'APPLIED_WITH_CONFLICT_FLAG',
-                  conflictCode: 'NEGATIVE_STOCK_VARIANCE',
-                  conflictDetails: {
-                    note: 'Offline physical sale accepted; stock balance went negative.',
-                  },
-                };
-              }
-
-              if (
-                rawCmdType === 'POS_RECORD_SALE' &&
-                typeof envelope.payload['registerId'] === 'string' &&
-                Array.isArray(envelope.payload['lines']) &&
-                Array.isArray(envelope.payload['payments'])
-              ) {
-                const salePayload = envelope.payload as unknown as CreatePosSaleRequest;
-                const spName = `sp_sync_exec_${envelope.localSeq}`;
-                await sql`SAVEPOINT ${sql.raw(spName)}`.execute(cmdTrx);
-                try {
-                  const saleResult = await checkoutSale(
-                    cmdTrx,
-                    envelope.commandId,
-                    salePayload,
-                  );
-                  await sql`RELEASE SAVEPOINT ${sql.raw(spName)}`.execute(cmdTrx);
-                  return {
-                    status: 'APPLIED',
-                    responsePayload: {
-                      saleId: saleResult.id,
-                      invoiceNumber: saleResult.invoiceNumber,
-                    },
-                  };
-                } catch (err) {
-                  await sql`ROLLBACK TO SAVEPOINT ${sql.raw(spName)}`.execute(cmdTrx);
-                  await sql`RELEASE SAVEPOINT ${sql.raw(spName)}`.execute(cmdTrx);
-                  if (
-                    err instanceof AppError &&
-                    (err.errorCode === 'INV_INSUFFICIENT_AVAILABLE_STOCK' ||
-                      err.errorCode === 'INV_INSUFFICIENT_BATCH_STOCK')
-                  ) {
-                    const retryResult = await checkoutSale(cmdTrx, envelope.commandId, {
-                      ...salePayload,
-                      allowNegativeStockOverride: true,
-                      overrideReason: 'Offline POS sync variance override',
-                    });
-                    return {
-                      status: 'APPLIED_WITH_CONFLICT_FLAG',
-                      conflictCode: 'NEGATIVE_STOCK_VARIANCE',
-                      conflictDetails: {
-                        saleId: retryResult.id,
-                        invoiceNumber: retryResult.invoiceNumber,
-                        reason: err.message,
-                      },
-                      responsePayload: {
-                        saleId: retryResult.id,
-                        invoiceNumber: retryResult.invoiceNumber,
-                      },
-                    };
-                  }
-                  if (err instanceof AppError) {
-                    throw new SyncPoisonPillError(err.errorCode, err.message, {
-                      commandType: envelope.commandType,
-                      statusCode: err.statusCode,
-                    });
-                  }
-                  throw err;
-                }
-              }
-
-              if (
-                rawCmdType === 'POS_RECORD_RETURN' &&
-                typeof envelope.payload['saleId'] === 'string' &&
-                Array.isArray(envelope.payload['lines'])
-              ) {
-                const { saleId, ...returnBody } = envelope.payload as {
-                  saleId: string;
-                } & CreatePosReturnRequest;
-                try {
-                  const retRes = await createPosReturn(
-                    cmdTrx,
-                    envelope.commandId,
-                    saleId,
-                    returnBody as CreatePosReturnRequest,
-                  );
-                  return {
-                    status: 'APPLIED',
-                    responsePayload: {
-                      returnId: retRes.id,
-                      returnNumber: retRes.returnNumber,
-                    },
-                  };
-                } catch (err) {
-                  if (err instanceof AppError) {
-                    throw new SyncPoisonPillError(err.errorCode, err.message, {
-                      commandType: envelope.commandType,
-                      statusCode: err.statusCode,
-                    });
-                  }
-                  throw err;
-                }
-              }
-
-              return {
-                status: 'APPLIED',
-              };
-            },
+            handler: (cmdTrx, envelope) => handleSyncCommand(cmdTrx, envelope),
           });
         },
       );
@@ -1554,6 +1441,7 @@ export async function buildApp(
         querystring: Type.Object(
           {
             branchId: Type.Optional(UuidSchema),
+            deviceId: Type.Optional(UuidSchema),
           },
           { additionalProperties: false },
         ),
@@ -1575,7 +1463,224 @@ export async function buildApp(
       return withTenantTransaction(
         options.db,
         { tenantId, userId: principal.userId, traceId },
-        (trx) => getSyncCatalogPricingSnapshot(trx, request.query),
+        async (trx) => {
+          const devId =
+            request.query.deviceId ??
+            (typeof request.headers['x-device-id'] === 'string'
+              ? request.headers['x-device-id']
+              : undefined);
+          if (devId) {
+            await assertDeviceAuthorizedForSync(trx, devId);
+          }
+          return getSyncCatalogPricingSnapshot(trx, request.query);
+        },
+      );
+    },
+  );
+
+  // 6c. Sync Pull & Reconciliation Delta (Phase 9.6 / 9.7 / 9.9)
+  app.get(
+    '/v1/sync/pull',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        querystring: Type.Object(
+          {
+            branchId: Type.Optional(UuidSchema),
+            deviceId: Type.Optional(UuidSchema),
+            since: Type.Optional(Type.String()),
+          },
+          { additionalProperties: false },
+        ),
+        response: {
+          200: SyncPullResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => pullSyncDeltaAndSnapshot(trx, request.query),
+      );
+    },
+  );
+
+  // 6d. List Sync Conflicts (Phase 9.7)
+  app.get(
+    '/v1/sync/conflicts',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        querystring: Type.Object(
+          {
+            branchId: Type.Optional(UuidSchema),
+            deviceId: Type.Optional(UuidSchema),
+            status: Type.Optional(SyncConflictStatusSchema),
+          },
+          { additionalProperties: false },
+        ),
+        response: {
+          200: Type.Array(SyncConflictRecordSchema),
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => listSyncConflicts(trx, request.query),
+      );
+    },
+  );
+
+  // 6e. Resolve / Reconcile a Sync Conflict (Phase 9.7)
+  app.post(
+    '/v1/sync/conflicts/:conflictId/resolve',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ conflictId: UuidSchema }),
+        body: ResolveSyncConflictRequestSchema,
+        response: {
+          200: ResolveSyncConflictResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          resolveSyncConflict(trx, request.params.conflictId, request.body),
+      );
+    },
+  );
+
+  // 6f. Offline Device Enrollment, Listing & Revocation (Phase 9.9)
+  app.get(
+    '/v1/sync/devices',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        querystring: Type.Object(
+          { branchId: Type.Optional(UuidSchema) },
+          { additionalProperties: false },
+        ),
+        response: {
+          200: Type.Array(OfflineDeviceRecordSchema),
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => listOfflineDevices(trx, request.query.branchId),
+      );
+    },
+  );
+
+  app.post(
+    '/v1/sync/devices/enroll',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        body: EnrollOfflineDeviceRequestSchema,
+        response: {
+          200: OfflineDeviceRecordSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+      return withTenantTransaction(
+        options.db,
+        {
+          tenantId,
+          userId: principal.userId,
+          deviceId: request.body.deviceId,
+          traceId,
+        },
+        (trx) => enrollOfflineDevice(trx, request.body),
+      );
+    },
+  );
+
+  app.post(
+    '/v1/sync/devices/:deviceId/revoke',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ deviceId: UuidSchema }),
+        body: RevokeOfflineDeviceRequestSchema,
+        response: {
+          200: OfflineDeviceRecordSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          revokeOfflineDevice(trx, request.params.deviceId, request.body.reason),
       );
     },
   );

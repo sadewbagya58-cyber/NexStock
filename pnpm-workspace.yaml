@@ -3,6 +3,7 @@ packages:
   - "apps/api"
   - "apps/web"
   - "apps/desktop"
+  - "apps/mobile"
 
 allowBuilds:
   esbuild: true

@@ -3257,5 +3257,59 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       expect(html).toContain('setDashboardDatePreset');
       expect(html).toContain('setDashboardBranchFilter');
     });
+
+    it('implements Phase 9.1-9.4 Cross-Platform Offline POS, IndexedDB/Tauri Storage, Draft Cart Recovery & Mobile PWA Shell', () => {
+      const html = readFileSync(resolve(WEB_ROOT, 'public/index.html'), 'utf8');
+      const clientJsPath = resolve(WEB_ROOT, 'public/nexstock-offline-client.js');
+      const swPath = resolve(WEB_ROOT, 'public/sw.js');
+      const manifestPath = resolve(WEB_ROOT, 'public/manifest.webmanifest');
+
+      expect(existsSync(clientJsPath)).toBe(true);
+      expect(existsSync(swPath)).toBe(true);
+      expect(existsSync(manifestPath)).toBe(true);
+
+      const clientJs = readFileSync(clientJsPath, 'utf8');
+      expect(clientJs).toContain('nexstock_offline_v1');
+      expect(clientJs).toContain('function recordOfflineCashSale');
+      expect(clientJs).toContain('function saveDraftCart');
+      expect(clientJs).toContain('function loadDraftCart');
+      expect(clientJs).toContain('OPTION_A_SERVER_VALIDATION_ON_SYNC');
+      expect(clientJs).toContain('desktop_queue_offline_sale');
+
+      expect(html).toContain('src="/nexstock-offline-client.js"');
+      expect(html).toContain('href="/manifest.webmanifest"');
+      expect(html).toContain('function openOfflineSyncQueueModal(');
+      expect(html).toContain('function syncOfflineSnapshotForActiveBranch(');
+      expect(html).toContain('function openOfflineLocalShiftSession(');
+      expect(html).toContain('PENDING SYNC — Saved Locally (Unconfirmed by Server)');
+    });
+
+    it('implements Phase 9.5-9.9 Offline Inventory, Sync Center, Conflict Resolution & Recovery UI/Client', () => {
+      const html = readFileSync(resolve(WEB_ROOT, 'public/index.html'), 'utf8');
+      const clientJs = readFileSync(resolve(WEB_ROOT, 'public/nexstock-offline-client.js'), 'utf8');
+
+      // Offline Client IndexedDB v2 stores & Phase 9.5-9.9 APIs
+      expect(clientJs).toContain('const DB_VERSION = 2;');
+      expect(clientJs).toContain('local_movements');
+      expect(clientJs).toContain('local_transfers');
+      expect(clientJs).toContain('local_conflicts');
+      expect(clientJs).toContain('async function recordOfflineStockAdjustment(');
+      expect(clientJs).toContain('async function createOfflineTransferRequest(');
+      expect(clientJs).toContain('async function getExpiryAlertsOffline(');
+      expect(clientJs).toContain('async function getSerialsOffline(');
+      expect(clientJs).toContain('async function recoverInFlightCommands(');
+      expect(clientJs).toContain('async function syncNow(');
+      expect(clientJs).toContain('async function resolveLocalConflict(');
+      expect(clientJs).toContain('async function exportRecoveryBackup(');
+      expect(clientJs).toContain('async function importRecoveryBackup(');
+
+      // Web UI Phase 9.5-9.9 Sync Center, Conflict Inspector & Offline Inventory Actions
+      expect(html).toContain('Offline Sync Center & Conflict Resolution');
+      expect(html).toContain('async function syncOfflineTransactionsNow(');
+      expect(html).toContain('async function resolveSyncConflictFromUi(');
+      expect(html).toContain('async function downloadOfflineRecoveryBackupUi(');
+      expect(html).toContain('TRANSFER_REQUEST_PENDING');
+      expect(html).toContain('± Stock Adjustment');
+    });
   });
 });

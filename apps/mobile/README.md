@@ -1,10 +1,11 @@
-# NexStock Mobile (`apps/mobile` — Flutter)
+# NexStock Mobile (`apps/mobile`)
 
-## Milestone 0 Status
+## Phase 9.1 – 9.4 Offline POS Status
 
-- **Workspace Shell**: Reserved for the Flutter Mobile POS & Inventory application (scheduled for **Milestone 6**).
-- **Cross-Language Parity Status (`Acceptance Criterion #4`)**:
-  - Canonical fixed-point calculation test vectors (`roundingVectors`, `taxVectors`, `valuationVectors`) have been authored in [`packages/domain-core/test-vectors/calculation-vectors.json`](../../packages/domain-core/test-vectors/calculation-vectors.json) and **verified in TypeScript** (`@nexstock/domain-core`).
-  - **Flutter/Dart execution is NOT yet implemented or verified** in Milestone 0 (the local environment does not currently have the Flutter/Dart SDK installed).
-  - Cross-language TypeScript-to-Dart parity will only be claimed once the Dart domain calculator port and `flutter test` runner are implemented and executed against `calculation-vectors.json`.
-- **Shared SQLite Schema**: Will execute the canonical SQLite `STRICT` migrations defined in [`packages/sqlite-schema/migrations/`](../../packages/sqlite-schema/migrations/).
+- **Runtime Engine (`@nexstock/mobile`)**:
+  - Uses the shared [`@nexstock/offline-engine`](../../packages/offline-engine) and canonical SQLite `STRICT` migrations `0001..0008` in [`packages/sqlite-schema/migrations/`](../../packages/sqlite-schema/migrations/).
+  - Provides `MobileOfflinePosRuntime` with camera barcode normalization (`parseMobileCameraBarcodeScan` for GS1-128, `NB-...` internal batch codes, EAN-13, UPC-A, and QR), catalog search, FEFO/FIFO batch pricing, cascading tax math (`@nexstock/domain-core`), local cash checkout, local `OFF-*` receipts (`PENDING_SYNC`), Option A stock balance projection, and restart recovery.
+- **Browser / Mobile PWA Runtime (`apps/web/public`)**:
+  - Ships touch-responsive Mobile POS (`360px`–`430px` viewports), Service Worker (`sw.js`), Web App Manifest (`manifest.webmanifest`), camera scanning (`getUserMedia` + `BarcodeDetector`), and persistent **IndexedDB (`nexstock_offline_v1`)** storage.
+- **Flutter/Dart Toolchain Note**:
+  - Flutter/Dart SDK is not currently installed on the build host, so no Dart binary compilation was claimed; cross-language TypeScript-to-SQLite parity is verified via `node:sqlite` + Vitest tests in `@nexstock/mobile` and headless Edge CDP responsive tests across mobile viewports.

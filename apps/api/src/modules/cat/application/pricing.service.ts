@@ -19,11 +19,14 @@ import type {
   PricingSettingsResponse,
   ProductPriceHistoryResponse,
   ProductPricingRuleResponse,
+  ProductQtyMode,
   RejectOrDeferPriceSuggestionRequest,
   SyncCatalogPricingResponse,
   TrackingMode,
   UpdatePricingSettingsRequest,
   UpsertProductPricingRuleRequest,
+  ValuationMethod,
+  MeasurementCategory,
 } from '@nexstock/contracts';
 import {
   calculateSuggestedSellingPrice,
@@ -2266,14 +2269,40 @@ export async function getSyncCatalogPricingSnapshot(
   trx: TenantTransactionContext,
   query: { branchId?: string } = {},
 ): Promise<SyncCatalogPricingResponse> {
-  await assertAuthorized(trx, {
+  const authCtx = await assertAuthorized(trx, {
     permission: 'pos:sale:create',
     ...(query.branchId ? { branchId: query.branchId } : {}),
   });
   await assertSubscriptionEntitlement(trx, { requireWriteAccess: false });
 
+  const scopedBranchIds: string[] | null = query.branchId
+    ? [query.branchId]
+    : authCtx.allLocationsAccess
+      ? null
+      : [...authCtx.allowedBranchIds];
+  const hasAnyBranchScope = scopedBranchIds === null || scopedBranchIds.length > 0;
+
   const currencyCode = await getTenantBaseCurrency(trx);
-  const [tenantRow, products, rules, settings, branchOverrides, batches] = await Promise.all([
+  const [
+    tenantRow,
+    products,
+    rules,
+    settings,
+    branchOverrides,
+    batches,
+    categories,
+    barcodes,
+    unitConversions,
+    taxGroups,
+    taxRates,
+    customers,
+    branches,
+    branchMainLogs,
+    warehouses,
+    registers,
+    balances,
+    serials,
+  ] = await Promise.all([
     trx.db
       .selectFrom('tenants')
       .select(['shop_display_name', 'logo_url'])
@@ -2285,12 +2314,22 @@ export async function getSyncCatalogPricingSnapshot(
         'id',
         'sku',
         'name',
+        'category_id',
         'base_uom',
         'price_uom',
+        'purchase_cost',
         'selling_price',
+        'valuation_method',
         'tracking_mode',
         'allocation_policy',
         'require_batch_selling_price',
+        'product_qty_mode',
+        'measurement_category',
+        'allowed_selling_uoms',
+        'qty_decimal_precision',
+        'tax_group_id',
+        'track_inventory',
+        'primary_barcode',
         'sync_version',
       ])
       .where('tenant_id', '=', trx.tenantId)
@@ -2302,74 +2341,184 @@ export async function getSyncCatalogPricingSnapshot(
       .where('tenant_id', '=', trx.tenantId)
       .execute(),
     ensureTenantPricingSettings(trx),
+    hasAnyBranchScope
+      ? trx.db
+          .selectFrom('product_branch_prices')
+          .innerJoin('products', (j) =>
+            j
+              .onRef('product_branch_prices.tenant_id', '=', 'products.tenant_id')
+              .onRef('product_branch_prices.product_id', '=', 'products.id'),
+          )
+          .innerJoin('branches', (j) =>
+            j
+              .onRef('product_branch_prices.tenant_id', '=', 'branches.tenant_id')
+              .onRef('product_branch_prices.branch_id', '=', 'branches.id'),
+          )
+          .select([
+            'product_branch_prices.id',
+            'product_branch_prices.tenant_id',
+            'product_branch_prices.product_id',
+            'products.name as product_name',
+            'products.sku as sku',
+            'products.selling_price as global_selling_price',
+            'product_branch_prices.branch_id',
+            'branches.name as branch_name',
+            'product_branch_prices.selling_price',
+            'product_branch_prices.pricing_method',
+            'product_branch_prices.target_percentage',
+            'product_branch_prices.rounding_rule',
+            'product_branch_prices.min_selling_price',
+            'product_branch_prices.max_discount_pct',
+            'product_branch_prices.effective_date',
+            'product_branch_prices.is_active',
+            'product_branch_prices.needs_review',
+            'product_branch_prices.review_reason',
+            'product_branch_prices.approved_at',
+            'product_branch_prices.sync_version',
+          ])
+          .where('product_branch_prices.tenant_id', '=', trx.tenantId)
+          .where('product_branch_prices.is_active', '=', true)
+          .$if(scopedBranchIds !== null, (qb) =>
+            qb.where('product_branch_prices.branch_id', 'in', scopedBranchIds!),
+          )
+          .execute()
+      : Promise.resolve([]),
+    hasAnyBranchScope
+      ? trx.db
+          .selectFrom('inventory_batches')
+          .select([
+            'id',
+            'product_id',
+            'branch_id',
+            'warehouse_id',
+            'batch_number',
+            'internal_barcode',
+            'expiry_date',
+            'received_date',
+            'current_quantity',
+            'reserved_quantity',
+            'unit_cost',
+            'selling_price',
+            'min_selling_price',
+            'max_discount_pct',
+            'batch_pricing_mode',
+            'status',
+          ])
+          .where('tenant_id', '=', trx.tenantId)
+          .where('status', '=', 'ACTIVE')
+          .$if(scopedBranchIds !== null, (qb) =>
+            qb.where('branch_id', 'in', scopedBranchIds!),
+          )
+          .orderBy('received_date', 'asc')
+          .execute()
+      : Promise.resolve([]),
     trx.db
-      .selectFrom('product_branch_prices')
-      .innerJoin('products', (j) =>
-        j
-          .onRef('product_branch_prices.tenant_id', '=', 'products.tenant_id')
-          .onRef('product_branch_prices.product_id', '=', 'products.id'),
-      )
-      .innerJoin('branches', (j) =>
-        j
-          .onRef('product_branch_prices.tenant_id', '=', 'branches.tenant_id')
-          .onRef('product_branch_prices.branch_id', '=', 'branches.id'),
-      )
-      .select([
-        'product_branch_prices.id',
-        'product_branch_prices.tenant_id',
-        'product_branch_prices.product_id',
-        'products.name as product_name',
-        'products.sku as sku',
-        'products.selling_price as global_selling_price',
-        'product_branch_prices.branch_id',
-        'branches.name as branch_name',
-        'product_branch_prices.selling_price',
-        'product_branch_prices.pricing_method',
-        'product_branch_prices.target_percentage',
-        'product_branch_prices.rounding_rule',
-        'product_branch_prices.min_selling_price',
-        'product_branch_prices.max_discount_pct',
-        'product_branch_prices.effective_date',
-        'product_branch_prices.is_active',
-        'product_branch_prices.needs_review',
-        'product_branch_prices.review_reason',
-        'product_branch_prices.approved_at',
-        'product_branch_prices.sync_version',
-      ])
-      .where('product_branch_prices.tenant_id', '=', trx.tenantId)
-      .where('product_branch_prices.is_active', '=', true)
-      .$if(Boolean(query.branchId), (qb) =>
-        qb.where('product_branch_prices.branch_id', '=', query.branchId!),
-      )
-      .execute(),
-    trx.db
-      .selectFrom('inventory_batches')
-      .select([
-        'id',
-        'product_id',
-        'branch_id',
-        'warehouse_id',
-        'batch_number',
-        'internal_barcode',
-        'expiry_date',
-        'received_date',
-        'current_quantity',
-        'reserved_quantity',
-        'unit_cost',
-        'selling_price',
-        'min_selling_price',
-        'max_discount_pct',
-        'batch_pricing_mode',
-        'status',
-      ])
+      .selectFrom('categories')
+      .select(['id', 'parent_id', 'name', 'status', 'sync_version'])
       .where('tenant_id', '=', trx.tenantId)
       .where('status', '=', 'ACTIVE')
-      .$if(Boolean(query.branchId), (qb) =>
-        qb.where('branch_id', '=', query.branchId!),
-      )
-      .orderBy('received_date', 'asc')
+      .orderBy('name', 'asc')
       .execute(),
+    trx.db
+      .selectFrom('product_barcodes')
+      .select(['id', 'product_id', 'barcode', 'barcode_type', 'uom_code', 'is_primary'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('is_active', '=', true)
+      .execute(),
+    trx.db
+      .selectFrom('product_unit_conversions')
+      .select(['id', 'product_id', 'uom_code', 'uom_name', 'conversion_factor_to_base', 'is_active'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('is_active', '=', true)
+      .execute(),
+    trx.db
+      .selectFrom('tax_groups')
+      .select(['id', 'code', 'name', 'is_active'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('is_active', '=', true)
+      .execute(),
+    trx.db
+      .selectFrom('tax_rates')
+      .select(['id', 'tax_group_id', 'code', 'name', 'rate_percentage', 'is_compound', 'priority', 'is_active'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('is_active', '=', true)
+      .orderBy('priority', 'asc')
+      .execute(),
+    trx.db
+      .selectFrom('customers')
+      .select(['id', 'customer_number', 'name', 'phone', 'email', 'status'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('status', '=', 'ACTIVE')
+      .orderBy('name', 'asc')
+      .execute(),
+    hasAnyBranchScope
+      ? trx.db
+          .selectFrom('branches')
+          .select(['id', 'code', 'name', 'is_active', 'default_warehouse_id'])
+          .where('tenant_id', '=', trx.tenantId)
+          .where('is_active', '=', true)
+          .$if(scopedBranchIds !== null, (qb) => qb.where('id', 'in', scopedBranchIds!))
+          .orderBy('created_at', 'asc')
+          .execute()
+      : Promise.resolve([]),
+    trx.db
+      .selectFrom('audit_logs')
+      .select(['resource_id', 'action', 'metadata_json'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('resource_type', '=', 'BRANCH')
+      .orderBy('created_at', 'asc')
+      .execute(),
+    hasAnyBranchScope
+      ? trx.db
+          .selectFrom('warehouses')
+          .select(['id', 'branch_id', 'code', 'name', 'allow_negative_stock', 'is_active'])
+          .where('tenant_id', '=', trx.tenantId)
+          .where('is_active', '=', true)
+          .$if(scopedBranchIds !== null, (qb) => qb.where('branch_id', 'in', scopedBranchIds!))
+          .execute()
+      : Promise.resolve([]),
+    hasAnyBranchScope
+      ? trx.db
+          .selectFrom('pos_registers')
+          .select(['id', 'branch_id', 'warehouse_id', 'code', 'name', 'is_active'])
+          .where('tenant_id', '=', trx.tenantId)
+          .where('is_active', '=', true)
+          .$if(scopedBranchIds !== null, (qb) => qb.where('branch_id', 'in', scopedBranchIds!))
+          .orderBy('code', 'asc')
+          .execute()
+      : Promise.resolve([]),
+    hasAnyBranchScope
+      ? trx.db
+          .selectFrom('inventory_balances')
+          .select(['branch_id', 'warehouse_id', 'product_id', 'qty_on_hand', 'qty_reserved', 'moving_avg_cost'])
+          .where('tenant_id', '=', trx.tenantId)
+          .$if(scopedBranchIds !== null, (qb) => qb.where('branch_id', 'in', scopedBranchIds!))
+          .execute()
+      : Promise.resolve([]),
+    hasAnyBranchScope
+      ? trx.db
+          .selectFrom('inventory_serials')
+          .select(['id', 'product_id', 'warehouse_id', 'branch_id', 'batch_id', 'serial_number', 'status', 'unit_cost'])
+          .where('tenant_id', '=', trx.tenantId)
+          .where('status', '=', 'IN_STOCK')
+          .$if(scopedBranchIds !== null, (qb) => qb.where('branch_id', 'in', scopedBranchIds!))
+          .execute()
+      : Promise.resolve([]),
   ]);
+
+  let mainBranchId: string | null = branches[0]?.id ?? null;
+  for (const log of branchMainLogs) {
+    if (!log.resource_id) continue;
+    const meta =
+      log.metadata_json && typeof log.metadata_json === 'object'
+        ? (log.metadata_json as Record<string, unknown>)
+        : {};
+    if (log.action === 'ORG_BRANCH_SET_MAIN' || meta.isMainBranch === true) {
+      if (branches.some((b) => b.id === log.resource_id)) {
+        mainBranchId = log.resource_id;
+      }
+    }
+  }
 
   const ruleMap = new Map(rules.map((r) => [r.product_id, r]));
   const defaultMaxDisc = formatPct2(settings.default_max_discount_pct, '20.00');
@@ -2392,12 +2541,21 @@ export async function getSyncCatalogPricingSnapshot(
     globalPrices: products.map((p) => {
       const rule = ruleMap.get(p.id);
       const rawPolicy = String(p.allocation_policy ?? 'FEFO');
+      const rawAllowed = p.allowed_selling_uoms;
+      const allowedSellingUoms = Array.isArray(rawAllowed)
+        ? rawAllowed.map((u) => String(u).trim().toUpperCase()).filter(Boolean)
+        : [p.base_uom.toUpperCase()];
       return {
         productId: p.id,
         sku: p.sku,
         name: p.name,
+        categoryId: p.category_id ?? null,
         baseUom: p.base_uom,
         priceUom: (p.price_uom ?? p.base_uom).toUpperCase(),
+        purchaseCost: Money.fromDecimalString(
+          String(p.purchase_cost ?? '0'),
+          currencyCode,
+        ).toDecimalString(),
         sellingPrice: Money.fromDecimalString(
           String(p.selling_price),
           currencyCode,
@@ -2412,9 +2570,17 @@ export async function getSyncCatalogPricingSnapshot(
           rule?.max_discount_pct !== null && rule?.max_discount_pct !== undefined
             ? formatPct2(rule.max_discount_pct)
             : defaultMaxDisc,
+        valuationMethod: (p.valuation_method ?? 'MOVING_AVG') as ValuationMethod,
         trackingMode: (p.tracking_mode ?? 'NONE') as TrackingMode,
         allocationPolicy: (rawPolicy === 'FIFO' ? 'FIFO' : 'FEFO') as BatchAllocationPolicy,
         requireBatchSellingPrice: Boolean(p.require_batch_selling_price ?? false),
+        productQtyMode: (p.product_qty_mode ?? 'STANDARD') as ProductQtyMode,
+        measurementCategory: (p.measurement_category ?? null) as MeasurementCategory | null,
+        allowedSellingUoms: allowedSellingUoms.length > 0 ? allowedSellingUoms : [p.base_uom.toUpperCase()],
+        qtyDecimalPrecision: Number(p.qty_decimal_precision ?? 0),
+        taxGroupId: p.tax_group_id ?? null,
+        trackInventory: Boolean(p.track_inventory),
+        primaryBarcode: p.primary_barcode ?? null,
         syncVersion: Number(p.sync_version),
       };
     }),
@@ -2488,5 +2654,113 @@ export async function getSyncCatalogPricingSnapshot(
         status: b.status as BatchStatus,
       };
     }),
+    categories: categories.map((c) => ({
+      id: c.id,
+      parentId: c.parent_id ?? null,
+      name: c.name,
+      status: c.status,
+      syncVersion: Number(c.sync_version),
+    })),
+    barcodes: barcodes.map((bc) => ({
+      id: bc.id,
+      productId: bc.product_id,
+      barcode: bc.barcode,
+      barcodeType: bc.barcode_type,
+      uomCode: bc.uom_code,
+      isPrimary: Boolean(bc.is_primary),
+    })),
+    unitConversions: unitConversions.map((u) => ({
+      id: u.id,
+      productId: u.product_id,
+      uomCode: u.uom_code,
+      uomName: u.uom_name,
+      conversionFactorToBase: Quantity.fromDecimalString(
+        String(u.conversion_factor_to_base),
+      ).toDecimalString(),
+      isActive: Boolean(u.is_active),
+    })),
+    taxGroups: taxGroups.map((tg) => ({
+      id: tg.id,
+      code: tg.code,
+      name: tg.name,
+      isActive: Boolean(tg.is_active),
+    })),
+    taxRates: taxRates.map((tr) => ({
+      id: tr.id,
+      taxGroupId: tr.tax_group_id,
+      code: tr.code,
+      name: tr.name,
+      ratePercentage: String(tr.rate_percentage),
+      isCompound: Boolean(tr.is_compound),
+      priority: Number(tr.priority),
+      isActive: Boolean(tr.is_active),
+    })),
+    customers: customers.map((cu) => ({
+      id: cu.id,
+      customerNumber: cu.customer_number,
+      name: cu.name,
+      phone: cu.phone ?? null,
+      email: cu.email ?? null,
+      status: cu.status,
+    })),
+    branches: branches.map((b) => ({
+      id: b.id,
+      code: b.code,
+      name: b.name,
+      isMainBranch: b.id === mainBranchId,
+      isActive: Boolean(b.is_active),
+      defaultWarehouseId: b.default_warehouse_id ?? null,
+    })),
+    warehouses: warehouses.map((w) => ({
+      id: w.id,
+      branchId: w.branch_id ?? null,
+      code: w.code,
+      name: w.name,
+      allowNegativeStock: Boolean(w.allow_negative_stock),
+      isActive: Boolean(w.is_active),
+    })),
+    registers: registers.map((r) => ({
+      id: r.id,
+      branchId: r.branch_id,
+      warehouseId: r.warehouse_id,
+      code: r.code,
+      name: r.name,
+      isActive: Boolean(r.is_active),
+    })),
+    balances: balances.map((bal) => {
+      const onHand = Quantity.fromDecimalString(String(bal.qty_on_hand || '0'));
+      const reserved = Quantity.fromDecimalString(String(bal.qty_reserved || '0'));
+      const avail = onHand.subtract(reserved);
+      return {
+        branchId: bal.branch_id,
+        warehouseId: bal.warehouse_id,
+        productId: bal.product_id,
+        qtyOnHand: onHand.toDecimalString(),
+        qtyReserved: reserved.toDecimalString(),
+        availableQty: (avail.isNegative() ? Quantity.zero() : avail).toDecimalString(),
+        movingAvgCost: Money.fromDecimalString(
+          String(bal.moving_avg_cost || '0'),
+          currencyCode,
+        ).toDecimalString(),
+      };
+    }),
+    serials: serials.map((s) => ({
+      id: s.id,
+      productId: s.product_id,
+      warehouseId: s.warehouse_id,
+      branchId: s.branch_id,
+      batchId: s.batch_id ?? null,
+      serialNumber: s.serial_number,
+      status: s.status,
+      unitCost: Money.fromDecimalString(String(s.unit_cost || '0'), currencyCode).toDecimalString(),
+    })),
+    deviceAuthorization: {
+      actorUserId: authCtx.userId,
+      allLocationsAccess: authCtx.allLocationsAccess,
+      allowedBranchIds: [...authCtx.allowedBranchIds],
+      roleCodes: [...authCtx.roleCodes],
+      permissions: [...authCtx.permissions],
+      offlineAuthTtlHours: 24,
+    },
   };
 }

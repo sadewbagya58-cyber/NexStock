@@ -10,6 +10,8 @@
   },
   "dependencies": {
     "@nexstock/contracts": "workspace:*",
+    "@nexstock/domain-core": "workspace:*",
+    "@nexstock/offline-engine": "workspace:*",
     "@nexstock/sqlite-schema": "workspace:*",
     "@nexstock/ui": "workspace:*"
   },
