@@ -4046,6 +4046,53 @@
       if (userNameEl && state.fullName) userNameEl.innerText = state.fullName;
     }
 
+    function guardBranchSwitchWithActiveCart(onProceedCallback) {
+      const cartItems = Array.isArray(state.cart) ? state.cart : [];
+      if (cartItems.length === 0) {
+        if (typeof onProceedCallback === 'function') onProceedCallback();
+        return;
+      }
+
+      window._pendingBranchSwitchCallback = onProceedCallback;
+      openModal({
+        title: 'Active POS Cart Items Detected',
+        maxWidth: '480px',
+        bodyHtml: `
+          <div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:14px;">
+            <div style="font-size:24px;line-height:1;">🛒</div>
+            <div style="font-size:13px;color:var(--text-secondary);line-height:1.5;">
+              You currently have <strong>${cartItems.length} ${cartItems.length === 1 ? 'item' : 'items'}</strong> in your active POS cart at <strong>${escapeHtml(state.branchName || 'Current Branch')}</strong>.<br><br>
+              Prices, stock batches, and tax rules are bound to a single branch and cannot be mixed across branches. Choose how to proceed:
+            </div>
+          </div>
+        `,
+        footerHtml: `
+          <button type="button" class="btn btn-secondary" onclick="stayOnCurrentBranchCart()">Stay &amp; Finish Sale</button>
+          <button type="button" class="btn btn-danger" onclick="confirmDiscardCartAndSwitchBranch()">Clear Cart &amp; Switch Branch</button>
+        `
+      });
+    }
+
+    function stayOnCurrentBranchCart() {
+      window._pendingBranchSwitchCallback = null;
+      closeModal();
+      if (state.activeView !== 'pos-checkout') {
+        renderView('pos-checkout');
+      }
+    }
+
+    function confirmDiscardCartAndSwitchBranch() {
+      state.cart = [];
+      state.selectedCustomer = null;
+      if (typeof updateCartBadge === 'function') {
+        try { updateCartBadge(); } catch {}
+      }
+      const cb = window._pendingBranchSwitchCallback;
+      window._pendingBranchSwitchCallback = null;
+      closeModal();
+      if (typeof cb === 'function') cb();
+    }
+
     async function switchActiveBranchContext(branchObj, options = {}) {
       clearTenantViewCache();
       state.cachedBatches = [];
@@ -4153,16 +4200,22 @@
     }
 
     function selectBranchFromSwitcher(branchId) {
-      if (!branchId) {
+      const targetId = branchId || '';
+      if (targetId === (state.branchId || '')) {
         closeModal();
-        switchActiveBranchContext(null);
         return;
       }
-      const found = (state.cachedBranches || []).find(b => b.id === branchId);
+      const found = targetId ? (state.cachedBranches || []).find(b => b.id === targetId) : null;
       closeModal();
-      if (found) {
-        switchActiveBranchContext(found);
-      }
+      guardBranchSwitchWithActiveCart(() => {
+        if (!targetId) {
+          switchActiveBranchContext(null);
+          return;
+        }
+        if (found) {
+          switchActiveBranchContext(found);
+        }
+      });
     }
 
     // Select Active Tenant Membership
@@ -6758,13 +6811,311 @@
       }
     }
 
+    function setDashboardDatePreset(preset) {
+      state.dashboardDatePreset = preset || 'TODAY';
+      renderDashboardView();
+    }
+
+    function applyCustomDashboardDates() {
+      const s = document.getElementById('dashCustomStart')?.value;
+      const e = document.getElementById('dashCustomEnd')?.value;
+      if (s && e) {
+        state.dashboardCustomStart = s;
+        state.dashboardCustomEnd = e;
+        state.dashboardDatePreset = 'CUSTOM';
+        renderDashboardView();
+      }
+    }
+
+    function setDashboardBranchFilter(branchId) {
+      const bId = branchId || '';
+      state.dashboardBranchFilterId = bId;
+      renderDashboardView();
+    }
+
+    function paintCentralizedDashboardHtml(container, summary, branches = []) {
+      const kpis = summary?.kpis || {};
+      const datePreset = summary?.datePreset || state.dashboardDatePreset || 'TODAY';
+      const selectedBranchId = summary?.selectedBranchId || '';
+      const canSelectAll = summary?.allLocationsAccess !== false;
+      const activeBranches = (branches || []).filter(b => b.isActive !== false);
+      const best = summary?.bestPerformingBranch;
+      const comparison = Array.isArray(summary?.branchComparison) ? summary.branchComparison : [];
+      const trend = Array.isArray(summary?.salesTrend) ? summary.salesTrend : [];
+      const watchlist = Array.isArray(summary?.lowStockWatchlist) ? summary.lowStockWatchlist : [];
+      const activities = Array.isArray(summary?.recentActivities) ? summary.recentActivities : [];
+
+      const presetButtons = [
+        { id: 'TODAY', label: 'Today' },
+        { id: 'YESTERDAY', label: 'Yesterday' },
+        { id: 'THIS_WEEK', label: 'This Week' },
+        { id: 'THIS_MONTH', label: 'This Month' },
+        { id: 'CUSTOM', label: 'Custom' },
+      ];
+
+      const maxCompSales = Math.max(1, ...comparison.map(c => Number(c.netSales || 0)));
+      const maxTrendSales = Math.max(1, ...trend.map(t => Math.max(0, Number(t.netSales || 0))));
+
+      container.innerHTML = `
+        <div class="view-header" style="align-items: flex-start; gap: 14px;">
+          <div>
+            <h1 class="view-title">Business Overview Dashboard</h1>
+            <div class="view-subtitle">
+              <span class="badge-pill ${summary?.scopeMode === 'SINGLE_BRANCH' ? 'badge-blue' : 'badge-green'}" style="margin-right: 6px;">
+                ${summary?.scopeMode === 'SINGLE_BRANCH' ? 'Branch View' : (canSelectAll ? 'Business-Wide' : 'Authorized Branches')}
+              </span>
+              <strong>${escapeHtml(summary?.selectedBranchName || 'All Branches')}</strong>
+              &bull; ${escapeHtml(summary?.startDate || '')}${summary?.startDate !== summary?.endDate ? ` to ${escapeHtml(summary?.endDate || '')}` : ''}
+              &bull; Currency: ${escapeHtml(summary?.currencyCode || getTenantCurrency())}
+            </div>
+          </div>
+
+          <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
+            <select class="form-select" id="dashBranchSelect" aria-label="Filter dashboard by branch" style="min-width: 190px; padding: 6px 10px; font-size: 13px;" onchange="setDashboardBranchFilter(this.value)">
+              ${canSelectAll ? `<option value="" ${!selectedBranchId ? 'selected' : ''}>🏢 All Branches (Business-Wide)</option>` : `<option value="" ${!selectedBranchId ? 'selected' : ''}>Authorized Branches Combined</option>`}
+              ${activeBranches.map(b => `
+                <option value="${escapeHtml(b.id)}" ${selectedBranchId === b.id ? 'selected' : ''}>${b.isMainBranch ? '⭐ ' : ''}${escapeHtml(b.name)} (${escapeHtml(b.code)})</option>
+              `).join('')}
+            </select>
+
+            <div style="display: inline-flex; flex-wrap: wrap; gap: 4px; background: var(--bg-primary); padding: 4px; border-radius: 8px; border: 1px solid var(--border-subtle);">
+              ${presetButtons.map(p => `
+                <button type="button" class="btn btn-sm ${datePreset === p.id ? 'btn-primary' : 'btn-secondary'}" style="padding: 4px 10px; font-size: 12px; min-height: 30px;" onclick="setDashboardDatePreset('${p.id}')">${p.label}</button>
+              `).join('')}
+            </div>
+
+            ${hasPermission('rep:report:view') ? `
+              <button type="button" class="btn btn-secondary btn-sm" onclick="renderView('reports')">Detailed Reports &rarr;</button>
+            ` : ''}
+          </div>
+        </div>
+
+        ${datePreset === 'CUSTOM' ? `
+          <div class="card" style="padding: 12px 16px; margin-bottom: 16px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center;">
+            <span style="font-size: 12px; font-weight: 600; color: var(--text-secondary);">Custom Date Range:</span>
+            <input type="date" id="dashCustomStart" class="form-input" style="width: auto; padding: 5px 8px; font-size: 13px;" value="${escapeHtml(state.dashboardCustomStart || summary?.startDate || '')}">
+            <span style="color: var(--text-secondary); font-size: 12px;">to</span>
+            <input type="date" id="dashCustomEnd" class="form-input" style="width: auto; padding: 5px 8px; font-size: 13px;" value="${escapeHtml(state.dashboardCustomEnd || summary?.endDate || '')}">
+            <button type="button" class="btn btn-primary btn-sm" onclick="applyCustomDashboardDates()">Apply Dates</button>
+          </div>
+        ` : ''}
+
+        <!-- KPI Summary Grid -->
+        <div class="kpi-grid" style="grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); margin-bottom: 20px;">
+          <div class="kpi-card">
+            <div class="kpi-label">Net Sales (${escapeHtml(datePreset.replace('_', ' '))})</div>
+            <div class="kpi-value" style="color: var(--accent-primary);">${formatTenantMoney(kpis.totalSales || '0')}</div>
+            <div class="kpi-trend" style="color: var(--text-secondary);">
+              Gross: ${formatTenantMoney(kpis.grossSales || '0')}
+              ${Number(kpis.refundTotal || 0) > 0 ? ` &bull; Refunds: -${formatTenantMoney(kpis.refundTotal)}` : ''}
+            </div>
+          </div>
+
+          <div class="kpi-card">
+            <div class="kpi-label">Orders &amp; Basket Size</div>
+            <div class="kpi-value">${Number(kpis.totalOrders || 0).toLocaleString()} <span style="font-size: 13px; font-weight: 500; color: var(--text-secondary);">orders</span></div>
+            <div class="kpi-trend" style="color: var(--text-secondary);">
+              AOV: ${formatTenantMoney(kpis.averageOrderValue || '0')}
+              ${Number(kpis.voidedOrders || 0) > 0 ? ` &bull; ${kpis.voidedOrders} voided` : ''}
+            </div>
+          </div>
+
+          <div class="kpi-card">
+            <div class="kpi-label">Inventory Valuation</div>
+            <div class="kpi-value" style="color: var(--status-success);">${formatTenantMoney(kpis.totalInventoryValue || '0')}</div>
+            <div class="kpi-trend" style="color: var(--text-secondary);">
+              ${formatQty(kpis.totalUnitsOnHand || '0')} total units &bull; ${Number(kpis.activeBranchesCount || 0)} branch${Number(kpis.activeBranchesCount || 0) === 1 ? '' : 'es'}
+            </div>
+          </div>
+
+          <div class="kpi-card">
+            <div class="kpi-label">Confirmed Gross Profit</div>
+            <div class="kpi-value" style="color: ${Number(kpis.grossProfit || 0) >= 0 ? 'var(--status-success)' : 'var(--status-danger)'};">${formatTenantMoney(kpis.grossProfit || '0')}</div>
+            <div class="kpi-trend" style="color: ${kpis.hasIncompleteCostData ? 'var(--status-warning)' : 'var(--text-secondary)'};">
+              ${kpis.hasIncompleteCostData
+                ? `⚠️ ${kpis.costCoveragePct}% cost coverage (${kpis.incompleteCostLinesCount} uncosted line${kpis.incompleteCostLinesCount === 1 ? '' : 's'})`
+                : `Margin: ${kpis.grossMarginPct ?? 0}% (COGS: ${formatTenantMoney(kpis.confirmedCogs || '0')})`}
+            </div>
+          </div>
+
+          <div class="kpi-card">
+            <div class="kpi-label">Stock Health &amp; Catalog</div>
+            <div class="kpi-value" style="color: ${(Number(kpis.lowStockAlerts || 0) + Number(kpis.outOfStockAlerts || 0)) > 0 ? 'var(--status-warning)' : 'var(--status-success)'};">
+              ${Number(kpis.lowStockAlerts || 0) + Number(kpis.outOfStockAlerts || 0)} <span style="font-size: 13px; font-weight: 500; color: var(--text-secondary);">alerts</span>
+            </div>
+            <div class="kpi-trend" style="color: var(--text-secondary);">
+              ${kpis.outOfStockAlerts || 0} out of stock &bull; ${kpis.totalProducts || 0} SKUs &bull; ${kpis.totalCustomers || 0} customers
+            </div>
+          </div>
+
+          <div class="kpi-card">
+            <div class="kpi-label">Top Performing Branch</div>
+            ${best ? `
+              <div class="kpi-value" style="font-size: 18px; color: var(--text-primary);">${escapeHtml(best.branchName)}</div>
+              <div class="kpi-trend" style="color: var(--status-success);">
+                ${formatTenantMoney(best.netSales)} (${best.sharePct}% share &bull; ${best.ordersCount} orders)
+              </div>
+            ` : `
+              <div class="kpi-value" style="font-size: 16px; color: var(--text-secondary);">No sales yet</div>
+              <div class="kpi-trend" style="color: var(--text-secondary);">Complete POS sales in period to rank branches</div>
+            `}
+          </div>
+        </div>
+
+        <!-- Middle Row: Branch Comparison & Sales Trend -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px; margin-bottom: 20px;">
+          <div class="card">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; gap: 8px; flex-wrap: wrap;">
+              <div>
+                <div class="card-title" style="margin-bottom: 2px;">Branch Sales &amp; Stock Comparison</div>
+                <div style="font-size: 12px; color: var(--text-secondary);">Net sales, order volume, and inventory held per branch</div>
+              </div>
+              <span class="badge-pill badge-blue">${comparison.length} Branch${comparison.length === 1 ? '' : 'es'}</span>
+            </div>
+            ${comparison.length === 0 ? `
+              <div class="empty-state-card" style="padding: 20px;">No branch activity available for your scope.</div>
+            ` : `
+              <div style="display: flex; flex-direction: column; gap: 12px;">
+                ${comparison.map(b => {
+                  const pct = Math.max(4, Math.min(100, Math.round((Math.max(0, Number(b.netSales || 0)) / maxCompSales) * 100)));
+                  return `
+                    <div style="padding: 10px 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-primary);">
+                      <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap;">
+                        <div style="font-weight: 700; font-size: 13px;">
+                          ${b.isMainBranch ? '⭐ ' : ''}${escapeHtml(b.branchName)}
+                          <code style="font-size: 11px; color: var(--text-secondary); margin-left: 4px;">${escapeHtml(b.branchCode)}</code>
+                        </div>
+                        <div style="font-weight: 700; color: var(--accent-primary); font-size: 14px;">${formatTenantMoney(b.netSales)}</div>
+                      </div>
+                      <div style="height: 6px; width: 100%; background: var(--bg-secondary); border-radius: 999px; overflow: hidden; margin-bottom: 6px;">
+                        <div style="height: 100%; width: ${Number(b.netSales || 0) > 0 ? pct : 0}%; background: var(--accent-primary); border-radius: 999px;"></div>
+                      </div>
+                      <div style="display: flex; justify-content: space-between; font-size: 11px; color: var(--text-secondary); flex-wrap: wrap; gap: 6px;">
+                        <span>${b.ordersCount} orders &bull; AOV ${formatTenantMoney(b.averageOrderValue)}</span>
+                        <span>Stock Val: <strong>${formatTenantMoney(b.inventoryValue)}</strong> (${b.lowStockCount + b.outOfStockCount} alerts)</span>
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            `}
+          </div>
+
+          <div class="card">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; gap: 8px; flex-wrap: wrap;">
+              <div>
+                <div class="card-title" style="margin-bottom: 2px;">Sales Revenue Trend</div>
+                <div style="font-size: 12px; color: var(--text-secondary);">Daily net POS revenue (${escapeHtml(summary?.startDate || '')} &rarr; ${escapeHtml(summary?.endDate || '')})</div>
+              </div>
+            </div>
+            ${trend.length === 0 ? `
+              <div class="empty-state-card" style="padding: 20px;">No daily trend data in selected range.</div>
+            ` : `
+              <div style="display: flex; align-items: flex-end; gap: 6px; height: 180px; padding: 14px 8px 6px; border-bottom: 1px solid var(--border-subtle); overflow-x: auto;">
+                ${trend.slice(-21).map(pt => {
+                  const val = Math.max(0, Number(pt.netSales || 0));
+                  const hPct = val > 0 ? Math.max(10, Math.round((val / maxTrendSales) * 100)) : 4;
+                  const shortDate = String(pt.date || '').slice(5);
+                  return `
+                    <div style="flex: 1 0 26px; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%;" title="${escapeHtml(pt.date)}: ${formatTenantMoney(pt.netSales)} (${pt.ordersCount} orders)">
+                      <div style="width: 100%; max-width: 28px; height: ${hPct}%; background: ${val > 0 ? 'var(--accent-primary)' : 'var(--border-subtle)'}; border-radius: 4px 4px 0 0; transition: height 0.2s;"></div>
+                      <div style="font-size: 10px; color: var(--text-secondary); margin-top: 6px; white-space: nowrap;">${escapeHtml(shortDate)}</div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+              <div style="display: flex; justify-content: space-between; font-size: 12px; color: var(--text-secondary); margin-top: 10px; flex-wrap: wrap; gap: 8px;">
+                <span>Period Total: <strong>${formatTenantMoney(kpis.totalSales || '0')}</strong></span>
+                <span>Completed Orders: <strong>${kpis.totalOrders || 0}</strong></span>
+              </div>
+            `}
+          </div>
+        </div>
+
+        <!-- Bottom Row: Low Stock Watchlist & Recent Activities -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px;">
+          <div class="card">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; gap: 8px;">
+              <div>
+                <div class="card-title" style="margin-bottom: 2px;">Low Stock &amp; Reorder Alerts</div>
+                <div style="font-size: 12px; color: var(--text-secondary);">Products at or below reorder threshold in scoped branches</div>
+              </div>
+              ${hasPermission('inv:balance:read') ? `<button type="button" class="btn btn-secondary btn-sm" onclick="renderView('balances')">Stock Balances</button>` : ''}
+            </div>
+            ${watchlist.length === 0 ? `
+              <div class="empty-state-card" style="padding: 20px; color: var(--status-success);">✓ All tracked stock is healthy across scoped branches.</div>
+            ` : `
+              <div style="display: flex; flex-direction: column; gap: 8px; max-height: 320px; overflow-y: auto;">
+                ${watchlist.map(item => `
+                  <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--border-subtle); border-radius: 6px;">
+                    <div style="min-width: 0;">
+                      <div style="font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(item.productName)} <code style="font-size: 11px;">${escapeHtml(item.sku)}</code></div>
+                      <div style="font-size: 11px; color: var(--text-secondary);">${escapeHtml(item.branchName)} &bull; Reorder @ ${formatQty(item.reorderPoint)} ${escapeHtml(item.baseUom)}</div>
+                    </div>
+                    <div style="text-align: right; flex-shrink: 0;">
+                      <span class="badge-pill ${item.stockState === 'LOW_STOCK' ? 'badge-yellow' : 'badge-red'}" style="font-size: 11px;">
+                        ${formatQty(item.qtyOnHand)} ${escapeHtml(item.baseUom)}
+                      </span>
+                    </div>
+                  </div>
+                `).join('')}
+              </div>
+            `}
+          </div>
+
+          <div class="card">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; gap: 8px;">
+              <div>
+                <div class="card-title" style="margin-bottom: 2px;">Recent Business Activities</div>
+                <div style="font-size: 12px; color: var(--text-secondary);">Sales, returns, voids, and inter-branch stock transfers</div>
+              </div>
+            </div>
+            ${activities.length === 0 ? `
+              <div class="empty-state-card" style="padding: 20px;">No transactions or transfers recorded in this period.</div>
+            ` : `
+              <div style="display: flex; flex-direction: column; gap: 8px; max-height: 320px; overflow-y: auto;">
+                ${activities.map(act => {
+                  const typeBadge =
+                    act.activityType === 'POS_SALE' ? 'badge-green'
+                      : act.activityType === 'POS_RETURN' ? 'badge-yellow'
+                      : act.activityType === 'POS_VOID' ? 'badge-red'
+                      : 'badge-blue';
+                  const typeLabel =
+                    act.activityType === 'POS_SALE' ? 'SALE'
+                      : act.activityType === 'POS_RETURN' ? 'RETURN'
+                      : act.activityType === 'POS_VOID' ? 'VOID'
+                      : 'TRANSFER';
+                  return `
+                    <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--border-subtle); border-radius: 6px;">
+                      <div style="min-width: 0;">
+                        <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                          <span class="badge-pill ${typeBadge}" style="font-size: 10px;">${typeLabel}</span>
+                          <span style="font-weight: 600; font-size: 13px;">${escapeHtml(act.description)}</span>
+                        </div>
+                        <div style="font-size: 11px; color: var(--text-secondary); margin-top: 2px;">
+                          ${escapeHtml(act.branchName)} &bull; By ${escapeHtml(act.actorName)} &bull; ${new Date(act.occurredAt).toLocaleString()}
+                        </div>
+                      </div>
+                      <div style="font-weight: 700; font-size: 13px; flex-shrink: 0; color: ${act.activityType === 'POS_RETURN' || act.activityType === 'POS_VOID' ? 'var(--status-danger)' : 'var(--text-primary)'};">
+                        ${act.amount != null ? formatTenantMoney(act.amount) : '<span style="font-size: 11px; color: var(--text-secondary); font-weight: 500;">Stock Move</span>'}
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            `}
+          </div>
+        </div>
+      `;
+    }
+
     async function renderDashboardView() {
       const container = document.getElementById('mainContainer');
       const renderSeq = state.viewRenderSeq;
 
       // Dedicated Staff self-service portal (BUG-059 remediation)
       const isStaffRole = state.userRole === 'STAFF' || (state.roles && state.roles.includes('STAFF'));
-      const isManagerOrAdmin = hasPermission('cat:product:read') || hasPermission('pos:sale:read') || hasPermission('inv:balance:read');
+      const isManagerOrAdmin = hasPermission('cat:product:read') || hasPermission('pos:sale:read') || hasPermission('inv:balance:read') || hasPermission('rep:report:view');
       if (isStaffRole && !isManagerOrAdmin) {
         if (!isModuleEnabled('hrm')) {
           renderStaffV1DashboardView(container, renderSeq);
@@ -6775,32 +7126,45 @@
       }
 
       try {
+        const preset = state.dashboardDatePreset || 'TODAY';
+        const effectiveBranchId =
+          state.dashboardBranchFilterId !== undefined
+            ? state.dashboardBranchFilterId
+            : (state.branchId || '');
+
+        const cacheKey = `dashboard::${preset}::${effectiveBranchId}::${state.dashboardCustomStart || ''}::${state.dashboardCustomEnd || ''}`;
+        const isDefaultDash = cacheKey === 'dashboard::TODAY::::';
         const cached = getViewCache('dashboard');
-        if (cached && cached.data && container) {
-          paintDashboardHtml(container, cached.data.prodList, cached.data.balList, cached.data.saleList);
+        const cachedScoped = isDefaultDash ? cached : getViewCache(cacheKey);
+        if (cachedScoped && cachedScoped.data && container) {
+          paintCentralizedDashboardHtml(container, cachedScoped.data.summary, cachedScoped.data.branches);
         }
 
-        const whParam = state.warehouseId ? `&warehouseId=${encodeURIComponent(state.warehouseId)}` : '';
-        const regParam = state.branchId ? `?branchId=${encodeURIComponent(state.branchId)}` : '';
-        const [products, balances, sales] = await Promise.all([
-          apiFetch('/v1/products?limit=100', { silent: true }).catch(() => ({ data: [] })),
-          apiFetch(`/v1/inventory/balances?limit=100${whParam}`, { silent: true }).catch(() => ({ data: [] })),
-          apiFetch('/v1/pos/sales?limit=100', { silent: true }).catch(() => [])
+        const qs = new URLSearchParams();
+        qs.set('datePreset', preset);
+        if (effectiveBranchId) qs.set('branchId', effectiveBranchId);
+        if (preset === 'CUSTOM') {
+          if (state.dashboardCustomStart) qs.set('startDate', state.dashboardCustomStart);
+          if (state.dashboardCustomEnd) qs.set('endDate', state.dashboardCustomEnd);
+        }
+
+        const [summary, branchesRes] = await Promise.all([
+          apiFetch(`/v1/dashboard/summary?${qs.toString()}`, { silent: true }),
+          hasPermission('org:branch:read')
+            ? apiFetch('/v1/org/branches?status=ACTIVE', { silent: true }).catch(() => ({ items: [] }))
+            : Promise.resolve({ items: state.cachedBranches || [] })
         ]);
 
-        const prodList = products?.data || (Array.isArray(products) ? products : []);
-        const balList = balances?.data || (Array.isArray(balances) ? balances : []);
-        const saleList = Array.isArray(sales) ? sales : (sales?.data || []);
-
-        state.cachedProducts = prodList;
-        setViewCache('dashboard', { prodList, balList, saleList });
-        setViewCache('balances', balList);
+        const branches = Array.isArray(branchesRes?.items) ? branchesRes.items : (Array.isArray(branchesRes) ? branchesRes : []);
+        if (branches.length > 0) state.cachedBranches = branches;
+        if (isDefaultDash) setViewCache('dashboard', { summary, branches });
+        setViewCache(cacheKey, { summary, branches });
 
         if (!isCurrentViewRender('dashboard', renderSeq) || !container) return;
-        paintDashboardHtml(container, prodList, balList, saleList);
+        paintCentralizedDashboardHtml(container, summary, branches);
       } catch (err) {
         if (!isCurrentViewRender('dashboard', renderSeq) || !container) return;
-        container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load dashboard: ${err.message} <button class="btn btn-secondary btn-sm" style="margin-left: 8px;" onclick="renderDashboardView()">Retry</button></div>`;
+        container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load dashboard: ${escapeHtml(err.message)} <button class="btn btn-secondary btn-sm" style="margin-left: 8px;" onclick="renderDashboardView()">Retry</button></div>`;
       }
     }
 
@@ -10593,24 +10957,59 @@
       }
     }
 
+    function switchPosBranchContext(nextBranchId) {
+      if (!nextBranchId || nextBranchId === state.branchId) return;
+      const found = (state.cachedBranches || []).find(b => b.id === nextBranchId);
+      if (!found) return;
+      guardBranchSwitchWithActiveCart(() => {
+        switchActiveBranchContext(found);
+      });
+    }
+
     async function renderPosCheckoutView(options = {}) {
       const container = document.getElementById('mainContainer');
       const renderSeq = state.viewRenderSeq;
       const requestedRegisterId = state.registerId || null;
       const isRegisterSwitch = Boolean(options?.registerSwitched);
       try {
+        // Ensure active branch & warehouse context before POS operations
+        let posBranches = (state.cachedBranches || []).filter(b => b.isActive !== false);
+        if (posBranches.length === 0 || !state.branchId || !state.warehouseId) {
+          const bRes = await apiFetch('/v1/org/branches?status=ACTIVE', { silent: true }).catch(() => ({ items: [] }));
+          const loaded = (Array.isArray(bRes?.items) ? bRes.items : (Array.isArray(bRes) ? bRes : [])).filter(b => b.isActive !== false);
+          if (loaded.length > 0) {
+            posBranches = loaded;
+            state.cachedBranches = loaded;
+          }
+          if (!state.branchId && posBranches.length > 0) {
+            const preferred = posBranches.find(b => b.isMainBranch) || posBranches[0];
+            state.branchId = preferred.id;
+            state.branchName = preferred.name;
+            state.warehouseId = preferred.defaultWarehouseId || '';
+            updateTopbarContext();
+          } else if (state.branchId && !state.warehouseId) {
+            const matched = posBranches.find(b => b.id === state.branchId);
+            if (matched) {
+              state.warehouseId = matched.defaultWarehouseId || '';
+              if (!state.branchName) state.branchName = matched.name;
+            }
+          }
+        }
+
         // Parallel register, shift, product, and category retrieval (BUG-066 Waterfall Optimization)
         let registers = state.cachedRegisters || [];
         const regPromise = ((!registers || registers.length === 0) && state.branchId)
           ? apiFetch(`/v1/pos/registers?branchId=${encodeURIComponent(state.branchId)}`, { silent: true }).catch(() => [])
           : Promise.resolve(registers);
 
-        // Authoritative Active Shift Fetching strictly for the requested register
+        // Authoritative Active Shift Fetching strictly for the requested register/branch
         let shiftStatusError = false;
         const shiftPromise = (
           requestedRegisterId
             ? apiFetch(`/v1/pos/shifts/active?registerId=${encodeURIComponent(requestedRegisterId)}`, { silent: true })
-            : apiFetch('/v1/pos/shifts/active', { silent: true })
+            : (state.branchId
+                ? apiFetch(`/v1/pos/shifts/active?branchId=${encodeURIComponent(state.branchId)}`, { silent: true })
+                : apiFetch('/v1/pos/shifts/active', { silent: true }))
         ).catch((err) => {
           if (err?.status === 404 || err?.statusCode === 404 || err?.errorCode === 'POS_NO_ACTIVE_SHIFT') {
             return null;
@@ -10655,9 +11054,20 @@
         if (requestedRegisterId && state.registerId !== requestedRegisterId) return;
 
         registers = Array.isArray(regRes) ? regRes : (regRes?.data || []);
+        if (registers.length === 0 && state.branchId && !isRegisterSwitch && hasPermission('org:register:manage')) {
+          try {
+            const ensured = await apiFetch('/v1/pos/registers/ensure-default', {
+              method: 'POST',
+              silent: true,
+              body: JSON.stringify({ branchId: state.branchId })
+            });
+            if (ensured && ensured.id) registers = [ensured];
+          } catch {}
+        }
+
         if (registers.length > 0) {
           state.cachedRegisters = registers;
-          if (!state.registerId) {
+          if (!state.registerId || !registers.some(r => r.id === state.registerId)) {
             state.registerId = registers[0].id;
             state.registerCode = registers[0].code || 'REG-01';
           }
@@ -10669,9 +11079,9 @@
 
         // BUG-089: Only check generic /v1/pos/shifts/active fallback on initial auto-entry when NO register was explicitly selected.
         // Never overwrite an explicitly selected idle register back to another register!
-        if (!activeShift && !shiftStatusError && !requestedRegisterId && !isRegisterSwitch) {
+        if (!activeShift && !shiftStatusError && !requestedRegisterId && !isRegisterSwitch && state.branchId) {
           try {
-            const userActiveShift = await apiFetch('/v1/pos/shifts/active', { silent: true });
+            const userActiveShift = await apiFetch(`/v1/pos/shifts/active?branchId=${encodeURIComponent(state.branchId)}`, { silent: true });
             if (userActiveShift && userActiveShift.id) {
               activeShift = userActiveShift;
               state.registerId = userActiveShift.registerId;
@@ -10755,8 +11165,17 @@
             <div>
               <h1 class="view-title">Point of Sale (POS)</h1>
               <div class="view-subtitle" style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-                <span>${escapeHtml(state.branchName || 'Main Store')} &bull; Register ${escapeHtml(state.registerCode || 'POS-01')}</span>
-                <button class="btn btn-secondary btn-sm" onclick="openSwitchRegisterModal()" style="font-size: 11px; padding: 2px 8px;">Change</button>
+                ${(state.cachedBranches || []).filter(b => b.isActive !== false).length > 1 ? `
+                  <select id="posBranchSelector" class="form-select" aria-label="Active POS Branch" style="padding: 3px 8px; font-size: 12px; font-weight: 600; min-width: 150px;" onchange="switchPosBranchContext(this.value)">
+                    ${(state.cachedBranches || []).filter(b => b.isActive !== false).map(b => `
+                      <option value="${escapeHtml(b.id)}" ${b.id === state.branchId ? 'selected' : ''}>📍 ${escapeHtml(b.name)} (${escapeHtml(b.code)})</option>
+                    `).join('')}
+                  </select>
+                ` : `
+                  <span class="badge-pill badge-blue" style="font-size: 11px;">📍 ${escapeHtml(state.branchName || 'Main Store')}</span>
+                `}
+                <span>&bull; Register <strong>${escapeHtml(state.registerCode || (registers[0]?.code || 'No Register'))}</strong></span>
+                <button class="btn btn-secondary btn-sm" onclick="openSwitchRegisterModal()" style="font-size: 11px; padding: 2px 8px;">Change Register</button>
                 <button class="btn btn-secondary btn-sm" id="posScaleStatusBtn" onclick="openPosScaleSettingsModal()" style="font-size: 11px; padding: 2px 8px;">${typeof getScaleStatusBadgeText === 'function' ? getScaleStatusBadgeText() : '⚖️ Scale: Manual'}</button>
               </div>
             </div>
@@ -14544,12 +14963,12 @@
           <div class="view-header">
             <div>
               <h1 class="view-title">Point of Sale Registers</h1>
-              <div class="view-subtitle">Manage physical checkouts, assigned warehouses and hardware terminals</div>
+              <div class="view-subtitle">Manage physical checkouts, assigned warehouses and hardware terminals (${escapeHtml(state.branchName || 'All Branches')})</div>
             </div>
-            ${(hasPermission('pos:register:create') || state.user?.role === 'OWNER' || state.user?.role === 'ADMIN') ? `
+            ${(hasAnyPermission(['org:register:manage', 'pos:register:create']) || state.user?.role === 'OWNER' || state.user?.role === 'ADMIN') ? `
               <button class="btn btn-primary" onclick="openCreateRegisterModal()">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-                + Add Register
+                Add Register
               </button>
             ` : ''}
           </div>
@@ -14560,7 +14979,7 @@
                 <svg class="empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
                 <div class="empty-state-title">No POS Registers</div>
                 <p class="empty-state-desc">No POS registers found for this branch. Create your first checkout terminal to begin sales.</p>
-                ${(hasPermission('pos:register:create') || state.user?.role === 'OWNER' || state.user?.role === 'ADMIN') ? `
+                ${(hasAnyPermission(['org:register:manage', 'pos:register:create']) || state.user?.role === 'OWNER' || state.user?.role === 'ADMIN') ? `
                   <button class="btn btn-primary" onclick="openCreateRegisterModal()">+ Add Register</button>
                 ` : ''}
               </div>
@@ -14572,6 +14991,7 @@
                       <tr>
                         <th>Register Code</th>
                         <th>Terminal Name</th>
+                        <th>Branch / Warehouse</th>
                         <th>Status</th>
                         <th>Last Invoice #</th>
                         <th>Action</th>
@@ -14581,6 +15001,8 @@
                       ${registers.map(r => {
                         const code = escapeHtml(r.code);
                         const name = escapeHtml(r.name);
+                        const bLabel = escapeHtml(r.branchName || r.branchCode || state.branchName || 'Branch');
+                        const wLabel = r.warehouseName ? ` (${escapeHtml(r.warehouseName)})` : '';
                         const isActive = r.isActive ?? (r.status === 'ACTIVE');
                         const lastInvoice = (r.lastInvoiceSeq != null)
                           ? `${code}-${String(r.lastInvoiceSeq).padStart(6, '0')}`
@@ -14590,6 +15012,7 @@
                           <tr>
                             <td><strong>${code}</strong></td>
                             <td>${name}</td>
+                            <td style="font-size: 12px;">${bLabel}<span style="color: var(--text-secondary);">${wLabel}</span></td>
                             <td><span class="badge-pill ${isActive ? 'badge-green' : 'badge-red'}">${isActive ? 'ACTIVE' : 'INACTIVE'}</span></td>
                             <td><code>${lastInvoice}</code></td>
                             <td>
@@ -14610,6 +15033,7 @@
                 ${registers.map(r => {
                   const code = escapeHtml(r.code);
                   const name = escapeHtml(r.name);
+                  const bLabel = escapeHtml(r.branchName || r.branchCode || state.branchName || 'Branch');
                   const isActive = r.isActive ?? (r.status === 'ACTIVE');
                   const lastInvoice = (r.lastInvoiceSeq != null)
                     ? `${code}-${String(r.lastInvoiceSeq).padStart(6, '0')}`
@@ -14623,6 +15047,10 @@
                       </div>
                       <div class="entity-card-title">${name}</div>
                       <div class="entity-card-details">
+                        <div class="detail-row">
+                          <span class="detail-label">Branch</span>
+                          <span class="detail-value">${bLabel}</span>
+                        </div>
                         <div class="detail-row">
                           <span class="detail-label">Last Invoice #</span>
                           <span class="detail-value"><code>${lastInvoice}</code></span>
@@ -14712,10 +15140,26 @@
       }
     }
 
-    function openCreateRegisterModal() {
+    async function openCreateRegisterModal() {
+      let branches = (state.cachedBranches || []).filter(b => b.isActive !== false);
+      if (branches.length === 0) {
+        const res = await apiFetch('/v1/org/branches?status=ACTIVE', { silent: true }).catch(() => ({ items: [] }));
+        branches = (res?.items || (Array.isArray(res) ? res : [])).filter(b => b.isActive !== false);
+        if (branches.length > 0) state.cachedBranches = branches;
+      }
+      const defaultBranchId = state.branchId || (branches[0]?.id || '');
+
       openModal({
         title: 'Add New POS Register Terminal',
         bodyHtml: `
+          <div class="form-group">
+            <label class="form-label">Branch *</label>
+            <select class="form-select" id="newRegBranchId" required>
+              ${branches.map(b => `
+                <option value="${escapeHtml(b.id)}" ${b.id === defaultBranchId ? 'selected' : ''}>${escapeHtml(b.name)} (${escapeHtml(b.code)})</option>
+              `).join('')}
+            </select>
+          </div>
           <div class="form-group">
             <label class="form-label">Register Code *</label>
             <input type="text" class="form-input" id="newRegCode" placeholder="e.g. REG-02" required style="text-transform: uppercase;">
@@ -14734,9 +15178,11 @@
     }
 
     async function submitCreateRegister() {
+      const targetBranchId = document.getElementById('newRegBranchId')?.value || state.branchId;
       const code = document.getElementById('newRegCode')?.value.trim().toUpperCase();
       const name = document.getElementById('newRegName')?.value.trim();
 
+      if (!targetBranchId) return showToast('Please select a branch', 'error');
       if (!code) return showToast('Register Code is required', 'error');
       if (!name) return showToast('Terminal Name is required', 'error');
 
@@ -14750,7 +15196,7 @@
         await apiFetch('/v1/pos/registers', {
           method: 'POST',
           body: JSON.stringify({
-            branchId: state.branchId,
+            branchId: targetBranchId,
             code,
             name
           })
@@ -14845,14 +15291,15 @@
         }
 
         let activeShift = null;
+        const shiftBranchQs = state.branchId ? `?branchId=${encodeURIComponent(state.branchId)}` : '';
         if (state.registerId) {
           try {
             activeShift = await apiFetch(`/v1/pos/shifts/active?registerId=${encodeURIComponent(state.registerId)}`, { silent: true });
           } catch (e) {}
         }
-        if (!activeShift) {
+        if (!activeShift && state.branchId) {
           try {
-            const userActiveShift = await apiFetch('/v1/pos/shifts/active', { silent: true });
+            const userActiveShift = await apiFetch(`/v1/pos/shifts/active${shiftBranchQs}`, { silent: true });
             if (userActiveShift && userActiveShift.id) {
               activeShift = userActiveShift;
               state.registerId = userActiveShift.registerId;
@@ -14863,10 +15310,11 @@
         }
         state.activeShift = activeShift;
 
-        // Fetch shift history (B5 & C3)
+        // Fetch shift history scoped to branch when active
         let shiftsHistory = [];
         try {
-          const histRes = await apiFetch('/v1/pos/shifts?limit=20', { silent: true });
+          const histBranchQs = state.branchId ? `&branchId=${encodeURIComponent(state.branchId)}` : '';
+          const histRes = await apiFetch(`/v1/pos/shifts?limit=25${histBranchQs}`, { silent: true });
           shiftsHistory = Array.isArray(histRes) ? histRes : (histRes?.data || []);
         } catch (e) {}
 
@@ -15348,6 +15796,11 @@
     // =========================================================================
     // 8. SALES HISTORY & VOID WORKFLOW
     // =========================================================================
+    function setSalesBranchFilter(branchId) {
+      state.salesBranchFilterId = branchId || '';
+      renderPosSalesView();
+    }
+
     async function renderPosSalesView() {
       const container = document.getElementById('mainContainer');
       container.innerHTML = `
@@ -15362,8 +15815,21 @@
         </div>
       `;
       try {
-        const res = await apiFetch('/v1/pos/sales?limit=50');
+        const effectiveBranchId =
+          state.salesBranchFilterId !== undefined
+            ? state.salesBranchFilterId
+            : (state.branchId || '');
+        const branchQs = effectiveBranchId ? `&branchId=${encodeURIComponent(effectiveBranchId)}` : '';
+
+        const [res, branchesRes] = await Promise.all([
+          apiFetch(`/v1/pos/sales?limit=50${branchQs}`),
+          hasPermission('org:branch:read') && (!state.cachedBranches || state.cachedBranches.length === 0)
+            ? apiFetch('/v1/org/branches?status=ACTIVE', { silent: true }).catch(() => ({ items: [] }))
+            : Promise.resolve({ items: state.cachedBranches || [] })
+        ]);
         const sales = Array.isArray(res) ? res : (res?.data || res?.items || []);
+        const branches = (Array.isArray(branchesRes?.items) ? branchesRes.items : (Array.isArray(branchesRes) ? branchesRes : [])).filter(b => b.isActive !== false);
+        if (branches.length > 0) state.cachedBranches = branches;
         state.cachedSales = sales;
 
         container.innerHTML = `
@@ -15372,6 +15838,14 @@
               <h1 class="view-title">Sales History &amp; Orders</h1>
               <div class="view-subtitle">Audit completed POS transactions, review receipts and execute authorized voids</div>
             </div>
+            ${branches.length > 1 ? `
+              <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                <select class="form-select" id="salesBranchFilterSelect" aria-label="Filter sales by branch" style="min-width: 190px; padding: 6px 10px; font-size: 13px;" onchange="setSalesBranchFilter(this.value)">
+                  <option value="" ${!effectiveBranchId ? 'selected' : ''}>🏢 ${state.allLocationsAccess ? 'All Branches' : 'All Authorized Branches'}</option>
+                  ${branches.map(b => `<option value="${escapeHtml(b.id)}" ${effectiveBranchId === b.id ? 'selected' : ''}>${escapeHtml(b.name)} (${escapeHtml(b.code)})</option>`).join('')}
+                </select>
+              </div>
+            ` : ''}
           </div>
 
           <div class="card">
@@ -15388,6 +15862,7 @@
                     <thead>
                       <tr>
                         <th>Invoice #</th>
+                        <th>Branch / Reg</th>
                         <th>Date / Time</th>
                         <th>Customer</th>
                         <th>Items</th>
@@ -15402,6 +15877,8 @@
                     <tbody>
                       ${sales.map(s => {
                         const inv = escapeHtml(s.invoiceNumber);
+                        const branchLabel = escapeHtml(s.branchName || s.branchCode || 'Branch');
+                        const regLabel = s.registerCode ? ` &bull; <code>${escapeHtml(s.registerCode)}</code>` : '';
                         const dateStr = (s.createdAt || s.soldAt) ? new Date(s.createdAt || s.soldAt).toLocaleString() : '—';
                         const cust = escapeHtml(s.customerName || 'Walk-in Customer');
                         const isCompleted = s.status === 'COMPLETED';
@@ -15418,6 +15895,7 @@
                         return `
                           <tr id="rowSale-${s.id}">
                             <td><strong>${inv}</strong></td>
+                            <td style="font-size: 12px;">${branchLabel}${regLabel}</td>
                             <td>${dateStr}</td>
                             <td>${cust}</td>
                             <td>
@@ -15450,6 +15928,7 @@
               <div class="mobile-cards-container">
                 ${sales.map(s => {
                   const inv = escapeHtml(s.invoiceNumber);
+                  const branchLabel = escapeHtml(s.branchName || s.branchCode || 'Branch');
                   const dateStr = (s.createdAt || s.soldAt) ? new Date(s.createdAt || s.soldAt).toLocaleString() : '—';
                   const cust = escapeHtml(s.customerName || 'Walk-in Customer');
                   const isCompleted = s.status === 'COMPLETED';
@@ -15466,7 +15945,7 @@
                   return `
                     <div class="entity-card" id="cardSaleMobile-${s.id}">
                       <div class="entity-card-header">
-                        <span class="entity-card-code"><strong>${inv}</strong></span>
+                        <span class="entity-card-code"><strong>${inv}</strong> &bull; <span style="font-size:11px;">${branchLabel}</span></span>
                         <span id="badgeStatusMobile-${s.id}" class="badge-pill ${isCompleted ? 'badge-green' : 'badge-red'}">${escapeHtml(s.status)}</span>
                       </div>
                       <div class="entity-card-title">${formatTenantMoney(s.grandTotal)} &bull; <span style="font-size: 13px; font-weight: normal; color: var(--text-secondary);">${cust}</span></div>
@@ -26941,7 +27420,7 @@
       let accessDenied = false;
 
       try {
-        const [membersRes, invRes, rolesRes, empRes] = await Promise.all([
+        const [membersRes, invRes, rolesRes, empRes, branchesRes, whRes] = await Promise.all([
           apiFetch('/v1/iam/members').catch(err => {
             const msg = String(err?.message || '').toLowerCase();
             if (err?.status === 403 || err?.statusCode === 403 || msg.includes('permission') || msg.includes('forbidden')) {
@@ -26952,6 +27431,8 @@
           apiFetch('/v1/iam/invitations').catch(() => []),
           apiFetch('/v1/iam/roles').catch(() => []),
           isModuleEnabled('hrm') ? apiFetch('/v1/employees?limit=200').catch(() => ({ items: [] })) : Promise.resolve({ items: [] }),
+          apiFetch('/v1/org/branches?status=ALL').catch(() => ({ items: [] })),
+          apiFetch('/v1/org/warehouses').catch(() => ({ items: [] }))
         ]);
 
         if (accessDenied && membersRes.length === 0) {
@@ -26970,11 +27451,15 @@
         invitations = Array.isArray(invRes) ? invRes : [];
         roles = Array.isArray(rolesRes) ? rolesRes : [];
         employees = Array.isArray(empRes?.items) ? empRes.items : (Array.isArray(empRes) ? empRes : []);
+        const branchesList = Array.isArray(branchesRes?.items) ? branchesRes.items : (Array.isArray(branchesRes) ? branchesRes : []);
+        const warehousesList = Array.isArray(whRes?.items) ? whRes.items : (Array.isArray(whRes) ? whRes : []);
 
         window._membersCache = members;
         window._invitationsCache = invitations;
         window._rolesCache = roles;
         window._employeesCache = employees;
+        window._employeeBranchesCache = branchesList;
+        window._employeeWarehousesCache = warehousesList;
 
         const activeCount = members.filter(m => m.status === 'ACTIVE').length;
         const deactivatedCount = members.filter(m => m.status === 'DEACTIVATED' || m.status === 'DISABLED').length;
@@ -27050,30 +27535,101 @@
       }
     }
 
+    function setTeamStaffFilters() {
+      state.teamBranchFilter = document.getElementById('teamBranchFilterSelect')?.value || '';
+      state.teamSearchQuery = document.getElementById('teamMemberSearchInput')?.value || '';
+      renderTeamStaffAccountsView();
+    }
+
+    function formatMemberTierBadge(member) {
+      const codes = new Set((member.roles || []).map(r => r.code));
+      if (codes.has('TENANT_OWNER')) {
+        return '<span class="badge-pill badge-yellow" style="font-size: 10px;">👑 Business Owner</span>';
+      }
+      if (codes.has('ORG_ADMIN')) {
+        return '<span class="badge-pill badge-blue" style="font-size: 10px;">🛡️ Business Admin</span>';
+      }
+      if (codes.has('BRANCH_MANAGER')) {
+        return '<span class="badge-pill badge-green" style="font-size: 10px;">🏬 Branch Manager</span>';
+      }
+      return '<span class="badge-pill" style="font-size: 10px; background: var(--bg-secondary); color: var(--text-secondary);">👤 Branch Staff</span>';
+    }
+
+    function formatMemberAssignedBranchesHtml(m) {
+      if (m.allLocationsAccess) {
+        return '<span class="badge-pill badge-green" style="font-size: 11px;">🌐 All Branches (Business-Wide)</span>';
+      }
+      const branchObjs = Array.isArray(m.assignedBranches) && m.assignedBranches.length > 0
+        ? m.assignedBranches
+        : (m.locationScopes?.branchIds || []).map(bid => {
+            const b = (window._employeeBranchesCache || []).find(x => x.id === bid);
+            return b ? { id: b.id, code: b.code, name: b.name, isActive: b.isActive !== false } : { id: bid, code: bid.slice(0, 6), name: 'Branch', isActive: true };
+          });
+      if (branchObjs.length === 0) {
+        return '<span class="badge-pill badge-red" style="font-size: 11px;">⚠️ No Branches Assigned</span>';
+      }
+      return `<div style="display:flex;flex-wrap:wrap;gap:4px;">${branchObjs.map(b => `
+        <span class="badge-pill badge-blue" style="font-size: 11px;" title="${escapeHtml(b.name)}">${escapeHtml(b.code || b.name)} &bull; ${escapeHtml(b.name)}</span>
+      `).join('')}</div>`;
+    }
+
     function renderStaffMembersTabHtml(members, roles) {
       if (members.length === 0) {
         return '<div class="card" style="padding: 40px; text-align: center; color: var(--text-secondary);">No team members found in this organization.</div>';
       }
 
+      const branches = (window._employeeBranchesCache || []).filter(b => b.isActive !== false);
+      const branchFilter = state.teamBranchFilter || '';
+      const searchQ = (state.teamSearchQuery || '').trim().toLowerCase();
+
+      const filteredMembers = members.filter(m => {
+        if (branchFilter === '__ALL_LOCATIONS__') {
+          if (!m.allLocationsAccess) return false;
+        } else if (branchFilter) {
+          const hasBranch = m.allLocationsAccess || (m.locationScopes?.branchIds || []).includes(branchFilter);
+          if (!hasBranch) return false;
+        }
+        if (searchQ) {
+          const hay = `${m.fullName || ''} ${m.email || ''} ${(m.roles || []).map(r => r.name || r.code).join(' ')}`.toLowerCase();
+          if (!hay.includes(searchQ)) return false;
+        }
+        return true;
+      });
+
       return `
         <div class="card">
+          <div style="display: flex; flex-wrap: wrap; gap: 10px; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+            <input type="text" id="teamMemberSearchInput" class="form-input" placeholder="Search staff by name, email or role..." value="${escapeHtml(state.teamSearchQuery || '')}" style="flex: 1 1 220px; max-width: 340px;" onkeydown="if(event.key==='Enter') setTeamStaffFilters()">
+            <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+              <select id="teamBranchFilterSelect" class="form-select" style="min-width: 190px; padding: 6px 10px; font-size: 13px;" onchange="setTeamStaffFilters()">
+                <option value="" ${!branchFilter ? 'selected' : ''}>All Staff (${members.length})</option>
+                <option value="__ALL_LOCATIONS__" ${branchFilter === '__ALL_LOCATIONS__' ? 'selected' : ''}>🌐 All-Locations Access</option>
+                ${branches.map(b => `<option value="${escapeHtml(b.id)}" ${branchFilter === b.id ? 'selected' : ''}>📍 ${escapeHtml(b.name)} (${escapeHtml(b.code)})</option>`).join('')}
+              </select>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="setTeamStaffFilters()">Filter</button>
+            </div>
+          </div>
+
+          ${filteredMembers.length === 0 ? `
+            <div class="empty-state-card" style="padding: 28px;">No staff members match the current search or branch filter.</div>
+          ` : `
           <!-- Desktop Table -->
           <div class="desktop-table-container">
             <div class="table-responsive">
               <table class="data-table">
                 <thead>
                   <tr>
-                    <th style="min-width: 180px;">Member</th>
+                    <th style="min-width: 190px;">Member &amp; Tier</th>
                     <th style="min-width: 150px;">Email</th>
                     <th style="min-width: 90px;">Status</th>
-                    <th style="min-width: 160px;">Assigned Roles</th>
+                    <th style="min-width: 150px;">Assigned Roles</th>
                     ${isModuleEnabled('hrm') ? '<th style="min-width: 180px;">Linked Employee</th>' : ''}
-                    <th style="min-width: 160px;">Location Access</th>
+                    <th style="min-width: 210px;">Assigned Branches</th>
                     <th style="text-align: right; min-width: 220px;">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  ${members.map(m => {
+                  ${filteredMembers.map(m => {
                     const isOwner = (m.roles || []).some(r => r.code === 'TENANT_OWNER');
                     const roleBadges = (m.roles || []).map(r => `
                       <span class="badge-pill ${r.code === 'TENANT_OWNER' ? 'badge-yellow' : (r.isSystemRole ? 'badge-blue' : 'badge-green')}" style="font-size: 11px;">
@@ -27093,14 +27649,13 @@
                           ? '<span class="badge-pill badge-red" style="font-size: 11px;">REVOKED</span>'
                           : '<span class="badge-pill badge-yellow" style="font-size: 11px;">DEACTIVATED</span>'));
 
-                    const scopeBadge = m.allLocationsAccess
-                      ? '<span class="badge-pill badge-green" style="font-size: 11px;">All Locations</span>'
-                      : `<span class="badge-pill badge-yellow" style="font-size: 11px;">${m.locationScopes?.branchIds?.length || 0} branch / ${m.locationScopes?.warehouseIds?.length || 0} wh</span>`;
+                    const scopeBadge = formatMemberAssignedBranchesHtml(m);
 
                     return `
                       <tr>
                         <td>
                           <div style="font-weight: 600; color: var(--text-primary);">${escapeHtml(m.fullName || 'User')}</div>
+                          <div style="margin-top: 3px;">${formatMemberTierBadge(m)}</div>
                         </td>
                         <td style="font-size: 12px; color: var(--text-secondary);">${escapeHtml(m.email)}</td>
                         <td>${statusBadge}</td>
@@ -27140,13 +27695,14 @@
 
           <!-- Mobile Cards -->
           <div class="mobile-cards-container">
-            ${members.map(m => {
+            ${filteredMembers.map(m => {
               const isOwner = (m.roles || []).some(r => r.code === 'TENANT_OWNER');
               return `
                 <div class="entity-card" style="padding: 14px 16px; border-radius: 8px; border: 1px solid var(--border-subtle); background: var(--surface-card); margin-bottom: 12px;">
                   <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
                     <div>
                       <div style="font-weight: 600; font-size: 14px;">${escapeHtml(m.fullName || 'User')}</div>
+                      <div style="margin: 3px 0;">${formatMemberTierBadge(m)}</div>
                       <div style="font-size: 12px; color: var(--text-secondary);">${escapeHtml(m.email)}</div>
                     </div>
                     <span class="badge-pill ${m.status === 'ACTIVE' ? 'badge-green' : (m.status === 'SUSPENDED' ? 'badge-yellow' : (m.status === 'REVOKED' ? 'badge-red' : 'badge-yellow'))}" style="font-size: 11px;">${escapeHtml(m.status)}</span>
@@ -27155,6 +27711,11 @@
                   <div style="font-size: 12px; margin-bottom: 6px;">
                     <span style="color: var(--text-secondary);">Roles:</span>
                     ${(m.roles || []).map(r => escapeHtml(r.name || r.code)).join(', ') || 'None'}
+                  </div>
+
+                  <div style="font-size: 12px; margin-bottom: 8px;">
+                    <div style="color: var(--text-secondary); margin-bottom: 3px;">Assigned Branches:</div>
+                    ${formatMemberAssignedBranchesHtml(m)}
                   </div>
 
                   ${isModuleEnabled('hrm') ? `
@@ -27189,6 +27750,7 @@
               `;
             }).join('')}
           </div>
+          `}
         </div>
       `;
     }
@@ -27330,6 +27892,11 @@
       });
     }
 
+    function toggleInviteBranchScopeList(isAll) {
+      const el = document.getElementById('inviteRestrictedBranchesWrap');
+      if (el) el.style.display = isAll ? 'none' : 'block';
+    }
+
     // Modal: Invite Staff Member
     async function openInviteStaffModal() {
       const prefillEmail = arguments[0] || '';
@@ -27345,12 +27912,23 @@
         }
       }
 
+      let branches = (window._employeeBranchesCache || []).filter(b => b.isActive !== false);
+      if (branches.length === 0) {
+        try {
+          const bRes = await apiFetch('/v1/org/branches?status=ACTIVE', { silent: true });
+          branches = (Array.isArray(bRes?.items) ? bRes.items : (Array.isArray(bRes) ? bRes : [])).filter(b => b.isActive !== false);
+          if (branches.length > 0) window._employeeBranchesCache = branches;
+        } catch {}
+      }
+
+      const defaultBranchId = state.branchId || (branches[0]?.id || '');
+
       // Filter only employees who are not yet linked to any user
       const unlinkedEmployees = employees.filter(e => !e.linkedUserId);
 
       openModal({
         title: 'Invite New Staff Member',
-        maxWidth: '540px',
+        maxWidth: '560px',
         bodyHtml: `
           <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px; line-height: 1.4;">
             Send an invitation to a staff member. A unique <strong>4-digit access code</strong> will be generated for them to join your business.
@@ -27365,13 +27943,34 @@
           <div class="form-group" style="margin-bottom: 14px;">
             <label class="form-label">System Role Assignment *</label>
             <select class="form-input" id="inviteStaffRole">
-              <option value="STAFF" selected>Staff Member (Workspace, Dynamic Permissions)</option>
               <option value="CASHIER">POS Cashier (Checkout, Shift Float, Payments)</option>
+              <option value="BRANCH_MANAGER">Branch Manager (Outlet Operations, Local Stock)</option>
               <option value="WAREHOUSE_CLERK">Warehouse Clerk (Stock Intake, Counts, Movements)</option>
               <option value="PURCHASER">Purchasing Officer (Suppliers, POs)</option>
               <option value="ACCOUNTANT">Staff Accountant (Expenses, Reports)</option>
-              <option value="BRANCH_MANAGER">Branch Manager (Outlet Operations, Local Stock)</option>
+              <option value="STAFF">Staff Member (Workspace, Dynamic Permissions)</option>
             </select>
+          </div>
+
+          <div class="form-group" style="margin-bottom: 14px;">
+            <label class="form-label">Assigned Branch Access</label>
+            ${state.allLocationsAccess ? `
+              <label style="display: flex; align-items: center; gap: 8px; font-size: 12px; margin-bottom: 8px; cursor: pointer; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border-subtle); background: var(--surface-bg);">
+                <input type="checkbox" id="inviteAllLocationsAccess" onchange="toggleInviteBranchScopeList(this.checked)">
+                <span><strong>All Branches (Business-Wide)</strong> — grant access to every branch</span>
+              </label>
+            ` : ''}
+            <div id="inviteRestrictedBranchesWrap" style="padding: 10px; border: 1px solid var(--border-subtle); border-radius: 6px; max-height: 140px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px;">
+              ${branches.length === 0 ? `
+                <div style="font-size: 12px; color: var(--text-secondary);">Default branch scope will be assigned.</div>
+              ` : branches.map(b => `
+                <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+                  <input type="checkbox" class="invite-branch-check" value="${escapeHtml(b.id)}" data-wh-id="${escapeHtml(b.defaultWarehouseId || '')}" ${(b.id === defaultBranchId || branches.length === 1) ? 'checked' : ''}>
+                  <span>${b.isMainBranch ? '⭐ ' : ''}${escapeHtml(b.name)} <code style="font-size: 11px;">${escapeHtml(b.code)}</code></span>
+                </label>
+              `).join('')}
+            </div>
+            <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">Each selected branch automatically authorizes its linked default warehouse for POS &amp; stock tasks.</div>
           </div>
 
           ${isModuleEnabled('hrm') ? `
@@ -27407,8 +28006,17 @@
       const email = document.getElementById('inviteStaffEmail')?.value.trim();
       const roleCode = document.getElementById('inviteStaffRole')?.value;
       const employeeId = isModuleEnabled('hrm') ? (document.getElementById('inviteStaffEmployeeId')?.value || null) : null;
+      const allLocationsAccess = Boolean(document.getElementById('inviteAllLocationsAccess')?.checked);
+      const checkedBranches = Array.from(document.querySelectorAll('.invite-branch-check')).filter(c => c.checked);
+      const branchIds = allLocationsAccess ? [] : checkedBranches.map(c => c.value);
+      const warehouseIds = allLocationsAccess
+        ? []
+        : Array.from(new Set(checkedBranches.map(c => c.getAttribute('data-wh-id')).filter(Boolean)));
 
       if (!email) return showToast('Please enter a valid email address.', 'error');
+      if (!allLocationsAccess && document.querySelectorAll('.invite-branch-check').length > 0 && branchIds.length === 0) {
+        return showToast('Please select at least one assigned branch or choose All Branches.', 'error');
+      }
 
       try {
         if (btn) { btn.disabled = true; btn.innerText = 'Creating Invitation...'; }
@@ -27418,7 +28026,10 @@
           body: JSON.stringify({
             email,
             roleCode: roleCode || 'STAFF',
-            employeeId: employeeId || null
+            employeeId: employeeId || null,
+            allLocationsAccess,
+            branchIds,
+            warehouseIds
           })
         });
 
@@ -28303,14 +28914,13 @@
                       ? m.roles.map(r => `<span class="badge-pill ${r.isSystemRole ? 'badge-blue' : 'badge-green'}" style="font-size: 11px;">${escapeHtml(r.name)}</span>`).join(' ')
                       : '<span style="color: var(--text-secondary); font-size: 12px;">No Roles Assigned</span>';
 
-                    const scopeBadge = m.allLocationsAccess
-                      ? '<span class="badge-pill badge-green" style="font-size: 11px;">All Locations (Org-Wide)</span>'
-                      : `<span class="badge-pill badge-yellow" style="font-size: 11px;">Restricted: ${m.locationScopes.branchIds.length} branch(es), ${m.locationScopes.warehouseIds.length} depot(s)</span>`;
+                    const scopeBadge = formatMemberAssignedBranchesHtml(m);
 
                     return `
                       <tr>
                         <td>
                           <div style="font-weight: 600; color: var(--text-primary);">${escapeHtml(m.fullName)}</div>
+                          <div style="margin-top: 3px;">${formatMemberTierBadge(m)}</div>
                         </td>
                         <td style="font-size: 12px; color: var(--text-secondary);">${escapeHtml(m.email)}</td>
                         <td>
@@ -28345,9 +28955,7 @@
                 ? m.roles.map(r => `<span class="badge-pill ${r.isSystemRole ? 'badge-blue' : 'badge-green'}" style="font-size: 11px;">${escapeHtml(r.name)}</span>`).join(' ')
                 : '<span style="color: var(--text-secondary); font-size: 12px;">No Roles Assigned</span>';
 
-              const scopeBadge = m.allLocationsAccess
-                ? '<span class="badge-pill badge-green" style="font-size: 11px;">All Locations (Org-Wide)</span>'
-                : `<span class="badge-pill badge-yellow" style="font-size: 11px;">Restricted Scope</span>`;
+              const scopeBadge = formatMemberAssignedBranchesHtml(m);
 
               return `
                 <div class="entity-card" style="padding: 14px 16px; border-radius: 8px; border: 1px solid var(--border-subtle); background: var(--surface-card); margin-bottom: 12px;">
@@ -28543,12 +29151,31 @@
     }
 
     // --- Modal 4: Edit Member Location Scope ---
-    function openEditMemberLocationScopeModal(membershipId) {
+    function onScopeBranchCheckboxChange(branchEl) {
+      const whId = branchEl?.getAttribute('data-default-wh-id');
+      if (!whId) return;
+      const whCheck = document.querySelector(`.scope-warehouse-check[value="${whId}"]`);
+      if (whCheck) whCheck.checked = Boolean(branchEl.checked);
+    }
+
+    async function openEditMemberLocationScopeModal(membershipId) {
       const member = (window._membersCache || []).find(m => m.id === membershipId);
-      const branches = window._employeeBranchesCache || [];
-      const warehouses = window._employeeWarehousesCache || [];
       if (!member) return showToast('Member not found', 'error');
 
+      let branches = window._employeeBranchesCache || [];
+      let warehouses = window._employeeWarehousesCache || [];
+      if (branches.length === 0 || warehouses.length === 0) {
+        const [bRes, wRes] = await Promise.all([
+          apiFetch('/v1/org/branches?status=ALL', { silent: true }).catch(() => ({ items: [] })),
+          apiFetch('/v1/org/warehouses', { silent: true }).catch(() => ({ items: [] }))
+        ]);
+        branches = Array.isArray(bRes?.items) ? bRes.items : (Array.isArray(bRes) ? bRes : []);
+        warehouses = Array.isArray(wRes?.items) ? wRes.items : (Array.isArray(wRes) ? wRes : []);
+        window._employeeBranchesCache = branches;
+        window._employeeWarehousesCache = warehouses;
+      }
+
+      const activeBranches = branches.filter(b => b.isActive !== false);
       const isAll = member.allLocationsAccess;
       const assignedBranchIds = new Set(member.locationScopes.branchIds || []);
       const assignedWarehouseIds = new Set(member.locationScopes.warehouseIds || []);
@@ -28561,6 +29188,7 @@
             Configure geographical and warehouse operational boundaries for <strong>${escapeHtml(member.fullName)}</strong>:
           </div>
 
+          ${state.allLocationsAccess ? `
           <div style="margin-bottom: 16px; padding: 12px; background: var(--surface-bg); border-radius: 6px; border: 1px solid var(--border-subtle);">
             <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
               <input type="checkbox" id="chkAllLocationsAccess" ${isAll ? 'checked' : ''} onchange="toggleScopeLocationList(this.checked)">
@@ -28570,14 +29198,15 @@
               </div>
             </label>
           </div>
+          ` : `<input type="checkbox" id="chkAllLocationsAccess" style="display:none;">`}
 
           <div id="restrictedLocationLists" style="${isAll ? 'display: none;' : 'display: block;'}">
-            <div style="font-size: 12px; font-weight: 700; text-transform: uppercase; color: var(--text-secondary); margin-bottom: 8px;">Authorized Branches (${branches.length})</div>
-            <div style="display: flex; flex-direction: column; gap: 6px; max-height: 160px; overflow-y: auto; margin-bottom: 14px; padding-right: 4px;">
-              ${branches.map(b => `
-                <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
-                  <input type="checkbox" class="scope-branch-check" value="${b.id}" ${assignedBranchIds.has(b.id) ? 'checked' : ''}>
-                  <span>${escapeHtml(b.name || b.code)}</span>
+            <div style="font-size: 12px; font-weight: 700; text-transform: uppercase; color: var(--text-secondary); margin-bottom: 8px;">Authorized Branches (${activeBranches.length})</div>
+            <div style="display: flex; flex-direction: column; gap: 6px; max-height: 180px; overflow-y: auto; margin-bottom: 14px; padding-right: 4px;">
+              ${activeBranches.length === 0 ? `<div style="font-size: 12px; color: var(--text-secondary);">No active branches available.</div>` : activeBranches.map(b => `
+                <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; padding: 6px 8px; border: 1px solid var(--border-subtle); border-radius: 6px;">
+                  <input type="checkbox" class="scope-branch-check" value="${b.id}" data-default-wh-id="${escapeHtml(b.defaultWarehouseId || '')}" ${assignedBranchIds.has(b.id) ? 'checked' : ''} onchange="onScopeBranchCheckboxChange(this)">
+                  <span>${b.isMainBranch ? '⭐ ' : ''}${escapeHtml(b.name || b.code)} <code style="font-size: 11px; color: var(--text-secondary);">${escapeHtml(b.code)}</code></span>
                 </label>
               `).join('')}
             </div>
@@ -28607,8 +29236,9 @@
     }
 
     async function submitMemberLocationScopes(membershipId) {
+      if (window._submittingLocationScopes) return;
       const btn = document.getElementById('btnSubmitLocationScopes');
-      const allLocationsAccess = document.getElementById('chkAllLocationsAccess').checked;
+      const allLocationsAccess = Boolean(document.getElementById('chkAllLocationsAccess')?.checked);
 
       const branchChecks = document.querySelectorAll('.scope-branch-check');
       const warehouseChecks = document.querySelectorAll('.scope-warehouse-check');
@@ -28618,8 +29248,13 @@
         : Array.from(branchChecks).filter(c => c.checked).map(c => c.value);
       const warehouseIds = allLocationsAccess
         ? []
-        : Array.from(warehouseChecks).filter(c => c.checked).map(c => c.value);
+        : Array.from(new Set(Array.from(warehouseChecks).filter(c => c.checked).map(c => c.value)));
 
+      if (!allLocationsAccess && branchIds.length === 0) {
+        return showToast('Please select at least one authorized branch or enable Organization-Wide Access.', 'error');
+      }
+
+      window._submittingLocationScopes = true;
       try {
         if (btn) { btn.disabled = true; btn.innerText = 'Saving...'; }
 
@@ -28634,10 +29269,15 @@
 
         showToast('Member location scope updated successfully!', 'success');
         closeModal();
-        renderRolesPermissionsView();
+        if (state.activeView === 'team-staff') {
+          await renderTeamStaffAccountsView();
+        } else {
+          await renderRolesPermissionsView();
+        }
       } catch (err) {
         showToast(err.message || 'Failed to update location scopes', 'error');
       } finally {
+        window._submittingLocationScopes = false;
         if (btn) { btn.disabled = false; btn.innerText = 'Save Location Scopes'; }
       }
     }

@@ -1128,7 +1128,7 @@ export async function listMembers(
 ): Promise<MemberSummaryResponse[]> {
   await assertAuthorized(trx, { permission: 'iam:member:read' });
 
-  const [members, assignments, scopes, employees] = await Promise.all([
+  const [members, assignments, scopes, employees, tenantBranches] = await Promise.all([
     trx.db
       .selectFrom('tenant_memberships')
       .innerJoin('users', 'users.id', 'tenant_memberships.user_id')
@@ -1180,7 +1180,20 @@ export async function listMembers(
       .where('tenant_id', '=', trx.tenantId)
       .where('linked_user_id', 'is not', null)
       .execute(),
+    trx.db
+      .selectFrom('branches')
+      .select(['id', 'code', 'name', 'is_active'])
+      .where('tenant_id', '=', trx.tenantId)
+      .orderBy('code', 'asc')
+      .execute(),
   ]);
+
+  const branchInfoMap = new Map(
+    tenantBranches.map((b) => [
+      b.id,
+      { id: b.id, code: b.code, name: b.name, isActive: Boolean(b.is_active) },
+    ]),
+  );
 
   const roleMap = new Map<
     string,
@@ -1225,20 +1238,32 @@ export async function listMembers(
     }
   }
 
-  return members.map((m) => ({
-    id: m.membership_id,
-    tenantId: m.tenant_id,
-    userId: m.user_id,
-    email: m.email,
-    fullName: m.full_name,
-    status: m.status as 'INVITED' | 'ACTIVE' | 'DEACTIVATED' | 'SUSPENDED' | 'REVOKED' | 'DISABLED',
-    suspensionReason: m.suspension_reason ?? null,
-    allLocationsAccess: Boolean(m.all_locations_access),
-    roles: roleMap.get(m.membership_id) ?? [],
-    locationScopes: scopeMap.get(m.membership_id) ?? { branchIds: [], warehouseIds: [] },
-    linkedEmployee: employeeByUserId.get(m.user_id) ?? null,
-    createdAt: m.created_at.toISOString(),
-  }));
+  return members.map((m) => {
+    const scope = scopeMap.get(m.membership_id) ?? { branchIds: [], warehouseIds: [] };
+    const assignedBranches = m.all_locations_access
+      ? tenantBranches
+          .filter((b) => b.is_active)
+          .map((b) => ({ id: b.id, code: b.code, name: b.name, isActive: Boolean(b.is_active) }))
+      : scope.branchIds
+          .map((bId) => branchInfoMap.get(bId))
+          .filter((b): b is { id: string; code: string; name: string; isActive: boolean } => Boolean(b));
+
+    return {
+      id: m.membership_id,
+      tenantId: m.tenant_id,
+      userId: m.user_id,
+      email: m.email,
+      fullName: m.full_name,
+      status: m.status as 'INVITED' | 'ACTIVE' | 'DEACTIVATED' | 'SUSPENDED' | 'REVOKED' | 'DISABLED',
+      suspensionReason: m.suspension_reason ?? null,
+      allLocationsAccess: Boolean(m.all_locations_access),
+      roles: roleMap.get(m.membership_id) ?? [],
+      locationScopes: scope,
+      assignedBranches,
+      linkedEmployee: employeeByUserId.get(m.user_id) ?? null,
+      createdAt: m.created_at.toISOString(),
+    };
+  });
 }
 
 export async function assignMemberRoles(
@@ -1492,7 +1517,38 @@ export async function updateMemberLocationScopes(
   membershipId: string,
   input: UpdateMemberLocationScopesRequest,
 ): Promise<MemberSummaryResponse> {
-  await assertAuthorized(trx, { permission: 'iam:member:manage' });
+  const actorCtx = await assertAuthorized(trx, { permission: 'iam:member:manage' });
+
+  if (!actorCtx.allLocationsAccess) {
+    if (input.allLocationsAccess) {
+      throw new AppError({
+        statusCode: 403,
+        errorCode: 'IAM_LOCATION_SCOPE_DENIED',
+        title: 'Location Scope Access Denied',
+        detail: 'Only an administrator with organization-wide access can grant All Locations access.',
+      });
+    }
+    for (const bId of input.branchIds ?? []) {
+      if (!actorCtx.allowedBranchIds.has(bId)) {
+        throw new AppError({
+          statusCode: 403,
+          errorCode: 'IAM_LOCATION_SCOPE_DENIED',
+          title: 'Location Scope Access Denied',
+          detail: `Cannot assign branch "${bId}" because you do not have access to that branch.`,
+        });
+      }
+    }
+    for (const wId of input.warehouseIds ?? []) {
+      if (!actorCtx.allowedWarehouseIds.has(wId)) {
+        throw new AppError({
+          statusCode: 403,
+          errorCode: 'IAM_LOCATION_SCOPE_DENIED',
+          title: 'Location Scope Access Denied',
+          detail: `Cannot assign warehouse "${wId}" because you do not have access to that warehouse.`,
+        });
+      }
+    }
+  }
 
   const membership = await trx.db
     .selectFrom('tenant_memberships')
@@ -1508,6 +1564,62 @@ export async function updateMemberLocationScopes(
       title: 'Membership Not Found',
       detail: `Membership "${membershipId}" was not found in tenant "${trx.tenantId}".`,
     });
+  }
+
+  if (!input.allLocationsAccess) {
+    const ownerRole = await trx.db
+      .selectFrom('member_role_assignments')
+      .innerJoin('roles', 'roles.id', 'member_role_assignments.role_id')
+      .select(['roles.code'])
+      .where('member_role_assignments.tenant_id', '=', trx.tenantId)
+      .where('member_role_assignments.membership_id', '=', membershipId)
+      .where('roles.code', '=', 'TENANT_OWNER')
+      .executeTakeFirst();
+    if (ownerRole) {
+      throw new AppError({
+        statusCode: 409,
+        errorCode: 'ERR_CONFLICT',
+        title: 'Cannot Restrict Owner Access',
+        detail: 'The Tenant Owner account must retain organization-wide access across all branches.',
+      });
+    }
+  }
+
+  const uniqueBranchIds = [...new Set(input.branchIds ?? [])];
+  const uniqueWarehouseIds = [...new Set(input.warehouseIds ?? [])];
+
+  if (!input.allLocationsAccess && uniqueBranchIds.length > 0) {
+    const validBranches = await trx.db
+      .selectFrom('branches')
+      .select(['id'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('id', 'in', uniqueBranchIds)
+      .execute();
+    if (validBranches.length !== uniqueBranchIds.length) {
+      throw new AppError({
+        statusCode: 404,
+        errorCode: 'ERR_NOT_FOUND',
+        title: 'Branch Not Found',
+        detail: 'One or more assigned branch IDs do not belong to this organization.',
+      });
+    }
+  }
+
+  if (!input.allLocationsAccess && uniqueWarehouseIds.length > 0) {
+    const validWarehouses = await trx.db
+      .selectFrom('warehouses')
+      .select(['id'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('id', 'in', uniqueWarehouseIds)
+      .execute();
+    if (validWarehouses.length !== uniqueWarehouseIds.length) {
+      throw new AppError({
+        statusCode: 404,
+        errorCode: 'ERR_NOT_FOUND',
+        title: 'Warehouse Not Found',
+        detail: 'One or more assigned warehouse IDs do not belong to this organization.',
+      });
+    }
   }
 
   await trx.db
@@ -1527,10 +1639,7 @@ export async function updateMemberLocationScopes(
     .execute();
 
   if (!input.allLocationsAccess) {
-    const branchIds = input.branchIds ?? [];
-    const warehouseIds = input.warehouseIds ?? [];
-
-    for (const bId of branchIds) {
+    for (const bId of uniqueBranchIds) {
       await trx.db
         .insertInto('member_location_scopes')
         .values({
@@ -1543,7 +1652,7 @@ export async function updateMemberLocationScopes(
         .execute();
     }
 
-    for (const wId of warehouseIds) {
+    for (const wId of uniqueWarehouseIds) {
       await trx.db
         .insertInto('member_location_scopes')
         .values({
@@ -1563,8 +1672,10 @@ export async function updateMemberLocationScopes(
     resourceId: membershipId,
     metadata: {
       allLocationsAccess: input.allLocationsAccess,
-      branchCount: (input.branchIds ?? []).length,
-      warehouseCount: (input.warehouseIds ?? []).length,
+      branchIds: uniqueBranchIds,
+      warehouseIds: uniqueWarehouseIds,
+      branchCount: uniqueBranchIds.length,
+      warehouseCount: uniqueWarehouseIds.length,
     },
   });
 
@@ -1903,6 +2014,10 @@ export async function createStaffInvitation(
     })
     .execute();
 
+  const invitedBranchIds = [...new Set(input.branchIds ?? [])];
+  const invitedWarehouseIds = [...new Set(input.warehouseIds ?? [])];
+  const invitedAllLocations = input.allLocationsAccess === true;
+
   await appendAuditLog(trx, {
     action: 'iam.invitation.created',
     resourceType: 'invitation',
@@ -1911,6 +2026,9 @@ export async function createStaffInvitation(
       email: normalizedEmail,
       roleCode,
       employeeId: input.employeeId ?? null,
+      allLocationsAccess: invitedAllLocations,
+      branchIds: invitedBranchIds,
+      warehouseIds: invitedWarehouseIds,
       expiresAt: expiresAt.toISOString(),
       codeLength: rawCode.length,
     },
@@ -1930,6 +2048,9 @@ export async function createStaffInvitation(
     employeeId: input.employeeId ?? null,
     employeeCode,
     employeeName,
+    allLocationsAccess: invitedAllLocations,
+    branchIds: invitedBranchIds,
+    warehouseIds: invitedWarehouseIds,
     status: 'PENDING',
     invitedByUserId: trx.userId,
     invitedByEmail: inviter?.email ?? null,
@@ -2878,7 +2999,57 @@ export async function acceptStaffInvitation(
         }
       }
 
-      // D. Link employee if employee_id was specified
+      // D. Link employee if employee_id was specified, and apply invited branch scopes
+      const invMetaLog = await trx.db
+        .selectFrom('audit_logs')
+        .select(['metadata_json'])
+        .where('tenant_id', '=', trx.tenantId)
+        .where('action', '=', 'iam.invitation.created')
+        .where('resource_id', '=', invitation.id)
+        .executeTakeFirst();
+      const invMeta = (invMetaLog?.metadata_json ?? {}) as Record<string, unknown>;
+      const invAllLocations = invMeta.allLocationsAccess === true;
+      const invBranchIds = Array.isArray(invMeta.branchIds)
+        ? invMeta.branchIds.filter((id): id is string => typeof id === 'string')
+        : [];
+      const invWarehouseIds = Array.isArray(invMeta.warehouseIds)
+        ? invMeta.warehouseIds.filter((id): id is string => typeof id === 'string')
+        : [];
+
+      if (invAllLocations) {
+        await trx.db
+          .updateTable('tenant_memberships')
+          .set({ all_locations_access: true, updated_at: new Date() })
+          .where('tenant_id', '=', trx.tenantId)
+          .where('id', '=', membershipId)
+          .execute();
+      } else {
+        for (const bId of invBranchIds) {
+          await trx.db
+            .insertInto('member_location_scopes')
+            .values({
+              id: generateUuidV7(),
+              tenant_id: trx.tenantId,
+              membership_id: membershipId,
+              branch_id: bId,
+              warehouse_id: null,
+            })
+            .execute();
+        }
+        for (const wId of invWarehouseIds) {
+          await trx.db
+            .insertInto('member_location_scopes')
+            .values({
+              id: generateUuidV7(),
+              tenant_id: trx.tenantId,
+              membership_id: membershipId,
+              branch_id: null,
+              warehouse_id: wId,
+            })
+            .execute();
+        }
+      }
+
       if (invitation.employee_id) {
         await trx.db
           .updateTable('employees')
@@ -2890,7 +3061,7 @@ export async function acceptStaffInvitation(
           .where('id', '=', invitation.employee_id)
           .execute();
 
-        // Auto-assign location scope from employee's primary branch
+        // Auto-assign location scope from employee's primary branch if not already covered
         const emp = await trx.db
           .selectFrom('employees')
           .select(['primary_branch_id'])
@@ -2898,7 +3069,7 @@ export async function acceptStaffInvitation(
           .where('id', '=', invitation.employee_id)
           .executeTakeFirst();
 
-        if (emp?.primary_branch_id) {
+        if (emp?.primary_branch_id && !invAllLocations && !invBranchIds.includes(emp.primary_branch_id)) {
           await trx.db
             .insertInto('member_location_scopes')
             .values({
@@ -2908,11 +3079,6 @@ export async function acceptStaffInvitation(
               branch_id: emp.primary_branch_id,
               warehouse_id: null,
             })
-            .onConflict((oc) =>
-              oc
-                .columns(['tenant_id', 'membership_id', 'branch_id'])
-                .doNothing(),
-            )
             .execute();
         }
       }

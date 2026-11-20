@@ -1493,13 +1493,26 @@ export type InventoryReconciliationResponse = Static<
 export const PosRegisterSummaryResponseSchema = Type.Object({
   id: UuidSchema,
   branchId: UuidSchema,
+  branchCode: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  branchName: Type.Optional(Type.Union([Type.String(), Type.Null()])),
   warehouseId: UuidSchema,
+  warehouseName: Type.Optional(Type.Union([Type.String(), Type.Null()])),
   code: Type.String(),
   name: Type.String(),
   isActive: Type.Boolean(),
 });
 export type PosRegisterSummaryResponse = Static<
   typeof PosRegisterSummaryResponseSchema
+>;
+
+export const EnsureDefaultPosRegisterRequestSchema = Type.Object(
+  {
+    branchId: UuidSchema,
+  },
+  { additionalProperties: false },
+);
+export type EnsureDefaultPosRegisterRequest = Static<
+  typeof EnsureDefaultPosRegisterRequestSchema
 >;
 
 export const CreatePosRegisterRequestSchema = Type.Object(
@@ -1564,6 +1577,7 @@ export type ClosePosShiftRequest = Static<
 
 export const ListPosShiftsQuerySchema = Type.Object(
   {
+    branchId: Type.Optional(UuidSchema),
     registerId: Type.Optional(UuidSchema),
     status: Type.Optional(Type.Union([Type.Literal('OPEN'), Type.Literal('CLOSED'), Type.Literal('ALL')])),
     limit: Type.Optional(PaginationLimitQueryParamSchema),
@@ -1639,6 +1653,7 @@ export type PosShiftResponse = Static<typeof PosShiftResponseSchema>;
 export const GetActivePosShiftQuerySchema = Type.Object(
   {
     registerId: Type.Optional(UuidSchema),
+    branchId: Type.Optional(UuidSchema),
   },
   { additionalProperties: false },
 );
@@ -1838,8 +1853,11 @@ export const SalesInvoiceResponseSchema = Type.Object({
   invoiceNumber: Type.String(),
   status: Type.Union([Type.Literal('COMPLETED'), Type.Literal('VOIDED')]),
   branchId: UuidSchema,
+  branchCode: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  branchName: Type.Optional(Type.Union([Type.String(), Type.Null()])),
   warehouseId: UuidSchema,
   registerId: UuidSchema,
+  registerCode: Type.Optional(Type.Union([Type.String(), Type.Null()])),
   shiftId: Type.Union([UuidSchema, Type.Null()]),
   cashierUserId: UuidSchema,
   customerId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
@@ -1864,6 +1882,7 @@ export type SalesInvoiceResponse = Static<
 
 export const ListSalesQuerySchema = Type.Object(
   {
+    branchId: Type.Optional(UuidSchema),
     registerId: Type.Optional(UuidSchema),
     status: Type.Optional(
       Type.Union([Type.Literal('COMPLETED'), Type.Literal('VOIDED')]),
@@ -1879,6 +1898,7 @@ export type ListSalesQuery = Static<typeof ListSalesQuerySchema>;
 
 export const SalesSummaryQuerySchema = Type.Object(
   {
+    branchId: Type.Optional(UuidSchema),
     registerId: Type.Optional(UuidSchema),
     startDate: Type.Optional(IsoTimestampSchema),
     endDate: Type.Optional(IsoTimestampSchema),
@@ -3143,6 +3163,13 @@ export const MemberLinkedEmployeeSummarySchema = Type.Object({
 });
 export type MemberLinkedEmployeeSummary = Static<typeof MemberLinkedEmployeeSummarySchema>;
 
+export const MemberAssignedBranchSummarySchema = Type.Object({
+  id: UuidSchema,
+  code: Type.String(),
+  name: Type.String(),
+  isActive: Type.Boolean(),
+});
+
 export const MemberSummaryResponseSchema = Type.Object({
   id: UuidSchema,
   tenantId: UuidSchema,
@@ -3160,6 +3187,7 @@ export const MemberSummaryResponseSchema = Type.Object({
   allLocationsAccess: Type.Boolean(),
   roles: Type.Array(MemberRoleAssignmentSummarySchema),
   locationScopes: MemberLocationScopeDetailSchema,
+  assignedBranches: Type.Optional(Type.Array(MemberAssignedBranchSummarySchema)),
   linkedEmployee: Type.Optional(Type.Union([MemberLinkedEmployeeSummarySchema, Type.Null()])),
   suspensionReason: Type.Optional(Type.Union([Type.String(), Type.Null()])),
   createdAt: Type.String(),
@@ -3211,6 +3239,9 @@ export const InviteStaffRequestSchema = Type.Object(
     }),
     roleCode: Type.Optional(Type.String({ minLength: 2, maxLength: 50 })),
     employeeId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
+    allLocationsAccess: Type.Optional(Type.Boolean()),
+    branchIds: Type.Optional(Type.Array(UuidSchema)),
+    warehouseIds: Type.Optional(Type.Array(UuidSchema)),
   },
   { additionalProperties: false },
 );
@@ -3224,6 +3255,9 @@ export const StaffInvitationResponseSchema = Type.Object({
   employeeId: Type.Union([UuidSchema, Type.Null()]),
   employeeCode: Type.Optional(Type.Union([Type.String(), Type.Null()])),
   employeeName: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  allLocationsAccess: Type.Optional(Type.Boolean()),
+  branchIds: Type.Optional(Type.Array(UuidSchema)),
+  warehouseIds: Type.Optional(Type.Array(UuidSchema)),
   status: Type.Union([
     Type.Literal('PENDING'),
     Type.Literal('ACCEPTED'),
@@ -5537,11 +5571,141 @@ export const UomCorrectionExecuteResponseSchema = Type.Object({
 });
 export type UomCorrectionExecuteResponse = Static<typeof UomCorrectionExecuteResponseSchema>;
 
+// ============================================================================
+// PHASE 8.6: CENTRALIZED MULTI-BRANCH BUSINESS DASHBOARD CONTRACTS
+// ============================================================================
 
+export const DashboardDatePresetSchema = Type.Union([
+  Type.Literal('TODAY'),
+  Type.Literal('YESTERDAY'),
+  Type.Literal('THIS_WEEK'),
+  Type.Literal('THIS_MONTH'),
+  Type.Literal('CUSTOM'),
+]);
+export type DashboardDatePreset = Static<typeof DashboardDatePresetSchema>;
 
+export const DashboardSummaryQuerySchema = Type.Object(
+  {
+    datePreset: Type.Optional(DashboardDatePresetSchema),
+    startDate: Type.Optional(Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' })),
+    endDate: Type.Optional(Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' })),
+    branchId: Type.Optional(UuidSchema),
+  },
+  { additionalProperties: false },
+);
+export type DashboardSummaryQuery = Static<typeof DashboardSummaryQuerySchema>;
 
+export const DashboardBranchMetricSchema = Type.Object({
+  branchId: UuidSchema,
+  branchCode: Type.String(),
+  branchName: Type.String(),
+  isMainBranch: Type.Boolean(),
+  netSales: DecimalMoneyStringSchema,
+  grossSales: DecimalMoneyStringSchema,
+  refundTotal: DecimalMoneyStringSchema,
+  ordersCount: Type.Integer(),
+  voidedCount: Type.Integer(),
+  returnsCount: Type.Integer(),
+  averageOrderValue: DecimalMoneyStringSchema,
+  inventoryValue: DecimalMoneyStringSchema,
+  unitsOnHand: DecimalQuantityStringSchema,
+  lowStockCount: Type.Integer(),
+  outOfStockCount: Type.Integer(),
+  confirmedCogs: DecimalMoneyStringSchema,
+  grossProfit: DecimalMoneyStringSchema,
+  costCoveragePct: Type.Number(),
+  hasIncompleteCostData: Type.Boolean(),
+});
+export type DashboardBranchMetric = Static<typeof DashboardBranchMetricSchema>;
 
+export const DashboardLowStockItemSchema = Type.Object({
+  branchId: UuidSchema,
+  branchName: Type.String(),
+  warehouseId: UuidSchema,
+  warehouseName: Type.String(),
+  productId: UuidSchema,
+  sku: Type.String(),
+  productName: Type.String(),
+  baseUom: Type.String(),
+  qtyOnHand: DecimalQuantityStringSchema,
+  availableQty: DecimalQuantityStringSchema,
+  reorderPoint: DecimalQuantityStringSchema,
+  stockState: StockAlertStateSchema,
+});
+export type DashboardLowStockItem = Static<typeof DashboardLowStockItemSchema>;
 
+export const DashboardActivityItemSchema = Type.Object({
+  id: Type.String(),
+  activityType: Type.Union([
+    Type.Literal('POS_SALE'),
+    Type.Literal('POS_VOID'),
+    Type.Literal('POS_RETURN'),
+    Type.Literal('STOCK_TRANSFER'),
+  ]),
+  referenceNumber: Type.String(),
+  branchId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
+  branchName: Type.String(),
+  description: Type.String(),
+  amount: Type.Optional(Type.Union([DecimalMoneyStringSchema, Type.Null()])),
+  actorName: Type.String(),
+  occurredAt: IsoTimestampSchema,
+});
+export type DashboardActivityItem = Static<typeof DashboardActivityItemSchema>;
 
+export const DashboardTrendPointSchema = Type.Object({
+  date: Type.String(),
+  netSales: DecimalMoneyStringSchema,
+  ordersCount: Type.Integer(),
+});
+export type DashboardTrendPoint = Static<typeof DashboardTrendPointSchema>;
 
+export const DashboardSummaryResponseSchema = Type.Object({
+  scopeMode: Type.Union([Type.Literal('BUSINESS_WIDE'), Type.Literal('SINGLE_BRANCH')]),
+  selectedBranchId: Type.Union([UuidSchema, Type.Null()]),
+  selectedBranchName: Type.String(),
+  datePreset: DashboardDatePresetSchema,
+  startDate: Type.String(),
+  endDate: Type.String(),
+  currencyCode: CurrencyCodeSchema,
+  allLocationsAccess: Type.Boolean(),
+  kpis: Type.Object({
+    totalSales: DecimalMoneyStringSchema,
+    grossSales: DecimalMoneyStringSchema,
+    refundTotal: DecimalMoneyStringSchema,
+    totalOrders: Type.Integer(),
+    voidedOrders: Type.Integer(),
+    returnsCount: Type.Integer(),
+    averageOrderValue: DecimalMoneyStringSchema,
+    totalInventoryValue: DecimalMoneyStringSchema,
+    totalUnitsOnHand: DecimalQuantityStringSchema,
+    totalProducts: Type.Integer(),
+    totalCustomers: Type.Integer(),
+    activeBranchesCount: Type.Integer(),
+    lowStockAlerts: Type.Integer(),
+    outOfStockAlerts: Type.Integer(),
+    confirmedCogs: DecimalMoneyStringSchema,
+    grossProfit: DecimalMoneyStringSchema,
+    grossMarginPct: Type.Number(),
+    costCoveragePct: Type.Number(),
+    hasIncompleteCostData: Type.Boolean(),
+    incompleteCostLinesCount: Type.Integer(),
+    totalSalesLinesCount: Type.Integer(),
+  }),
+  bestPerformingBranch: Type.Union([
+    Type.Object({
+      branchId: UuidSchema,
+      branchCode: Type.String(),
+      branchName: Type.String(),
+      netSales: DecimalMoneyStringSchema,
+      ordersCount: Type.Integer(),
+      sharePct: Type.Number(),
+    }),
+    Type.Null(),
+  ]),
+  branchComparison: Type.Array(DashboardBranchMetricSchema),
+  salesTrend: Type.Array(DashboardTrendPointSchema),
+  lowStockWatchlist: Type.Array(DashboardLowStockItemSchema),
+  recentActivities: Type.Array(DashboardActivityItemSchema),
+});
+export type DashboardSummaryResponse = Static<typeof DashboardSummaryResponseSchema>;
 

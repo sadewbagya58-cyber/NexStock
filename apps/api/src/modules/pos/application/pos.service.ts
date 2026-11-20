@@ -60,30 +60,170 @@ export async function listAuthorizedRegisters(
   trx: TenantTransactionContext,
   query: ListPosRegistersQuery,
 ): Promise<PosRegisterSummaryResponse[]> {
-  await assertAuthorized(trx, {
+  const authCtx = await assertAuthorized(trx, {
     permission: 'pos:register:read',
     branchId: query.branchId,
   });
 
-  let dbQuery = trx.db
-    .selectFrom('pos_registers')
-    .select(['id', 'branch_id', 'warehouse_id', 'code', 'name', 'is_active'])
-    .where('tenant_id', '=', trx.tenantId);
-
-  if (query.branchId) {
-    dbQuery = dbQuery.where('branch_id', '=', query.branchId);
+  if (!authCtx.allLocationsAccess && authCtx.allowedBranchIds.size === 0) {
+    return [];
   }
 
-  const rows = await dbQuery.orderBy('code', 'asc').execute();
+  let dbQuery = trx.db
+    .selectFrom('pos_registers')
+    .leftJoin('branches', (join) =>
+      join
+        .onRef('branches.tenant_id', '=', 'pos_registers.tenant_id')
+        .onRef('branches.id', '=', 'pos_registers.branch_id'),
+    )
+    .leftJoin('warehouses', (join) =>
+      join
+        .onRef('warehouses.tenant_id', '=', 'pos_registers.tenant_id')
+        .onRef('warehouses.id', '=', 'pos_registers.warehouse_id'),
+    )
+    .select([
+      'pos_registers.id as id',
+      'pos_registers.branch_id as branch_id',
+      'branches.code as branch_code',
+      'branches.name as branch_name',
+      'pos_registers.warehouse_id as warehouse_id',
+      'warehouses.name as warehouse_name',
+      'pos_registers.code as code',
+      'pos_registers.name as name',
+      'pos_registers.is_active as is_active',
+    ])
+    .where('pos_registers.tenant_id', '=', trx.tenantId);
+
+  if (!authCtx.allLocationsAccess) {
+    dbQuery = dbQuery.where(
+      'pos_registers.branch_id',
+      'in',
+      [...authCtx.allowedBranchIds],
+    );
+  }
+
+  if (query.branchId) {
+    dbQuery = dbQuery.where('pos_registers.branch_id', '=', query.branchId);
+  }
+
+  const rows = await dbQuery.orderBy('pos_registers.code', 'asc').execute();
 
   return rows.map((r) => ({
     id: r.id,
     branchId: r.branch_id,
+    branchCode: r.branch_code ?? null,
+    branchName: r.branch_name ?? null,
     warehouseId: r.warehouse_id,
+    warehouseName: r.warehouse_name ?? null,
     code: r.code,
     name: r.name,
     isActive: r.is_active,
   }));
+}
+
+export async function ensureDefaultPosRegisterForBranch(
+  trx: TenantTransactionContext,
+  branchId: string,
+): Promise<PosRegisterSummaryResponse> {
+  await assertAuthorized(trx, {
+    permission: 'org:register:manage',
+    branchId,
+  });
+
+  const existing = await trx.db
+    .selectFrom('pos_registers')
+    .leftJoin('branches', (join) =>
+      join
+        .onRef('branches.tenant_id', '=', 'pos_registers.tenant_id')
+        .onRef('branches.id', '=', 'pos_registers.branch_id'),
+    )
+    .leftJoin('warehouses', (join) =>
+      join
+        .onRef('warehouses.tenant_id', '=', 'pos_registers.tenant_id')
+        .onRef('warehouses.id', '=', 'pos_registers.warehouse_id'),
+    )
+    .select([
+      'pos_registers.id as id',
+      'pos_registers.branch_id as branch_id',
+      'branches.code as branch_code',
+      'branches.name as branch_name',
+      'pos_registers.warehouse_id as warehouse_id',
+      'warehouses.name as warehouse_name',
+      'pos_registers.code as code',
+      'pos_registers.name as name',
+      'pos_registers.is_active as is_active',
+    ])
+    .where('pos_registers.tenant_id', '=', trx.tenantId)
+    .where('pos_registers.branch_id', '=', branchId)
+    .where('pos_registers.is_active', '=', true)
+    .orderBy('pos_registers.created_at', 'asc')
+    .executeTakeFirst();
+
+  if (existing) {
+    return {
+      id: existing.id,
+      branchId: existing.branch_id,
+      branchCode: existing.branch_code ?? null,
+      branchName: existing.branch_name ?? null,
+      warehouseId: existing.warehouse_id,
+      warehouseName: existing.warehouse_name ?? null,
+      code: existing.code,
+      name: existing.name,
+      isActive: existing.is_active,
+    };
+  }
+
+  const branch = await trx.db
+    .selectFrom('branches')
+    .select(['id', 'code', 'name', 'default_warehouse_id', 'is_active'])
+    .where('tenant_id', '=', trx.tenantId)
+    .where('id', '=', branchId)
+    .executeTakeFirst();
+
+  if (!branch) {
+    throw new AppError({
+      statusCode: 404,
+      errorCode: 'ORG_BRANCH_NOT_FOUND',
+      title: 'Branch Not Found',
+      detail: `Branch "${branchId}" does not exist.`,
+    });
+  }
+
+  if (!branch.is_active) {
+    throw new AppError({
+      statusCode: 409,
+      errorCode: 'ERR_CONFLICT',
+      title: 'Branch Archived',
+      detail: `Archived branch "${branch.name}" cannot open or create POS registers.`,
+    });
+  }
+
+  let baseCode = `REG-${branch.code.trim().toUpperCase().slice(0, 16)}-01`;
+  const clash = await trx.db
+    .selectFrom('pos_registers')
+    .select(['id'])
+    .where('tenant_id', '=', trx.tenantId)
+    .where('code', '=', baseCode)
+    .executeTakeFirst();
+  if (clash) {
+    baseCode = `REG-${generateUuidV7().slice(-6).toUpperCase()}`;
+  }
+
+  const created = await createPosRegister(trx, {
+    branchId,
+    ...(branch.default_warehouse_id
+      ? { warehouseId: branch.default_warehouse_id }
+      : {}),
+    code: baseCode,
+    name: `${branch.name} Counter 1`,
+    isActive: true,
+  });
+
+  return {
+    ...created,
+    branchCode: branch.code,
+    branchName: branch.name,
+  };
 }
 
 export async function createPosRegister(
@@ -700,6 +840,7 @@ export async function closePosShift(
 export async function getActivePosShift(
   trx: TenantTransactionContext,
   registerId?: string,
+  branchId?: string,
 ): Promise<PosShiftResponse | null> {
   let shiftRow;
 
@@ -734,14 +875,26 @@ export async function getActivePosShift(
       .where('status', '=', 'OPEN')
       .executeTakeFirst();
   } else {
-    // If no registerId provided, lookup the calling cashier's active shift
-    shiftRow = await trx.db
+    if (branchId) {
+      await assertAuthorized(trx, {
+        permission: 'pos:register:read',
+        branchId,
+      });
+    }
+
+    // Lookup the calling cashier's active shift (scoped to branchId if specified)
+    let fallbackQuery = trx.db
       .selectFrom('pos_shifts')
       .selectAll()
       .where('tenant_id', '=', trx.tenantId)
       .where('opened_by_user_id', '=', trx.userId)
-      .where('status', '=', 'OPEN')
-      .executeTakeFirst();
+      .where('status', '=', 'OPEN');
+
+    if (branchId) {
+      fallbackQuery = fallbackQuery.where('branch_id', '=', branchId);
+    }
+
+    shiftRow = await fallbackQuery.executeTakeFirst();
 
     if (shiftRow) {
       const register = await trx.db
@@ -845,7 +998,15 @@ export async function listPosShifts(
   trx: TenantTransactionContext,
   query: ListPosShiftsQuery,
 ): Promise<PosShiftResponse[]> {
-  const authCtx = await resolveMemberAuthorizationContext(trx);
+  const authCtx = await assertAuthorized(trx, {
+    permission: 'pos:register:read',
+    ...(query.branchId ? { branchId: query.branchId } : {}),
+  });
+
+  if (!authCtx.allLocationsAccess && authCtx.allowedBranchIds.size === 0) {
+    return [];
+  }
+
   const isManagerOrAdmin =
     authCtx.roleCodes.includes('TENANT_OWNER') ||
     authCtx.roleCodes.includes('ORG_ADMIN') ||
@@ -879,6 +1040,18 @@ export async function listPosShifts(
       'closer.email as closer_email',
     ])
     .where('pos_shifts.tenant_id', '=', trx.tenantId);
+
+  if (!authCtx.allLocationsAccess) {
+    baseQuery = baseQuery.where(
+      'pos_shifts.branch_id',
+      'in',
+      [...authCtx.allowedBranchIds],
+    );
+  }
+
+  if (query.branchId) {
+    baseQuery = baseQuery.where('pos_shifts.branch_id', '=', query.branchId);
+  }
 
   if (!isManagerOrAdmin) {
     baseQuery = baseQuery.where('pos_shifts.opened_by_user_id', '=', trx.userId);
@@ -3428,9 +3601,14 @@ export async function listSales(
   trx: TenantTransactionContext,
   query: ListSalesQuery,
 ): Promise<SalesInvoiceResponse[]> {
-  await assertAuthorized(trx, {
+  const authCtx = await assertAuthorized(trx, {
     permission: 'pos:sale:read',
+    ...(query.branchId ? { branchId: query.branchId } : {}),
   });
+
+  if (!authCtx.allLocationsAccess && authCtx.allowedBranchIds.size === 0) {
+    return [];
+  }
 
   const limit = Math.min(Math.max(Number(query.limit ?? 25), 1), 100);
 
@@ -3438,6 +3616,14 @@ export async function listSales(
     .selectFrom('sales_invoices')
     .selectAll()
     .where('tenant_id', '=', trx.tenantId);
+
+  if (!authCtx.allLocationsAccess) {
+    dbQuery = dbQuery.where('branch_id', 'in', [...authCtx.allowedBranchIds]);
+  }
+
+  if (query.branchId) {
+    dbQuery = dbQuery.where('branch_id', '=', query.branchId);
+  }
 
   if (query.registerId) {
     dbQuery = dbQuery.where('register_id', '=', query.registerId);
@@ -3465,20 +3651,43 @@ export async function listSales(
   }
 
   const saleIds = sales.map((s) => s.id);
-  const allLines = await trx.db
-    .selectFrom('sales_invoice_lines')
-    .selectAll()
-    .where('tenant_id', '=', trx.tenantId)
-    .where('invoice_id', 'in', saleIds)
-    .orderBy('line_number', 'asc')
-    .execute();
+  const saleBranchIds = [...new Set(sales.map((s) => s.branch_id))];
+  const saleRegisterIds = [...new Set(sales.map((s) => s.register_id))];
 
-  const allPayments = await trx.db
-    .selectFrom('sales_payments')
-    .selectAll()
-    .where('tenant_id', '=', trx.tenantId)
-    .where('invoice_id', 'in', saleIds)
-    .execute();
+  const [allLines, allPayments, branchRows, registerRows] = await Promise.all([
+    trx.db
+      .selectFrom('sales_invoice_lines')
+      .selectAll()
+      .where('tenant_id', '=', trx.tenantId)
+      .where('invoice_id', 'in', saleIds)
+      .orderBy('line_number', 'asc')
+      .execute(),
+    trx.db
+      .selectFrom('sales_payments')
+      .selectAll()
+      .where('tenant_id', '=', trx.tenantId)
+      .where('invoice_id', 'in', saleIds)
+      .execute(),
+    saleBranchIds.length > 0
+      ? trx.db
+          .selectFrom('branches')
+          .select(['id', 'code', 'name'])
+          .where('tenant_id', '=', trx.tenantId)
+          .where('id', 'in', saleBranchIds)
+          .execute()
+      : [],
+    saleRegisterIds.length > 0
+      ? trx.db
+          .selectFrom('pos_registers')
+          .select(['id', 'code'])
+          .where('tenant_id', '=', trx.tenantId)
+          .where('id', 'in', saleRegisterIds)
+          .execute()
+      : [],
+  ]);
+
+  const branchInfoMap = new Map(branchRows.map((b) => [b.id, { code: b.code, name: b.name }]));
+  const registerCodeMap = new Map(registerRows.map((r) => [r.id, r.code]));
 
   const linesByInvoice = new Map<string, typeof allLines>();
   for (const l of allLines) {
@@ -3497,14 +3706,18 @@ export async function listSales(
   return sales.map((sale) => {
     const lines = linesByInvoice.get(sale.id) ?? [];
     const payments = paymentsByInvoice.get(sale.id) ?? [];
+    const brInfo = branchInfoMap.get(sale.branch_id);
 
     return {
       id: sale.id,
       invoiceNumber: sale.invoice_number,
       status: sale.status,
       branchId: sale.branch_id,
+      branchCode: brInfo?.code ?? null,
+      branchName: brInfo?.name ?? null,
       warehouseId: sale.warehouse_id,
       registerId: sale.register_id,
+      registerCode: registerCodeMap.get(sale.register_id) ?? null,
       shiftId: sale.shift_id,
       cashierUserId: sale.cashier_user_id,
       customerName: sale.customer_name,
@@ -3609,9 +3822,20 @@ export async function getSalesSummary(
   trx: TenantTransactionContext,
   query: SalesSummaryQuery,
 ): Promise<SalesSummaryResponse> {
-  await assertAuthorized(trx, {
+  const authCtx = await assertAuthorized(trx, {
     permission: 'pos:sale:read',
+    ...(query.branchId ? { branchId: query.branchId } : {}),
   });
+
+  if (!authCtx.allLocationsAccess && authCtx.allowedBranchIds.size === 0) {
+    return {
+      completedAmount: '0.0000',
+      completedCount: 0,
+      voidedAmount: '0.0000',
+      voidedCount: 0,
+      totalSalesCount: 0,
+    };
+  }
 
   let dbQuery = trx.db
     .selectFrom('sales_invoices')
@@ -3622,6 +3846,14 @@ export async function getSalesSummary(
     ])
     .where('tenant_id', '=', trx.tenantId)
     .groupBy('status');
+
+  if (!authCtx.allLocationsAccess) {
+    dbQuery = dbQuery.where('branch_id', 'in', [...authCtx.allowedBranchIds]);
+  }
+
+  if (query.branchId) {
+    dbQuery = dbQuery.where('branch_id', '=', query.branchId);
+  }
 
   if (query.registerId) {
     dbQuery = dbQuery.where('register_id', '=', query.registerId);

@@ -33,6 +33,8 @@ import {
   CreateSupplierReturnRequestSchema,
   CreateWarehouseRequestSchema,
   CurrencyCodeSchema,
+  DashboardSummaryQuerySchema,
+  DashboardSummaryResponseSchema,
   DecimalMoneyStringSchema,
   DecimalQuantityStringSchema,
   EmployeeDocumentResponseSchema,
@@ -40,6 +42,7 @@ import {
   EmployeeProfileResponseSchema,
   EmployeeResponseSchema,
   EmploymentStatusSchema,
+  EnsureDefaultPosRegisterRequestSchema,
   FefoSelectionResponseSchema,
   FifoCostLayerResponseSchema,
   type GenerateBarcodeQuery,
@@ -305,6 +308,7 @@ import {
   type BusinessReportQuery,
   getBusinessReport,
   getBusinessReportDrilldown,
+  getDashboardSummary,
 } from './modules/reports/index.js';
 import {
   convertTenantCurrencyAmount,
@@ -423,6 +427,7 @@ import {
   createPosRegister,
   createPosReturn,
   createPosShiftAdjustment,
+  ensureDefaultPosRegisterForBranch,
   getActivePosShift,
   getReceiptData,
   getSaleById,
@@ -6290,6 +6295,42 @@ export async function buildApp(
     },
   );
 
+  // 1c. Ensure Default POS Register for Branch (Phase 8.5 on-demand provisioning)
+  app.post(
+    '/v1/pos/registers/ensure-default',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        body: EnsureDefaultPosRegisterRequestSchema,
+        response: {
+          200: PosRegisterSummaryResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      const register = await withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => ensureDefaultPosRegisterForBranch(trx, request.body.branchId),
+      );
+
+      reply.code(200).send(register);
+    },
+  );
+
   // 2. Open Cashier Shift
   app.post(
     '/v1/pos/shifts',
@@ -6390,7 +6431,8 @@ export async function buildApp(
       const shift = await withTenantTransaction(
         options.db,
         { tenantId, userId: principal.userId, traceId },
-        (trx) => getActivePosShift(trx, request.query.registerId),
+        (trx) =>
+          getActivePosShift(trx, request.query.registerId, request.query.branchId),
       );
 
       if (!shift) {
@@ -10478,6 +10520,41 @@ export async function buildApp(
       const branchId = (request.query as { branchId?: string })?.branchId || null;
       const events = realtimeEventHub.getEventsSince(tenantId, sinceEpoch, branchId);
       return { events, currentEpoch: Date.now() };
+    },
+  );
+
+  // --------------------------------------------------------------------------
+  // Phase 8.6: Centralized Multi-Branch Business Dashboard Summary
+  // --------------------------------------------------------------------------
+  app.get(
+    '/v1/dashboard/summary',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        querystring: DashboardSummaryQuerySchema,
+        response: {
+          200: DashboardSummaryResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => getDashboardSummary(trx, request.query),
+      );
     },
   );
 

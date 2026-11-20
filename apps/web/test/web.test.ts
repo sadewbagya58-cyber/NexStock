@@ -350,7 +350,6 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       expect(html).not.toContain('/v1/inventory/warehouses');
 
       // Confirms warehouseId query params are conditionally guarded
-      expect(html).toContain("state.warehouseId ? `&warehouseId=${encodeURIComponent(state.warehouseId)}` : ''");
       expect(html).toContain("state.warehouseId ? `warehouseId=${encodeURIComponent(state.warehouseId)}&` : ''");
       expect(html).not.toContain('balances?warehouseId=${state.warehouseId}&');
       expect(html).not.toContain('movements?warehouseId=${state.warehouseId}&');
@@ -3234,6 +3233,29 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       expect(html).toContain('trAutoComplete');
       expect(html).toContain('autoComplete,');
       expect(html).toContain('openTransferDetailsModal');
+    });
+
+    it('implements Phase 8.4 Staff Branch RBAC, Phase 8.5 Multi-Branch POS & Phase 8.6 Centralized Dashboard', () => {
+      const html = readFileSync(resolve(WEB_ROOT, 'public/index.html'), 'utf8');
+
+      // Phase 8.4 Staff & RBAC
+      expect(html).toContain('function formatMemberTierBadge(');
+      expect(html).toContain('function formatMemberAssignedBranchesHtml(');
+      expect(html).toContain('invite-branch-check');
+      expect(html).toContain('onScopeBranchCheckboxChange');
+
+      // Phase 8.5 Multi-Branch POS + Cart Branch Switch Conflict Guard
+      expect(html).toContain('function guardBranchSwitchWithActiveCart(');
+      expect(html).toContain('confirmDiscardCartAndSwitchBranch');
+      expect(html).toContain('function switchPosBranchContext(');
+      expect(html).toContain('/v1/pos/registers/ensure-default');
+      expect(html).toContain('setSalesBranchFilter');
+
+      // Phase 8.6 Centralized Business Dashboard
+      expect(html).toContain('function paintCentralizedDashboardHtml(');
+      expect(html).toContain('/v1/dashboard/summary');
+      expect(html).toContain('setDashboardDatePreset');
+      expect(html).toContain('setDashboardBranchFilter');
     });
   });
 });
