@@ -218,7 +218,7 @@
         throw new Error(`Read-Only Mode (${snap.status}): New offline transactions are blocked. Renew your subscription to resume sales and stock adjustments.`);
       }
       if (isWriteOperation && snap.offlineEntitled === false) {
-        throw new Error(`Offline POS & Inventory requires Professional or Enterprise plan (current plan: ${snap.planCode}).`);
+        throw new Error(`Offline POS & Inventory requires Pro or Enterprise plan (current plan: ${snap.planCode}).`);
       }
     }
     return dev;

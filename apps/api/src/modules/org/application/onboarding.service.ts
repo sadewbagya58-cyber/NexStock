@@ -17,6 +17,7 @@ import {
   generateUuidV7,
   withAppUserTransaction,
   withTenantTransaction,
+  withUserTransaction,
 } from '../../shared/index.js';
 
 export const SUPPORTED_ONBOARDING_CURRENCIES = [
@@ -64,11 +65,13 @@ export async function onboardBusinessAtomic(
     readonly userId: string;
     readonly userEmail?: string | undefined;
     readonly userFullName?: string | undefined;
+    readonly idempotencyKey?: string | undefined;
     readonly request: OnboardBusinessRequest;
     readonly traceId: string;
   },
 ): Promise<OnboardBusinessResponse> {
   const currency = input.request.currency.trim().toUpperCase();
+  const normalizedIdemKey = input.idempotencyKey?.trim() || null;
 
   // 1. Authoritative domain validation against supported onboarding currencies
   const isSupportedDomainCurrency = (
@@ -84,51 +87,142 @@ export async function onboardBusinessAtomic(
     });
   }
 
-  // 2. Preliminary database verification under application role.
-  // If the query returns a record, confirm active state. If database RLS or
-  // connection isolation restricts standalone SELECT, domain validation guarantees
-  // legitimacy and the PostgreSQL foreign key constraint `tenants.base_currency REFERENCES currencies(code)`
-  // guarantees relational integrity at insertion.
-  try {
-    const currencyRecord = await withAppUserTransaction(
-      db,
-      { traceId: input.traceId },
-      async (trx) => {
-        return trx
+  const baseSlug = slugify(input.request.businessName);
+
+  // 2. Single preflight transaction: idempotency check, currency status, user profile, and slug check
+  const preflight = await withUserTransaction(
+    db,
+    { userId: input.userId, traceId: input.traceId },
+    async (trx) => {
+      if (normalizedIdemKey) {
+        const existingTenant = await trx
+          .selectFrom('tenants')
+          .innerJoin('tenant_memberships', 'tenant_memberships.tenant_id', 'tenants.id')
+          .select([
+            'tenants.id as tenant_id',
+            'tenants.slug',
+            'tenants.legal_name',
+            'tenants.base_currency',
+            'tenants.status',
+            'tenant_memberships.id as membership_id',
+          ])
+          .where('tenants.onboarding_idempotency_key', '=', normalizedIdemKey)
+          .where('tenant_memberships.user_id', '=', input.userId)
+          .executeTakeFirst();
+
+        if (existingTenant) {
+          return {
+            existingTenant,
+          };
+        }
+      }
+
+      const [currencyRecord, userRecord, existingSlug] = await Promise.all([
+        trx
           .selectFrom('currencies')
           .select(['code', 'is_active'])
           .where('code', '=', currency)
-          .executeTakeFirst();
+          .executeTakeFirst()
+          .catch(() => undefined),
+        trx
+          .selectFrom('users')
+          .select(['id', 'email', 'full_name'])
+          .where('id', '=', input.userId)
+          .executeTakeFirst(),
+        trx
+          .selectFrom('tenants')
+          .select('id')
+          .where('slug', '=', baseSlug)
+          .executeTakeFirst()
+          .catch(() => undefined),
+      ]);
+
+      return {
+        existingTenant: null,
+        currencyRecord,
+        userRecord,
+        existingSlug,
+      };
+    },
+  );
+
+  if (preflight.existingTenant) {
+    const existingTenant = preflight.existingTenant;
+    const replayResult = await withTenantTransaction(
+      db,
+      { tenantId: existingTenant.tenant_id, userId: input.userId, traceId: input.traceId },
+      async (trx) => {
+        const [branchRow, whRow, regRow] = await Promise.all([
+          trx.db
+            .selectFrom('branches')
+            .select(['id', 'code', 'name'])
+            .where('tenant_id', '=', existingTenant.tenant_id)
+            .orderBy('created_at', 'asc')
+            .executeTakeFirst(),
+          trx.db
+            .selectFrom('warehouses')
+            .select(['id', 'code', 'name'])
+            .where('tenant_id', '=', existingTenant.tenant_id)
+            .orderBy('created_at', 'asc')
+            .executeTakeFirst(),
+          trx.db
+            .selectFrom('pos_registers')
+            .select(['id', 'code', 'name'])
+            .where('tenant_id', '=', existingTenant.tenant_id)
+            .orderBy('created_at', 'asc')
+            .executeTakeFirst(),
+        ]);
+
+        if (!branchRow || !whRow || !regRow) {
+          return null;
+        }
+
+        return {
+          tenant: {
+            id: existingTenant.tenant_id,
+            slug: existingTenant.slug,
+            legalName: existingTenant.legal_name,
+            baseCurrency: existingTenant.base_currency,
+            status: existingTenant.status,
+          },
+          branch: {
+            id: branchRow.id,
+            code: branchRow.code,
+            name: branchRow.name,
+          },
+          warehouse: {
+            id: whRow.id,
+            code: whRow.code,
+            name: whRow.name,
+          },
+          register: {
+            id: regRow.id,
+            code: regRow.code,
+            name: regRow.name,
+          },
+          ownerMembershipId: existingTenant.membership_id,
+        } satisfies OnboardBusinessResponse;
       },
     );
-    if (currencyRecord && currencyRecord.is_active === false) {
-      throw new AppError({
-        statusCode: 400,
-        errorCode: 'ERR_VALIDATION_FAILED',
-        title: 'Invalid Currency',
-        detail: `Currency code "${currency}" is currently inactive. Supported currencies include ${SUPPORTED_ONBOARDING_CURRENCIES.join(', ')}.`,
-      });
+
+    if (replayResult) {
+      return replayResult;
     }
-  } catch (err) {
-    if (err instanceof AppError) {
-      throw err;
-    }
-    // Non-fatal if preliminary query fails due to database isolation; tenant insertion FK strictly validates
   }
 
-  // Ensure user record exists under application role
-  const userRecord = await withAppUserTransaction(db, { userId: input.userId, traceId: input.traceId }, async (trx) => {
-    return trx
-      .selectFrom('users')
-      .select(['id', 'email', 'full_name'])
-      .where('id', '=', input.userId)
-      .executeTakeFirst();
-  });
+  if (preflight.currencyRecord && preflight.currencyRecord.is_active === false) {
+    throw new AppError({
+      statusCode: 400,
+      errorCode: 'ERR_VALIDATION_FAILED',
+      title: 'Invalid Currency',
+      detail: `Currency code "${currency}" is currently inactive. Supported currencies include ${SUPPORTED_ONBOARDING_CURRENCIES.join(', ')}.`,
+    });
+  }
 
-  const email = userRecord?.email ?? input.userEmail ?? `${input.userId}@nexstock.local`;
-  const fullName = userRecord?.full_name ?? input.userFullName ?? input.request.businessName;
+  const email = preflight.userRecord?.email ?? input.userEmail ?? `${input.userId}@nexstock.local`;
+  const fullName = preflight.userRecord?.full_name ?? input.userFullName ?? input.request.businessName;
 
-  if (!userRecord) {
+  if (!preflight.userRecord) {
     await withAppUserTransaction(db, { userId: input.userId, traceId: input.traceId }, async (trx) => {
       await trx
         .insertInto('users')
@@ -143,19 +237,8 @@ export async function onboardBusinessAtomic(
     });
   }
 
-  const baseSlug = slugify(input.request.businessName);
   let slug = baseSlug;
-
-  // Ensure unique slug under application role
-  const existingSlug = await withAppUserTransaction(db, { traceId: input.traceId }, async (trx) => {
-    return trx
-      .selectFrom('tenants')
-      .select('id')
-      .where('slug', '=', slug)
-      .executeTakeFirst();
-  });
-
-  if (existingSlug) {
+  if (preflight.existingSlug) {
     const randomSuffix = Math.floor(1000 + Math.random() * 9000).toString();
     slug = `${baseSlug}-${randomSuffix}`.slice(0, 64);
   }
@@ -200,6 +283,7 @@ export async function onboardBusinessAtomic(
           default_timezone: timezone,
           country_code: countryCode,
           status: 'TRIALING',
+          ...(normalizedIdemKey ? { onboarding_idempotency_key: normalizedIdemKey } : {}),
         })
         .execute();
 

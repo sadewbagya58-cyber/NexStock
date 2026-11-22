@@ -30,6 +30,7 @@ import {
   Quantity,
   UomConversionError,
   divideAndRoundBigInt,
+  formatQuantityForDisplay,
   resolveUomRationalFactor,
 } from '@nexstock/domain-core';
 import {
@@ -906,6 +907,8 @@ async function hydrateProductsBatch(
       conversionFactorToBase: Quantity.fromDecimalString(
         String(u.conversion_factor_to_base),
       ).toDecimalString(),
+      isDefaultPurchasing: Boolean(u.is_default_purchasing ?? false),
+      isDefaultSelling: Boolean(u.is_default_selling ?? false),
       isActive: u.is_active,
     });
     uomsByProductId.set(u.product_id, list);
@@ -957,7 +960,11 @@ async function hydrateProductsBatch(
     primaryBarcode: row.primary_barcode,
     barcodes: barcodesByProductId.get(row.id) ?? [],
     unitConversions: uomsByProductId.get(row.id) ?? [],
-    allocationPolicy: (row.allocation_policy === 'FIFO' ? 'FIFO' : 'FEFO') as BatchAllocationPolicy,
+    allocationPolicy: (
+      row.allocation_policy === 'FIFO' || row.allocation_policy === 'MANUAL'
+        ? row.allocation_policy
+        : 'FEFO'
+    ) as BatchAllocationPolicy,
     requireBatchSellingPrice: Boolean(row.require_batch_selling_price ?? false),
     syncVersion: Number(row.sync_version),
     createdAt: new Date(row.created_at).toISOString(),
@@ -972,6 +979,113 @@ async function hydrateProductDetails(
 ): Promise<ProductResponse> {
   const [hydrated] = await hydrateProductsBatch(trx, [row]);
   return hydrated!;
+}
+
+interface NormalizedProductConversion {
+  readonly uomCode: string;
+  readonly uomName: string;
+  readonly conversionFactorToBase: string;
+  readonly isDefaultPurchasing: boolean;
+  readonly isDefaultSelling: boolean;
+}
+
+function normalizeProductUnitConversionsInput(
+  baseUom: string,
+  unitConversions:
+    | ReadonlyArray<{
+        uomCode: string;
+        uomName?: string;
+        conversionFactorToBase: string;
+        isDefaultPurchasing?: boolean;
+        isDefaultSelling?: boolean;
+      }>
+    | undefined,
+): NormalizedProductConversion[] {
+  const entries = unitConversions ?? [];
+  if (entries.length === 0) {
+    return [];
+  }
+
+  const rawCodeCounts = new Map<string, number>();
+  const parsed = entries.map((conv) => {
+    const rawCode = conv.uomCode.trim().toUpperCase();
+    if (!rawCode || rawCode === baseUom) {
+      throw new AppError({
+        statusCode: 400,
+        errorCode: 'CAT_INVALID_UOM_CONVERSION',
+        title: 'Invalid or Duplicate UoM Conversion',
+        detail: `Additional UoM "${rawCode}" is invalid or duplicates baseUom "${baseUom}".`,
+      });
+    }
+
+    let factor: Quantity;
+    try {
+      factor = Quantity.fromDecimalString(conv.conversionFactorToBase);
+    } catch {
+      throw new AppError({
+        statusCode: 400,
+        errorCode: 'CAT_INVALID_UOM_CONVERSION',
+        title: 'Invalid UoM Conversion Factor',
+        detail: `Conversion factor "${conv.conversionFactorToBase}" for UoM "${rawCode}" is not a valid fixed-point quantity.`,
+      });
+    }
+
+    if (!factor.isPositive()) {
+      throw new AppError({
+        statusCode: 400,
+        errorCode: 'CAT_INVALID_UOM_CONVERSION',
+        title: 'Non-Positive UoM Conversion Factor',
+        detail: `Conversion factor for UoM "${rawCode}" must be strictly greater than zero.`,
+      });
+    }
+
+    rawCodeCounts.set(rawCode, (rawCodeCounts.get(rawCode) ?? 0) + 1);
+    return {
+      rawCode,
+      rawName: conv.uomName?.trim() || '',
+      factor,
+      factorDecimal: factor.toDecimalString(),
+      factorDisplay: formatQuantityForDisplay(factor.toDecimalString()),
+      isDefaultPurchasing: Boolean(conv.isDefaultPurchasing),
+      isDefaultSelling: Boolean(conv.isDefaultSelling),
+    };
+  });
+
+  const seenUoms = new Set<string>([baseUom]);
+  const normalized: NormalizedProductConversion[] = [];
+
+  for (const item of parsed) {
+    const hasMultiplePackages = (rawCodeCounts.get(item.rawCode) ?? 0) > 1;
+    let finalCode = item.rawCode;
+    if (hasMultiplePackages) {
+      const compactFactor = item.factorDisplay.replace(/[^A-Z0-9.]/gi, '').replace('.', '_');
+      const candidate = `${item.rawCode}_${compactFactor}${baseUom}`.toUpperCase();
+      finalCode = candidate.slice(0, 20);
+    }
+
+    if (seenUoms.has(finalCode)) {
+      throw new AppError({
+        statusCode: 400,
+        errorCode: 'CAT_INVALID_UOM_CONVERSION',
+        title: 'Invalid or Duplicate UoM Conversion',
+        detail: `Additional UoM "${item.rawCode}" (${item.factorDisplay} ${baseUom}) duplicates another conversion on this product.`,
+      });
+    }
+    seenUoms.add(finalCode);
+
+    const finalName =
+      item.rawName || `${item.rawCode} (${item.factorDisplay} ${baseUom})`;
+
+    normalized.push({
+      uomCode: finalCode,
+      uomName: finalName,
+      conversionFactorToBase: item.factorDecimal,
+      isDefaultPurchasing: item.isDefaultPurchasing,
+      isDefaultSelling: item.isDefaultSelling,
+    });
+  }
+
+  return normalized;
 }
 
 export async function createProduct(
@@ -1112,53 +1226,14 @@ export async function createProduct(
   }
 
   // Validate UoM conversions
-  const seenUoms = new Set<string>([baseUom]);
-  const normalizedConversions: Array<{
-    uomCode: string;
-    uomName: string;
-    conversionFactorToBase: string;
-  }> = [];
-
-  for (const conv of input.unitConversions ?? []) {
-    const code = conv.uomCode.trim().toUpperCase();
-    const uomName = conv.uomName.trim();
-    if (!code || !uomName || seenUoms.has(code)) {
-      throw new AppError({
-        statusCode: 400,
-        errorCode: 'CAT_INVALID_UOM_CONVERSION',
-        title: 'Invalid or Duplicate UoM Conversion',
-        detail: `Additional UoM "${code}" is invalid or duplicates baseUom / another conversion.`,
-      });
-    }
-
-    let factor: Quantity;
-    try {
-      factor = Quantity.fromDecimalString(conv.conversionFactorToBase);
-    } catch {
-      throw new AppError({
-        statusCode: 400,
-        errorCode: 'CAT_INVALID_UOM_CONVERSION',
-        title: 'Invalid UoM Conversion Factor',
-        detail: `Conversion factor "${conv.conversionFactorToBase}" for UoM "${code}" is not a valid fixed-point quantity.`,
-      });
-    }
-
-    if (!factor.isPositive()) {
-      throw new AppError({
-        statusCode: 400,
-        errorCode: 'CAT_INVALID_UOM_CONVERSION',
-        title: 'Non-Positive UoM Conversion Factor',
-        detail: `Conversion factor for UoM "${code}" must be strictly greater than zero.`,
-      });
-    }
-
-    seenUoms.add(code);
-    normalizedConversions.push({
-      uomCode: code,
-      uomName,
-      conversionFactorToBase: factor.toDecimalString(),
-    });
-  }
+  const normalizedConversions = normalizeProductUnitConversionsInput(
+    baseUom,
+    input.unitConversions,
+  );
+  const seenUoms = new Set<string>([
+    baseUom,
+    ...normalizedConversions.map((c) => c.uomCode),
+  ]);
 
   // Validate Primary & Alternate Barcodes
   const primaryBarcode = input.primaryBarcode?.trim() || null;
@@ -1241,13 +1316,23 @@ export async function createProduct(
     }
   }
 
+  const defaultPurchasingConv = normalizedConversions.find((c) => c.isDefaultPurchasing);
+  const defaultSellingConvs = normalizedConversions
+    .filter((c) => c.isDefaultSelling)
+    .map((c) => c.uomCode);
+  const mergedAllowedSellingUoms = input.allowedSellingUoms
+    ? Array.from(new Set([...input.allowedSellingUoms, ...defaultSellingConvs]))
+    : defaultSellingConvs.length > 0
+      ? Array.from(new Set([baseUom, ...defaultSellingConvs]))
+      : undefined;
+
   const uomConfig = resolveAndValidateProductUomConfig({
     baseUom,
     productQtyMode: input.productQtyMode,
     measurementCategory: input.measurementCategory,
-    purchaseUom: input.purchaseUom,
+    purchaseUom: input.purchaseUom ?? defaultPurchasingConv?.uomCode,
     priceUom: input.priceUom,
-    allowedSellingUoms: input.allowedSellingUoms,
+    allowedSellingUoms: mergedAllowedSellingUoms,
     qtyDecimalPrecision: input.qtyDecimalPrecision,
     featuredPos: input.featuredPos,
     densityGPerMl: input.densityGPerMl,
@@ -1346,6 +1431,8 @@ export async function createProduct(
         uom_code: conv.uomCode,
         uom_name: conv.uomName,
         conversion_factor_to_base: conv.conversionFactorToBase,
+        is_default_purchasing: conv.isDefaultPurchasing || uomConfig.purchaseUom === conv.uomCode,
+        is_default_selling: conv.isDefaultSelling,
         is_active: true,
         created_at: now,
         updated_at: now,
@@ -1785,41 +1872,20 @@ export async function updateProduct(
     conversionFactorToBase: string;
   }> = [];
 
-  if (input.unitConversions !== undefined) {
-    const seenUoms = new Set<string>([nextBaseUom]);
-    const normalizedConversions: Array<{
-      uomCode: string;
-      uomName: string;
-      conversionFactorToBase: string;
-    }> = [];
+  let updateDefaultPurchasingUom: string | undefined;
+  let updateDefaultSellingUoms: string[] = [];
 
-    for (const conv of input.unitConversions) {
-      const code = conv.uomCode.trim().toUpperCase();
-      const uomName = conv.uomName.trim();
-      if (!code || !uomName || seenUoms.has(code)) {
-        throw new AppError({
-          statusCode: 400,
-          errorCode: 'CAT_INVALID_UOM_CONVERSION',
-          title: 'Invalid or Duplicate UoM Conversion',
-          detail: `Additional UoM "${code}" is invalid or duplicates baseUom / another conversion.`,
-        });
-      }
-      const factor = Quantity.fromDecimalString(conv.conversionFactorToBase);
-      if (!factor.isPositive()) {
-        throw new AppError({
-          statusCode: 400,
-          errorCode: 'CAT_INVALID_UOM_CONVERSION',
-          title: 'Non-Positive UoM Conversion Factor',
-          detail: `Conversion factor for UoM "${code}" must be strictly greater than zero.`,
-        });
-      }
-      seenUoms.add(code);
-      normalizedConversions.push({
-        uomCode: code,
-        uomName,
-        conversionFactorToBase: factor.toDecimalString(),
-      });
-    }
+  if (input.unitConversions !== undefined) {
+    const normalizedConversions = normalizeProductUnitConversionsInput(
+      nextBaseUom,
+      input.unitConversions,
+    );
+    updateDefaultPurchasingUom = normalizedConversions.find(
+      (c) => c.isDefaultPurchasing,
+    )?.uomCode;
+    updateDefaultSellingUoms = normalizedConversions
+      .filter((c) => c.isDefaultSelling)
+      .map((c) => c.uomCode);
 
     await trx.db
       .deleteFrom('product_unit_conversions')
@@ -1837,6 +1903,8 @@ export async function updateProduct(
           uom_code: conv.uomCode,
           uom_name: conv.uomName,
           conversion_factor_to_base: conv.conversionFactorToBase,
+          is_default_purchasing: conv.isDefaultPurchasing,
+          is_default_selling: conv.isDefaultSelling,
           is_active: true,
           created_at: now,
           updated_at: now,
@@ -1861,6 +1929,15 @@ export async function updateProduct(
     }));
   }
 
+  const baseAllowedSelling =
+    input.allowedSellingUoms !== undefined
+      ? input.allowedSellingUoms
+      : parseAllowedSellingUomsJson(existing.allowed_selling_uoms, nextBaseUom);
+  const mergedUpdateAllowedSelling =
+    updateDefaultSellingUoms.length > 0
+      ? Array.from(new Set([...baseAllowedSelling, ...updateDefaultSellingUoms]))
+      : baseAllowedSelling;
+
   const resolvedUomConfig = resolveAndValidateProductUomConfig({
     baseUom: nextBaseUom,
     productQtyMode:
@@ -1874,15 +1951,12 @@ export async function updateProduct(
     purchaseUom:
       input.purchaseUom !== undefined
         ? input.purchaseUom
-        : (existing.purchase_uom ?? nextBaseUom),
+        : (updateDefaultPurchasingUom ?? existing.purchase_uom ?? nextBaseUom),
     priceUom:
       input.priceUom !== undefined
         ? input.priceUom
         : (existing.price_uom ?? nextBaseUom),
-    allowedSellingUoms:
-      input.allowedSellingUoms !== undefined
-        ? input.allowedSellingUoms
-        : parseAllowedSellingUomsJson(existing.allowed_selling_uoms, nextBaseUom),
+    allowedSellingUoms: mergedUpdateAllowedSelling,
     qtyDecimalPrecision:
       input.qtyDecimalPrecision !== undefined
         ? input.qtyDecimalPrecision
@@ -2341,11 +2415,10 @@ export async function listProducts(
       query.trackInventory === 'true',
     );
   }
-  if (query.cursor) {
-    dbQuery = dbQuery.where('id', '>', query.cursor);
-  }
-
   const sortDir = query.sortDir ?? 'asc';
+  if (query.cursor) {
+    dbQuery = dbQuery.where('id', sortDir === 'desc' ? '<' : '>', query.cursor);
+  }
   const sortBy = query.sortBy ?? 'createdAt';
   if (sortBy === 'name') {
     dbQuery = dbQuery.orderBy('name', sortDir).orderBy('id', 'asc');

@@ -385,6 +385,11 @@ describe('@nexstock/api — Milestone 0 Foundation, RLS, Idempotency & Sync Inva
           name: '0030_phase10_5_9_enforcement_admin_analytics_security',
           filename: '0030_phase10_5_9_enforcement_admin_analytics_security.sql',
         },
+        {
+          version: 31,
+          name: '0031_qa_master_enhancements',
+          filename: '0031_qa_master_enhancements.sql',
+        },
       ]);
     });
 
@@ -473,6 +478,7 @@ describe('@nexstock/api — Milestone 0 Foundation, RLS, Idempotency & Sync Inva
         '0028_phase9_offline_devices_and_conflict_resolution.sql',
         '0029_phase10_subscription_plans_lifecycle_billing.sql',
         '0030_phase10_5_9_enforcement_admin_analytics_security.sql',
+        '0031_qa_master_enhancements.sql',
       ]);
 
       await expect(

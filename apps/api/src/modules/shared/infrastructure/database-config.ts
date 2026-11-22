@@ -641,6 +641,13 @@ export function loadPhase105To9EnforcementAdminAnalyticsSecurityMigrationSql(): 
   return sqlText;
 }
 
+export function loadQaMasterEnhancementsMigrationSql(): string {
+  const filename = '0031_qa_master_enhancements.sql';
+  const sqlText = readFileSync(resolve(migrationsDir, filename), 'utf-8');
+  assertPostgresMigrationSqlCompatible(sqlText, filename);
+  return sqlText;
+}
+
 export function getOrderedPostgresMigrations(): readonly PostgresMigrationSpec[] {
   return [
     {
@@ -852,6 +859,13 @@ export function getOrderedPostgresMigrations(): readonly PostgresMigrationSpec[]
       name: '0030_phase10_5_9_enforcement_admin_analytics_security',
       filename: '0030_phase10_5_9_enforcement_admin_analytics_security.sql',
       sql: loadPhase105To9EnforcementAdminAnalyticsSecurityMigrationSql(),
+    },
+    {
+      dialect: 'postgres',
+      version: 31,
+      name: '0031_qa_master_enhancements',
+      filename: '0031_qa_master_enhancements.sql',
+      sql: loadQaMasterEnhancementsMigrationSql(),
     },
   ];
 }

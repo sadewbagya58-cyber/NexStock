@@ -1362,6 +1362,8 @@ export async function searchPosProducts(
       'products.track_inventory as track_inventory',
       'products.tracking_mode as tracking_mode',
       'products.valuation_method as valuation_method',
+      'products.allocation_policy as allocation_policy',
+      'products.require_batch_selling_price as require_batch_selling_price',
       'products.image_url as image_url',
       'products.category_id as category_id',
       'categories.name as category_name',
@@ -1396,7 +1398,12 @@ export async function searchPosProducts(
         .selectFrom('inventory_serials')
         .select(['product_id'])
         .where('tenant_id', '=', trx.tenantId)
-        .where('serial_number', '=', trimmedBarcode.toUpperCase())
+        .where((eb) =>
+          eb.or([
+            eb('serial_number', '=', trimmedBarcode.toUpperCase()),
+            eb('internal_barcode', '=', trimmedBarcode.toUpperCase()),
+          ]),
+        )
         .where('status', '=', 'IN_STOCK')
         .execute(),
     ]);
@@ -1523,6 +1530,8 @@ export async function searchPosProducts(
       conversionFactorToBase: Quantity.fromDecimalString(
         String(u.conversion_factor_to_base),
       ).toDecimalString(),
+      isDefaultPurchasing: Boolean(u.is_default_purchasing ?? false),
+      isDefaultSelling: Boolean(u.is_default_selling ?? false),
       isActive: u.is_active,
     });
     uomsByProduct.set(u.product_id, list);
@@ -1573,6 +1582,12 @@ export async function searchPosProducts(
         ? Quantity.fromDecimalString(String(r.density_g_per_ml)).toDecimalString()
         : null,
       unitConversions: uomsByProduct.get(r.product_id) ?? [],
+      allocationPolicy: (
+        r.allocation_policy === 'FIFO' || r.allocation_policy === 'MANUAL'
+          ? r.allocation_policy
+          : 'FEFO'
+      ) as 'FEFO' | 'FIFO' | 'MANUAL',
+      requireBatchSellingPrice: Boolean(r.require_batch_selling_price ?? false),
       retailPrice: priceStr,
       globalRetailPrice: globalPriceStr,
       priceSource: branchOverridePrice ? ('BRANCH_OVERRIDE' as const) : ('GLOBAL' as const),
@@ -1759,17 +1774,22 @@ export async function checkoutSale(
     readonly expiryDate: string | null;
     readonly priceSource:
       | 'BATCH_EXPLICIT'
+      | 'SERIAL_GROUP'
       | 'POS_MANUAL_OVERRIDE'
       | 'PRODUCT_FALLBACK'
       | 'BRANCH_OVERRIDE'
       | 'GLOBAL_PRODUCT'
       | null;
     readonly serialId: string | null;
+    readonly serialGroupId: string | null;
+    readonly serialNumber: string | null;
+    readonly serialInternalBarcode: string | null;
   }> = [];
 
   let subtotalAccumulator = Money.zero(currencyCode);
   let totalLineDiscounts = Money.zero(currencyCode);
   let totalTaxes = Money.zero(currencyCode);
+  const usedSerialIds = new Set<string>();
 
   for (let idx = 0; idx < input.lines.length; idx++) {
     const lineItem = input.lines[idx]!;
@@ -1911,28 +1931,187 @@ export async function checkoutSale(
     }
 
     let serialId: string | null = lineItem.serialId ?? null;
+    let resolvedSerialGroupId: string | null = lineItem.serialGroupId ?? null;
+    let resolvedSerialNumber: string | null = null;
+    let resolvedSerialInternalBarcode: string | null = null;
+    let resolvedSerialSellingPrice: string | null = null;
+    let resolvedSerialUnitCost: string | null = null;
+
     if (product.track_inventory && product.tracking_mode === 'SERIAL') {
-      if (!serialId && lineItem.serialNumber) {
-        const sRow = await trx.db
+      if (normalizedBaseQty.compare(Quantity.fromInteger(1)) !== 0) {
+        throw new AppError({
+          statusCode: 422,
+          errorCode: 'INV_SERIAL_QUANTITY_MUST_BE_ONE',
+          title: 'Serial Quantity Must Be 1',
+          detail: `Serial-tracked product "${product.sku}" must be sold 1 unit per line (requested ${normalizedBaseQty.toDecimalString()}).`,
+        });
+      }
+      let sRow:
+        | {
+            id: string;
+            product_id: string;
+            warehouse_id: string;
+            branch_id: string;
+            status: string;
+            serial_number: string;
+            internal_barcode: string | null;
+            serial_group_id: string | null;
+            unit_cost: string;
+            selling_price: string | null;
+            currency_code: string;
+          }
+        | undefined;
+
+      if (serialId) {
+        sRow = await trx.db
           .selectFrom('inventory_serials')
-          .select(['id', 'status'])
+          .select([
+            'id',
+            'product_id',
+            'warehouse_id',
+            'branch_id',
+            'status',
+            'serial_number',
+            'internal_barcode',
+            'serial_group_id',
+            'unit_cost',
+            'selling_price',
+            'currency_code',
+          ])
+          .where('tenant_id', '=', trx.tenantId)
+          .where('id', '=', serialId)
+          .forUpdate()
+          .executeTakeFirst();
+      } else if (lineItem.scannedBarcode) {
+        const scannedTrimmed = lineItem.scannedBarcode.trim();
+        const scannedUpper = scannedTrimmed.toUpperCase();
+        sRow = await trx.db
+          .selectFrom('inventory_serials')
+          .select([
+            'id',
+            'product_id',
+            'warehouse_id',
+            'branch_id',
+            'status',
+            'serial_number',
+            'internal_barcode',
+            'serial_group_id',
+            'unit_cost',
+            'selling_price',
+            'currency_code',
+          ])
+          .where('tenant_id', '=', trx.tenantId)
+          .where((eb) =>
+            eb.or([
+              eb('internal_barcode', '=', scannedTrimmed),
+              eb('internal_barcode', '=', scannedUpper),
+              eb('serial_number', '=', scannedUpper),
+            ]),
+          )
+          .forUpdate()
+          .executeTakeFirst();
+      } else if (lineItem.serialNumber) {
+        sRow = await trx.db
+          .selectFrom('inventory_serials')
+          .select([
+            'id',
+            'product_id',
+            'warehouse_id',
+            'branch_id',
+            'status',
+            'serial_number',
+            'internal_barcode',
+            'serial_group_id',
+            'unit_cost',
+            'selling_price',
+            'currency_code',
+          ])
           .where('tenant_id', '=', trx.tenantId)
           .where('product_id', '=', product.id)
-          .where(
-            'serial_number',
-            '=',
-            lineItem.serialNumber.trim().toUpperCase(),
-          )
+          .where('serial_number', '=', lineItem.serialNumber.trim().toUpperCase())
+          .forUpdate()
           .executeTakeFirst();
-        if (sRow) {
-          serialId = sRow.id;
-        } else {
-          throw new AppError({
-            statusCode: 404,
-            errorCode: 'INV_SERIAL_NOT_FOUND',
-            title: 'Serial Number Not Found',
-            detail: `Serial number "${lineItem.serialNumber}" not found for product "${product.sku}".`,
-          });
+      } else {
+        throw new AppError({
+          statusCode: 422,
+          errorCode: 'POS_SERIAL_SELECTION_REQUIRED',
+          title: 'Serial Selection Required',
+          detail: `Product "${product.sku}" is SERIAL-tracked; scan its serial barcode or select a serial unit.`,
+        });
+      }
+
+      if (!sRow) {
+        throw new AppError({
+          statusCode: 404,
+          errorCode: 'INV_SERIAL_NOT_FOUND',
+          title: 'Serial Number Not Found',
+          detail: `Serial "${lineItem.scannedBarcode ?? lineItem.serialNumber ?? serialId}" not found for product "${product.sku}".`,
+        });
+      }
+
+      if (sRow.product_id !== product.id) {
+        throw new AppError({
+          statusCode: 409,
+          errorCode: 'POS_SERIAL_PRODUCT_MISMATCH',
+          title: 'Serial Product Mismatch',
+          detail: `Serial "${sRow.serial_number}" does not belong to product "${product.sku}".`,
+        });
+      }
+
+      if (sRow.warehouse_id !== register.warehouse_id) {
+        throw new AppError({
+          statusCode: 409,
+          errorCode: 'INV_SERIAL_WRONG_WAREHOUSE',
+          title: 'Serial In Different Warehouse',
+          detail: `Serial "${sRow.serial_number}" belongs to another warehouse and cannot be sold at this register.`,
+        });
+      }
+
+      if (sRow.status !== 'IN_STOCK' && !allowNegative) {
+        throw new AppError({
+          statusCode: 409,
+          errorCode: 'INV_SERIAL_NOT_AVAILABLE',
+          title: 'Serial Unit Unavailable',
+          detail: `Serial "${sRow.serial_number}" has status "${sRow.status}" and is not available for sale.`,
+        });
+      }
+
+      if (usedSerialIds.has(sRow.id)) {
+        throw new AppError({
+          statusCode: 409,
+          errorCode: 'POS_DUPLICATE_SERIAL_IN_CART',
+          title: 'Duplicate Serial In Cart',
+          detail: `Serial "${sRow.serial_number}" cannot appear more than once on the same invoice.`,
+        });
+      }
+      usedSerialIds.add(sRow.id);
+
+      serialId = sRow.id;
+      resolvedSerialGroupId = sRow.serial_group_id ?? null;
+      resolvedSerialNumber = sRow.serial_number;
+      resolvedSerialInternalBarcode = sRow.internal_barcode ?? null;
+      resolvedSerialUnitCost = Money.fromDecimalString(
+        String(sRow.unit_cost),
+        currencyCode,
+      ).toDecimalString();
+
+      if (sRow.selling_price != null) {
+        resolvedSerialSellingPrice = Money.fromDecimalString(
+          String(sRow.selling_price),
+          currencyCode,
+        ).toDecimalString();
+      } else if (sRow.serial_group_id) {
+        const grp = await trx.db
+          .selectFrom('serial_stock_groups')
+          .select(['selling_price'])
+          .where('tenant_id', '=', trx.tenantId)
+          .where('id', '=', sRow.serial_group_id)
+          .executeTakeFirst();
+        if (grp) {
+          resolvedSerialSellingPrice = Money.fromDecimalString(
+            String(grp.selling_price),
+            currencyCode,
+          ).toDecimalString();
         }
       }
     }
@@ -1951,6 +2130,7 @@ export async function checkoutSale(
       readonly unitCostSnapshot: string;
       readonly priceSource:
         | 'BATCH_EXPLICIT'
+        | 'SERIAL_GROUP'
         | 'POS_MANUAL_OVERRIDE'
         | 'PRODUCT_FALLBACK'
         | 'BRANCH_OVERRIDE'
@@ -2144,6 +2324,26 @@ export async function checkoutSale(
           priceSource: resolvedPrice.priceSource,
         });
       } else {
+        if (product.allocation_policy === 'MANUAL') {
+          const existingBatchRow = await trx.db
+            .selectFrom('inventory_batches')
+            .select(['id'])
+            .where('tenant_id', '=', trx.tenantId)
+            .where('warehouse_id', '=', register.warehouse_id)
+            .where('product_id', '=', product.id)
+            .limit(1)
+            .executeTakeFirst();
+
+          if (existingBatchRow) {
+            throw new AppError({
+              statusCode: 422,
+              errorCode: 'POS_BATCH_SELECTION_REQUIRED',
+              title: 'Manual Batch Selection Required',
+              detail: `Product "${product.sku}" uses MANUAL batch allocation; select a specific batch before checkout.`,
+            });
+          }
+        }
+
         // Automatic FEFO/FIFO allocation (supports multi-batch cart splitting)
         const fefo = await selectFefoBatches(trx, {
           warehouseId: register.warehouse_id,
@@ -2334,11 +2534,14 @@ export async function checkoutSale(
         }
       }
     } else {
-      let effectiveUnitPriceStr = branchPriceCfg.effectivePrice;
+      let effectiveUnitPriceStr =
+        resolvedSerialSellingPrice ?? branchPriceCfg.effectivePrice;
       let resolvedPriceSource: CheckoutSlice['priceSource'] =
-        branchPriceCfg.priceSource === 'BRANCH_OVERRIDE'
-          ? 'BRANCH_OVERRIDE'
-          : 'GLOBAL_PRODUCT';
+        resolvedSerialSellingPrice
+          ? 'SERIAL_GROUP'
+          : branchPriceCfg.priceSource === 'BRANCH_OVERRIDE'
+            ? 'BRANCH_OVERRIDE'
+            : 'GLOBAL_PRODUCT';
       if (
         isPriceOverrideAuthorized &&
         lineItem.overrideSellingPrice !== undefined &&
@@ -2372,12 +2575,12 @@ export async function checkoutSale(
         sliceConvFactorToBase: conversionFactorToBaseStr,
         batchId: null,
         batchNumber: null,
-        internalBarcode: null,
+        internalBarcode: resolvedSerialInternalBarcode,
         expiryDate: null,
         effectiveUnitPriceStr,
         minSellingPriceFloor: branchPriceCfg.minSellingPrice,
         maxDiscountPctPolicy: branchPriceCfg.maxDiscountPct,
-        unitCostSnapshot: product.purchase_cost,
+        unitCostSnapshot: resolvedSerialUnitCost ?? product.purchase_cost,
         priceSource: resolvedPriceSource,
       });
     }
@@ -2547,6 +2750,18 @@ export async function checkoutSale(
         priceSource: slice.priceSource,
         serialId:
           product.tracking_mode === 'SERIAL' && sIdx === 0 ? serialId : null,
+        serialGroupId:
+          product.tracking_mode === 'SERIAL' && sIdx === 0
+            ? resolvedSerialGroupId
+            : null,
+        serialNumber:
+          product.tracking_mode === 'SERIAL' && sIdx === 0
+            ? resolvedSerialNumber
+            : null,
+        serialInternalBarcode:
+          product.tracking_mode === 'SERIAL' && sIdx === 0
+            ? resolvedSerialInternalBarcode
+            : null,
       });
     }
   }
@@ -2658,21 +2873,21 @@ export async function checkoutSale(
     await assertFeatureEntitlement(
       trx,
       'posPaymentSplit',
-      'Split POS payments require the Professional plan or higher.',
+      'Split POS payments require the Pro plan or higher.',
     );
   }
   if (input.payments.some((p) => p.paymentMethod === 'CARD')) {
     await assertFeatureEntitlement(
       trx,
       'posPaymentCard',
-      'Card POS payments require the Professional plan or higher.',
+      'Card POS payments require the Pro plan or higher.',
     );
   }
   if (input.payments.some((p) => p.paymentMethod === 'BANK_TRANSFER')) {
     await assertFeatureEntitlement(
       trx,
       'posPaymentBankTransfer',
-      'Bank transfer POS payments require the Professional plan or higher.',
+      'Bank transfer POS payments require the Pro plan or higher.',
     );
   }
 
@@ -2865,6 +3080,14 @@ export async function checkoutSale(
           );
         }
       }
+      if (line.serialId) {
+        await trx.db
+          .updateTable('inventory_serials')
+          .set({ last_sale_invoice_id: saleId })
+          .where('tenant_id', '=', trx.tenantId)
+          .where('id', '=', line.serialId)
+          .execute();
+      }
     }
   }
 
@@ -2936,12 +3159,16 @@ export async function checkoutSale(
     expiryDate?: string | null;
     priceSource?:
       | 'BATCH_EXPLICIT'
+      | 'SERIAL_GROUP'
       | 'POS_MANUAL_OVERRIDE'
       | 'PRODUCT_FALLBACK'
       | 'BRANCH_OVERRIDE'
       | 'GLOBAL_PRODUCT'
       | null;
     serialId?: string | null;
+    serialGroupId?: string | null;
+    serialNumber?: string | null;
+    serialInternalBarcode?: string | null;
     originalEnteredQty?: string | null;
     originalUomCode?: string | null;
     conversionFactorToBase?: string | null;
@@ -2973,6 +3200,9 @@ export async function checkoutSale(
         unit_cost_snapshot: line.unitCostSnapshot,
         batch_id: line.batchId ?? null,
         serial_id: line.serialId ?? null,
+        serial_group_id: line.serialGroupId ?? null,
+        serial_number: line.serialNumber ?? null,
+        serial_internal_barcode: line.serialInternalBarcode ?? null,
         original_entered_qty: line.quantity.toDecimalString(),
         original_uom_code: line.uomCode,
         conversion_factor_to_base: line.conversionFactorToBase,
@@ -3002,6 +3232,9 @@ export async function checkoutSale(
       expiryDate: line.expiryDate ?? null,
       priceSource: line.priceSource ?? null,
       serialId: line.serialId ?? null,
+      serialGroupId: line.serialGroupId ?? null,
+      serialNumber: line.serialNumber ?? null,
+      serialInternalBarcode: line.serialInternalBarcode ?? null,
       originalEnteredQty: line.quantity.toDecimalString(),
       originalUomCode: line.uomCode,
       conversionFactorToBase: line.conversionFactorToBase,
@@ -3582,6 +3815,9 @@ export async function getSaleById(
       unitCostSnapshot: l.unit_cost_snapshot,
       batchId: l.batch_id ?? null,
       serialId: l.serial_id ?? null,
+      serialGroupId: l.serial_group_id ?? null,
+      serialNumber: l.serial_number ?? null,
+      serialInternalBarcode: l.serial_internal_barcode ?? null,
       originalEnteredQty: l.original_entered_qty
         ? Quantity.fromDecimalString(String(l.original_entered_qty)).toDecimalString()
         : null,
@@ -4028,6 +4264,9 @@ export async function getReceiptData(
       unitCostSnapshot: l.unit_cost_snapshot,
       batchId: l.batch_id ?? null,
       serialId: l.serial_id ?? null,
+      serialGroupId: l.serial_group_id ?? null,
+      serialNumber: l.serial_number ?? null,
+      serialInternalBarcode: l.serial_internal_barcode ?? null,
       originalEnteredQty: l.original_entered_qty
         ? Quantity.fromDecimalString(String(l.original_entered_qty)).toDecimalString()
         : null,

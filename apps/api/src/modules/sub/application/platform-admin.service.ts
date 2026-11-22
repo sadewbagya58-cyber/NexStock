@@ -203,6 +203,7 @@ export async function getPlatformAdminSecurityProfile(
       'status',
       'mfa_enforced',
       'totp_enabled',
+      'totp_secret_base32',
       'mfa_verified_until',
       'last_login_at',
       'created_at',
@@ -218,7 +219,7 @@ export async function getPlatformAdminSecurityProfile(
         email: userRow.email,
         platform_role: 'SUPER_ADMIN',
         status: 'ACTIVE',
-        mfa_enforced: false,
+        mfa_enforced: true,
         totp_enabled: false,
       })
       .onConflict((oc) => oc.column('user_id').doNothing())
@@ -228,6 +229,7 @@ export async function getPlatformAdminSecurityProfile(
         'status',
         'mfa_enforced',
         'totp_enabled',
+        'totp_secret_base32',
         'mfa_verified_until',
         'last_login_at',
         'created_at',
@@ -235,41 +237,90 @@ export async function getPlatformAdminSecurityProfile(
       .executeTakeFirst();
   }
 
+  const platformRole = acct?.platform_role ?? 'SUPER_ADMIN';
+  const mfaEnforced = Boolean(acct?.mfa_enforced || platformRole === 'SUPER_ADMIN');
+  const totpEnabled = Boolean(acct?.totp_enabled);
+  const hasPendingSecret = !totpEnabled && Boolean(acct?.totp_secret_base32);
   const mfaStepUpActive = Boolean(
-    acct?.mfa_verified_until &&
+    totpEnabled &&
+      acct?.mfa_verified_until &&
       new Date(acct.mfa_verified_until).getTime() > Date.now(),
   );
+  const mfaState = mfaStepUpActive
+    ? 'VERIFIED'
+    : totpEnabled
+      ? 'ENABLED_STEP_UP_REQUIRED'
+      : hasPendingSecret
+        ? 'PENDING_VERIFICATION'
+        : 'DISABLED';
 
   return {
     userId: userRow.id,
     email: userRow.email,
     fullName: userRow.full_name,
-    platformRole: acct?.platform_role ?? 'SUPER_ADMIN',
+    platformRole,
+    role: platformRole,
     status: acct?.status ?? 'ACTIVE',
-    mfaEnforced: Boolean(acct?.mfa_enforced),
-    totpEnabled: Boolean(acct?.totp_enabled),
+    mfaEnforced,
+    totpEnabled,
+    hasPendingSecret,
     mfaStepUpActive,
+    mfaVerified: mfaStepUpActive,
+    mfaState,
     mfaVerifiedUntil: acct?.mfa_verified_until
       ? new Date(acct.mfa_verified_until).toISOString()
       : null,
   };
 }
 
-export async function setupPlatformAdminTotp(trx: TenantTransactionContext) {
+export async function setupPlatformAdminTotp(
+  trx: TenantTransactionContext,
+  options?: { readonly currentCode?: string | undefined; readonly rotate?: boolean | undefined },
+) {
   const userRow = await trx.db
     .selectFrom('users')
     .select(['id', 'email'])
     .where('id', '=', trx.userId)
     .executeTakeFirstOrThrow();
 
-  const secretBase32 = encodeBase32(randomBytes(20));
-  const now = new Date();
-
   const existing = await trx.db
     .selectFrom('platform_admin_accounts')
-    .select(['user_id'])
+    .select([
+      'user_id',
+      'platform_role',
+      'mfa_enforced',
+      'totp_enabled',
+      'totp_secret_base32',
+      'mfa_verified_until',
+    ])
     .where('user_id', '=', trx.userId)
     .executeTakeFirst();
+
+  const isStepUpActive = Boolean(
+    existing?.totp_enabled &&
+      existing.mfa_verified_until &&
+      new Date(existing.mfa_verified_until).getTime() > Date.now(),
+  );
+
+  // If rotating an already-enabled 2FA secret, require either an active verified step-up session
+  // or a valid current 6-digit TOTP code so unauthenticated/unverified sessions cannot overwrite 2FA.
+  if (existing?.totp_enabled && !isStepUpActive) {
+    const code = options?.currentCode?.trim() ?? '';
+    if (!code || !existing.totp_secret_base32 || !verifyTotpCode(existing.totp_secret_base32, code)) {
+      throw new AppError({
+        statusCode: 403,
+        errorCode: 'SUB_PLATFORM_MFA_REQUIRED',
+        title: 'Current 2FA Verification Required',
+        detail:
+          'Verify your current 6-digit authenticator code (or have an active verified 2FA session) before rotating your TOTP secret.',
+      });
+    }
+  }
+
+  const secretBase32 = encodeBase32(randomBytes(20));
+  const now = new Date();
+  const effectiveRole = existing?.platform_role ?? trx.platformRole ?? 'SUPER_ADMIN';
+  const shouldEnforce = Boolean(existing?.mfa_enforced || effectiveRole === 'SUPER_ADMIN');
 
   if (existing) {
     await trx.db
@@ -277,6 +328,8 @@ export async function setupPlatformAdminTotp(trx: TenantTransactionContext) {
       .set({
         totp_secret_base32: secretBase32,
         totp_enabled: false,
+        mfa_enforced: shouldEnforce,
+        mfa_verified_until: null,
         updated_at: now,
       })
       .where('user_id', '=', trx.userId)
@@ -287,20 +340,21 @@ export async function setupPlatformAdminTotp(trx: TenantTransactionContext) {
       .values({
         user_id: trx.userId,
         email: userRow.email,
-        platform_role: trx.platformRole ?? 'SUPER_ADMIN',
+        platform_role: effectiveRole,
         status: 'ACTIVE',
         totp_secret_base32: secretBase32,
         totp_enabled: false,
-        mfa_enforced: false,
+        mfa_enforced: shouldEnforce,
+        mfa_verified_until: null,
       })
       .execute();
   }
 
   await recordPlatformAudit(trx, {
-    action: 'PLATFORM_MFA_TOTP_INITIATED',
+    action: options?.rotate ? 'PLATFORM_MFA_TOTP_ROTATED' : 'PLATFORM_MFA_TOTP_INITIATED',
     resourceType: 'PLATFORM_ADMIN_ACCOUNT',
     resourceId: trx.userId,
-    metadata: { email: userRow.email },
+    metadata: { email: userRow.email, mfaEnforced: shouldEnforce },
   });
 
   const otpauthUri = `otpauth://totp/NexStock%20Platform:${encodeURIComponent(userRow.email)}?secret=${secretBase32}&issuer=NexStock%20Platform&algorithm=SHA1&digits=6&period=30`;
@@ -309,6 +363,8 @@ export async function setupPlatformAdminTotp(trx: TenantTransactionContext) {
     secretBase32,
     otpauthUri,
     totpEnabled: false,
+    mfaEnforced: shouldEnforce,
+    mfaState: 'PENDING_VERIFICATION' as const,
   };
 }
 
@@ -370,6 +426,9 @@ export async function verifyPlatformAdminTotp(
     verified: true,
     totpEnabled: true,
     mfaEnforced: true,
+    mfaStepUpActive: true,
+    mfaVerified: true,
+    mfaState: 'VERIFIED' as const,
     mfaVerifiedUntil: verifiedUntil.toISOString(),
   };
 }
@@ -398,7 +457,7 @@ export async function listPlatformAdminAccounts(trx: TenantTransactionContext) {
     fullName: r.full_name,
     platformRole: r.platform_role,
     status: r.status,
-    mfaEnforced: r.mfa_enforced,
+    mfaEnforced: r.mfa_enforced || r.platform_role === 'SUPER_ADMIN',
     totpEnabled: r.totp_enabled,
     createdAt: new Date(r.created_at).toISOString(),
     updatedAt: new Date(r.updated_at).toISOString(),
@@ -459,7 +518,7 @@ export async function provisionPlatformAdminAccount(
         email: targetUser.email,
         platform_role: input.platformRole,
         status: 'ACTIVE',
-        mfa_enforced: input.mfaEnforced ?? false,
+        mfa_enforced: input.platformRole === 'SUPER_ADMIN' ? true : (input.mfaEnforced ?? false),
         totp_enabled: false,
         created_by_user_id: trx.userId,
       })
@@ -475,7 +534,7 @@ export async function provisionPlatformAdminAccount(
       email: targetUser.email,
       platformRole: input.platformRole,
       status: 'ACTIVE',
-      mfaEnforced: input.mfaEnforced ?? false,
+      mfaEnforced: input.platformRole === 'SUPER_ADMIN' ? true : (input.mfaEnforced ?? false),
     },
   });
 

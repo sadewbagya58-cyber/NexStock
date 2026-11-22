@@ -7,6 +7,8 @@ import type {
   BranchPriceOverrideResponse,
   CreatePriceSuggestionRequest,
   CurrencyCode,
+  MarketPriceLookupQuery,
+  MarketPriceLookupResponse,
   PriceSuggestionResponse,
   PriceSuggestionSourceEventType,
   PriceSuggestionStatus,
@@ -586,6 +588,10 @@ async function hydrateSuggestionRow(
     rounding_rule: PricingRoundingRuleType;
     reason: string;
     effective_date: string | Date;
+    market_price?: string | null;
+    market_price_source?: string | null;
+    incoming_purchase_cost?: string | null;
+    moving_avg_cost?: string | null;
     status: PriceSuggestionStatus;
     created_by_user_id: string;
     reviewed_by_user_id: string | null;
@@ -647,6 +653,22 @@ async function hydrateSuggestionRow(
     roundingRule: row.rounding_rule,
     reason: row.reason,
     effectiveDate: formatDateOnly(row.effective_date),
+    marketPrice:
+      row.market_price != null
+        ? Money.fromDecimalString(String(row.market_price), currencyCode).toDecimalString()
+        : null,
+    marketPriceSource: row.market_price_source ?? null,
+    incomingPurchaseCost:
+      row.incoming_purchase_cost != null
+        ? Money.fromDecimalString(
+            String(row.incoming_purchase_cost),
+            currencyCode,
+          ).toDecimalString()
+        : null,
+    movingAvgCost:
+      row.moving_avg_cost != null
+        ? Money.fromDecimalString(String(row.moving_avg_cost), currencyCode).toDecimalString()
+        : null,
     status: row.status,
     currentMarginPct: computeActualMarginPct({
       cost: newCostStr,
@@ -705,6 +727,10 @@ async function getHydratedSuggestionById(
       'price_suggestions.rounding_rule',
       'price_suggestions.reason',
       'price_suggestions.effective_date',
+      'price_suggestions.market_price',
+      'price_suggestions.market_price_source',
+      'price_suggestions.incoming_purchase_cost',
+      'price_suggestions.moving_avg_cost',
       'price_suggestions.status',
       'price_suggestions.created_by_user_id',
       'price_suggestions.reviewed_by_user_id',
@@ -746,6 +772,10 @@ async function createSuggestionInternal(
     readonly effectiveDate: string;
     readonly reason: string;
     readonly explicitProposedPrice?: string | undefined;
+    readonly marketPrice?: string | null | undefined;
+    readonly marketPriceSource?: string | null | undefined;
+    readonly incomingPurchaseCost?: string | null | undefined;
+    readonly movingAvgCost?: string | null | undefined;
   },
 ): Promise<PriceSuggestionResponse | null> {
   const currencyCode = await getTenantBaseCurrency(trx);
@@ -870,6 +900,22 @@ async function createSuggestionInternal(
       rounding_rule: params.roundingRule,
       reason: params.reason.trim(),
       effective_date: params.effectiveDate,
+      market_price:
+        params.marketPrice != null
+          ? Money.fromDecimalString(params.marketPrice, currencyCode).toDecimalString()
+          : null,
+      market_price_source: params.marketPriceSource ?? null,
+      incoming_purchase_cost:
+        params.incomingPurchaseCost != null
+          ? Money.fromDecimalString(
+              params.incomingPurchaseCost,
+              currencyCode,
+            ).toDecimalString()
+          : null,
+      moving_avg_cost:
+        params.movingAvgCost != null
+          ? Money.fromDecimalString(params.movingAvgCost, currencyCode).toDecimalString()
+          : null,
       status: 'PENDING',
       created_by_user_id: trx.userId,
       reviewed_by_user_id: null,
@@ -895,6 +941,8 @@ export async function triggerCostChangeSuggestionIfApplicable(
     readonly oldCost: string;
     readonly newCost: string;
     readonly movingAvgCost?: string;
+    readonly marketPrice?: string | null;
+    readonly marketPriceSource?: string | null;
     readonly sourceEventType: 'GRN_POSTED' | 'COST_EDIT' | 'STOCK_MOVEMENT';
     readonly sourceEventKey: string;
     readonly reason: string;
@@ -1008,6 +1056,10 @@ export async function triggerCostChangeSuggestionIfApplicable(
     minSellingPrice: rule.minSellingPrice,
     effectiveDate: formatDateOnly(new Date()),
     reason: params.reason,
+    marketPrice: params.marketPrice ?? null,
+    marketPriceSource: params.marketPriceSource ?? null,
+    incomingPurchaseCost: newCostMoney.toDecimalString(),
+    movingAvgCost: params.movingAvgCost ?? basisCostStr,
   });
 }
 
@@ -1127,6 +1179,10 @@ export async function createPriceSuggestion(
     effectiveDate: input.effectiveDate ?? formatDateOnly(new Date()),
     reason: input.reason,
     explicitProposedPrice: input.proposedPrice,
+    marketPrice: input.marketPrice ?? null,
+    marketPriceSource: input.marketPriceSource ?? null,
+    incomingPurchaseCost: costMoney.toDecimalString(),
+    movingAvgCost: costMoney.toDecimalString(),
   });
 
   if (!created) {
@@ -1441,6 +1497,20 @@ export async function approvePriceSuggestion(
       status: nextStatus,
       final_approved_price: approvedMoney.toDecimalString(),
       effective_date: effectiveDate,
+      ...(input.marketPrice !== undefined
+        ? {
+            market_price:
+              input.marketPrice != null
+                ? Money.fromDecimalString(
+                    input.marketPrice,
+                    currencyCode,
+                  ).toDecimalString()
+                : null,
+          }
+        : {}),
+      ...(input.marketPriceSource !== undefined
+        ? { market_price_source: input.marketPriceSource }
+        : {}),
       reviewed_by_user_id: trx.userId,
       review_notes: input.reviewNotes?.trim() || input.bypassFloorWithReason?.trim() || null,
       reviewed_at: now,
@@ -1670,6 +1740,10 @@ export async function listPriceSuggestions(
       'price_suggestions.rounding_rule',
       'price_suggestions.reason',
       'price_suggestions.effective_date',
+      'price_suggestions.market_price',
+      'price_suggestions.market_price_source',
+      'price_suggestions.incoming_purchase_cost',
+      'price_suggestions.moving_avg_cost',
       'price_suggestions.status',
       'price_suggestions.created_by_user_id',
       'price_suggestions.reviewed_by_user_id',
@@ -2762,5 +2836,173 @@ export async function getSyncCatalogPricingSnapshot(
       permissions: [...authCtx.permissions],
       offlineAuthTtlHours: 24,
     },
+  };
+}
+
+/**
+ * Computes Smart Stock Receiving pricing comparison metrics after GRN receipt without mutating
+ * the active POS selling price; returns live recommendation row and optional PENDING suggestion ID.
+ */
+export async function buildGrnSmartPricingRecommendation(
+  trx: TenantTransactionContext,
+  params: {
+    readonly productId: string;
+    readonly sku: string;
+    readonly productName: string;
+    readonly baseUom: string;
+    readonly existingSellingPrice: string;
+    readonly oldPurchaseCost: string;
+    readonly incomingPurchaseCost: string;
+    readonly updatedMovingAvgCost: string;
+    readonly marketPrice?: string | null;
+    readonly marketPriceSource?: string | null;
+    readonly branchId: string;
+    readonly batchId?: string | null;
+    readonly suggestion?: PriceSuggestionResponse | null;
+  },
+) {
+  const currencyCode = await getTenantBaseCurrency(trx);
+  const rule = await resolveEffectiveRuleForProduct(trx, params.productId);
+  const effectiveBasisCostStr =
+    rule.costBasis === 'LAST_PURCHASE_COST'
+      ? Money.fromDecimalString(params.incomingPurchaseCost, currencyCode).toDecimalString()
+      : Money.fromDecimalString(params.updatedMovingAvgCost, currencyCode).toDecimalString();
+
+  let recommendedPriceStr = params.suggestion?.suggestedSellingPrice ?? '';
+  if (!recommendedPriceStr) {
+    const calc = calculateSuggestedSellingPrice({
+      cost: effectiveBasisCostStr,
+      currencyCode,
+      pricingMethod: rule.pricingMethod,
+      targetPercentage: rule.targetPercentage,
+      roundingRule: rule.roundingRule,
+      minSellingPrice: rule.minSellingPrice,
+    });
+    recommendedPriceStr = calc.suggestedPrice;
+  }
+
+  const expectedMarginPct = computeActualMarginPct({
+    cost: effectiveBasisCostStr,
+    sellingPrice: recommendedPriceStr,
+    currencyCode,
+  });
+  const expectedProfitPerUnit = Money.fromDecimalString(
+    recommendedPriceStr,
+    currencyCode,
+  )
+    .subtract(Money.fromDecimalString(effectiveBasisCostStr, currencyCode))
+    .toDecimalString();
+
+  return {
+    productId: params.productId,
+    sku: params.sku,
+    productName: params.productName,
+    baseUom: params.baseUom,
+    suggestionId: params.suggestion?.id ?? null,
+    existingSellingPrice: Money.fromDecimalString(
+      params.existingSellingPrice,
+      currencyCode,
+    ).toDecimalString(),
+    incomingPurchaseCost: Money.fromDecimalString(
+      params.incomingPurchaseCost,
+      currencyCode,
+    ).toDecimalString(),
+    updatedMovingAvgCost: Money.fromDecimalString(
+      params.updatedMovingAvgCost,
+      currencyCode,
+    ).toDecimalString(),
+    marketPrice:
+      params.marketPrice != null
+        ? Money.fromDecimalString(params.marketPrice, currencyCode).toDecimalString()
+        : params.suggestion?.marketPrice ?? null,
+    marketPriceSource:
+      params.marketPriceSource ?? params.suggestion?.marketPriceSource ?? null,
+    recommendedSellingPrice: recommendedPriceStr,
+    expectedMarginPct,
+    expectedProfitPerUnit,
+    targetPercentage: formatPct2(rule.targetPercentage),
+    pricingMethod: rule.pricingMethod,
+    scope: (params.batchId ? 'BATCH' : 'GLOBAL') as PricingScope,
+    batchId: params.batchId ?? null,
+  };
+}
+
+/**
+ * Queries optional online market reference metadata with a strict timeout and
+ * gracefully falls back to offline/manual entry when unavailable.
+ */
+export async function lookupMarketPriceReference(
+  trx: TenantTransactionContext,
+  query: MarketPriceLookupQuery,
+): Promise<MarketPriceLookupResponse> {
+  await assertAuthorized(trx, { permission: 'cat:pricing:read' });
+  const currencyCode = (await getTenantBaseCurrency(trx)) as CurrencyCode;
+
+  let barcode = query.barcode?.trim() || '';
+  let searchName = query.query?.trim() || '';
+
+  if (query.productId) {
+    const prod = await trx.db
+      .selectFrom('products')
+      .select(['name', 'primary_barcode', 'selling_price'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('id', '=', query.productId)
+      .executeTakeFirst();
+    if (prod) {
+      if (!searchName) searchName = prod.name;
+      if (!barcode && prod.primary_barcode) barcode = prod.primary_barcode;
+    }
+  }
+
+  // Try OpenFoodFacts lookup when barcode resembles a standard EAN/UPC (8-14 digits)
+  if (/^\d{8,14}$/.test(barcode)) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 3000);
+    try {
+      const res = await fetch(
+        `https://world.openfoodfacts.org/api/v0/product/${encodeURIComponent(barcode)}.json`,
+        { signal: controller.signal },
+      );
+      clearTimeout(timer);
+      if (res.ok) {
+        const json = (await res.json()) as {
+          status?: number;
+          product?: { product_name?: string; brands?: string };
+        };
+        if (json.status === 1 && json.product?.product_name) {
+          return {
+            available: true,
+            suggestedMarketPrice: null,
+            currencyCode,
+            source: 'OPENFOODFACTS_CATALOG',
+            externalReferenceName: [json.product.brands, json.product.product_name]
+              .filter(Boolean)
+              .join(' - '),
+            message:
+              'External product matched; no retail price feed in catalog—enter observed market price manually.',
+          };
+        }
+      }
+    } catch {
+      clearTimeout(timer);
+      return {
+        available: false,
+        suggestedMarketPrice: null,
+        currencyCode,
+        source: 'MANUAL_OFFLINE',
+        externalReferenceName: searchName || null,
+        message: 'Online market lookup timed out or offline. Enter market price manually.',
+      };
+    }
+  }
+
+  return {
+    available: false,
+    suggestedMarketPrice: null,
+    currencyCode,
+    source: 'MANUAL_ENTRY',
+    externalReferenceName: searchName || null,
+    message:
+      'Enter current competitor or market retail price manually to compare against recommended margin.',
   };
 }

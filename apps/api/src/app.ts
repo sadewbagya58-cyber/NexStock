@@ -65,12 +65,15 @@ import {
   ListPosShiftsQuerySchema,
   ListProductsQuerySchema,
   ListSalesQuerySchema,
+  ListSerialStockGroupsQuerySchema,
   ListSerialsQuerySchema,
   PosReturnResponseSchema,
   PurchaseOrderResponseSchema,
   SupplierReturnResponseSchema,
   UnitOfMeasureResponseSchema,
   ListStockMovementsQuerySchema,
+  MarketPriceLookupQuerySchema,
+  MarketPriceLookupResponseSchema,
   ListStocktakeSessionsQuerySchema,
   ListSuppliersQuerySchema,
   LoginRequestSchema,
@@ -97,6 +100,7 @@ import {
   ProblemDetailsSchema,
   ProductBarcodeResponseSchema,
   ProductResponseSchema,
+  PrintSerialGroupBarcodesRequestSchema,
   QuarantineBatchRequestSchema,
   ReceiptResponseSchema,
   RecordPayrollPaymentRequestSchema,
@@ -113,6 +117,7 @@ import {
   SalesSummaryQuerySchema,
   SalesSummaryResponseSchema,
   SerialResponseSchema,
+  SerialStockGroupResponseSchema,
   SignUpRequestSchema,
   SignUpResponseSchema,
   StaffInvitationResponseSchema,
@@ -327,6 +332,7 @@ import {
   listProductBarcodes,
   listProductPriceHistory,
   listProducts,
+  lookupMarketPriceReference,
   rejectOrDeferPriceSuggestion,
   updateCategory,
   listUnitsOfMeasure,
@@ -397,8 +403,12 @@ import {
   getStockMovementById,
   getStocktakeSessionById,
   listBatches,
+  generateBarcodeForSerial,
+  generateSerialBarcodesForGroup,
+  getSerialStockGroupById,
   listFifoCostLayers,
   listInventoryBalances,
+  listSerialStockGroups,
   listSerials,
   listStockMovements,
   listStocktakeSessions,
@@ -406,6 +416,7 @@ import {
   postStocktakeAdjustments,
   quarantineBatch,
   reconcileInventoryBalances,
+  recordSerialGroupPrintLog,
   recordStocktakeCounts,
   registerSerialStock,
   releaseBatch,
@@ -1312,9 +1323,11 @@ export async function buildApp(
         jwtOptions,
       );
       const traceId = String(request.id);
+      const idempotencyKey = (request.headers as Record<string, string | undefined>)['idempotency-key'];
       const result = await onboardBusinessAtomic(options.db, {
         userId: principal.userId,
         userEmail: principal.email,
+        idempotencyKey,
         request: request.body,
         traceId,
       });
@@ -1760,7 +1773,7 @@ export async function buildApp(
             await assertFeatureEntitlement(
               trx,
               featureKey,
-              'Offline device sync requires a Professional or Enterprise subscription plan.',
+              'Offline device sync requires a Pro or Enterprise subscription plan.',
             );
             return enrollOfflineDevice(trx, request.body);
           })(),
@@ -3802,7 +3815,7 @@ export async function buildApp(
       schema: {
         headers: Type.Object(
           {
-            authorization: Type.String({ minLength: 1 }),
+            authorization: Type.Optional(Type.String()),
           },
           { additionalProperties: true },
         ),
@@ -3851,7 +3864,7 @@ export async function buildApp(
       schema: {
         headers: Type.Object(
           {
-            authorization: Type.String({ minLength: 1 }),
+            authorization: Type.Optional(Type.String()),
           },
           { additionalProperties: true },
         ),
@@ -3888,7 +3901,7 @@ export async function buildApp(
       schema: {
         headers: Type.Object(
           {
-            authorization: Type.String({ minLength: 1 }),
+            authorization: Type.Optional(Type.String()),
           },
           { additionalProperties: true },
         ),
@@ -3931,7 +3944,7 @@ export async function buildApp(
       schema: {
         headers: Type.Object(
           {
-            authorization: Type.String({ minLength: 1 }),
+            authorization: Type.Optional(Type.String()),
           },
           { additionalProperties: true },
         ),
@@ -3965,7 +3978,7 @@ export async function buildApp(
       schema: {
         headers: Type.Object(
           {
-            authorization: Type.String({ minLength: 1 }),
+            authorization: Type.Optional(Type.String()),
           },
           { additionalProperties: true },
         ),
@@ -4128,7 +4141,7 @@ export async function buildApp(
     '/v1/platform/security/me',
     {
       schema: {
-        headers: Type.Object({ authorization: Type.String({ minLength: 1 }) }, { additionalProperties: true }),
+        headers: Type.Object({ authorization: Type.Optional(Type.String()) }, { additionalProperties: true }),
       },
     },
     async (request) => {
@@ -4145,7 +4158,7 @@ export async function buildApp(
     '/v1/platform/security/mfa/setup',
     {
       schema: {
-        headers: Type.Object({ authorization: Type.String({ minLength: 1 }) }, { additionalProperties: true }),
+        headers: Type.Object({ authorization: Type.Optional(Type.String()) }, { additionalProperties: true }),
       },
     },
     async (request) => {
@@ -4159,10 +4172,37 @@ export async function buildApp(
   );
 
   app.post(
+    '/v1/platform/security/mfa/rotate',
+    {
+      schema: {
+        headers: Type.Object({ authorization: Type.Optional(Type.String()) }, { additionalProperties: true }),
+        body: Type.Optional(
+          Type.Object(
+            {
+              currentCode: Type.Optional(Type.String({ pattern: '^[0-9]{6}$' })),
+              reason: Type.Optional(Type.String({ maxLength: 500 })),
+            },
+            { additionalProperties: false },
+          ),
+        ),
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(request.headers.authorization, jwksProvider, jwtOptions);
+      const bodyObj = (request.body as { currentCode?: string; reason?: string } | undefined) ?? {};
+      return withPlatformAdminTransaction(
+        options.db,
+        { userId: principal.userId, traceId: String(request.id), jwtAal: principal.aal, jwtAmr: principal.amr },
+        (trx) => setupPlatformAdminTotp(trx, { currentCode: bodyObj.currentCode, rotate: true }),
+      );
+    },
+  );
+
+  app.post(
     '/v1/platform/security/mfa/verify',
     {
       schema: {
-        headers: Type.Object({ authorization: Type.String({ minLength: 1 }) }, { additionalProperties: true }),
+        headers: Type.Object({ authorization: Type.Optional(Type.String()) }, { additionalProperties: true }),
         body: PlatformMfaVerifyRequestSchema,
       },
     },
@@ -4180,7 +4220,7 @@ export async function buildApp(
     '/v1/platform/security/admins',
     {
       schema: {
-        headers: Type.Object({ authorization: Type.String({ minLength: 1 }) }, { additionalProperties: true }),
+        headers: Type.Object({ authorization: Type.Optional(Type.String()) }, { additionalProperties: true }),
       },
     },
     async (request) => {
@@ -4197,7 +4237,7 @@ export async function buildApp(
     '/v1/platform/security/admins',
     {
       schema: {
-        headers: Type.Object({ authorization: Type.String({ minLength: 1 }) }, { additionalProperties: true }),
+        headers: Type.Object({ authorization: Type.Optional(Type.String()) }, { additionalProperties: true }),
         body: PlatformProvisionAdminRequestSchema,
       },
     },
@@ -4216,7 +4256,7 @@ export async function buildApp(
     '/v1/platform/security/admins/:userId',
     {
       schema: {
-        headers: Type.Object({ authorization: Type.String({ minLength: 1 }) }, { additionalProperties: true }),
+        headers: Type.Object({ authorization: Type.Optional(Type.String()) }, { additionalProperties: true }),
         params: Type.Object({ userId: UuidSchema }, { additionalProperties: false }),
         body: PlatformUpdateAdminRequestSchema,
       },
@@ -4235,7 +4275,7 @@ export async function buildApp(
     '/v1/platform/analytics/overview',
     {
       schema: {
-        headers: Type.Object({ authorization: Type.String({ minLength: 1 }) }, { additionalProperties: true }),
+        headers: Type.Object({ authorization: Type.Optional(Type.String()) }, { additionalProperties: true }),
         querystring: PlatformAnalyticsQuerySchema,
       },
     },
@@ -4253,7 +4293,7 @@ export async function buildApp(
     '/v1/platform/analytics/export',
     {
       schema: {
-        headers: Type.Object({ authorization: Type.String({ minLength: 1 }) }, { additionalProperties: true }),
+        headers: Type.Object({ authorization: Type.Optional(Type.String()) }, { additionalProperties: true }),
         querystring: PlatformAnalyticsQuerySchema,
       },
     },
@@ -4276,7 +4316,7 @@ export async function buildApp(
     '/v1/platform/businesses',
     {
       schema: {
-        headers: Type.Object({ authorization: Type.String({ minLength: 1 }) }, { additionalProperties: true }),
+        headers: Type.Object({ authorization: Type.Optional(Type.String()) }, { additionalProperties: true }),
         querystring: Type.Object(
           {
             search: Type.Optional(Type.String({ maxLength: 160 })),
@@ -4303,7 +4343,7 @@ export async function buildApp(
     '/v1/platform/businesses/:tenantId',
     {
       schema: {
-        headers: Type.Object({ authorization: Type.String({ minLength: 1 }) }, { additionalProperties: true }),
+        headers: Type.Object({ authorization: Type.Optional(Type.String()) }, { additionalProperties: true }),
         params: Type.Object({ tenantId: UuidSchema }, { additionalProperties: false }),
       },
     },
@@ -4321,7 +4361,7 @@ export async function buildApp(
     '/v1/platform/businesses/:tenantId/suspend',
     {
       schema: {
-        headers: Type.Object({ authorization: Type.String({ minLength: 1 }) }, { additionalProperties: true }),
+        headers: Type.Object({ authorization: Type.Optional(Type.String()) }, { additionalProperties: true }),
         params: Type.Object({ tenantId: UuidSchema }, { additionalProperties: false }),
         body: PlatformSuspendBusinessRequestSchema,
       },
@@ -4340,7 +4380,7 @@ export async function buildApp(
     '/v1/platform/businesses/:tenantId/restore',
     {
       schema: {
-        headers: Type.Object({ authorization: Type.String({ minLength: 1 }) }, { additionalProperties: true }),
+        headers: Type.Object({ authorization: Type.Optional(Type.String()) }, { additionalProperties: true }),
         params: Type.Object({ tenantId: UuidSchema }, { additionalProperties: false }),
         body: PlatformRestoreBusinessRequestSchema,
       },
@@ -4359,7 +4399,7 @@ export async function buildApp(
     '/v1/platform/businesses/:tenantId/subscription/override',
     {
       schema: {
-        headers: Type.Object({ authorization: Type.String({ minLength: 1 }) }, { additionalProperties: true }),
+        headers: Type.Object({ authorization: Type.Optional(Type.String()) }, { additionalProperties: true }),
         params: Type.Object({ tenantId: UuidSchema }, { additionalProperties: false }),
         body: PlatformSubscriptionOverrideRequestSchema,
       },
@@ -4378,7 +4418,7 @@ export async function buildApp(
     '/v1/platform/subscriptions/plans/history',
     {
       schema: {
-        headers: Type.Object({ authorization: Type.String({ minLength: 1 }) }, { additionalProperties: true }),
+        headers: Type.Object({ authorization: Type.Optional(Type.String()) }, { additionalProperties: true }),
         querystring: Type.Object({ planCode: Type.Optional(SubscriptionPlanCodeSchema) }, { additionalProperties: false }),
       },
     },
@@ -4396,7 +4436,7 @@ export async function buildApp(
     '/v1/platform/audit-logs',
     {
       schema: {
-        headers: Type.Object({ authorization: Type.String({ minLength: 1 }) }, { additionalProperties: true }),
+        headers: Type.Object({ authorization: Type.Optional(Type.String()) }, { additionalProperties: true }),
         querystring: Type.Object(
           {
             tenantId: Type.Optional(UuidSchema),
@@ -4422,7 +4462,7 @@ export async function buildApp(
     '/v1/platform/monitoring/alerts',
     {
       schema: {
-        headers: Type.Object({ authorization: Type.String({ minLength: 1 }) }, { additionalProperties: true }),
+        headers: Type.Object({ authorization: Type.Optional(Type.String()) }, { additionalProperties: true }),
         querystring: Type.Object(
           {
             status: Type.Optional(Type.Union([Type.Literal('OPEN'), Type.Literal('ACKNOWLEDGED'), Type.Literal('RESOLVED')])),
@@ -4445,7 +4485,7 @@ export async function buildApp(
     '/v1/platform/monitoring/alerts/:alertId/resolve',
     {
       schema: {
-        headers: Type.Object({ authorization: Type.String({ minLength: 1 }) }, { additionalProperties: true }),
+        headers: Type.Object({ authorization: Type.Optional(Type.String()) }, { additionalProperties: true }),
         params: Type.Object({ alertId: UuidSchema }, { additionalProperties: false }),
       },
     },
@@ -4463,7 +4503,7 @@ export async function buildApp(
     '/v1/platform/backups/status',
     {
       schema: {
-        headers: Type.Object({ authorization: Type.String({ minLength: 1 }) }, { additionalProperties: true }),
+        headers: Type.Object({ authorization: Type.Optional(Type.String()) }, { additionalProperties: true }),
       },
     },
     async (request) => {
@@ -4480,7 +4520,7 @@ export async function buildApp(
     '/v1/platform/backups/verify',
     {
       schema: {
-        headers: Type.Object({ authorization: Type.String({ minLength: 1 }) }, { additionalProperties: true }),
+        headers: Type.Object({ authorization: Type.Optional(Type.String()) }, { additionalProperties: true }),
       },
     },
     async (request, reply) => {
@@ -5749,6 +5789,35 @@ export async function buildApp(
     },
   );
 
+  app.get(
+    '/v1/pricing/market-price-lookup',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        querystring: MarketPriceLookupQuerySchema,
+        response: {
+          200: MarketPriceLookupResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => lookupMarketPriceReference(trx, request.query),
+      );
+    },
+  );
+
   app.post(
     '/v1/pricing/suggestions/:suggestionId/reject-or-defer',
     {
@@ -6743,7 +6812,7 @@ export async function buildApp(
                 await assertFeatureEntitlement(
                   innerTrx,
                   'batchTracking',
-                  'Batch & Expiry tracking requires a Professional or Enterprise subscription plan.',
+                  'Batch & Expiry tracking requires an active Starter, Pro, or Enterprise subscription plan.',
                 );
                 const body = await createBatch(
                   innerTrx,
@@ -6768,7 +6837,7 @@ export async function buildApp(
           await assertFeatureEntitlement(
             trx,
             'batchTracking',
-            'Batch & Expiry tracking requires a Professional or Enterprise subscription plan.',
+            'Batch & Expiry tracking requires an active Starter, Pro, or Enterprise subscription plan.',
           );
           return createBatch(trx, request.body);
         },
@@ -7115,7 +7184,7 @@ export async function buildApp(
           await assertFeatureEntitlement(
             trx,
             'stockTransfers',
-            'Inter-branch stock transfers require a Professional or Enterprise subscription plan.',
+            'Inter-branch stock transfers require a Pro or Enterprise subscription plan.',
           );
           return createStockTransfer(trx, request.body);
         },
@@ -7294,7 +7363,7 @@ export async function buildApp(
                 await assertFeatureEntitlement(
                   innerTrx,
                   'serialTracking',
-                  'Serial number tracking requires a Professional or Enterprise subscription plan.',
+                  'Serial number tracking requires a Pro or Enterprise subscription plan.',
                 );
                 const body = await registerSerialStock(
                   innerTrx,
@@ -7319,7 +7388,7 @@ export async function buildApp(
           await assertFeatureEntitlement(
             trx,
             'serialTracking',
-            'Serial number tracking requires a Professional or Enterprise subscription plan.',
+            'Serial number tracking requires a Pro or Enterprise subscription plan.',
           );
           return registerSerialStock(trx, generateUuidV7(), request.body);
         },
@@ -7422,6 +7491,177 @@ export async function buildApp(
         { tenantId, userId: principal.userId, traceId },
         (trx) =>
           transitionSerialStatus(trx, request.params.serialId, request.body),
+      );
+    },
+  );
+
+  app.post(
+    '/v1/inventory/serials/:serialId/barcode/generate',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ serialId: UuidSchema }),
+        response: {
+          200: SerialResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        async (trx) => {
+          await assertFeatureEntitlement(
+            trx,
+            'serialTracking',
+            'Serial barcode generation requires a Pro or Enterprise subscription plan.',
+          );
+          return generateBarcodeForSerial(trx, request.params.serialId);
+        },
+      );
+    },
+  );
+
+  app.get(
+    '/v1/inventory/serial-groups',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        querystring: ListSerialStockGroupsQuerySchema,
+        response: {
+          200: createCursorPageResponseSchema(SerialStockGroupResponseSchema),
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => listSerialStockGroups(trx, request.query),
+      );
+    },
+  );
+
+  app.get(
+    '/v1/inventory/serial-groups/:groupId',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ groupId: UuidSchema }),
+        response: {
+          200: SerialStockGroupResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => getSerialStockGroupById(trx, request.params.groupId),
+      );
+    },
+  );
+
+  app.post(
+    '/v1/inventory/serial-groups/:groupId/barcodes/generate',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ groupId: UuidSchema }),
+        response: {
+          200: SerialStockGroupResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        async (trx) => {
+          await assertFeatureEntitlement(
+            trx,
+            'serialTracking',
+            'Serial barcode generation requires a Pro or Enterprise subscription plan.',
+          );
+          return generateSerialBarcodesForGroup(trx, request.params.groupId);
+        },
+      );
+    },
+  );
+
+  app.post(
+    '/v1/inventory/serial-groups/:groupId/print-log',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ groupId: UuidSchema }),
+        body: PrintSerialGroupBarcodesRequestSchema,
+        response: {
+          200: SerialStockGroupResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          recordSerialGroupPrintLog(trx, request.params.groupId, request.body),
       );
     },
   );

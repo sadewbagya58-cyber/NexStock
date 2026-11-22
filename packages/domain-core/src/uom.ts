@@ -269,13 +269,49 @@ export function resolveUomRationalFactor(params: {
       };
     }
 
-    // Chained lookup: e.g. fromCode in canonical catalog -> productBase -> toCode custom (or reverse)
-    if (fromCode !== productBase && toCode === productBase && fromCustom !== undefined) {
+    // Chained lookup: custom unit -> productBase -> canonical target (e.g. BAG_25KG -> KG -> G)
+    if (fromCustom !== undefined && toCustom === undefined && toCode !== productBase) {
+      const baseToTarget = resolveUomRationalFactor({
+        fromUom: productBase,
+        toUom: toCode,
+        ...(params.densityGPerMl !== undefined ? { densityGPerMl: params.densityGPerMl } : {}),
+      });
+      const numerator = fromCustom * baseToTarget.numerator;
+      const denominator = QUANTITY_SCALE_FACTOR * baseToTarget.denominator;
+      const scaledFactor = divideAndRoundBigInt(
+        numerator * QUANTITY_SCALE_FACTOR,
+        denominator,
+        'HALF_EVEN',
+      );
       return {
-        numerator: fromCustom,
-        denominator: QUANTITY_SCALE_FACTOR,
+        numerator,
+        denominator,
         factorDecimal6: formatScaledBigIntToDecimalString(
-          fromCustom,
+          scaledFactor,
+          QUANTITY_SCALE,
+        ),
+      };
+    }
+
+    // Chained lookup: canonical source -> productBase -> custom unit (e.g. G -> KG -> BAG_25KG)
+    if (toCustom !== undefined && fromCustom === undefined && fromCode !== productBase) {
+      const sourceToBase = resolveUomRationalFactor({
+        fromUom: fromCode,
+        toUom: productBase,
+        ...(params.densityGPerMl !== undefined ? { densityGPerMl: params.densityGPerMl } : {}),
+      });
+      const numerator = sourceToBase.numerator * QUANTITY_SCALE_FACTOR;
+      const denominator = sourceToBase.denominator * toCustom;
+      const scaledFactor = divideAndRoundBigInt(
+        numerator * QUANTITY_SCALE_FACTOR,
+        denominator,
+        'HALF_EVEN',
+      );
+      return {
+        numerator,
+        denominator,
+        factorDecimal6: formatScaledBigIntToDecimalString(
+          scaledFactor,
           QUANTITY_SCALE,
         ),
       };

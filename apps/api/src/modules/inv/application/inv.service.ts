@@ -991,6 +991,18 @@ export async function postStockMovement(
           occurred_at: now,
         })
         .execute();
+
+      if (serialRow.serial_group_id && serialRow.status === 'IN_STOCK') {
+        await trx.db
+          .updateTable('serial_stock_groups')
+          .set({
+            remaining_quantity: sql`GREATEST(remaining_quantity - 1, 0)`,
+            updated_at: now,
+          })
+          .where('tenant_id', '=', trx.tenantId)
+          .where('id', '=', serialRow.serial_group_id)
+          .execute();
+      }
     } else {
       await trx.db
         .updateTable('inventory_serials')
@@ -1021,6 +1033,18 @@ export async function postStockMovement(
           occurred_at: now,
         })
         .execute();
+
+      if (serialRow.serial_group_id && serialRow.status !== 'IN_STOCK') {
+        await trx.db
+          .updateTable('serial_stock_groups')
+          .set({
+            remaining_quantity: sql`LEAST(remaining_quantity + 1, initial_quantity)`,
+            updated_at: now,
+          })
+          .where('tenant_id', '=', trx.tenantId)
+          .where('id', '=', serialRow.serial_group_id)
+          .execute();
+      }
     }
   }
 
@@ -1515,7 +1539,7 @@ export async function reverseStockMovement(
   if (original.serial_id) {
     const sRow = await trx.db
       .selectFrom('inventory_serials')
-      .select(['id', 'status'])
+      .select(['id', 'status', 'serial_group_id'])
       .where('tenant_id', '=', trx.tenantId)
       .where('id', '=', original.serial_id)
       .forUpdate()
@@ -1550,6 +1574,30 @@ export async function reverseStockMovement(
           occurred_at: now,
         })
         .execute();
+
+      if (sRow.serial_group_id) {
+        if (sRow.status !== 'IN_STOCK' && restoredStatus === 'IN_STOCK') {
+          await trx.db
+            .updateTable('serial_stock_groups')
+            .set({
+              remaining_quantity: sql`LEAST(remaining_quantity + 1, initial_quantity)`,
+              updated_at: now,
+            })
+            .where('tenant_id', '=', trx.tenantId)
+            .where('id', '=', sRow.serial_group_id)
+            .execute();
+        } else if (sRow.status === 'IN_STOCK' && restoredStatus !== 'IN_STOCK') {
+          await trx.db
+            .updateTable('serial_stock_groups')
+            .set({
+              remaining_quantity: sql`GREATEST(remaining_quantity - 1, 0)`,
+              updated_at: now,
+            })
+            .where('tenant_id', '=', trx.tenantId)
+            .where('id', '=', sRow.serial_group_id)
+            .execute();
+        }
+      }
     }
   }
 

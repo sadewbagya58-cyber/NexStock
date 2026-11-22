@@ -22,6 +22,9 @@ export interface FormatReceiptInput {
     unitCostSnapshot?: string;
     batchId?: string | null;
     serialId?: string | null;
+    serialGroupId?: string | null;
+    serialNumber?: string | null;
+    serialInternalBarcode?: string | null;
     originalEnteredQty?: string | null;
     originalUomCode?: string | null;
     conversionFactorToBase?: string | null;
@@ -84,6 +87,11 @@ export function formatReceiptData(input: FormatReceiptInput): ReceiptResponse {
       ...(l.unitCostSnapshot !== undefined ? { unitCostSnapshot: l.unitCostSnapshot } : {}),
       ...(l.batchId !== undefined ? { batchId: l.batchId } : {}),
       ...(l.serialId !== undefined ? { serialId: l.serialId } : {}),
+      ...(l.serialGroupId !== undefined ? { serialGroupId: l.serialGroupId } : {}),
+      ...(l.serialNumber !== undefined ? { serialNumber: l.serialNumber } : {}),
+      ...(l.serialInternalBarcode !== undefined
+        ? { serialInternalBarcode: l.serialInternalBarcode }
+        : {}),
       ...(l.originalEnteredQty !== undefined ? { originalEnteredQty: l.originalEnteredQty } : {}),
       ...(l.originalUomCode !== undefined ? { originalUomCode: l.originalUomCode } : {}),
       ...(l.conversionFactorToBase !== undefined ? { conversionFactorToBase: l.conversionFactorToBase } : {}),

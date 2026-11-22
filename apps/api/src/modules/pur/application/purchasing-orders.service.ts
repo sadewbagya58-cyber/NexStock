@@ -17,6 +17,7 @@ import {
   divideAndRoundBigInt,
 } from '@nexstock/domain-core';
 import {
+  buildGrnSmartPricingRecommendation,
   resolveProductForInventory,
   triggerCostChangeSuggestionIfApplicable,
 } from '../../cat/index.js';
@@ -613,6 +614,7 @@ export async function postGoodsReceipt(
 
   let grandTotalCost = Money.zero(currencyCode);
   const lineResponses: GoodsReceiptLineResponse[] = [];
+  const pricingRecommendations: NonNullable<GoodsReceiptResponse["pricingRecommendations"]> = [];
 
   for (let i = 0; i < input.lines.length; i += 1) {
     const line = input.lines[i]!;
@@ -718,6 +720,7 @@ export async function postGoodsReceipt(
         });
       }
       if (line.batchNumber?.trim()) {
+        const effectiveLotConflictPolicy = line.lotConflictPolicy ?? input.lotConflictPolicy;
         const batchRes = await ensureBatchForGoodsReceipt(trx, {
           productId: product.id,
           warehouseId: input.warehouseId,
@@ -737,7 +740,7 @@ export async function postGoodsReceipt(
           currencyCode,
           receivedDate: receivedAt.toISOString().slice(0, 10),
           goodsReceiptId: grnId,
-          ...(line.lotConflictPolicy ? { lotConflictPolicy: line.lotConflictPolicy } : {}),
+          ...(effectiveLotConflictPolicy ? { lotConflictPolicy: effectiveLotConflictPolicy } : {}),
         });
         batchId = batchRes.batchId;
         resolvedBatchNumber = batchRes.resolvedBatchNumber;
@@ -772,22 +775,40 @@ export async function postGoodsReceipt(
       isBatchTracked &&
       (product.valuationMethod === 'FIFO' || line.sellingPrice != null);
 
+    const [balMacRow, prodPriceRow] = await Promise.all([
+      trx.db
+        .selectFrom('inventory_balances')
+        .select(['moving_avg_cost'])
+        .where('tenant_id', '=', trx.tenantId)
+        .where('warehouse_id', '=', input.warehouseId)
+        .where('product_id', '=', product.id)
+        .executeTakeFirst(),
+      trx.db
+        .selectFrom('products')
+        .select(['selling_price', 'sync_version'])
+        .where('tenant_id', '=', trx.tenantId)
+        .where('id', '=', product.id)
+        .executeTakeFirstOrThrow(),
+    ]);
+
+    const updatedMovingAvgCostStr = balMacRow?.moving_avg_cost
+      ? Money.fromDecimalString(
+          String(balMacRow.moving_avg_cost),
+          currencyCode,
+        ).toDecimalString()
+      : unitCostPerBase.toDecimalString();
+    const existingSellingPriceStr = Money.fromDecimalString(
+      String(prodPriceRow.selling_price),
+      currencyCode,
+    ).toDecimalString();
+
     if (!isolateBatchCostOnBatch) {
       // Update product last purchase cost (in base_uom) without modifying active selling_price
       await trx.db
         .updateTable('products')
         .set({
           purchase_cost: unitCostPerBase.toDecimalString(),
-          sync_version: Number(
-            (
-              await trx.db
-                .selectFrom('products')
-                .select(['sync_version'])
-                .where('tenant_id', '=', trx.tenantId)
-                .where('id', '=', product.id)
-                .executeTakeFirstOrThrow()
-            ).sync_version,
-          ) + 1,
+          sync_version: Number(prodPriceRow.sync_version) + 1,
           updated_at: now,
         })
         .where('tenant_id', '=', trx.tenantId)
@@ -795,11 +816,15 @@ export async function postGoodsReceipt(
         .execute();
     }
 
+    let createdSuggestion = null;
     if (!isBatchTracked) {
-      await triggerCostChangeSuggestionIfApplicable(trx, {
+      createdSuggestion = await triggerCostChangeSuggestionIfApplicable(trx, {
         productId: product.id,
         oldCost: product.purchaseCost,
         newCost: unitCostPerBase.toDecimalString(),
+        movingAvgCost: updatedMovingAvgCostStr,
+        marketPrice: line.marketPrice ?? null,
+        marketPriceSource: line.marketPriceSource ?? null,
         sourceEventType: 'GRN_POSTED',
         sourceEventKey: `GRN:${grnId}:${product.id}`,
         reason: `Goods Receipt ${grnNumber} (${unitCostPerBase.toDecimalString()}/${product.baseUom})`,
@@ -807,10 +832,13 @@ export async function postGoodsReceipt(
       });
     } else if (batchId) {
       // D-04: Batch cost stays isolated on the batch; generate BATCH-scoped suggestion only
-      await triggerCostChangeSuggestionIfApplicable(trx, {
+      createdSuggestion = await triggerCostChangeSuggestionIfApplicable(trx, {
         productId: product.id,
         oldCost: product.purchaseCost,
         newCost: unitCostPerBase.toDecimalString(),
+        movingAvgCost: updatedMovingAvgCostStr,
+        marketPrice: line.marketPrice ?? null,
+        marketPriceSource: line.marketPriceSource ?? null,
         sourceEventType: 'GRN_POSTED',
         sourceEventKey: `GRN:${grnId}:${product.id}:BATCH:${batchId}`,
         reason: `Batch ${resolvedBatchNumber ?? ''} GRN ${grnNumber} (${unitCostPerBase.toDecimalString()}/${product.baseUom})`,
@@ -819,6 +847,23 @@ export async function postGoodsReceipt(
         batchCurrentSellingPrice: line.sellingPrice ?? null,
       });
     }
+
+    const rec = await buildGrnSmartPricingRecommendation(trx, {
+      productId: product.id,
+      sku: product.sku,
+      productName: product.name,
+      baseUom: product.baseUom,
+      existingSellingPrice: line.sellingPrice ?? existingSellingPriceStr,
+      oldPurchaseCost: product.purchaseCost,
+      incomingPurchaseCost: unitCostPerBase.toDecimalString(),
+      updatedMovingAvgCost: updatedMovingAvgCostStr,
+      marketPrice: line.marketPrice ?? null,
+      marketPriceSource: line.marketPriceSource ?? null,
+      branchId: input.branchId,
+      batchId,
+      suggestion: createdSuggestion,
+    });
+    pricingRecommendations.push(rec);
 
     if (line.purchaseOrderLineId && linkedPo) {
       const poLine = await trx.db
@@ -976,6 +1021,7 @@ export async function postGoodsReceipt(
     receivedAt: receivedAt.toISOString(),
     createdAt: now.toISOString(),
     lines: lineResponses,
+    pricingRecommendations,
   };
 }
 

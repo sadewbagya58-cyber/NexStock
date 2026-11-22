@@ -351,7 +351,7 @@ export async function handleSignUp(
     email: normalizedEmail,
     fullName,
     token,
-    refreshToken: `dev_refresh_${generateUuidV7()}`,
+    refreshToken: `dev_refresh_${userId}_${generateUuidV7()}`,
     requiresEmailVerification: false,
     message: 'Registration successful (development mode).',
   };
@@ -527,7 +527,7 @@ export async function handleLogin(
 
   return {
     token,
-    refreshToken: `dev_refresh_${generateUuidV7()}`,
+    refreshToken: `dev_refresh_${user.id}_${generateUuidV7()}`,
     expiresIn: 86400 * 7,
     user: userProfile.user,
     memberships: userProfile.memberships,
@@ -593,10 +593,12 @@ export async function handleRefreshToken(
     }
   }
 
-  // Local dev mode: issue new dev token
+  // Local dev mode: preserve original userId encoded in dev refresh token when present
+  const devMatch = /^dev_refresh_([0-9a-fA-F-]{36})_/.exec(input.refreshToken.trim());
+  const preservedUserId = devMatch?.[1] ?? generateUuidV7();
   return {
-    token: signDevJwt({ userId: generateUuidV7() }),
-    refreshToken: input.refreshToken,
+    token: signDevJwt({ userId: preservedUserId }),
+    refreshToken: `dev_refresh_${preservedUserId}_${generateUuidV7()}`,
     expiresIn: 86400 * 7,
   };
 }

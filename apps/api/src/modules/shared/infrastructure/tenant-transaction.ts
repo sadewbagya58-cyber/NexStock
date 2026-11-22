@@ -229,6 +229,7 @@ export async function withPlatformAdminTransaction<T>(
     const mfaRequired =
       Boolean(ctx.requireMfaStepUp) &&
       (Boolean(adminAcct?.mfa_enforced) ||
+        effectiveRole === 'SUPER_ADMIN' ||
         process.env['NEXSTOCK_REQUIRE_PLATFORM_MFA'] === 'true');
 
     if (mfaRequired) {

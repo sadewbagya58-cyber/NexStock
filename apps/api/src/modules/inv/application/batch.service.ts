@@ -2046,6 +2046,143 @@ export async function resolveHybridBarcode(
     return buildExactBatchResponse('INTERNAL_BATCH', internalBatchMatch);
   }
 
+  async function buildSerialMatchResponse(
+    matchedBy: 'SERIAL_BARCODE' | 'SERIAL_NUMBER',
+    serialMatch: {
+      id: string;
+      product_id: string;
+      warehouse_id: string;
+      branch_id: string;
+      serial_number: string;
+      internal_barcode: string | null;
+      serial_group_id: string | null;
+      status: string;
+      unit_cost: string;
+      selling_price: string | null;
+      currency_code: string;
+    },
+  ): Promise<ResolveBarcodeResponse> {
+    const [serialProduct, groupRow] = await Promise.all([
+      trx.db
+        .selectFrom('products')
+        .selectAll()
+        .where('tenant_id', '=', trx.tenantId)
+        .where('id', '=', serialMatch.product_id)
+        .executeTakeFirstOrThrow(),
+      serialMatch.serial_group_id
+        ? trx.db
+            .selectFrom('serial_stock_groups')
+            .select(['id', 'group_code', 'selling_price', 'currency_code'])
+            .where('tenant_id', '=', trx.tenantId)
+            .where('id', '=', serialMatch.serial_group_id)
+            .executeTakeFirst()
+        : Promise.resolve(undefined),
+    ]);
+
+    const { branchSellingPrice } = await resolveProductEffectivePriceContext(
+      serialProduct.id,
+      String(serialProduct.selling_price),
+    );
+
+    const groupSellingPrice =
+      serialMatch.selling_price != null
+        ? Money.fromDecimalString(
+            String(serialMatch.selling_price),
+            serialMatch.currency_code || baseCurrency,
+          ).toDecimalString()
+        : groupRow?.selling_price != null
+          ? Money.fromDecimalString(
+              String(groupRow.selling_price),
+              groupRow.currency_code || baseCurrency,
+            ).toDecimalString()
+          : null;
+
+    const wrongWarehouse =
+      (input.warehouseId && serialMatch.warehouse_id !== input.warehouseId) ||
+      (input.branchId && serialMatch.branch_id !== input.branchId);
+    const serialBlocked =
+      serialMatch.status !== 'IN_STOCK'
+        ? `SERIAL_${serialMatch.status}`
+        : wrongWarehouse
+          ? 'SERIAL_WRONG_WAREHOUSE'
+          : null;
+    const serialAvailStr =
+      serialMatch.status === 'IN_STOCK' && !wrongWarehouse
+        ? '1.000000'
+        : '0.000000';
+
+    const effectiveUnitPrice =
+      groupSellingPrice ??
+      branchSellingPrice ??
+      Money.fromDecimalString(
+        String(serialProduct.selling_price),
+        baseCurrency,
+      ).toDecimalString();
+    const priceSource: ResolveBarcodeResponse['priceSource'] = groupSellingPrice
+      ? 'SERIAL_GROUP'
+      : branchSellingPrice
+        ? 'BRANCH_OVERRIDE'
+        : 'GLOBAL_PRODUCT';
+
+    return {
+      matchedBy,
+      rawBarcode: input.rawBarcode,
+      normalizedBarcode:
+        matchedBy === 'SERIAL_BARCODE' && serialMatch.internal_barcode
+          ? serialMatch.internal_barcode
+          : serialMatch.serial_number,
+      isExactBatchLocked: false,
+      isExactSerialLocked: true,
+      gs1Parsed: {
+        isGs1: gs1.isGs1,
+        gtin: gs1.gtin14 ?? null,
+        batchNumber: gs1.batchNumber ?? null,
+        expiryDate: gs1.expiryDate ?? null,
+        serialNumber: serialMatch.serial_number,
+      },
+      product: mapProductSummary(serialProduct, serialAvailStr),
+      exactBatch: null,
+      exactSerial: {
+        id: serialMatch.id,
+        serialNumber: serialMatch.serial_number,
+        internalBarcode: serialMatch.internal_barcode,
+        serialGroupId: serialMatch.serial_group_id,
+        groupCode: groupRow?.group_code ?? null,
+        status: serialMatch.status as 'IN_STOCK' | 'RESERVED' | 'SOLD' | 'RETURNED' | 'QUARANTINED' | 'DAMAGED' | 'WRITTEN_OFF',
+        unitCost: Money.fromDecimalString(
+          String(serialMatch.unit_cost),
+          serialMatch.currency_code || baseCurrency,
+        ).toDecimalString(),
+        sellingPrice: groupSellingPrice ?? effectiveUnitPrice,
+        warehouseId: serialMatch.warehouse_id,
+        branchId: serialMatch.branch_id,
+      },
+      availableQuantityTotal: serialAvailStr,
+      effectiveUnitPrice,
+      priceSource,
+      requiresPricePrompt: false,
+      blockedReason: serialBlocked,
+      fefoPreview: [],
+    };
+  }
+
+  // Priority 1.5: Exact generated serial barcode (`NB-S...`)
+  const serialBarcodeMatch = await trx.db
+    .selectFrom('inventory_serials')
+    .selectAll()
+    .where('tenant_id', '=', trx.tenantId)
+    .where((eb) =>
+      eb.or([
+        eb('internal_barcode', '=', normalizedBarcode),
+        eb('internal_barcode', '=', upperNormalized),
+      ]),
+    )
+    .executeTakeFirst();
+
+  if (serialBarcodeMatch) {
+    return buildSerialMatchResponse('SERIAL_BARCODE', serialBarcodeMatch);
+  }
+
   // Helper to lookup product by barcode candidates
   async function findProductByBarcodeCandidates(candidates: readonly string[]) {
     if (candidates.length === 0) return undefined;
@@ -2264,51 +2401,16 @@ export async function resolveHybridBarcode(
     .selectFrom('inventory_serials')
     .selectAll()
     .where('tenant_id', '=', trx.tenantId)
-    .where('serial_number', '=', normalizedBarcode)
+    .where((eb) =>
+      eb.or([
+        eb('serial_number', '=', normalizedBarcode),
+        eb('serial_number', '=', upperNormalized),
+      ]),
+    )
     .executeTakeFirst();
 
   if (serialMatch) {
-    const serialProduct = await trx.db
-      .selectFrom('products')
-      .selectAll()
-      .where('tenant_id', '=', trx.tenantId)
-      .where('id', '=', serialMatch.product_id)
-      .executeTakeFirstOrThrow();
-
-    const { branchSellingPrice } = await resolveProductEffectivePriceContext(
-      serialProduct.id,
-      String(serialProduct.selling_price),
-    );
-    const serialBlocked =
-      serialMatch.status !== 'IN_STOCK' ? `SERIAL_${serialMatch.status}` : null;
-    const serialAvailStr =
-      serialMatch.status === 'IN_STOCK' ? '1.000000' : '0.000000';
-    return {
-      matchedBy: 'SERIAL_NUMBER',
-      rawBarcode: input.rawBarcode,
-      normalizedBarcode: serialMatch.serial_number,
-      isExactBatchLocked: false,
-      gs1Parsed: {
-        isGs1: gs1.isGs1,
-        gtin: gs1.gtin14 ?? null,
-        batchNumber: gs1.batchNumber ?? null,
-        expiryDate: gs1.expiryDate ?? null,
-        serialNumber: serialMatch.serial_number,
-      },
-      product: mapProductSummary(serialProduct, serialAvailStr),
-      exactBatch: null,
-      availableQuantityTotal: serialAvailStr,
-      effectiveUnitPrice:
-        branchSellingPrice ??
-        Money.fromDecimalString(
-          String(serialProduct.selling_price),
-          baseCurrency,
-        ).toDecimalString(),
-      priceSource: branchSellingPrice ? 'BRANCH_OVERRIDE' : 'GLOBAL_PRODUCT',
-      requiresPricePrompt: false,
-      blockedReason: serialBlocked,
-      fefoPreview: [],
-    };
+    return buildSerialMatchResponse('SERIAL_NUMBER', serialMatch);
   }
 
   const skuMatch = await trx.db

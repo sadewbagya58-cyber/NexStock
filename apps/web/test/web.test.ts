@@ -443,8 +443,8 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       expect(html).toContain("rawEndpoint.startsWith('/') ? rawEndpoint : `/${rawEndpoint}`");
 
       // Confirms renderProductsView catches errors gracefully
-      expect(html).toContain("apiFetch('/v1/products?limit=100').catch(");
-      expect(html).toContain("apiFetch('/v1/categories?limit=100').catch(");
+      expect(html).toContain("apiFetch('/v1/products?limit=200&sortBy=createdAt&sortDir=desc').catch(");
+      expect(html).toContain("apiFetch('/v1/categories?limit=200').catch(");
 
       // Confirms empty state handling
       expect(html).toContain('No products found. Click "+ Add Product" to create your first SKU.');
@@ -565,9 +565,9 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       expect(html).toContain('setTimeout(() => controller.abort(), 2000)');
       expect(html).toContain('signal: controller.signal');
 
-      // Toast deduplication via Set
+      // Toast deduplication via Set + 1500ms normalized key window
       expect(html).toContain('const activeToastMessages = new Set();');
-      expect(html).toContain('if (activeToastMessages.has(msgStr)) return;');
+      expect(html).toContain('if (activeToastMessages.has(msgStr) || (norm && lastToastNormalizedKey === `${type}:${norm}` && nowMs - lastToastTimestampMs < 1500)) {');
       expect(html).toContain('activeToastMessages.add(msgStr);');
       expect(html).toContain('activeToastMessages.delete(msgStr);');
     });
@@ -1439,9 +1439,9 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       expect(html).toContain('submitBtn.disabled = true');
       expect(html).toContain("submitBtn.textContent = 'Saving...'");
 
-      // 5. Success toast notifies user of serial intake in ledger
+      // 5. Success toast notifies user of serial intake with unique NB-S barcodes
       expect(html).toContain('showToast(');
-      expect(html).toContain('recorded stock intake in ledger');
+      expect(html).toContain('serials with unique NB-S barcodes');
 
       // 6. Refreshes Serials, Balances, and Movements views
       expect(html).toContain('renderSerialsView()');
@@ -1614,9 +1614,9 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       expect(html).toContain('Cannot increase quantity: Only');
       expect(html).toContain('Quantity exceeds available stock');
 
-      // Drawer pre-checkout stock guard
-      expect(html).toContain('Cannot proceed to checkout:');
-      expect(html).toContain('Checkout blocked:');
+      // Drawer pre-checkout stock guard (normalized to base UoM)
+      expect(html).toContain('if (!validateCartStockBeforeCheckout()) {');
+      expect(html).toContain('Insufficient stock for "${grp.label}": requested ${formatQty(grp.qty)} ${grp.baseUom}, available ${formatQty(grp.avail)} ${grp.baseUom}.');
     });
 
     it('BUG-021: verifies in-memory fast-path barcode indexing in executeBarcodeScan', () => {
@@ -3343,7 +3343,7 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       // Prorated additional branch add-on & feature disclaimer
       expect(html).toContain('Additional Branch Capacity (Hybrid Add-On)');
       expect(html).toContain('/v1/subscriptions/branch-addons/checkout');
-      expect(html).toContain('does not unlock Professional features');
+      expect(html).toContain('does not unlock Pro features');
 
       // Manual Bank Transfer Details & Private Proof Flow
       expect(html).toContain('W.Swarnalatha');
@@ -3406,6 +3406,50 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       expect(html).toContain('.pa-split-grid');
       expect(html).toContain('.pa-mobile-cards');
       expect(html).toContain('@media (max-width: 480px)');
+    });
+  });
+
+  // ============================================================================
+  // MASTER QA ENHANCEMENTS: MOBILE UX, UOM CONVERSIONS, SERIAL GROUPS & PRICING
+  // ============================================================================
+  describe('37. Master QA Register — Bug Fixes, Mobile UI/UX, Serial Stock Groups & Smart Pricing', () => {
+    it('supports mobile POS A-Z dropdown, mobile PO cards, stacked Subscription matrix cards, multi-package UoM, MANUAL batch & global UoM stock checks', () => {
+      const html = readFileSync(resolve(WEB_ROOT, 'public/index.html'), 'utf8');
+
+      // 2.1, 2.2, 2.3 Auth / MFA / Onboarding idempotency
+      expect(html).toContain('state.tokenExpiresAt = getTokenExpiry(sessionToken)');
+      expect(html).toContain('/v1/platform/security/mfa/rotate');
+      expect(html).toContain('state.onboardIdempotencyKey');
+
+      // 2.4, 2.6 Multi-package UoM Conversions Builder & defaults
+      expect(html).toContain('function buildProductUomConversionRowHtml(');
+      expect(html).toContain('function addProductUomConversionRow(');
+      expect(html).toContain('isDefaultPurchasing');
+      expect(html).toContain('isDefaultSelling');
+
+      // 2.5 Upload timeout & client optimization + retry
+      expect(html).toContain('compressProductImageIfNeeded(');
+      expect(html).toContain('retryPendingProductImageUpload(');
+      expect(html).toContain('timeoutMs: 60000');
+
+      // 2.8, 2.9 MANUAL batch modal & normalized base-UOM cart validation
+      expect(html).toContain('openPosManualBatchSelectModal(');
+      expect(html).toContain('validateCartStockBeforeCheckout()');
+
+      // 3.1, 3.2, 3.3 Mobile-only UX (<= 768px) preserving desktop
+      expect(html).toContain('id="posMobileCategorySelect"');
+      expect(html).toContain('.po-add-another-btn');
+      expect(html).toContain('.sub-matrix-mobile-cards');
+
+      // 4.1-4.5 Serial Stock Groups, Label Printing & Smart Receiving Pricing
+      expect(html).toContain('/v1/inventory/serial-groups');
+      expect(html).toContain('openSerialGroupLabelPrintModal(');
+      expect(html).toContain('openGrnSmartPricingModal(');
+      expect(html).toContain('/v1/pricing/market-price-lookup');
+
+      // 4.6, 5.1, 5.4 Pro naming & Starter Batch/Expiry
+      expect(html).toContain("name: 'Pro'");
+      expect(html).toContain('hasPlanFeature(');
     });
   });
 });

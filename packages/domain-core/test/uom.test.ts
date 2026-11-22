@@ -106,4 +106,49 @@ describe('@nexstock/domain-core — UOM Foundation & Variable Quantity Arithmeti
     expect(formatQuantityForDisplay('2.000000')).toBe('2');
     expect(formatQuantityForDisplay('0.125000')).toBe('0.125');
   });
+
+  it('converts COUNT (BOX/PCS) and LENGTH (M/CM/MM) and supports multiple package conversions via custom <-> base <-> canonical chain', () => {
+    // LENGTH: 50 CM -> 0.5 M
+    const lenRes = convertQuantityBetweenUoms({
+      quantity: '50',
+      fromUom: 'CM',
+      toUom: 'M',
+      productBaseUom: 'M',
+    });
+    expect(lenRes.convertedQuantity.toDecimalString()).toBe('0.500000');
+
+    // COUNT: 2 BOX (1 BOX = 12 PCS) -> 24 PCS
+    const countConvs = [{ uomCode: 'BOX', conversionFactorToBase: '12.000000' }];
+    const countRes = convertQuantityBetweenUoms({
+      quantity: '2',
+      fromUom: 'BOX',
+      toUom: 'PCS',
+      productBaseUom: 'PCS',
+      customConversions: countConvs,
+    });
+    expect(countRes.convertedQuantity.toDecimalString()).toBe('24.000000');
+
+    // Multi-package conversion on WEIGHT: 1 BAG_25KG = 25 KG, 1 BAG_50KG = 50 KG -> convert BAG_25KG to G!
+    const multiBagConvs = [
+      { uomCode: 'BAG_25KG', conversionFactorToBase: '25.000000' },
+      { uomCode: 'BAG_50KG', conversionFactorToBase: '50.000000' },
+    ];
+    const bag25ToKg = convertQuantityBetweenUoms({
+      quantity: '1',
+      fromUom: 'BAG_25KG',
+      toUom: 'KG',
+      productBaseUom: 'KG',
+      customConversions: multiBagConvs,
+    });
+    expect(bag25ToKg.convertedQuantity.toDecimalString()).toBe('25.000000');
+
+    const bag50ToG = convertQuantityBetweenUoms({
+      quantity: '1',
+      fromUom: 'BAG_50KG',
+      toUom: 'G',
+      productBaseUom: 'KG',
+      customConversions: multiBagConvs,
+    });
+    expect(bag50ToG.convertedQuantity.toDecimalString()).toBe('50000.000000');
+  });
 });

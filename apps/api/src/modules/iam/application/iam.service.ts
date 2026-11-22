@@ -68,66 +68,105 @@ export async function seedDefaultSystemRoles(
   trx: TenantTransactionContext,
 ): Promise<Readonly<Record<SystemRoleCode, string>>> {
   const roleIdMap = {} as Record<SystemRoleCode, string>;
-
-  for (const [code, def] of Object.entries(SYSTEM_ROLE_DEFINITIONS) as [
+  const entries = Object.entries(SYSTEM_ROLE_DEFINITIONS) as [
     SystemRoleCode,
     (typeof SYSTEM_ROLE_DEFINITIONS)[SystemRoleCode],
-  ][]) {
-    const existing = await trx.db
-      .selectFrom('roles')
-      .select(['id'])
-      .where('tenant_id', '=', trx.tenantId)
-      .where('code', '=', code)
-      .executeTakeFirst();
+  ][];
 
-    const roleId = existing?.id ?? generateUuidV7();
+  // 1. Fetch all existing roles for this tenant in a single query
+  const existingRoles = await trx.db
+    .selectFrom('roles')
+    .select(['id', 'code', 'name', 'description'])
+    .where('tenant_id', '=', trx.tenantId)
+    .execute();
+
+  const existingByCode = new Map(existingRoles.map((r) => [r.code, r]));
+  const rolesToInsert: Array<{
+    id: string;
+    tenant_id: string;
+    code: string;
+    name: string;
+    description: string;
+    is_system_role: boolean;
+  }> = [];
+
+  for (const [code, def] of entries) {
+    const existing = existingByCode.get(code);
     const desc = SYSTEM_ROLE_DESCRIPTIONS[code];
-    if (!existing) {
-      await trx.db
-        .insertInto('roles')
-        .values({
-          id: roleId,
-          tenant_id: trx.tenantId,
-          code,
-          name: def.name,
-          description: desc,
-          is_system_role: true,
-        })
-        .execute();
-    } else {
-      await trx.db
-        .updateTable('roles')
-        .set({
-          name: def.name,
-          description: desc,
-        })
-        .where('tenant_id', '=', trx.tenantId)
-        .where('id', '=', roleId)
-        .execute();
-    }
-
-    roleIdMap[code] = roleId;
-
-    for (const permKey of def.permissions) {
-      const existingPerm = await trx.db
-        .selectFrom('role_permissions')
-        .select(['id'])
-        .where('tenant_id', '=', trx.tenantId)
-        .where('role_id', '=', roleId)
-        .where('permission_key', '=', permKey)
-        .executeTakeFirst();
-
-      if (!existingPerm) {
+    if (existing) {
+      roleIdMap[code] = existing.id;
+      if (existing.name !== def.name || existing.description !== desc) {
         await trx.db
-          .insertInto('role_permissions')
-          .values({
-            id: generateUuidV7(),
-            tenant_id: trx.tenantId,
-            role_id: roleId,
-            permission_key: permKey,
-          })
+          .updateTable('roles')
+          .set({ name: def.name, description: desc })
+          .where('tenant_id', '=', trx.tenantId)
+          .where('id', '=', existing.id)
           .execute();
       }
+    } else {
+      const roleId = generateUuidV7();
+      roleIdMap[code] = roleId;
+      rolesToInsert.push({
+        id: roleId,
+        tenant_id: trx.tenantId,
+        code,
+        name: def.name,
+        description: desc,
+        is_system_role: true,
+      });
+    }
+  }
+
+  if (rolesToInsert.length > 0) {
+    await trx.db
+      .insertInto('roles')
+      .values(rolesToInsert)
+      .onConflict((oc) => oc.columns(['tenant_id', 'code']).doNothing())
+      .execute();
+  }
+
+  // 2. Fetch all existing role_permissions for this tenant in a single query
+  const existingPerms = await trx.db
+    .selectFrom('role_permissions')
+    .select(['role_id', 'permission_key'])
+    .where('tenant_id', '=', trx.tenantId)
+    .execute();
+
+  const existingPermSet = new Set(
+    existingPerms.map((p) => `${p.role_id}:${p.permission_key}`),
+  );
+
+  const permsToInsert: Array<{
+    id: string;
+    tenant_id: string;
+    role_id: string;
+    permission_key: string;
+  }> = [];
+
+  for (const [code, def] of entries) {
+    const roleId = roleIdMap[code];
+    for (const permKey of def.permissions) {
+      const key = `${roleId}:${permKey}`;
+      if (!existingPermSet.has(key)) {
+        existingPermSet.add(key);
+        permsToInsert.push({
+          id: generateUuidV7(),
+          tenant_id: trx.tenantId,
+          role_id: roleId,
+          permission_key: permKey,
+        });
+      }
+    }
+  }
+
+  if (permsToInsert.length > 0) {
+    const chunkSize = 250;
+    for (let i = 0; i < permsToInsert.length; i += chunkSize) {
+      await trx.db
+        .insertInto('role_permissions')
+        .values(permsToInsert.slice(i, i + chunkSize))
+        .onConflict((oc) => oc.columns(['tenant_id', 'role_id', 'permission_key']).doNothing())
+        .execute();
     }
   }
 

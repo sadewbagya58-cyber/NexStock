@@ -23,6 +23,34 @@ const TINY_PNG_BYTES = Buffer.from([
   0x60, 0x82,
 ]);
 
+function generateTotpCode(base32Secret: string): string {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  const clean = base32Secret.toUpperCase().replace(/[^A-Z2-7]/g, '');
+  let bits = 0;
+  let value = 0;
+  const out: number[] = [];
+  for (const ch of clean) {
+    const idx = alphabet.indexOf(ch);
+    if (idx < 0) continue;
+    value = (value << 5) | idx;
+    bits += 5;
+    if (bits >= 8) {
+      out.push((value >>> (bits - 8)) & 0xff);
+      bits -= 8;
+    }
+  }
+  const msg = Buffer.alloc(8);
+  msg.writeBigUInt64BE(BigInt(Math.floor(Date.now() / 1000 / 30)), 0);
+  const hmac = createHmac('sha1', Buffer.from(out)).update(msg).digest();
+  const offset = (hmac[hmac.length - 1] ?? 0) & 0x0f;
+  const bin =
+    (((hmac[offset] ?? 0) & 0x7f) << 24) |
+    (((hmac[offset + 1] ?? 0) & 0xff) << 16) |
+    (((hmac[offset + 2] ?? 0) & 0xff) << 8) |
+    ((hmac[offset + 3] ?? 0) & 0xff);
+  return String(bin % 1_000_000).padStart(6, '0');
+}
+
 describe('Phase 10.1-10.4 — SaaS Subscription Plans, Entitlements, Lifecycle & Hybrid Billing', () => {
   let harness: TestPostgresHarness;
   let devJwksProvider: StaticJwksProvider;
@@ -155,6 +183,23 @@ describe('Phase 10.1-10.4 — SaaS Subscription Plans, Entitlements, Lifecycle &
       .set({ is_platform_admin: true })
       .where('id', '=', platformAdminId)
       .execute();
+
+    // Complete enforced Super Admin 2FA enrollment & verification
+    const mfaSetupRes = await app.inject({
+      method: 'POST',
+      url: '/v1/platform/security/mfa/setup',
+      headers: { authorization: `Bearer ${platformAdminToken}` },
+      payload: {},
+    });
+    expect(mfaSetupRes.statusCode).toBe(200);
+    const totpCode = generateTotpCode(mfaSetupRes.json().secretBase32 as string);
+    const mfaVerifyRes = await app.inject({
+      method: 'POST',
+      url: '/v1/platform/security/mfa/verify',
+      headers: { authorization: `Bearer ${platformAdminToken}` },
+      payload: { code: totpCode },
+    });
+    expect(mfaVerifyRes.statusCode).toBe(200);
   });
 
   afterAll(async () => {
@@ -650,9 +695,12 @@ describe('Phase 10.1-10.4 — SaaS Subscription Plans, Entitlements, Lifecycle &
         'x-tenant-id': tenantAId,
       },
       payload: {
-        filename: 'blocked.png',
-        mimeType: 'image/png',
-        dataBase64: TINY_PNG_BYTES.toString('base64'),
+        filename: 'blocked.jpg',
+        mimeType: 'image/jpeg',
+        dataBase64: Buffer.from([
+          0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01,
+          0x01, 0x00, 0x00, 0x01,
+        ]).toString('base64'),
       },
     });
     expect(imgOverQuota.statusCode).toBe(403);

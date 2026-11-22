@@ -105,6 +105,7 @@
       letter-spacing: 0.05em;
     }
     .badge-blue { background: var(--accent-light); color: var(--accent-primary); }
+    .badge-purple { background: rgba(139, 92, 246, 0.16); color: #7c3aed; }
     .badge-green { background: #DCFCE7; color: var(--status-success); }
     .badge-yellow { background: #FEF3C7; color: var(--status-warning); }
     .badge-red { background: #FEE2E2; color: var(--status-danger); }
@@ -1738,7 +1739,8 @@
       flex-wrap: wrap;
       gap: 12px;
     }
-    .sub-mobile-cards {
+    .sub-mobile-cards,
+    .sub-matrix-mobile-cards {
       display: none;
     }
     @media (max-width: 1024px) {
@@ -1746,14 +1748,66 @@
         grid-template-columns: repeat(2, minmax(0, 1fr));
       }
     }
+    .po-header-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    .po-line-grid {
+      display: grid;
+      grid-template-columns: 2fr 1fr 90px 1fr auto;
+      gap: 8px;
+      align-items: end;
+    }
+    .po-add-another-btn {
+      width: 100%;
+      margin-top: 8px;
+      min-height: 44px;
+      justify-content: center;
+      font-weight: 600;
+    }
+    .pos-mobile-category-select-wrap {
+      display: none;
+    }
     @media (max-width: 768px) {
+      #posCategoryPillsContainer {
+        display: none !important;
+      }
+      .pos-mobile-category-select-wrap {
+        display: block;
+        margin-bottom: 10px;
+      }
+      .pos-mobile-category-select-wrap .form-select {
+        width: 100%;
+        min-height: 44px;
+        font-size: 14px;
+        font-weight: 600;
+        border-radius: 10px;
+      }
+      .sub-usage-grid {
+        grid-template-columns: 1fr;
+        gap: 10px;
+      }
+      .sub-usage-card,
+      .sub-plan-card,
+      .sub-bank-box,
+      .sub-notif-item {
+        min-width: 0;
+        overflow-wrap: anywhere;
+      }
+      .sub-bank-grid {
+        grid-template-columns: 1fr !important;
+        gap: 10px;
+      }
       .sub-plans-grid {
         grid-template-columns: 1fr;
       }
-      .sub-desktop-table {
+      .sub-desktop-table,
+      .sub-matrix-desktop {
         display: none;
       }
-      .sub-mobile-cards {
+      .sub-mobile-cards,
+      .sub-matrix-mobile-cards {
         display: flex;
         flex-direction: column;
         gap: 10px;
@@ -1761,6 +1815,30 @@
       .sub-addon-bar {
         flex-direction: column;
         align-items: stretch;
+      }
+      .sub-billing-header {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+      .po-header-grid {
+        grid-template-columns: 1fr;
+      }
+      .po-line-grid {
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+      .po-line-prod-col {
+        grid-column: 1 / -1;
+      }
+      .po-line-remove-btn {
+        grid-column: 1 / -1;
+        width: 100%;
+        min-height: 40px;
+      }
+      .po-line-grid .form-input,
+      .po-line-grid .form-select {
+        min-height: 42px;
+        font-size: 14px;
       }
     }
 
@@ -3759,14 +3837,22 @@
       return activeRefreshPromise;
     }
 
-    // Helper: Toast Notifications with deduplication and throttling
+    // Helper: Toast Notifications with normalized deduplication and throttling
     const activeToastMessages = new Set();
+    let lastToastNormalizedKey = '';
+    let lastToastTimestampMs = 0;
     function showToast(message, type = 'info') {
       if (!message) return;
       const msgStr = String(message).trim();
       if (!msgStr) return;
-      if (activeToastMessages.has(msgStr)) return;
+      const norm = msgStr.toLowerCase().replace(/^error[^:]*:\s*/i, '').trim();
+      const nowMs = Date.now();
+      if (activeToastMessages.has(msgStr) || (norm && lastToastNormalizedKey === `${type}:${norm}` && nowMs - lastToastTimestampMs < 1500)) {
+        return;
+      }
 
+      lastToastNormalizedKey = `${type}:${norm}`;
+      lastToastTimestampMs = nowMs;
       activeToastMessages.add(msgStr);
       const container = document.getElementById('toastContainer');
       if (!container) return;
@@ -3925,6 +4011,29 @@
       }
 
       const executeRequest = (async () => {
+        if (!isAuthBypass && !state.token && typeof localStorage !== 'undefined') {
+          const savedToken = localStorage.getItem('nexstock_session_token');
+          if (savedToken) {
+            state.token = savedToken;
+            state.tokenExpiresAt = getTokenExpiry(savedToken);
+          }
+        }
+
+        if (!isAuthBypass && !state.token) {
+          const refreshed = await refreshAccessToken();
+          if (refreshed !== true || !state.token) {
+            if (typeof handleSignOut === 'function' && state.currentView !== 'signin') {
+              handleSignOut();
+            }
+            const authErr = new Error('Authentication required. Please sign in again.');
+            authErr.status = 401;
+            if (!options.silent) {
+              showToast(authErr.message, 'warning');
+            }
+            throw authErr;
+          }
+        }
+
         // Proactive token refresh if token exists, is expiring within 30 seconds, and refresh token is available
         if (!isAuthBypass && state.token && !options._retried) {
           const exp = state.tokenExpiresAt || getTokenExpiry(state.token);
@@ -4011,11 +4120,15 @@
             const timeoutErr = new Error('Request timed out. The server is taking longer than expected to respond.');
             if (!options.silent) {
               showToast(timeoutErr.message, 'error');
+              timeoutErr._toastShown = true;
             }
             throw timeoutErr;
           }
-          if (!options.silent) {
+          if (!options.silent && !err?._toastShown) {
             showToast(formatUserFacingErrorMessage(err), 'error');
+            if (err && typeof err === 'object') {
+              err._toastShown = true;
+            }
           }
           throw err;
         } finally {
@@ -4898,6 +5011,15 @@
     }
 
     // Fetch Subscription Features & Entitlements (V1 Entitlement Gating & V2 Premium Readiness)
+    function hasPlanFeature(featureKey) {
+      if (!featureKey) return true;
+      if (state.subscription && state.subscription.allowAdminOverride) return true;
+      if (state.features && Object.prototype.hasOwnProperty.call(state.features, featureKey)) {
+        return Boolean(state.features[featureKey]);
+      }
+      return true;
+    }
+
     async function fetchTenantSubscriptionEntitlement(tenantId) {
       if (!state.token || !tenantId) return null;
       try {
@@ -5448,6 +5570,8 @@
           {
             view: 'serials',
             label: 'Serial Registry',
+            featureKey: 'serialTracking',
+            requiredTier: 'PRO',
             icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="9" x2="20" y2="9"></line><line x1="4" y1="15" x2="20" y2="15"></line><line x1="10" y1="3" x2="8" y2="21"></line><line x1="16" y1="3" x2="14" y2="21"></line></svg>`,
             permission: ['inv:serial:read', 'inv:serial:manage']
           },
@@ -5512,6 +5636,8 @@
           {
             view: 'roles-permissions',
             label: 'Roles & Permissions',
+            featureKey: 'customRoles',
+            requiredTier: 'PRO',
             icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>`,
             permission: 'iam:role:manage'
           },
@@ -5575,10 +5701,15 @@
         html += `<div class="nav-section-title">${escapeHtml(section.category)}</div>`;
         for (const item of permittedItems) {
           const isActive = state.activeView === item.view;
+          const lockedByPlan = item.featureKey && !hasPlanFeature(item.featureKey);
+          const tierBadge = lockedByPlan
+            ? `<span class="badge-pill badge-purple" style="margin-left: auto; font-size: 9px; padding: 1px 6px; letter-spacing: 0.03em;">${escapeHtml(item.requiredTier || 'PRO')}</span>`
+            : '';
           html += `
             <a class="nav-link ${isActive ? 'active' : ''}" data-view="${escapeHtml(item.view)}">
               ${item.icon}
-              ${escapeHtml(item.label)}
+              <span style="flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(item.label)}</span>
+              ${tierBadge}
             </a>
           `;
         }
@@ -6181,6 +6312,8 @@
 
         const sessionToken = data.token || data.accessToken;
         state.token = sessionToken;
+        state.tokenExpiresAt = getTokenExpiry(sessionToken);
+        state.sessionEpoch = (state.sessionEpoch || 0) + 1;
         localStorage.setItem('nexstock_session_token', sessionToken);
         if (data.refreshToken) {
           localStorage.setItem('nexstock_refresh_token', data.refreshToken);
@@ -6629,12 +6762,19 @@
       submitBtn.disabled = true;
       submitBtn.innerText = 'Provisioning Business & First Branch...';
 
+      if (!state.onboardIdempotencyKey) {
+        state.onboardIdempotencyKey = (typeof crypto !== 'undefined' && crypto.randomUUID)
+          ? crypto.randomUUID()
+          : `onboard-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      }
+
       try {
         const res = await fetch(`${state.apiBaseUrl}/v1/org/onboard`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${state.token}`
+            'Authorization': `Bearer ${state.token}`,
+            'idempotency-key': state.onboardIdempotencyKey,
           },
           body: JSON.stringify({
             businessName,
@@ -6651,6 +6791,8 @@
         if (!res.ok) {
           throw new Error(data?.detail || data?.title || 'Failed to onboard business.');
         }
+
+        state.onboardIdempotencyKey = null;
 
         // Apply newly provisioned context
         state.tenantId = data.tenant.id;
@@ -6720,7 +6862,7 @@
         const roleEl = document.getElementById('topbarUserRole');
         if (roleEl) roleEl.innerText = state.userRole;
 
-        showToast(`Business "${data.tenant.name}" created successfully!`, 'success');
+        showToast(`Business "${state.tenantName || businessName}" created successfully!`, 'success');
         renderView('dashboard');
       } catch (err) {
         alertEl.innerText = err.message;
@@ -7828,17 +7970,19 @@
         }
 
         const [productsRes, categoriesRes] = await Promise.all([
-          apiFetch('/v1/products?limit=100').catch(err => {
+          apiFetch('/v1/products?limit=200&sortBy=createdAt&sortDir=desc').catch(err => {
             console.warn('Unable to load products from API:', err);
             return { data: [] };
           }),
-          apiFetch('/v1/categories?limit=100').catch(err => {
+          apiFetch('/v1/categories?limit=200').catch(err => {
             console.warn('Unable to load categories from API:', err);
             return { data: [] };
           })
         ]);
         state.cachedProducts = productsRes?.data || (Array.isArray(productsRes) ? productsRes : []);
         state.cachedCategories = categoriesRes?.data || (Array.isArray(categoriesRes) ? categoriesRes : []);
+        state.posCachedProducts = null;
+        state.posCachedCategories = null;
         setViewCache('products', { products: state.cachedProducts, categories: state.cachedCategories });
         setViewCache('categories', state.cachedCategories);
 
@@ -7885,6 +8029,74 @@
       return Array.from(new Set([...baseList, ...extraCodes.map(c => String(c || '').trim().toUpperCase()).filter(Boolean)]));
     }
 
+    function buildProductUomConversionRowHtml(prefix, baseUom, row = {}) {
+      const code = escapeHtml(String(row.uomCode || '').trim().toUpperCase());
+      const label = escapeHtml(String(row.uomName || '').trim());
+      const factor = row.conversionFactorToBase != null && row.conversionFactorToBase !== ''
+        ? escapeHtml(formatQty(row.conversionFactorToBase))
+        : '';
+      const defPurch = Boolean(row.isDefaultPurchasing);
+      const defSell = Boolean(row.isDefaultSelling);
+      return `
+        <div class="uom-conv-row" style="display: grid; grid-template-columns: 92px 1fr 110px auto auto auto; gap: 6px; align-items: center; padding: 6px 8px; border: 1px solid var(--border-subtle); border-radius: 6px; background: var(--bg-primary); margin-bottom: 6px;">
+          <input type="text" class="form-input uom-conv-code" value="${code}" placeholder="BAG" style="padding: 4px 6px; font-size: 12px; text-transform: uppercase;" oninput="syncProductCustomUomOptions('${prefix}')">
+          <input type="text" class="form-input uom-conv-name" value="${label}" placeholder="Label (e.g. 25 KG Bag)" style="padding: 4px 6px; font-size: 12px;">
+          <input type="number" step="0.000001" min="0.000001" class="form-input uom-conv-factor" value="${factor}" placeholder="= ${escapeHtml(baseUom)}" style="padding: 4px 6px; font-size: 12px;">
+          <label style="display: inline-flex; align-items: center; gap: 3px; font-size: 11px; white-space: nowrap; cursor: pointer;" title="Set as default purchasing package">
+            <input type="checkbox" class="uom-conv-purch" ${defPurch ? 'checked' : ''} onchange="onCustomUomDefaultPurchChange('${prefix}', this)"> Purch
+          </label>
+          <label style="display: inline-flex; align-items: center; gap: 3px; font-size: 11px; white-space: nowrap; cursor: pointer;" title="Allow selling in this unit at POS">
+            <input type="checkbox" class="uom-conv-sell" ${defSell ? 'checked' : ''}> Sell
+          </label>
+          <button type="button" class="btn btn-secondary btn-sm" style="padding: 2px 7px; font-size: 12px; color: var(--status-danger);" onclick="this.closest('.uom-conv-row').remove(); syncProductCustomUomOptions('${prefix}');" title="Remove conversion">&times;</button>
+        </div>
+      `;
+    }
+
+    function addProductUomConversionRow(prefix) {
+      const listEl = document.getElementById(`${prefix}UnitConvList`);
+      if (!listEl) return;
+      const baseUom = (document.getElementById(`${prefix}Uom`)?.value || 'PCS').trim().toUpperCase();
+      listEl.insertAdjacentHTML('beforeend', buildProductUomConversionRowHtml(prefix, baseUom, {}));
+    }
+
+    function onCustomUomDefaultPurchChange(prefix, cb) {
+      if (!cb.checked) return;
+      document.querySelectorAll(`#${prefix}UnitConvList .uom-conv-purch`).forEach(el => {
+        if (el !== cb) el.checked = false;
+      });
+      const row = cb.closest('.uom-conv-row');
+      const code = row?.querySelector('.uom-conv-code')?.value?.trim().toUpperCase();
+      if (code) {
+        syncProductCustomUomOptions(prefix);
+        const purchEl = document.getElementById(`${prefix}PurchaseUom`);
+        if (purchEl && Array.from(purchEl.options).some(o => o.value === code)) {
+          purchEl.value = code;
+        }
+      }
+    }
+
+    function syncProductCustomUomOptions(prefix) {
+      const cat = document.getElementById(`${prefix}MeasCat`)?.value || 'COUNT';
+      const purchEl = document.getElementById(`${prefix}PurchaseUom`);
+      const boxEl = document.getElementById(`${prefix}AllowedUomsBox`);
+      if (!purchEl || !boxEl) return;
+      const customCodes = Array.from(document.querySelectorAll(`#${prefix}UnitConvList .uom-conv-code`))
+        .map(el => el.value.trim().toUpperCase())
+        .filter(Boolean);
+      const uoms = getUomOptionsForCategory(cat);
+      const currPurch = purchEl.value;
+      const purchList = Array.from(new Set([...uoms, 'BAG', 'BOX', 'PACK', ...customCodes]));
+      purchEl.innerHTML = purchList.map(u => `<option value="${escapeHtml(u)}" ${u === currPurch ? 'selected' : ''}>${escapeHtml(u)}</option>`).join('');
+      const prevChecked = new Set(Array.from(document.querySelectorAll(`.${prefix}-allowed-uom:checked`)).map(el => el.value));
+      const allSellCodes = Array.from(new Set([...uoms, ...customCodes]));
+      boxEl.innerHTML = allSellCodes.map(u => `
+        <label style="display: inline-flex; align-items: center; gap: 4px; font-size: 12px; padding: 3px 8px; border: 1px solid var(--border-subtle); border-radius: 6px; background: var(--bg-primary); cursor: pointer;">
+          <input type="checkbox" class="${prefix}-allowed-uom" value="${escapeHtml(u)}" ${prevChecked.has(u) ? 'checked' : ''}> ${escapeHtml(u)}
+        </label>
+      `).join('');
+    }
+
     function renderProductUomConfigHtml(prefix, product = null) {
       const qtyMode = product?.productQtyMode === 'VARIABLE' ? 'VARIABLE' : 'STANDARD';
       const baseUom = String(product?.baseUom || (qtyMode === 'VARIABLE' ? 'KG' : 'PCS')).trim().toUpperCase();
@@ -7899,14 +8111,13 @@
         : (qtyMode === 'VARIABLE' ? 3 : (CLIENT_UOM_CATALOG[baseUom]?.precision ?? 0));
       const featuredPos = Boolean(product?.featuredPos);
       const density = product?.densityGPerMl ? String(product.densityGPerMl) : '';
-      const firstCustomConv = Array.isArray(product?.unitConversions)
-        ? product.unitConversions.find(c => String(c.uomCode || '').toUpperCase() !== baseUom && parseFloat(c.conversionFactorToBase) > 0)
-        : null;
-      const customConvCode = firstCustomConv ? String(firstCustomConv.uomCode).toUpperCase() : '';
-      const customConvFactor = firstCustomConv ? formatQty(firstCustomConv.conversionFactorToBase) : '';
+      const existingConvs = Array.isArray(product?.unitConversions)
+        ? product.unitConversions.filter(c => String(c.uomCode || '').toUpperCase() !== baseUom && parseFloat(c.conversionFactorToBase) > 0)
+        : [];
+      const extraConvCodes = existingConvs.map(c => String(c.uomCode).toUpperCase());
 
-      const catUoms = getUomOptionsForCategory(measCat, [baseUom, purchaseUom, priceUom, ...(customConvCode ? [customConvCode] : []), ...allowed]);
-      const purchaseAndCustomUoms = Array.from(new Set([...catUoms, 'BAG', 'BOX', 'PACK']));
+      const catUoms = getUomOptionsForCategory(measCat, [baseUom, purchaseUom, priceUom, ...extraConvCodes, ...allowed]);
+      const purchaseAndCustomUoms = Array.from(new Set([...catUoms, 'BAG', 'BOX', 'PACK', ...extraConvCodes]));
 
       return `
         <div style="border: 1px solid var(--border-subtle); border-radius: 8px; padding: 12px; margin-bottom: 14px; background: var(--bg-hover);">
@@ -7970,20 +8181,18 @@
               <input type="checkbox" id="${prefix}FeaturedPos" ${featuredPos ? 'checked' : ''}> Feature in "Weighed &amp; Measured Products" on POS (no barcode needed)
             </label>
           </div>
-          <details style="margin-top: 10px; font-size: 12px;" ${density || customConvCode ? 'open' : ''}>
-            <summary style="cursor: pointer; color: var(--text-secondary); font-weight: 600;">Advanced UoM Conversions &amp; Density (Optional)</summary>
-            <div class="modal-grid-3" style="margin-top: 8px;">
-              <div class="form-group" style="margin-bottom: 0;">
-                <label class="form-label" style="font-size: 11px;">Pack/Bag Code</label>
-                <input type="text" class="form-input" id="${prefix}CustomConvUom" value="${escapeHtml(customConvCode)}" placeholder="e.g. BAG">
+          <details style="margin-top: 10px; font-size: 12px;" ${density || existingConvs.length ? 'open' : ''}>
+            <summary style="cursor: pointer; color: var(--text-secondary); font-weight: 600;">Package &amp; Multi-UoM Conversions / Density (${existingConvs.length} configured)</summary>
+            <div style="margin-top: 8px;">
+              <div id="${prefix}UnitConvList">
+                ${existingConvs.map(c => buildProductUomConversionRowHtml(prefix, baseUom, c)).join('')}
               </div>
-              <div class="form-group" style="margin-bottom: 0;">
-                <label class="form-label" style="font-size: 11px;">1 Pack = ? Base UoM</label>
-                <input type="number" step="0.000001" min="0" class="form-input" id="${prefix}CustomConvFactor" value="${escapeHtml(customConvFactor)}" placeholder="e.g. 25">
-              </div>
-              <div class="form-group" style="margin-bottom: 0;">
-                <label class="form-label" style="font-size: 11px;">Density (g/mL)</label>
-                <input type="number" step="0.0001" min="0" class="form-input" id="${prefix}DensityGPerMl" value="${escapeHtml(density)}" placeholder="e.g. 0.92 for oil">
+              <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px;">
+                <button type="button" class="btn btn-secondary btn-sm" onclick="addProductUomConversionRow('${prefix}')">+ Add Package / Conversion</button>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <label class="form-label" style="font-size: 11px; margin-bottom: 0;">Density (g/mL):</label>
+                  <input type="number" step="0.0001" min="0" class="form-input" id="${prefix}DensityGPerMl" value="${escapeHtml(density)}" placeholder="0.92" style="width: 96px; padding: 4px 6px; font-size: 12px;">
+                </div>
               </div>
             </div>
           </details>
@@ -8094,23 +8303,35 @@
       const checkedSelling = Array.from(document.querySelectorAll(`.${prefix}-allowed-uom:checked`))
         .map(el => el.value.trim().toUpperCase())
         .filter(Boolean);
-      const allowedSellingUoms = checkedSelling.length ? checkedSelling : [baseUom];
       const rawPrec = parseInt(document.getElementById(`${prefix}QtyPrecision`)?.value || '0', 10);
       const qtyDecimalPrecision = Number.isFinite(rawPrec) ? Math.max(0, Math.min(6, rawPrec)) : 0;
       const featuredPos = Boolean(document.getElementById(`${prefix}FeaturedPos`)?.checked);
       const densityVal = (document.getElementById(`${prefix}DensityGPerMl`)?.value || '').trim();
       const densityGPerMl = densityVal && parseFloat(densityVal) > 0 ? parseFloat(densityVal).toFixed(6) : null;
-      const customUom = (document.getElementById(`${prefix}CustomConvUom`)?.value || '').trim().toUpperCase();
-      const customFactor = parseFloat(document.getElementById(`${prefix}CustomConvFactor`)?.value || '0');
+
       const unitConversions = [];
-      if (customUom && Number.isFinite(customFactor) && customFactor > 0 && customUom !== baseUom) {
-        unitConversions.push({
-          uomCode: customUom,
-          conversionFactorToBase: customFactor.toFixed(6),
-          isDefaultPurchasing: purchaseUom === customUom,
-          isDefaultSelling: allowedSellingUoms.includes(customUom)
-        });
+      const convRows = Array.from(document.querySelectorAll(`#${prefix}UnitConvList .uom-conv-row`));
+      for (const row of convRows) {
+        const uCode = (row.querySelector('.uom-conv-code')?.value || '').trim().toUpperCase();
+        const uLabel = (row.querySelector('.uom-conv-name')?.value || '').trim();
+        const uFactor = parseFloat(row.querySelector('.uom-conv-factor')?.value || '0');
+        const isPurch = Boolean(row.querySelector('.uom-conv-purch')?.checked);
+        const isSell = Boolean(row.querySelector('.uom-conv-sell')?.checked);
+        if (uCode && Number.isFinite(uFactor) && uFactor > 0 && uCode !== baseUom) {
+          const factorFixed = uFactor.toFixed(6);
+          const factorLabel = String(parseFloat(factorFixed));
+          unitConversions.push({
+            uomCode: uCode,
+            uomName: uLabel || `${uCode} (${factorLabel} ${baseUom})`,
+            conversionFactorToBase: factorFixed,
+            isDefaultPurchasing: isPurch || purchaseUom === uCode,
+            isDefaultSelling: isSell || checkedSelling.includes(uCode)
+          });
+        }
       }
+
+      const defaultSellingConvCodes = unitConversions.filter(c => c.isDefaultSelling).map(c => c.uomCode);
+      const allowedSellingUoms = Array.from(new Set([...(checkedSelling.length ? checkedSelling : [baseUom]), ...defaultSellingConvCodes]));
       const allocationPolicy = document.getElementById(`${prefix}AllocationPolicy`)?.value || 'FEFO';
       const requireBatchSellingPrice = Boolean(document.getElementById(`${prefix}RequireBatchPrice`)?.checked);
       return {
@@ -8269,7 +8490,8 @@
 
         showToast(`Product ${sku} created successfully`, 'success');
         closeModal();
-        renderProductsView();
+        state.posCachedProducts = null;
+        await renderProductsView();
       } catch (err) {
         // error toast already shown
       } finally {
@@ -8586,7 +8808,7 @@
 
         showToast(`Product "${name}" updated successfully`, 'success');
         closeModal();
-        renderProductsView();
+        await renderProductsView();
       } catch (err) {
         if (err && (err.errorCode === 'CAT_UOM_CHANGE_REQUIRES_WIZARD' || String(err.message || '').includes('Legacy UOM Correction Wizard'))) {
           closeModal();
@@ -8866,26 +9088,42 @@
         `,
         footerHtml: `
           <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-          <button class="btn btn-primary" onclick="submitCreateCategory()">Create Category</button>
+          <button id="btnSubmitCreateCategory" class="btn btn-primary" onclick="submitCreateCategory()">Create Category</button>
         `
       });
     }
 
     async function submitCreateCategory() {
+      if (state.isSubmittingCategory) return;
       const name = document.getElementById('newCatName').value.trim();
       const description = document.getElementById('newCatDesc').value.trim() || null;
       const color = document.getElementById('newCatColor')?.value || '#6366f1';
       if (!name) return showToast('Category Name is required', 'error');
 
+      const btn = document.getElementById('btnSubmitCreateCategory');
+      state.isSubmittingCategory = true;
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Creating...';
+      }
+
       try {
         await apiFetch('/v1/categories', {
           method: 'POST',
+          headers: { 'idempotency-key': crypto.randomUUID() },
           body: JSON.stringify({ name, description, color })
         });
+        state.posCachedCategories = null;
         showToast(`Category "${name}" created`, 'success');
         closeModal();
-        renderCategoriesView();
-      } catch (err) {}
+        await renderCategoriesView();
+      } catch {} finally {
+        state.isSubmittingCategory = false;
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = 'Create Category';
+        }
+      }
     }
 
     function openEditCategoryModal(categoryId) {
@@ -9603,10 +9841,12 @@
       const uom = uomSel?.value || prod.baseUom;
       const baseQty = convertClientUomQty(qty, uom, prod.baseUom, prod);
       const baseCost = baseQty && baseQty > 0 ? (qty * cost) / baseQty : cost;
+      const totalBadge = rowEl.querySelector('.po-line-total-badge');
+      if (totalBadge) totalBadge.textContent = `Line Total: ${formatTenantMoney(qty * cost)}`;
       if (baseQty === null) {
         prevEl.innerHTML = `<span style="color:var(--status-danger);">Incompatible UoM ${escapeHtml(uom)} for base ${escapeHtml(prod.baseUom)}</span>`;
       } else {
-        prevEl.textContent = `${formatQty(qty)} ${uom} = ${formatQty(baseQty)} ${prod.baseUom} (${formatTenantMoney(baseCost)} / ${prod.baseUom}, Line Total: ${formatTenantMoney(qty * cost)})`;
+        prevEl.textContent = `${formatQty(qty)} ${uom} = ${formatQty(baseQty)} ${prod.baseUom} (${formatTenantMoney(baseCost)} / ${prod.baseUom})`;
       }
     }
 
@@ -9614,12 +9854,17 @@
       const box = document.getElementById('poLinesContainer');
       const prods = window._productsCache || [];
       if (!box || !prods.length) return;
+      const itemIdx = box.querySelectorAll('.po-line-row').length + 1;
       const row = document.createElement('div');
       row.className = 'po-line-row';
-      row.style.cssText = 'border: 1px solid var(--border-subtle); border-radius: 8px; padding: 10px; margin-bottom: 8px; background: var(--bg-hover);';
+      row.style.cssText = 'border: 1px solid var(--border-subtle); border-radius: 10px; padding: 12px; margin-bottom: 10px; background: var(--bg-hover);';
       row.innerHTML = `
-        <div style="display: grid; grid-template-columns: 2fr 1fr 90px 1fr auto; gap: 8px; align-items: end;">
-          <div>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; font-size: 11px; color: var(--text-secondary); font-weight: 600;">
+          <span class="po-line-index">Item #${itemIdx}</span>
+          <span class="po-line-total-badge" style="color: var(--text-primary);"></span>
+        </div>
+        <div class="po-line-grid">
+          <div class="po-line-prod-col">
             <label class="form-label" style="font-size:11px;">Product *</label>
             <select class="form-select po-line-prod" onchange="updatePoRowUomsAndPreview(this.closest('.po-line-row'))">
               ${prods.map(p => `<option value="${p.id}">${escapeHtml(p.sku)} — ${escapeHtml(p.name)}</option>`).join('')}
@@ -9637,7 +9882,7 @@
             <label class="form-label" style="font-size:11px;">Unit Cost *</label>
             <input type="number" step="${getCurrencyInputStep()}" min="0" class="form-input po-line-cost" value="0" oninput="this.dataset.edited='1'; updatePoRowUomsAndPreview(this.closest('.po-line-row'))">
           </div>
-          <button type="button" class="btn btn-danger btn-sm" onclick="this.closest('.po-line-row').remove()" title="Remove">&times;</button>
+          <button type="button" class="btn btn-danger btn-sm po-line-remove-btn" onclick="this.closest('.po-line-row').remove()" title="Remove Item">Remove</button>
         </div>
         <div class="po-line-preview" style="font-size: 11px; color: var(--text-secondary); margin-top: 6px;"></div>
       `;
@@ -9654,7 +9899,7 @@
         title: 'Create Purchase Order',
         maxWidth: '720px',
         bodyHtml: `
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+          <div class="po-header-grid">
             <div class="form-group">
               <label class="form-label">Supplier *</label>
               <select class="form-select" id="poSupplierId">
@@ -9671,7 +9916,8 @@
             <button type="button" class="btn btn-secondary btn-sm" onclick="addPoLineRow()">+ Add Line</button>
           </div>
           <div id="poLinesContainer"></div>
-          <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; margin-top: 8px;">
+          <button type="button" class="btn btn-secondary po-add-another-btn" onclick="addPoLineRow()">+ Add Another Item</button>
+          <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; margin-top: 12px;">
             <input type="checkbox" id="poApproveImmediately" checked> Approve PO immediately for Goods Receipt
           </label>
         `,
@@ -9755,7 +10001,38 @@
       }
       const lineTotal = qty * cost;
       const perBaseCost = lineTotal / baseQty;
-      prevEl.innerHTML = `Stock Increase: <strong>+${formatQty(baseQty)} ${escapeHtml(prod.baseUom)}</strong> &bull; Normalized Cost: <strong>${formatTenantMoney(perBaseCost)} / ${escapeHtml(prod.baseUom)}</strong> &bull; Total: ${formatTenantMoney(lineTotal)}`;
+      const curSell = parseFloat(prod.sellingPrice || '0');
+      const marginVsCurrentPct = curSell > 0 ? (((curSell - perBaseCost) / curSell) * 100).toFixed(1) : '0.0';
+      prevEl.innerHTML = `Stock Increase: <strong>+${formatQty(baseQty)} ${escapeHtml(prod.baseUom)}</strong> &bull; Normalized Cost: <strong>${formatTenantMoney(perBaseCost)} / ${escapeHtml(prod.baseUom)}</strong> &bull; Current POS: <strong>${formatTenantMoney(curSell)}</strong> (${marginVsCurrentPct}% margin) &bull; Total: ${formatTenantMoney(lineTotal)}`;
+    }
+
+    async function lookupGrnLineMarketPrice(btnEl) {
+      const row = btnEl?.closest('.grn-line-row');
+      if (!row) return;
+      const productId = row.querySelector('.grn-line-prod')?.value;
+      const marketIn = row.querySelector('.grn-line-market-price');
+      if (!productId || !marketIn) return;
+      const origText = btnEl.textContent;
+      btnEl.disabled = true;
+      btnEl.textContent = '...';
+      try {
+        const res = await apiFetch(`/v1/pricing/market-price-lookup?productId=${encodeURIComponent(productId)}`, { silent: true });
+        if (res?.suggestedMarketPrice) {
+          marketIn.value = parseFloat(res.suggestedMarketPrice).toFixed(2);
+          marketIn.dataset.source = res.source || 'ONLINE_REFERENCE';
+          showToast(`Online market price fetched (${res.source}): ${formatTenantMoney(res.suggestedMarketPrice)}`, 'success');
+        } else {
+          marketIn.dataset.source = res?.source || 'MANUAL_ENTRY';
+          showToast(res?.message || 'Enter current market retail price manually.', 'info');
+          marketIn.focus();
+        }
+      } catch {
+        showToast('Online lookup unavailable (offline). Enter market price manually.', 'info');
+        marketIn.focus();
+      } finally {
+        btnEl.disabled = false;
+        btnEl.textContent = origText;
+      }
     }
 
     function addGrnLineRow(prefill = null) {
@@ -9798,7 +10075,7 @@
             <input type="date" class="form-input grn-line-expiry" style="font-size: 12px; padding: 5px 8px;" value="${escapeHtml(prefill?.expiryDate || '')}" title="Optional Expiry Date">
           </div>
         </div>
-        <div class="modal-grid-2" style="margin-top: 6px; gap: 8px;">
+        <div class="modal-grid-3" style="margin-top: 6px; gap: 8px;">
           <div>
             <label class="form-label" style="font-size:11px;">Batch Selling Price (${escapeHtml(getTenantCurrency())})</label>
             <input type="number" step="${getCurrencyInputStep()}" min="0" class="form-input grn-line-sell-price" style="font-size: 12px; padding: 5px 8px;" value="${escapeHtml(prefill?.sellingPrice || '')}" placeholder="Independent batch price (optional)">
@@ -9806,6 +10083,13 @@
           <div>
             <label class="form-label" style="font-size:11px;">Min Selling Price Floor</label>
             <input type="number" step="${getCurrencyInputStep()}" min="0" class="form-input grn-line-min-price" style="font-size: 12px; padding: 5px 8px;" value="${escapeHtml(prefill?.minSellingPrice || '')}" placeholder="Optional floor price">
+          </div>
+          <div>
+            <label class="form-label" style="font-size:11px;">Market Retail Price (${escapeHtml(getTenantCurrency())})</label>
+            <div style="display: flex; gap: 4px;">
+              <input type="number" step="${getCurrencyInputStep()}" min="0" class="form-input grn-line-market-price" style="font-size: 12px; padding: 5px 8px;" value="${escapeHtml(prefill?.marketPrice || '')}" placeholder="Manual / online">
+              <button type="button" class="btn btn-secondary btn-sm" style="padding: 4px 8px; font-size: 11px; white-space: nowrap;" onclick="lookupGrnLineMarketPrice(this)" title="Check online market reference">Lookup</button>
+            </div>
           </div>
         </div>
         <div class="grn-line-preview" style="font-size: 11px; color: var(--text-secondary); margin-top: 6px;"></div>
@@ -9909,6 +10193,164 @@
       }
     }
 
+    async function lookupGrnSmartMarketPrice(idx) {
+      const rec = (window._lastGrnPricingRecommendations || [])[idx];
+      const marketIn = document.getElementById(`grnSmartMarket-${idx}`);
+      if (!rec || !marketIn) return;
+      try {
+        const res = await apiFetch(`/v1/pricing/market-price-lookup?productId=${encodeURIComponent(rec.productId)}`, { silent: true });
+        if (res?.suggestedMarketPrice) {
+          marketIn.value = parseFloat(res.suggestedMarketPrice).toFixed(2);
+          marketIn.dataset.source = res.source || 'ONLINE_REFERENCE';
+          showToast(`Market reference (${res.source}): ${formatTenantMoney(res.suggestedMarketPrice)}`, 'success');
+        } else {
+          marketIn.dataset.source = res?.source || 'MANUAL_ENTRY';
+          showToast(res?.message || 'No live retail feed matched — enter observed market price manually.', 'info');
+          marketIn.focus();
+        }
+      } catch {
+        showToast('Online market lookup unavailable (offline). Enter market price manually.', 'info');
+        marketIn.focus();
+      }
+    }
+
+    function recalcGrnSmartPricingRow(idx) {
+      const card = document.getElementById(`grnSmartCard-${idx}`);
+      if (!card) return;
+      const mac = parseFloat(card.dataset.mac || '0');
+      const publishPrice = parseFloat(document.getElementById(`grnSmartPrice-${idx}`)?.value || '0');
+      const profit = publishPrice - mac;
+      const marginPct = publishPrice > 0 ? ((profit / publishPrice) * 100).toFixed(2) : '0.00';
+      const el = document.getElementById(`grnSmartMargin-${idx}`);
+      if (el) {
+        el.innerHTML = `Expected Margin: <strong style="color: ${profit >= 0 ? 'var(--status-success)' : 'var(--status-danger)'};">${marginPct}%</strong> (${formatTenantMoney(profit)} / unit)`;
+      }
+    }
+
+    async function approveGrnSmartPricingLine(idx) {
+      const recs = window._lastGrnPricingRecommendations || [];
+      const rec = recs[idx];
+      if (!rec) return;
+      const priceInput = document.getElementById(`grnSmartPrice-${idx}`);
+      const marketInput = document.getElementById(`grnSmartMarket-${idx}`);
+      const btn = document.getElementById(`btnApproveGrnSmart-${idx}`);
+      const overridePrice = parseFloat(priceInput?.value || '0');
+      if (!Number.isFinite(overridePrice) || overridePrice <= 0) {
+        return showToast('Enter a valid positive selling price to publish.', 'error');
+      }
+      const marketVal = marketInput?.value?.trim();
+      const marketPrice = marketVal && Number.isFinite(parseFloat(marketVal)) ? parseFloat(marketVal).toFixed(4) : null;
+      const marketPriceSource = marketInput?.dataset?.source || (marketPrice ? 'MANUAL_ENTRY' : null);
+
+      if (btn) { btn.disabled = true; btn.textContent = 'Publishing...'; }
+      try {
+        let suggestionId = rec.suggestionId;
+        if (!suggestionId) {
+          const created = await apiFetch('/v1/pricing/suggestions', {
+            method: 'POST',
+            body: JSON.stringify({
+              productId: rec.productId,
+              scope: rec.scope === 'BRANCH' ? 'BRANCH' : 'GLOBAL',
+              proposedPrice: overridePrice.toFixed(4),
+              costOverride: rec.updatedMovingAvgCost,
+              ...(marketPrice ? { marketPrice, marketPriceSource } : {}),
+              reason: `Smart Stock Receiving pricing update (GRN MAC: ${rec.updatedMovingAvgCost})`
+            })
+          });
+          suggestionId = created?.id;
+        }
+        if (suggestionId) {
+          await apiFetch(`/v1/pricing/suggestions/${suggestionId}/approve`, {
+            method: 'POST',
+            body: JSON.stringify({
+              overridePrice: overridePrice.toFixed(4),
+              ...(marketPrice ? { marketPrice, marketPriceSource } : {}),
+              reviewNotes: 'Approved & Published from Smart Stock Receiving Comparison'
+            })
+          });
+        }
+        rec._published = true;
+        if (btn) {
+          btn.textContent = 'Published ✓';
+          btn.classList.remove('btn-primary');
+          btn.classList.add('btn-secondary');
+        }
+        state.posCachedProducts = null;
+        showToast(`Active POS price updated for ${rec.productName}: ${formatTenantMoney(overridePrice)}`, 'success');
+      } catch {
+        if (btn) { btn.disabled = false; btn.textContent = 'Approve & Publish'; }
+      }
+    }
+
+    function openGrnSmartPricingModal(grn, batchIdForLabels = null) {
+      const recs = grn?.pricingRecommendations || [];
+      if (!recs.length) {
+        if (batchIdForLabels) openBatchLabelPrintModal(batchIdForLabels);
+        return;
+      }
+      window._lastGrnPricingRecommendations = recs;
+      openModal({
+        title: `Smart Stock Receiving & Pricing Review (${escapeHtml(grn.grnNumber || 'GRN')})`,
+        maxWidth: '760px',
+        bodyHtml: `
+          <div style="padding: 10px 12px; border-radius: 8px; background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.25); font-size: 12px; margin-bottom: 12px;">
+            Active POS selling prices remain unchanged until you explicitly click <strong>Approve &amp; Publish</strong> below.
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 12px; max-height: 62vh; overflow-y: auto;">
+            ${recs.map((rec, idx) => `
+              <div id="grnSmartCard-${idx}" data-mac="${escapeHtml(rec.updatedMovingAvgCost)}" style="border: 1px solid var(--border-subtle); border-radius: 10px; padding: 12px; background: var(--bg-hover);">
+                <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px;">
+                  <div><strong>${escapeHtml(rec.productName)}</strong> <span style="font-size: 11px; color: var(--text-secondary);">(${escapeHtml(rec.sku)} / ${escapeHtml(rec.baseUom)})</span></div>
+                  <span class="badge-pill badge-blue">${escapeHtml(rec.pricingMethod)} (${escapeHtml(rec.targetPercentage)}%)</span>
+                </div>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; font-size: 12px; margin-bottom: 10px;">
+                  <div style="background: var(--bg-primary); padding: 8px; border-radius: 6px; border: 1px solid var(--border-subtle);">
+                    <div style="font-size: 11px; color: var(--text-secondary);">Existing POS Price</div>
+                    <strong>${formatTenantMoney(rec.existingSellingPrice)}</strong>
+                  </div>
+                  <div style="background: var(--bg-primary); padding: 8px; border-radius: 6px; border: 1px solid var(--border-subtle);">
+                    <div style="font-size: 11px; color: var(--text-secondary);">Incoming Purchase Cost</div>
+                    <strong>${formatTenantMoney(rec.incomingPurchaseCost)}</strong>
+                  </div>
+                  <div style="background: var(--bg-primary); padding: 8px; border-radius: 6px; border: 1px solid var(--border-subtle);">
+                    <div style="font-size: 11px; color: var(--text-secondary);">Updated MAC Cost</div>
+                    <strong style="color: var(--accent-primary);">${formatTenantMoney(rec.updatedMovingAvgCost)}</strong>
+                  </div>
+                  <div style="background: var(--bg-primary); padding: 8px; border-radius: 6px; border: 1px solid var(--border-subtle);">
+                    <div style="font-size: 11px; color: var(--text-secondary);">Target Recommended</div>
+                    <strong>${formatTenantMoney(rec.recommendedSellingPrice)}</strong>
+                  </div>
+                </div>
+                <div class="modal-grid-2" style="gap: 10px; align-items: end;">
+                  <div>
+                    <label class="form-label" style="font-size: 11px;">Market Price Comparison (${escapeHtml(getTenantCurrency())})</label>
+                    <div style="display: flex; gap: 4px;">
+                      <input type="number" step="${getCurrencyInputStep()}" min="0" class="form-input" id="grnSmartMarket-${idx}" value="${rec.marketPrice ? parseFloat(rec.marketPrice).toFixed(2) : ''}" placeholder="Manual or fetch">
+                      <button type="button" class="btn btn-secondary btn-sm" style="white-space: nowrap;" onclick="lookupGrnSmartMarketPrice(${idx})">Fetch</button>
+                    </div>
+                  </div>
+                  <div>
+                    <label class="form-label" style="font-size: 11px;">New POS Selling Price (${escapeHtml(getTenantCurrency())})</label>
+                    <input type="number" step="${getCurrencyInputStep()}" min="0" class="form-input" id="grnSmartPrice-${idx}" value="${parseFloat(rec.recommendedSellingPrice || '0').toFixed(2)}" oninput="recalcGrnSmartPricingRow(${idx})">
+                  </div>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 10px;">
+                  <div id="grnSmartMargin-${idx}" style="font-size: 12px;">
+                    Expected Margin: <strong>${escapeHtml(rec.expectedMarginPct)}%</strong> (${formatTenantMoney(rec.expectedProfitPerUnit)} / unit)
+                  </div>
+                  <button type="button" id="btnApproveGrnSmart-${idx}" class="btn btn-primary btn-sm" onclick="approveGrnSmartPricingLine(${idx})">Approve &amp; Publish</button>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        `,
+        footerHtml: `
+          ${batchIdForLabels ? `<button type="button" class="btn btn-secondary" onclick="closeModal(); openBatchLabelPrintModal('${escapeHtml(batchIdForLabels)}')">Print Batch Labels</button>` : ''}
+          <button type="button" class="btn btn-primary" onclick="closeModal()">Done (Keep Unapproved Prices)</button>
+        `
+      });
+    }
+
     async function submitGoodsReceipt(lotConflictPolicy = 'REJECT', overrideReason = null) {
       const rows = Array.from(document.querySelectorAll('#grnLinesContainer .grn-line-row'));
       if (!rows.length) return showToast('Add at least one receipt line', 'error');
@@ -9922,6 +10364,9 @@
         const expiryDate = r.querySelector('.grn-line-expiry')?.value || null;
         const sellPriceRaw = (r.querySelector('.grn-line-sell-price')?.value || '').trim();
         const minPriceRaw = (r.querySelector('.grn-line-min-price')?.value || '').trim();
+        const marketPriceEl = r.querySelector('.grn-line-market-price');
+        const marketPriceRaw = (marketPriceEl?.value || '').trim();
+        const marketPriceSource = marketPriceEl?.dataset?.source || (marketPriceRaw ? 'MANUAL_ENTRY' : null);
         const poLineId = r.dataset.poLineId || null;
         if (!productId || !Number.isFinite(receivedQty) || receivedQty <= 0) {
           return showToast('Each GRN line requires positive quantity', 'error');
@@ -9932,10 +10377,11 @@
           receivedUom,
           receivedQty: receivedQty.toFixed(6),
           unitCost: unitCost.toFixed(4),
-          ...(batchNumber ? { batchNumber } : {}),
+          ...(batchNumber ? { batchNumber, lotConflictPolicy } : {}),
           ...(expiryDate ? { expiryDate } : {}),
           ...(sellPriceRaw !== '' && Number.isFinite(parseFloat(sellPriceRaw)) ? { sellingPrice: parseFloat(sellPriceRaw).toFixed(4) } : {}),
-          ...(minPriceRaw !== '' && Number.isFinite(parseFloat(minPriceRaw)) ? { minSellingPrice: parseFloat(minPriceRaw).toFixed(4) } : {})
+          ...(minPriceRaw !== '' && Number.isFinite(parseFloat(minPriceRaw)) ? { minSellingPrice: parseFloat(minPriceRaw).toFixed(4) } : {}),
+          ...(marketPriceRaw !== '' && Number.isFinite(parseFloat(marketPriceRaw)) ? { marketPrice: parseFloat(marketPriceRaw).toFixed(4), marketPriceSource } : {})
         });
       }
       const btn = document.getElementById('btnSubmitGrn');
@@ -9964,10 +10410,12 @@
         showToast('Goods Receipt posted & warehouse inventory updated', 'success');
         closeModal();
         const batchLine = (grn?.lines || []).find(l => l.batchId);
-        if (batchLine && batchLine.batchId) {
+        if ((grn?.pricingRecommendations || []).length > 0) {
+          openGrnSmartPricingModal(grn, batchLine?.batchId || null);
+        } else if (batchLine && batchLine.batchId) {
           openBatchLabelPrintModal(batchLine.batchId);
         }
-        renderPurchasingView('grn');
+        await renderPurchasingView('grn');
       } catch (err) {
         if (err && (err.errorCode === 'INV_BATCH_LOT_CONFLICT' || String(err.message || '').includes('INV_BATCH_LOT_CONFLICT') || err.status === 409)) {
           openModal({
@@ -10005,6 +10453,10 @@
         overrideReason = prompt('Enter manager override reason (min 5 chars):', 'Confirmed consolidated batch merge with price update') || '';
         if (overrideReason.trim().length < 5) return showToast('Reason of at least 5 characters required', 'warning');
       }
+      const patchedLines = (pending.lines || []).map(l => ({
+        ...l,
+        ...(l.batchNumber ? { lotConflictPolicy: policy } : {})
+      }));
       try {
         const grn = await apiFetch('/v1/goods-receipts', {
           method: 'POST',
@@ -10017,16 +10469,18 @@
             notes: pending.notes,
             lotConflictPolicy: policy,
             ...(overrideReason ? { conflictOverrideReason: overrideReason.trim() } : {}),
-            lines: pending.lines
+            lines: patchedLines
           })
         });
         showToast('Goods Receipt posted after conflict resolution', 'success');
         closeModal();
         const batchLine = (grn?.lines || []).find(l => l.batchId);
-        if (batchLine && batchLine.batchId) {
+        if ((grn?.pricingRecommendations || []).length > 0) {
+          openGrnSmartPricingModal(grn, batchLine?.batchId || null);
+        } else if (batchLine && batchLine.batchId) {
           openBatchLabelPrintModal(batchLine.batchId);
         }
-        renderPurchasingView('grn');
+        await renderPurchasingView('grn');
       } catch (err) {}
     }
 
@@ -12248,8 +12702,22 @@
                 </button>
               </div>
 
-              <!-- Category Quick-Selection Pills (F1) -->
-              ${categories.length > 0 ? `
+              <!-- Category Quick-Selection Pills (F1 Desktop) + A-Z Dropdown (Mobile <= 768px) -->
+              ${categories.length > 0 ? (() => {
+                const sortedCatsAlpha = [...categories].sort((a, b) =>
+                  String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' })
+                );
+                return `
+                <div class="pos-mobile-category-select-wrap">
+                  <select class="form-select" id="posMobileCategorySelect" aria-label="Filter POS items by category" onchange="filterPosCategory(this.value || null)">
+                    <option value="" ${!selectedCatId ? 'selected' : ''}>All Items (${products.length})</option>
+                    ${sortedCatsAlpha.map(cat => {
+                      const isSel = selectedCatId === cat.id;
+                      const count = products.filter(p => p.categoryId === cat.id || (p.categoryName && cat.name && p.categoryName.toLowerCase().trim() === cat.name.toLowerCase().trim())).length;
+                      return `<option value="${escapeHtml(cat.id)}" ${isSel ? 'selected' : ''}>${escapeHtml(cat.name)} (${count})</option>`;
+                    }).join('')}
+                  </select>
+                </div>
                 <div class="pos-category-pills" id="posCategoryPillsContainer" style="display: flex; gap: 6px; flex-wrap: nowrap; overflow-x: auto; padding: 2px 0 8px 0; margin-bottom: 8px; scrollbar-width: thin; -webkit-overflow-scrolling: touch; flex-shrink: 0;">
                   <button class="btn btn-sm pos-cat-pill ${!selectedCatId ? 'active' : ''}" data-cat-id="" data-active-bg="var(--accent-primary)" onclick="filterPosCategory(null)" style="border-radius: 20px; font-weight: 600; white-space: nowrap; ${!selectedCatId ? 'background: var(--accent-primary); color: #fff; border: 1px solid var(--accent-primary);' : 'background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-subtle);'}">
                     All Items (${products.length})
@@ -12267,7 +12735,8 @@
                     `;
                   }).join('')}
                 </div>
-              ` : ''}
+              `;
+              })() : ''}
 
               <!-- Catalog Products Container (Top-to-Bottom Sections) -->
               <div id="posProductSectionsContainer">
@@ -12441,6 +12910,143 @@
       });
     }
 
+    async function openPosManualBatchSelectModal(product, scannedCode = null, preloadedBatches = null) {
+      let batches = Array.isArray(preloadedBatches) ? preloadedBatches : null;
+      if (!batches) {
+        try {
+          const res = await apiFetch(`/v1/inventory/batches?warehouseId=${encodeURIComponent(state.warehouseId)}&productId=${encodeURIComponent(product.id)}&status=ACTIVE&limit=50`, { silent: true });
+          batches = res?.data || [];
+        } catch {
+          batches = [];
+        }
+      }
+      const todayIso = new Date().toISOString().slice(0, 10);
+      const sellable = (batches || []).filter(b => {
+        const cur = parseFloat(b.currentQuantity ?? b.availableQuantity ?? b.availableQty ?? '0') - (parseFloat(b.reservedQuantity || '0') || 0);
+        const notExp = !b.expiryDate || String(b.expiryDate).slice(0, 10) >= todayIso;
+        return b.status !== 'EXPIRED' && b.status !== 'QUARANTINED' && cur > 0 && notExp;
+      });
+      if (!sellable.length) {
+        playScanChime(false);
+        showToast(`No active non-expired batches available for "${product.name}"`, 'warning');
+        return;
+      }
+
+      window._manualBatchSelectionContext = { product, scannedCode, batches: sellable };
+      openModal({
+        title: `Select Batch: ${escapeHtml(product.name)}`,
+        maxWidth: '580px',
+        bodyHtml: `
+          <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 10px;">
+            This product uses <strong>MANUAL</strong> allocation policy. Choose the exact batch to deduct from inventory:
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 8px; max-height: 55vh; overflow-y: auto;">
+            ${sellable.map((b, idx) => {
+              const avail = parseFloat(b.currentQuantity ?? b.availableQuantity ?? b.availableQty ?? '0') - (parseFloat(b.reservedQuantity || '0') || 0);
+              const price = b.sellingPrice ?? product.retailPrice ?? product.sellingPrice ?? '0.0000';
+              return `
+                <button type="button" class="btn btn-secondary" style="display: flex; justify-content: space-between; align-items: center; text-align: left; padding: 10px 12px; border: 1px solid var(--border-subtle);" onclick="selectManualPosBatchIndex(${idx})">
+                  <div>
+                    <div style="font-weight: 700; color: var(--text-primary);">${escapeHtml(b.batchNumber || 'Batch')}</div>
+                    <div style="font-size: 11px; color: var(--text-secondary);">
+                      Avail: <strong>${formatQty(avail)} ${escapeHtml(product.baseUom || 'PCS')}</strong>
+                      ${b.expiryDate ? ` &bull; Exp: ${escapeHtml(String(b.expiryDate).slice(0, 10))}` : ''}
+                    </div>
+                  </div>
+                  <div style="font-weight: 700; color: var(--accent-primary);">${formatTenantMoney(price)}</div>
+                </button>
+              `;
+            }).join('')}
+          </div>
+        `,
+        footerHtml: `<button class="btn btn-secondary" onclick="closeModal()">Cancel</button>`
+      });
+    }
+
+    function selectManualPosBatchIndex(idx) {
+      const ctx = window._manualBatchSelectionContext;
+      const b = ctx?.batches?.[idx];
+      if (!ctx || !b) return;
+      const p = ctx.product;
+      const avail = Math.max(0, (parseFloat(b.currentQuantity ?? b.availableQuantity ?? b.availableQty ?? '0') || 0) - (parseFloat(b.reservedQuantity || '0') || 0));
+      const price = b.sellingPrice ?? p.retailPrice ?? p.sellingPrice ?? '0.0000';
+      closeModal();
+      playScanChime(true);
+      addToCart(p.id, p.sku, p.name, price, p.baseUom || 'PCS', p.trackInventory !== false, avail, {
+        batchId: b.batchId || b.id,
+        batchNumber: b.batchNumber,
+        internalBarcode: b.internalBarcode || null,
+        expiryDate: b.expiryDate ? String(b.expiryDate).slice(0, 10) : null,
+        isExactBatchLocked: true,
+        scannedBarcode: ctx.scannedCode || null,
+        priceSource: b.sellingPrice != null ? 'BATCH_EXPLICIT' : 'PRODUCT',
+        entrySource: ctx.scannedCode ? 'BARCODE_SCAN' : 'MANUAL'
+      });
+      showToast(`Selected Batch ${b.batchNumber} (${formatTenantMoney(price)})`, 'success');
+    }
+
+    async function openPosManualSerialSelectModal(product) {
+      let serials = [];
+      try {
+        const res = await apiFetch(`/v1/inventory/serials?warehouseId=${encodeURIComponent(state.warehouseId)}&productId=${encodeURIComponent(product.id)}&status=IN_STOCK&limit=50`, { silent: true });
+        serials = res?.data || [];
+      } catch {
+        serials = [];
+      }
+      if (!serials.length) {
+        playScanChime(false);
+        showToast(`No IN_STOCK serial units available for "${product.name}" in this warehouse`, 'warning');
+        return;
+      }
+      window._manualSerialSelectionContext = { product, serials };
+      openModal({
+        title: `Select Serial Unit: ${escapeHtml(product.name)}`,
+        maxWidth: '580px',
+        bodyHtml: `
+          <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 10px;">
+            Scan a serial barcode directly or choose an available unit below:
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 8px; max-height: 55vh; overflow-y: auto;">
+            ${serials.map((s, idx) => {
+              const price = s.sellingPrice ?? product.retailPrice ?? product.sellingPrice ?? '0.0000';
+              return `
+                <button type="button" class="btn btn-secondary" style="display: flex; justify-content: space-between; align-items: center; text-align: left; padding: 10px 12px; border: 1px solid var(--border-subtle);" onclick="selectManualPosSerialIndex(${idx})">
+                  <div>
+                    <div style="font-weight: 700; color: var(--text-primary); font-family: monospace;">${escapeHtml(s.serialNumber)}</div>
+                    <div style="font-size: 11px; color: var(--text-secondary);">
+                      ${s.internalBarcode ? `Barcode: <strong>${escapeHtml(s.internalBarcode)}</strong>` : 'No label barcode yet'}
+                      ${s.groupCode ? ` &bull; Group: ${escapeHtml(s.groupCode)}` : ''}
+                    </div>
+                  </div>
+                  <div style="font-weight: 700; color: var(--accent-primary);">${formatTenantMoney(price)}</div>
+                </button>
+              `;
+            }).join('')}
+          </div>
+        `,
+        footerHtml: `<button class="btn btn-secondary" onclick="closeModal()">Cancel</button>`
+      });
+    }
+
+    function selectManualPosSerialIndex(idx) {
+      const ctx = window._manualSerialSelectionContext;
+      const s = ctx?.serials?.[idx];
+      if (!ctx || !s) return;
+      const p = ctx.product;
+      const price = s.sellingPrice ?? p.retailPrice ?? p.sellingPrice ?? '0.0000';
+      closeModal();
+      playScanChime(true);
+      addToCart(p.id, p.sku, p.name, price, p.baseUom || 'PCS', p.trackInventory !== false, 1, {
+        serialId: s.id,
+        serialGroupId: s.serialGroupId || null,
+        serialNumber: s.serialNumber,
+        serialInternalBarcode: s.internalBarcode || null,
+        qty: 1,
+        priceSource: s.sellingPrice != null ? 'SERIAL_GROUP' : 'PRODUCT',
+        entrySource: 'MANUAL'
+      });
+    }
+
     async function handlePosProductCardClick(productId, cardEl = null) {
       const p = (state.posCachedProducts || []).find(x => x.id === productId);
       if (!p) return;
@@ -12455,11 +13061,20 @@
         return;
       }
 
+      if (p.trackingMode === 'SERIAL' && p.trackInventory !== false) {
+        await openPosManualSerialSelectModal(p);
+        return;
+      }
+
       // Instant fast-path (<5ms) for Batch-Tracked products using pre-warmed active warehouse batches
       if (p.trackingMode === 'BATCH' || p.trackingMode === 'BATCH_EXPIRY') {
         const cachedBatches = state.posBatchesByProductId instanceof Map
           ? state.posBatchesByProductId.get(p.id)
           : null;
+        if (p.allocationPolicy === 'MANUAL') {
+          await openPosManualBatchSelectModal(p, null, cachedBatches && cachedBatches.length ? cachedBatches : null);
+          return;
+        }
         if (Array.isArray(cachedBatches) && cachedBatches.length > 0) {
           const addedBatch = addNextFefoBatchLineSync(p, cachedBatches, null, 1, p.baseUom || 'PCS');
           if (addedBatch) {
@@ -12478,7 +13093,7 @@
         }
       }
 
-      // Instant synchronous cart add (<5ms) for standard / serial products — zero network round-trip!
+      // Instant synchronous cart add (<5ms) for standard products — zero network round-trip!
       const price = p.retailPrice || p.sellingPrice || '0.0000';
       addToCart(p.id, p.sku, p.name, price, p.baseUom || 'PCS', p.trackInventory !== false, p.availableQuantity);
     }
@@ -12692,6 +13307,8 @@
 
     function filterPosCategory(catId) {
       state.posSelectedCategoryId = catId || null;
+      const mobileSel = document.getElementById('posMobileCategorySelect');
+      if (mobileSel) mobileSel.value = catId || '';
       const pills = document.querySelectorAll('.pos-cat-pill');
       pills.forEach(p => {
         const pCatId = p.getAttribute('data-cat-id');
@@ -12883,6 +13500,12 @@
             playScanChime(false);
             if (resolved.requiresPricePrompt || String(resolved.blockedReason || '').includes('PRICE')) {
               openPosBatchOverridePriceModal(resolved, cleanCode);
+            } else if (resolved.exactSerial) {
+              const sInfo = resolved.exactSerial;
+              const reasonText = resolved.blockedReason === 'SERIAL_WRONG_WAREHOUSE'
+                ? 'belongs to another branch/warehouse'
+                : `status is ${sInfo.status}`;
+              showToast(`Blocked (${resolved.blockedReason}): Serial "${sInfo.serialNumber}" ${reasonText} and cannot be sold here.`, 'error');
             } else {
               showToast(`Blocked (${resolved.blockedReason}): Cannot sell batch ${resolved.exactBatch?.batchNumber || ''}`, 'error');
             }
@@ -12890,6 +13513,29 @@
           }
 
           const p = resolved.product;
+          if (resolved.isExactSerialLocked && resolved.exactSerial) {
+            const s = resolved.exactSerial;
+            if ((state.cart || []).some(item => item.serialId && item.serialId === s.id)) {
+              playScanChime(false);
+              showToast(`Serial "${s.serialNumber}" is already in the cart.`, 'warning');
+              return;
+            }
+            const unitPrice = resolved.effectiveUnitPrice ?? s.sellingPrice ?? p.sellingPrice ?? '0.0000';
+            playScanChime(true);
+            addToCart(p.id, p.sku, p.name, unitPrice, p.baseUom || 'PCS', p.trackInventory !== false, 1, {
+              serialId: s.id,
+              serialGroupId: s.serialGroupId || null,
+              serialNumber: s.serialNumber,
+              serialInternalBarcode: s.internalBarcode || cleanCode,
+              qty: 1,
+              scannedBarcode: s.internalBarcode || cleanCode,
+              priceSource: resolved.priceSource || 'SERIAL_GROUP',
+              entrySource: 'BARCODE_SCAN'
+            });
+            showToast(`Added Serial ${s.serialNumber} (${p.name}) — ${formatTenantMoney(unitPrice)}`, 'success');
+            return;
+          }
+
           if (resolved.isExactBatchLocked && resolved.exactBatch) {
             const b = resolved.exactBatch;
             const exactAvail = parseFloat(b.availableQty ?? b.availableQuantity ?? resolved.fefoPreview?.[0]?.availableQty ?? b.currentQuantity ?? '0') - (parseFloat(b.reservedQuantity ?? '0') || 0);
@@ -12920,6 +13566,11 @@
               }
             );
             showToast(`Locked Batch ${b.batchNumber} (${formatTenantMoney(resolved.effectiveUnitPrice)})`, 'success');
+            return;
+          }
+
+          if ((p.allocationPolicy === 'MANUAL') && (p.trackingMode === 'BATCH' || p.trackingMode === 'BATCH_EXPIRY')) {
+            await openPosManualBatchSelectModal(p, cleanCode, resolved.fefoPreview && resolved.fefoPreview.length ? resolved.fefoPreview : null);
             return;
           }
 
@@ -13152,7 +13803,114 @@
       }
     }
 
+    async function compressProductImageIfNeeded(file, mimeType) {
+      const readRaw = () => new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve({ dataUrl: String(e.target.result), mimeType });
+        reader.onerror = () => reject(new Error('Failed to read image file.'));
+        reader.readAsDataURL(file);
+      });
+
+      const raw = await readRaw();
+      // Only optimize large images (> 750 KB) when canvas compression is supported in browser
+      if (file.size <= 750 * 1024 || typeof document === 'undefined' || typeof Image === 'undefined') {
+        return raw;
+      }
+
+      try {
+        const img = await new Promise((resolve, reject) => {
+          const i = new Image();
+          i.onload = () => resolve(i);
+          i.onerror = () => reject(new Error('Decode failed'));
+          i.src = raw.dataUrl;
+        });
+        const maxDim = 1400;
+        const scale = Math.min(1, maxDim / Math.max(img.width || 1, img.height || 1));
+        const targetW = Math.max(1, Math.round((img.width || 1) * scale));
+        const targetH = Math.max(1, Math.round((img.height || 1) * scale));
+        const canvas = document.createElement('canvas');
+        canvas.width = targetW;
+        canvas.height = targetH;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return raw;
+        ctx.drawImage(img, 0, 0, targetW, targetH);
+        const targetMime = mimeType === 'image/png' ? 'image/webp' : mimeType;
+        const compressedUrl = canvas.toDataURL(targetMime, 0.85);
+        if (compressedUrl && compressedUrl.length < raw.dataUrl.length) {
+          return { dataUrl: compressedUrl, mimeType: targetMime };
+        }
+      } catch {}
+      return raw;
+    }
+
     // Product Image Upload & Management Helpers (BUG-018 & BUG-019)
+    async function uploadPreparedProductImage(mode, fileName, mimeType, dataUrl) {
+      const previewEl = document.getElementById(`${mode}ProdImagePreview`);
+      const previewWrapper = document.getElementById(`${mode}ProdImagePreviewWrapper`);
+      const statusEl = document.getElementById(`${mode}ProdImageStatus`);
+      const hiddenUrlInput = document.getElementById(`${mode}ProdImageUrl`);
+      const actionInput = document.getElementById(`${mode}ProdImageAction`);
+      const submitBtn = document.getElementById(mode === 'new' ? 'btnSubmitCreateProduct' : 'btnSubmitEditProduct');
+
+      if (previewEl) previewEl.src = dataUrl;
+      if (previewWrapper) previewWrapper.style.display = 'block';
+      if (statusEl) {
+        statusEl.style.display = 'block';
+        statusEl.style.color = 'var(--text-secondary)';
+        statusEl.textContent = 'Uploading image (25%)...';
+      }
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.dataset.originalText = submitBtn.dataset.originalText || submitBtn.textContent;
+        submitBtn.textContent = 'Uploading Image...';
+      }
+
+      window._pendingImageRetry = window._pendingImageRetry || {};
+      window._pendingImageRetry[mode] = { fileName, mimeType, dataUrl };
+
+      try {
+        const base64Data = String(dataUrl).split(',')[1];
+        if (statusEl) statusEl.textContent = 'Uploading image to server (65%)...';
+        const uploadRes = await apiFetch('/v1/products/upload-image', {
+          method: 'POST',
+          timeoutMs: 60000,
+          body: JSON.stringify({
+            filename: fileName,
+            mimeType,
+            dataBase64: base64Data,
+          }),
+        });
+
+        if (uploadRes && uploadRes.imageUrl) {
+          if (hiddenUrlInput) hiddenUrlInput.value = uploadRes.imageUrl;
+          if (actionInput) actionInput.value = 'replace';
+          if (statusEl) {
+            statusEl.style.color = '#10b981';
+            statusEl.textContent = `Image uploaded (100% — ${(Number(uploadRes.size || 0) / 1024).toFixed(0)} KB) ✓`;
+          }
+          delete window._pendingImageRetry[mode];
+          showToast('Product image uploaded', 'success');
+        }
+      } catch (err) {
+        if (statusEl) {
+          statusEl.style.color = '#ef4444';
+          statusEl.innerHTML = `Upload failed: ${escapeHtml(err.message)} <button type="button" class="btn btn-secondary btn-sm" style="margin-left: 6px; padding: 2px 8px; font-size: 11px;" onclick="retryPendingProductImageUpload('${mode}')">Retry Upload</button>`;
+        }
+        if (hiddenUrlInput) hiddenUrlInput.value = '';
+      } finally {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.textContent = submitBtn.dataset.originalText || (mode === 'new' ? 'Create Product' : 'Save Changes');
+        }
+      }
+    }
+
+    function retryPendingProductImageUpload(mode) {
+      const pending = window._pendingImageRetry?.[mode];
+      if (!pending) return;
+      uploadPreparedProductImage(mode, pending.fileName, pending.mimeType, pending.dataUrl);
+    }
+
     async function handleProductImageSelected(event, mode) {
       const file = event.target?.files?.[0];
       if (!file) return;
@@ -13182,66 +13940,22 @@
         return;
       }
 
-      const previewEl = document.getElementById(`${mode}ProdImagePreview`);
-      const previewWrapper = document.getElementById(`${mode}ProdImagePreviewWrapper`);
       const statusEl = document.getElementById(`${mode}ProdImageStatus`);
-      const hiddenUrlInput = document.getElementById(`${mode}ProdImageUrl`);
-      const actionInput = document.getElementById(`${mode}ProdImageAction`);
-      const submitBtn = document.getElementById(mode === 'new' ? 'btnSubmitCreateProduct' : 'btnSubmitEditProduct');
+      if (statusEl) {
+        statusEl.style.display = 'block';
+        statusEl.style.color = 'var(--text-secondary)';
+        statusEl.textContent = 'Preparing image preview & optimizing size...';
+      }
 
-      // Read as base64 and show preview immediately (BUG-019)
-      const reader = new FileReader();
-      reader.onload = async (e) => {
-        const dataUrl = e.target.result;
-        if (previewEl) previewEl.src = dataUrl;
-        if (previewWrapper) previewWrapper.style.display = 'block';
+      try {
+        const prepared = await compressProductImageIfNeeded(file, mimeType);
+        await uploadPreparedProductImage(mode, file.name, prepared.mimeType, prepared.dataUrl);
+      } catch (err) {
         if (statusEl) {
-          statusEl.style.display = 'block';
-          statusEl.style.color = 'var(--text-secondary)';
-          statusEl.textContent = 'Uploading image... ⏳';
+          statusEl.style.color = '#ef4444';
+          statusEl.textContent = `Could not process image: ${err.message}`;
         }
-        if (submitBtn) {
-          submitBtn.disabled = true;
-          submitBtn.dataset.originalText = submitBtn.textContent;
-          submitBtn.textContent = 'Uploading Image...';
-        }
-
-        try {
-          const base64Data = String(dataUrl).split(',')[1];
-          const uploadRes = await apiFetch('/v1/products/upload-image', {
-            method: 'POST',
-            body: JSON.stringify({
-              filename: file.name,
-              mimeType: mimeType,
-              dataBase64: base64Data,
-            }),
-          });
-
-          if (uploadRes && uploadRes.imageUrl) {
-            if (hiddenUrlInput) hiddenUrlInput.value = uploadRes.imageUrl;
-            if (actionInput) actionInput.value = 'replace';
-            if (statusEl) {
-              statusEl.style.color = '#10b981';
-              statusEl.textContent = 'Image uploaded successfully ✓';
-            }
-            showToast('Product image uploaded', 'success');
-          }
-        } catch (err) {
-          if (statusEl) {
-            statusEl.style.color = '#ef4444';
-            statusEl.textContent = `Upload failed: ${err.message}`;
-          }
-          showToast(`Image upload failed: ${err.message}`, 'error');
-          if (previewWrapper) previewWrapper.style.display = 'none';
-          if (hiddenUrlInput) hiddenUrlInput.value = '';
-        } finally {
-          if (submitBtn) {
-            submitBtn.disabled = false;
-            submitBtn.textContent = submitBtn.dataset.originalText || (mode === 'new' ? 'Create Product' : 'Save Changes');
-          }
-        }
-      };
-      reader.readAsDataURL(file);
+      }
     }
 
     function removeProductImage(mode) {
@@ -14293,8 +15007,12 @@
             ? `<span class="batch-lock-badge" title="Scanned exact NB-B batch barcode (FEFO replacement disabled)">NB-B Locked &bull; ${escapeHtml(line.batchNumber || 'Batch')}</span>`
             : `<span class="batch-fefo-badge" title="Auto-allocated via FEFO/FIFO">${escapeHtml(line.batchNumber || 'Batch')}</span>`)
         : '';
+      const serialBadgeHtml = line.serialId
+        ? `<span class="batch-lock-badge" title="Serial unit ${escapeHtml(line.serialInternalBarcode || line.serialNumber || '')}">SN: ${escapeHtml(line.serialNumber || line.serialInternalBarcode || 'Serial')}</span>`
+        : '';
       const maxInSellingUom = (() => {
         if (!line.trackInventory) return 999999;
+        if (line.serialId) return 1;
         const prod = (state.posCachedProducts || []).find(p => p.id === line.productId);
         const base = line.baseUom || prod?.baseUom || line.uomCode;
         const usedQty = line.batchId
@@ -14320,16 +15038,20 @@
                     ? `${formatQty(line.qty)} ${escapeHtml(line.uomCode)} &times; ${formatTenantMoney(pricePerLabel)} / ${escapeHtml(priceUomLabel)}`
                     : `${formatTenantMoney(line.unitPrice)} / ${escapeHtml(line.uomCode)}`}
                 </div>
-                ${(batchBadgeHtml || line.expiryDate || line.priceSource === 'OVERRIDE') ? `
+                ${(batchBadgeHtml || serialBadgeHtml || line.expiryDate || line.priceSource === 'OVERRIDE') ? `
                   <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px;">
                     ${batchBadgeHtml}
+                    ${serialBadgeHtml}
                     ${line.expiryDate ? `<span style="font-size: 10px; color: var(--text-secondary); white-space: nowrap;">Exp: ${escapeHtml(line.expiryDate)}</span>` : ''}
                     ${line.priceSource === 'OVERRIDE' ? `<span class="badge-pill badge-yellow" style="font-size: 10px;">Override</span>` : ''}
                   </div>
                 ` : ''}
               </div>
               <div class="cart-line-controls">
-                ${isVar ? `
+                ${line.serialId ? `
+                  <span style="font-size: 12px; font-weight: 600; padding: 0 6px;">1 ${escapeHtml(line.uomCode)}</span>
+                  <button class="btn btn-danger btn-sm" style="padding: 2px 6px; font-size: 11px;" onclick="updateCartQty(${idx}, -999999)" title="Remove">&times;</button>
+                ` : isVar ? `
                   <button class="btn btn-secondary btn-sm" style="padding: 2px 7px; font-size: 11px;" onclick="openVariableQtyPosModal('${line.productId}', ${idx}, '${escapeHtml(line.entrySource || 'MANUAL_WEIGHT')}')" title="Edit weight/unit">⚖️ ${formatQty(line.qty)} ${escapeHtml(line.uomCode)}</button>
                   <button class="btn btn-danger btn-sm" style="padding: 2px 6px; font-size: 11px;" onclick="updateCartQty(${idx}, -999999)" title="Remove">&times;</button>
                 ` : `
@@ -14571,14 +15293,24 @@
       const qtyToAdd = extraMeta?.qty ? parseFloat(extraMeta.qty) : 1;
       const entrySource = extraMeta?.entrySource || 'MANUAL';
       const batchId = extraMeta?.batchId || null;
+      const serialId = extraMeta?.serialId || null;
       const isExactBatchLocked = Boolean(extraMeta?.isExactBatchLocked);
+
+      if (serialId && (state.cart || []).some(i => i.serialId && i.serialId === serialId)) {
+        showToast(`Serial unit "${extraMeta?.serialNumber || serialId}" is already in the cart.`, 'warning');
+        return;
+      }
 
       if (isTracked && avail <= 0) {
         showToast(`"${name}" is out of stock (0 available)`, 'error');
         return;
       }
 
-      const baseToAdd = convertClientUomQty(qtyToAdd, uomCode, baseUom, cachedProd) ?? qtyToAdd;
+      const baseToAdd = convertClientUomQty(qtyToAdd, uomCode, baseUom, cachedProd);
+      if (baseToAdd === null) {
+        showToast(`Incompatible UoM "${uomCode}" for base stock unit "${baseUom}" on "${name}".`, 'error');
+        return;
+      }
       const existingUsed = batchId
         ? getTotalCartBaseQtyForBatch(batchId)
         : getTotalCartBaseQtyForProduct(productId);
@@ -14592,10 +15324,11 @@
         return;
       }
 
-      // Key cart lines by productId + batchId + uomCode + unitPrice so different batches/prices never merge silently
-      const existingIndex = state.cart.findIndex(i =>
+      // Key cart lines by productId + batchId + serialId + uomCode + unitPrice so distinct serials/batches never merge silently
+      const existingIndex = serialId ? -1 : state.cart.findIndex(i =>
         i.productId === productId &&
         (i.batchId || null) === batchId &&
+        !i.serialId &&
         i.uomCode === uomCode &&
         (parseFloat(i.unitPrice || '0').toFixed(4) === safePrice) &&
         Boolean(i.isExactBatchLocked) === isExactBatchLocked
@@ -14631,9 +15364,13 @@
           internalBarcode: extraMeta?.internalBarcode || null,
           expiryDate: extraMeta?.expiryDate || null,
           isExactBatchLocked,
+          serialId,
+          serialGroupId: extraMeta?.serialGroupId || null,
+          serialNumber: extraMeta?.serialNumber || null,
+          serialInternalBarcode: extraMeta?.serialInternalBarcode || null,
           scannedBarcode: extraMeta?.scannedBarcode || null,
           overrideSellingPrice: extraMeta?.overrideSellingPrice || null,
-          priceSource: extraMeta?.priceSource || (batchId ? 'BATCH' : 'PRODUCT'),
+          priceSource: extraMeta?.priceSource || (serialId ? 'SERIAL_GROUP' : batchId ? 'BATCH' : 'PRODUCT'),
           fefoPreview: extraMeta?.fefoPreview || null
         });
       }
@@ -14795,6 +15532,56 @@
       savePosDraftCartAuto();
     }
 
+    // Global UoM-normalized pre-checkout stock validator (2.9 & 4.4)
+    function validateCartStockBeforeCheckout() {
+      const seenSerialIds = new Set();
+      const productGroups = new Map();
+      const batchGroups = new Map();
+
+      for (const item of state.cart || []) {
+        if (item.serialId) {
+          if (seenSerialIds.has(item.serialId)) {
+            showToast(`Duplicate serial unit "${item.serialNumber || item.serialId}" in cart.`, 'error');
+            return false;
+          }
+          seenSerialIds.add(item.serialId);
+          if (Math.abs((parseFloat(item.qty) || 0) - 1) > 1e-6) {
+            showToast(`Serial unit "${item.serialNumber || item.name}" must have quantity 1.`, 'error');
+            return false;
+          }
+        }
+        if (!item.trackInventory) continue;
+
+        const prod = (state.posCachedProducts || []).find(p => p.id === item.productId);
+        const baseUom = item.baseUom || prod?.baseUom || item.uomCode || 'PCS';
+        const convertedBase = convertClientUomQty(item.qty, item.uomCode, baseUom, prod);
+        if (convertedBase === null || !Number.isFinite(convertedBase) || convertedBase <= 0) {
+          showToast(`Incompatible selling UoM "${item.uomCode}" for stock unit "${baseUom}" on "${item.name}".`, 'error');
+          return false;
+        }
+        item.normalizedBaseQty = convertedBase;
+
+        const avail = parseFloat(item.availableQuantity ?? prod?.availableQuantity ?? '0') || 0;
+        if (item.batchId) {
+          const prev = batchGroups.get(item.batchId) || { qty: 0, avail, baseUom, label: `${item.name} (Batch ${item.batchNumber || ''})` };
+          prev.qty += convertedBase;
+          batchGroups.set(item.batchId, prev);
+        } else {
+          const prev = productGroups.get(item.productId) || { qty: 0, avail, baseUom, label: item.name };
+          prev.qty += convertedBase;
+          productGroups.set(item.productId, prev);
+        }
+      }
+
+      for (const grp of [...batchGroups.values(), ...productGroups.values()]) {
+        if (grp.qty > grp.avail + 1e-9) {
+          showToast(`Insufficient stock for "${grp.label}": requested ${formatQty(grp.qty)} ${grp.baseUom}, available ${formatQty(grp.avail)} ${grp.baseUom}.`, 'error');
+          return false;
+        }
+      }
+      return true;
+    }
+
     // Checkout & Payment Modal
     function openPaymentDrawer() {
       if (!state.activeShift) {
@@ -14807,12 +15594,8 @@
         return;
       }
 
-      // BUG-020 Pre-validate stock before opening checkout drawer
-      for (const item of state.cart) {
-        if (item.trackInventory && item.qty > (item.availableQuantity || 0)) {
-          showToast(`Cannot proceed to checkout: "${item.name}" quantity (${item.qty}) exceeds available stock (${item.availableQuantity || 0} PCS)`, 'error');
-          return;
-        }
+      if (!validateCartStockBeforeCheckout()) {
+        return;
       }
 
       // Generate or reuse a stable checkout idempotency key for this intentional checkout attempt
@@ -15222,12 +16005,8 @@
         return;
       }
 
-      // Guard against stock oversubscription
-      for (const item of state.cart) {
-        if (item.trackInventory && item.qty > (item.availableQuantity || 0)) {
-          showToast(`Checkout blocked: "${item.name}" quantity (${item.qty}) exceeds available stock (${item.availableQuantity || 0})`, 'error');
-          return;
-        }
+      if (!validateCartStockBeforeCheckout()) {
+        return;
       }
 
       const grandTotal = calculateCartGrandTotal();
@@ -15260,6 +16039,9 @@
       const lines = state.cart.map(c => ({
         productId: c.productId,
         ...(c.batchId ? { batchId: c.batchId } : {}),
+        ...(c.serialId ? { serialId: c.serialId } : {}),
+        ...(c.serialGroupId ? { serialGroupId: c.serialGroupId } : {}),
+        ...(c.serialNumber ? { serialNumber: c.serialNumber } : {}),
         ...(c.scannedBarcode ? { scannedBarcode: c.scannedBarcode } : {}),
         ...(c.overrideSellingPrice != null ? { overrideSellingPrice: c.overrideSellingPrice } : {}),
         quantity: Number(c.qty).toFixed(6),
@@ -17937,7 +18719,7 @@
         ] = await Promise.all([
           apiFetch('/v1/subscriptions/entitlement').catch(() => ({
             planCode: 'PROFESSIONAL',
-            planName: 'Professional',
+            planName: 'Pro',
             status: 'TRIALING',
             billingCycle: 'MONTHLY',
             maxBranches: 5,
@@ -18593,7 +19375,7 @@
         {
           code: 'STARTER',
           name: 'Starter',
-          description: 'Core online POS, single-branch inventory, and standard reports.',
+          description: 'Core online POS, single-branch inventory, Batch & Expiry tracking, and standard reports.',
           isCustomPricing: false,
           monthlyPriceAmount: '2990.0000',
           annualDiscountPct: '15.00',
@@ -18603,12 +19385,12 @@
           limits: { maxBranches: 1, maxUsers: 3, maxProducts: 2500, maxStorageMb: 10240 },
           trialDays: 30,
           supportLevel: 'Email Support',
-          features: { desktopOfflinePos: false, multiBranchManagement: false, apiAccess: false, batchTracking: false, posPaymentCard: false, barcodeFull: true }
+          features: { desktopOfflinePos: false, multiBranchManagement: false, apiAccess: false, batchTracking: true, expiryTracking: true, fefoFifoAllocation: true, serialTracking: false, posPaymentCard: false, barcodeFull: true }
         },
         {
           code: 'PROFESSIONAL',
-          name: 'Professional',
-          description: 'Multi-branch operations, Desktop & Mobile Offline POS, stock transfers, API access, and batch/serial tracking.',
+          name: 'Pro',
+          description: 'Multi-branch operations, Desktop & Mobile Offline POS, stock transfers, API access, and serial tracking.',
           isCustomPricing: false,
           monthlyPriceAmount: '5990.0000',
           annualDiscountPct: '15.00',
@@ -18618,7 +19400,7 @@
           limits: { maxBranches: 5, maxUsers: 15, maxProducts: 25000, maxStorageMb: 51200 },
           trialDays: 30,
           supportLevel: 'Priority Support',
-          features: { desktopOfflinePos: true, multiBranchManagement: true, apiAccess: true, batchTracking: true, posPaymentCard: true, barcodeFull: true }
+          features: { desktopOfflinePos: true, multiBranchManagement: true, apiAccess: true, batchTracking: true, expiryTracking: true, fefoFifoAllocation: true, serialTracking: true, posPaymentCard: true, barcodeFull: true }
         },
         {
           code: 'ENTERPRISE',
@@ -18633,7 +19415,7 @@
           limits: { maxBranches: 100, maxUsers: 500, maxProducts: 1000000, maxStorageMb: 512000 },
           trialDays: 30,
           supportLevel: 'Dedicated Support + SLA',
-          features: { desktopOfflinePos: true, multiBranchManagement: true, apiAccess: true, batchTracking: true, posPaymentCard: true, barcodeFull: true }
+          features: { desktopOfflinePos: true, multiBranchManagement: true, apiAccess: true, batchTracking: true, expiryTracking: true, fefoFifoAllocation: true, serialTracking: true, posPaymentCard: true, barcodeFull: true }
         }
       ];
     }
@@ -18789,7 +19571,7 @@
                       <li>✓ <strong>${plan.isCustomPricing ? 'Custom' : formatSubStorageMb(pLim.maxStorageMb, false)}</strong> storage</li>
                       <li>${feat.desktopOfflinePos ? '✓ Offline Desktop &amp; Mobile POS' : '• Online POS &amp; Core Inventory'}</li>
                       <li>${feat.multiBranchManagement ? '✓ Multi-Branch &amp; Transfers + API' : '• Barcode &amp; Standard Exports'}</li>
-                      <li>${feat.batchTracking ? '✓ Batch, Expiry, Serial &amp; FEFO' : '• Cash POS Checkout'}</li>
+                      <li>${feat.serialTracking ? '✓ Batch, Expiry, Serial &amp; FEFO' : feat.batchTracking ? '✓ Batch &amp; Expiry + FEFO/FIFO/Manual' : '• Cash POS Checkout'}</li>
                       <li>✓ ${escapeHtml(plan.supportLevel || 'Support')}</li>
                     </ul>
                   </div>
@@ -18816,7 +19598,7 @@
               <div style="font-size: 14px; font-weight: 700;">Additional Branch Capacity (Hybrid Add-On)</div>
               <div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">
                 ${addonUnitFee ? `Extra branches on <strong>${escapeHtml(ent.planName || ent.planCode)}</strong> cost <strong>${formatSubLkr(addonUnitFee)}/mo</strong> each (prorated for remaining cycle days).` : 'Custom enterprise branch pricing.'}
-                Note: Adding branches increases branch quota only and does not unlock Professional features.
+                Note: Adding branches increases branch quota only and does not unlock Pro features.
               </div>
             </div>
             <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
@@ -18937,10 +19719,11 @@
       const plans = (Array.isArray(cache.plans) && cache.plans.length > 0) ? cache.plans : getSubFallbackCatalog();
       const matrixFeatures = [
         { key: 'onlinePos', label: 'Online POS & Sales Register' },
+        { key: 'batchTracking', label: 'Batch & Expiry Tracking (FEFO/FIFO/Manual)' },
+        { key: 'serialTracking', label: 'Serial Number Tracking & Barcodes' },
         { key: 'desktopOfflinePos', label: 'Desktop Offline POS & Sync' },
         { key: 'mobileOfflinePos', label: 'Mobile Offline POS & Sync' },
         { key: 'multiBranchManagement', label: 'Multi-Branch & Stock Transfers' },
-        { key: 'batchTracking', label: 'Batch, Expiry, Serial & FEFO' },
         { key: 'posPaymentCard', label: 'Card, Bank Transfer & Split POS Payments' },
         { key: 'advancedReports', label: 'Advanced & Multi-Branch Reports' },
         { key: 'apiAccess', label: 'API Access & Automated Backups' }
@@ -18952,7 +19735,7 @@
             <span>Plan Feature Comparison Matrix</span>
             <span style="font-size: 11px; color: var(--text-secondary);">Live entitlement definitions from NexStock server</span>
           </div>
-          <div class="sub-feature-matrix-wrap">
+          <div class="sub-feature-matrix-wrap sub-matrix-desktop">
             <table class="sub-feature-matrix-table">
               <thead>
                 <tr>
@@ -18984,6 +19767,24 @@
                 `).join('')}
               </tbody>
             </table>
+          </div>
+          <div class="sub-matrix-mobile-cards">
+            ${matrixFeatures.map(f => `
+              <div style="border: 1px solid var(--border-subtle); border-radius: 10px; padding: 10px 12px; background: var(--bg-hover);">
+                <div style="font-size: 12px; font-weight: 700; margin-bottom: 8px;">${escapeHtml(f.label)}</div>
+                <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px;">
+                  ${plans.map(p => {
+                    const on = Boolean(p.features?.[f.key]);
+                    return `
+                      <div style="padding: 5px 4px; border-radius: 6px; border: 1px solid var(--border-subtle); background: var(--bg-primary); text-align: center; font-size: 11px;">
+                        <div style="font-weight: 600; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(p.name)}</div>
+                        <div style="margin-top: 2px; font-weight: 700; color: ${on ? 'var(--status-success)' : 'var(--text-tertiary)'};">${on ? '✓ Yes' : '—'}</div>
+                      </div>
+                    `;
+                  }).join('')}
+                </div>
+              </div>
+            `).join('')}
           </div>
         </div>
 
@@ -19280,7 +20081,7 @@
             <select id="paFilterPlanCode" class="form-input" style="width: 160px;">
               <option value="">All Plans</option>
               <option value="STARTER" ${f.planCode === 'STARTER' ? 'selected' : ''}>Starter</option>
-              <option value="PROFESSIONAL" ${f.planCode === 'PROFESSIONAL' ? 'selected' : ''}>Professional</option>
+              <option value="PROFESSIONAL" ${f.planCode === 'PROFESSIONAL' ? 'selected' : ''}>Pro</option>
               <option value="ENTERPRISE" ${f.planCode === 'ENTERPRISE' ? 'selected' : ''}>Enterprise</option>
             </select>
             <select id="paFilterStatus" class="form-input" style="width: 180px;">
@@ -19401,7 +20202,7 @@
             <select id="paBizPlanSelect" class="form-input" style="width: 150px;">
               <option value="">All Plans</option>
               <option value="STARTER" ${f.planCode === 'STARTER' ? 'selected' : ''}>Starter</option>
-              <option value="PROFESSIONAL" ${f.planCode === 'PROFESSIONAL' ? 'selected' : ''}>Professional</option>
+              <option value="PROFESSIONAL" ${f.planCode === 'PROFESSIONAL' ? 'selected' : ''}>Pro</option>
               <option value="ENTERPRISE" ${f.planCode === 'ENTERPRISE' ? 'selected' : ''}>Enterprise</option>
             </select>
             <select id="paBizStatusSelect" class="form-input" style="width: 170px;">
@@ -19891,18 +20692,29 @@
       const me = pa.securityMe || {};
       const admins = pa.admins || [];
       const logs = pa.auditLogs || [];
+      const mfaState = me.mfaState || (me.mfaVerified ? 'VERIFIED' : me.mfaEnabled ? 'ENABLED_STEP_UP_REQUIRED' : me.hasPendingSecret ? 'PENDING_VERIFICATION' : 'DISABLED');
+      const mfaBadge = mfaState === 'VERIFIED'
+        ? '<span class="badge-pill badge-green">Verified Session</span>'
+        : mfaState === 'PENDING_VERIFICATION'
+          ? '<span class="badge-pill badge-amber">Pending Verification</span>'
+          : mfaState === 'ENABLED_STEP_UP_REQUIRED'
+            ? '<span class="badge-pill badge-amber">Step-Up Verification Needed</span>'
+            : '<span class="badge-pill badge-red">2FA Setup Required</span>';
       return `
         <div class="pa-split-grid">
           <div class="card" style="margin-bottom: 0;">
             <div class="card-title">Platform Admin 2FA / TOTP Verification</div>
-            <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 10px;">
-              Sensitive governance operations require active MFA verification. Status: <strong style="color: var(--text-primary);">${me.mfaVerified ? 'Verified Session' : 'Verification Needed'}</strong>
+            <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 10px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+              <span>Super Admin governance operations require active 2FA/TOTP verification.</span>
+              ${mfaBadge}
             </div>
             <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px;">
-              <button type="button" class="btn btn-secondary btn-sm" onclick="setupPaTotp()">Generate / Reset TOTP Secret</button>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="setupPaTotp()">${me.mfaEnabled ? 'Re-Enroll TOTP Secret' : 'Initialize TOTP Setup'}</button>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="rotatePaTotpSecret()">Rotate Compromised Secret</button>
             </div>
             ${pa.mfaSetupData ? `
               <div style="padding: 10px; border: 1px dashed var(--accent-primary); border-radius: 8px; margin-bottom: 12px; font-size: 12px;">
+                <div style="font-weight: 600; color: var(--accent-primary); margin-bottom: 4px;">Scan or enter once — this secret disappears after verification</div>
                 <div>Secret Key: <code style="user-select: all;">${escapeHtml(pa.mfaSetupData.secretBase32 || pa.mfaSetupData.secret || '')}</code></div>
                 <div style="margin-top: 4px; word-break: break-all;">URI: <code>${escapeHtml(pa.mfaSetupData.otpauthUri)}</code></div>
               </div>
@@ -19916,12 +20728,16 @@
           <div class="card" style="margin-bottom: 0;">
             <div class="card-title">Platform Admin Roles (${admins.length})</div>
             <div style="display: flex; flex-direction: column; gap: 8px; font-size: 12px;">
-                ${admins.map(a => `
+                ${admins.map(a => {
+                  const isSuper = (a.platformRole || a.roleCode) === 'SUPER_ADMIN';
+                  const mfaRequired = isSuper || Boolean(a.mfaEnforced);
+                  return `
                 <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; padding-bottom: 6px; border-bottom: 1px solid var(--border-subtle);">
-                  <div><strong>${escapeHtml(a.email)}</strong><div>Role: ${escapeHtml(a.platformRole || a.roleCode || 'ADMIN')} &bull; MFA: ${a.mfaEnforced ? 'Required' : 'Optional'}</div></div>
+                  <div><strong>${escapeHtml(a.email)}</strong><div>Role: ${escapeHtml(a.platformRole || a.roleCode || 'ADMIN')} &bull; MFA: <strong>${mfaRequired ? 'Required' : 'Optional'}</strong></div></div>
                   <span class="badge-pill ${paStatusBadgeClass(a.status)}">${escapeHtml(a.status)}</span>
                 </div>
-              `).join('')}
+              `;
+                }).join('')}
             </div>
           </div>
         </div>
@@ -19944,24 +20760,36 @@
       const pa = ensurePlatformAdminState();
       try {
         pa.mfaSetupData = await apiFetch('/v1/platform/security/mfa/setup', { method: 'POST', body: JSON.stringify({}) });
-        showToast('TOTP secret generated. Enter a 6-digit code from your authenticator app.', 'info');
+        showToast('TOTP secret generated. Enter a 6-digit code from your authenticator app to activate.', 'info');
+        await loadPlatformAdminTabData('security');
         drawPlatformAdminConsole();
-      } catch (err) {
-        showToast(err?.message || 'Unable to initialize TOTP setup', 'error');
-      }
+      } catch {}
+    }
+
+    async function rotatePaTotpSecret() {
+      const pa = ensurePlatformAdminState();
+      try {
+        pa.mfaSetupData = await apiFetch('/v1/platform/security/mfa/rotate', {
+          method: 'POST',
+          body: JSON.stringify({ reason: 'Security rotation initiated from Platform Admin console' })
+        });
+        showToast('New TOTP secret generated. Verify with your authenticator app immediately.', 'warning');
+        await loadPlatformAdminTabData('security');
+        drawPlatformAdminConsole();
+      } catch {}
     }
 
     async function verifyPaTotpSubmit(event) {
       event.preventDefault();
+      const pa = ensurePlatformAdminState();
       try {
         const code = document.getElementById('paTotpCodeInput')?.value?.trim() || '';
         await apiFetch('/v1/platform/security/mfa/verify', { method: 'POST', body: JSON.stringify({ code }) });
+        pa.mfaSetupData = null;
         showToast('Platform Admin 2FA verified!', 'success');
         await loadPlatformAdminTabData('security');
         drawPlatformAdminConsole();
-      } catch (err) {
-        showToast(err?.message || 'Invalid TOTP verification code', 'error');
-      }
+      } catch {}
     }
 
     function renderPaHealthTab(pa) {
@@ -20971,9 +21799,9 @@
 
           showToast('Batch created and inventory intake recorded successfully', 'success');
           closeModal();
-          renderBatchesView();
+          await renderBatchesView();
         } catch (err) {
-          showToast(`Error creating batch: ${err.message}`, 'error');
+          // Error toast already displayed by apiFetch unless silent
         } finally {
           if (submitBtn) {
             submitBtn.disabled = false;
@@ -21395,21 +22223,238 @@
       };
     }
 
+    async function openSerialGroupLabelPrintModal(groupId) {
+      let group = await apiFetch(`/v1/inventory/serial-groups/${groupId}`, { silent: true }).catch(() => null);
+      if (!group) {
+        showToast('Serial stock group not found for label printing', 'error');
+        return;
+      }
+
+      const missingBarcode = (group.serials || []).some(s => !s.internalBarcode);
+      if (missingBarcode) {
+        const updated = await apiFetch(`/v1/inventory/serial-groups/${groupId}/barcodes/generate`, {
+          method: 'POST',
+          silent: true,
+          body: JSON.stringify({})
+        }).catch(() => null);
+        if (updated) group = updated;
+      }
+
+      const serials = group.serials || [];
+      if (!serials.length) {
+        showToast('No serial units found in this stock group', 'warning');
+        return;
+      }
+
+      const branding = state.tenantBranding || {};
+      const shopName = branding.shopDisplayName || state.tenantName || 'NexStock Store';
+      const logoUrl = branding.logoUrl ? resolveMediaUrl(branding.logoUrl) : '';
+      const productName = group.productName || group.productSku || group.productId;
+
+      const buildSerialLabelHtml = (serialItem, opts) => {
+        const fmt = opts.format || 'THERMAL_50X30';
+        const spec = getLabelFormatSpec(fmt);
+        const code = serialItem.internalBarcode || serialItem.serialNumber;
+        const svg = renderBarcodeSvg(code, 'CODE128', {
+          height: spec.bcHeight,
+          barWidth: spec.bcBarW,
+          fontSize: spec.bcFont,
+          quietZone: 8,
+          svgStyle: opts.forPrint
+            ? `width:100%; max-width:${spec.svgMaxW}; height:${spec.svgH}; max-height:${spec.svgH}; display:block; margin:0 auto;`
+            : `width:100%; max-width:220px; height:42px; display:block; margin:0 auto;`
+        });
+        const serialMeta = `S/N: <strong>${escapeHtml(serialItem.serialNumber)}</strong>`;
+        const sellPrice = serialItem.sellingPrice ?? group.sellingPrice;
+
+        return `
+          <div class="shop-branded-label-preview" ${opts.forPrint ? '' : `data-format="${escapeHtml(fmt)}" style="max-width: 280px; margin: 0 auto;"`}>
+            <div class="shop-label-header">
+              ${logoUrl ? `<img src="${escapeHtml(logoUrl)}" alt="" style="height:${opts.forPrint ? spec.logoH : '16px'}; max-width:14mm; object-fit:contain;" onerror="this.style.display='none'" />` : ''}
+              <span class="shop-label-store">${escapeHtml(shopName)}</span>
+            </div>
+            <div class="shop-label-product">${escapeHtml(productName)}</div>
+            <div class="shop-label-meta">${serialMeta}</div>
+            <div class="shop-label-barcode">${svg}</div>
+            ${opts.showPrice && sellPrice != null ? `<div class="shop-label-price">${formatTenantMoney(sellPrice)}</div>` : ''}
+          </div>
+        `;
+      };
+
+      openModal({
+        title: `Print Serial Labels — Group ${escapeHtml(group.groupCode)}`,
+        maxWidth: '660px',
+        bodyHtml: `
+          <div style="display: grid; grid-template-columns: 1fr auto; gap: 10px; margin-bottom: 10px; align-items: end;">
+            <div class="form-group" style="margin: 0;">
+              <label class="form-label">Thermal / Sheet Format</label>
+              <select class="form-select" id="serialLabelFormat">
+                <option value="THERMAL_50X30" selected>Thermal 50 &times; 30 mm (Standard)</option>
+                <option value="THERMAL_40X30">Thermal 40 &times; 30 mm</option>
+                <option value="THERMAL_50X40">Thermal 50 &times; 40 mm</option>
+                <option value="THERMAL_58">Thermal Roll 58 mm</option>
+                <option value="THERMAL_80">Thermal Roll 80 mm</option>
+                <option value="A4_SHEET">A4 Sheet (21 Labels Grid)</option>
+              </select>
+            </div>
+            <label style="display: inline-flex; align-items: center; gap: 6px; font-size: 12px; min-height: 38px; cursor: pointer;">
+              <input type="checkbox" id="serialLblShowPrice" checked /> Show Price (${formatTenantMoney(group.sellingPrice)})
+            </label>
+          </div>
+
+          <div style="border: 1px solid var(--border-subtle); border-radius: 8px; padding: 10px; margin-bottom: 12px; background: var(--bg-hover);">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 8px;">
+              <strong style="font-size: 12px;">Select Serial Units (<span id="serialPrintSelectedCount">${serials.length}</span> / ${serials.length})</strong>
+              <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                <button type="button" class="btn btn-secondary btn-sm" id="btnSerialSelectAll">Select All</button>
+                <button type="button" class="btn btn-secondary btn-sm" id="btnSerialDeselectAll">Deselect All</button>
+                <button type="button" class="btn btn-secondary btn-sm" id="btnSerialSelectInStock">In-Stock Only</button>
+              </div>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 4px; max-height: 170px; overflow-y: auto;">
+              ${serials.map(s => `
+                <label style="display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 6px; background: var(--bg-primary); border: 1px solid var(--border-subtle); font-size: 12px; cursor: pointer;">
+                  <span style="display: inline-flex; align-items: center; gap: 8px; min-width: 0;">
+                    <input type="checkbox" class="serial-print-cb" value="${escapeHtml(s.id)}" data-status="${escapeHtml(s.status)}" checked />
+                    <strong style="font-family: monospace;">${escapeHtml(s.serialNumber)}</strong>
+                    <span style="color: var(--text-secondary); font-family: monospace; font-size: 11px;">${escapeHtml(s.internalBarcode || '')}</span>
+                  </span>
+                  <span style="font-size: 11px; color: var(--text-secondary); white-space: nowrap;">
+                    ${escapeHtml(s.status)}${(s.labelPrintCount || 0) > 0 ? ` &bull; Printed &times;${s.labelPrintCount}` : ''}
+                  </span>
+                </label>
+              `).join('')}
+            </div>
+          </div>
+
+          <div id="serialLabelLivePreviewWrap">
+            ${buildSerialLabelHtml(serials[0], { format: 'THERMAL_50X30', showPrice: true, forPrint: false })}
+          </div>
+        `,
+        footerHtml: `
+          <button class="btn btn-secondary" onclick="closeModal()">Close</button>
+          <button class="btn btn-primary" id="btnPrintSerialGroupLabelsNow">Print Selected Labels (${serials.length})</button>
+        `
+      });
+
+      const syncSelectedUi = () => {
+        const checked = Array.from(document.querySelectorAll('.serial-print-cb:checked'));
+        const cntEl = document.getElementById('serialPrintSelectedCount');
+        if (cntEl) cntEl.textContent = String(checked.length);
+        const btn = document.getElementById('btnPrintSerialGroupLabelsNow');
+        if (btn) btn.textContent = `Print Selected Labels (${checked.length})`;
+        const firstId = checked[0]?.value || serials[0].id;
+        const previewSerial = serials.find(s => s.id === firstId) || serials[0];
+        const fmt = document.getElementById('serialLabelFormat')?.value || 'THERMAL_50X30';
+        const showPrice = Boolean(document.getElementById('serialLblShowPrice')?.checked);
+        const wrap = document.getElementById('serialLabelLivePreviewWrap');
+        if (wrap) wrap.innerHTML = buildSerialLabelHtml(previewSerial, { format: fmt, showPrice, forPrint: false });
+      };
+
+      document.getElementById('btnSerialSelectAll').onclick = () => {
+        document.querySelectorAll('.serial-print-cb').forEach(cb => { cb.checked = true; });
+        syncSelectedUi();
+      };
+      document.getElementById('btnSerialDeselectAll').onclick = () => {
+        document.querySelectorAll('.serial-print-cb').forEach(cb => { cb.checked = false; });
+        syncSelectedUi();
+      };
+      document.getElementById('btnSerialSelectInStock').onclick = () => {
+        document.querySelectorAll('.serial-print-cb').forEach(cb => { cb.checked = cb.dataset.status === 'IN_STOCK'; });
+        syncSelectedUi();
+      };
+      document.querySelectorAll('.serial-print-cb').forEach(cb => cb.addEventListener('change', syncSelectedUi));
+      document.getElementById('serialLabelFormat')?.addEventListener('change', syncSelectedUi);
+      document.getElementById('serialLblShowPrice')?.addEventListener('change', syncSelectedUi);
+
+      document.getElementById('btnPrintSerialGroupLabelsNow').onclick = async () => {
+        const selectedIds = Array.from(document.querySelectorAll('.serial-print-cb:checked')).map(cb => cb.value);
+        if (!selectedIds.length) {
+          showToast('Select at least one serial unit to print.', 'warning');
+          return;
+        }
+        const selectedSerials = serials.filter(s => selectedIds.includes(s.id));
+        const format = document.getElementById('serialLabelFormat')?.value || 'THERMAL_50X30';
+        const showPrice = Boolean(document.getElementById('serialLblShowPrice')?.checked);
+        const spec = getLabelFormatSpec(format);
+        const cardsHtml = selectedSerials.map(s =>
+          `<div class="batch-print-item">${buildSerialLabelHtml(s, { format, showPrice, forPrint: true })}</div>`
+        ).join('');
+
+        let pageStyles = '';
+        let printableHtml = '';
+        let pageDims = { w: spec.w, h: spec.h };
+        if (spec.isA4Grid) {
+          pageDims = { w: '210mm', h: '297mm' };
+          pageStyles = `
+            @page { size: A4 portrait; margin: 8mm 7mm; }
+            html, body { width: 210mm; margin: 0; padding: 0; }
+            .a4-grid { display: grid; grid-template-columns: repeat(3, ${spec.w}); grid-auto-rows: ${spec.h}; gap: 0mm 2.5mm; justify-content: center; }
+            .batch-print-item { width: ${spec.w}; height: ${spec.h}; max-height: ${spec.h}; border: 0.5px dashed #bbb; padding: ${spec.pad}; box-sizing: border-box; overflow: hidden; page-break-inside: avoid; break-inside: avoid; }
+            .shop-branded-label-preview { width: 100%; height: 100%; border: none; padding: 0; margin: 0; box-sizing: border-box; overflow: hidden; display: flex; flex-direction: column; justify-content: space-between; align-items: center; text-align: center; }
+            .shop-label-header { width: 100%; font-weight: 800; font-size: ${spec.headerPt}; line-height: 1.05; border-bottom: 0.5px solid #000; padding-bottom: 0.4mm; display: flex; align-items: center; justify-content: center; gap: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+            .shop-label-product { width: 100%; font-weight: 700; font-size: ${spec.prodPt}; line-height: 1.1; color: #000; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+            .shop-label-meta { width: 100%; font-size: ${spec.metaPt}; line-height: 1.05; color: #222; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+            .shop-label-barcode { width: 100%; max-height: ${spec.svgH}; display: flex; justify-content: center; align-items: center; overflow: hidden; }
+            .shop-label-price { width: 100%; font-weight: 800; font-size: ${spec.pricePt}; line-height: 1.05; color: #000; white-space: nowrap; }
+          `;
+          printableHtml = `<div class="a4-grid">${cardsHtml}</div>`;
+        } else {
+          pageStyles = `
+            @page { size: ${spec.w} ${spec.h}; margin: 0mm; }
+            html, body { width: ${spec.w}; margin: 0; padding: 0; }
+            .batch-print-item { width: ${spec.w}; height: ${spec.h}; max-height: ${spec.h}; padding: ${spec.pad}; box-sizing: border-box; overflow: hidden; page-break-inside: avoid; break-inside: avoid; }
+            .batch-print-item:not(:last-child) { page-break-after: always; break-after: page; }
+            .shop-branded-label-preview { width: 100%; height: 100%; border: none; padding: 0; margin: 0; box-sizing: border-box; overflow: hidden; display: flex; flex-direction: column; justify-content: space-between; align-items: center; text-align: center; }
+            .shop-label-header { width: 100%; font-weight: 800; font-size: ${spec.headerPt}; line-height: 1.05; border-bottom: 0.5px solid #000; padding-bottom: 0.4mm; display: flex; align-items: center; justify-content: center; gap: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+            .shop-label-product { width: 100%; font-weight: 700; font-size: ${spec.prodPt}; line-height: 1.1; color: #000; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+            .shop-label-meta { width: 100%; font-size: ${spec.metaPt}; line-height: 1.05; color: #222; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+            .shop-label-barcode { width: 100%; max-height: ${spec.svgH}; display: flex; justify-content: center; align-items: center; overflow: hidden; }
+            .shop-label-price { width: 100%; font-weight: 800; font-size: ${spec.pricePt}; line-height: 1.05; color: #000; white-space: nowrap; }
+          `;
+          printableHtml = cardsHtml;
+        }
+
+        printHtmlDocument(printableHtml, pageStyles, pageDims);
+        await apiFetch(`/v1/inventory/serial-groups/${groupId}/print-log`, {
+          method: 'POST',
+          silent: true,
+          body: JSON.stringify({ serialIds: selectedIds, format })
+        }).catch(() => {});
+        showToast(`Sent ${selectedSerials.length} serial label(s) to print queue.`, 'success');
+        await renderSerialsView();
+      };
+    }
+
+    async function generateSingleSerialBarcode(serialId) {
+      try {
+        const res = await apiFetch(`/v1/inventory/serials/${serialId}/barcode/generate`, {
+          method: 'POST',
+          body: JSON.stringify({})
+        });
+        showToast(`Barcode ready: ${res?.internalBarcode || 'Generated'}`, 'success');
+        await renderSerialsView();
+      } catch {}
+    }
+
     // =========================================================================
-    // 11. ADVANCED INVENTORY: SERIAL REGISTRY VIEW
+    // 11. ADVANCED INVENTORY: SERIAL REGISTRY & STOCK GROUPS VIEW
     // =========================================================================
     async function renderSerialsView() {
       const container = document.getElementById('mainContainer');
       try {
         const whParam = state.warehouseId ? `warehouseId=${encodeURIComponent(state.warehouseId)}&` : '';
-        const [serialsRes, prodsRes] = await Promise.all([
+        const [groupsRes, serialsRes, prodsRes] = await Promise.all([
+          apiFetch(`/v1/inventory/serial-groups?${whParam}includeSerials=true&limit=50`, { silent: true }).catch(() => ({ data: [] })),
           apiFetch(`/v1/inventory/serials?${whParam}limit=100`, { silent: true }).catch(() => ({ data: [] })),
-          apiFetch('/v1/products?limit=100', { silent: true }).catch(() => ({ data: [] }))
+          apiFetch('/v1/products?limit=200', { silent: true }).catch(() => ({ data: [] }))
         ]);
 
+        const groups = groupsRes.data || [];
         const serials = serialsRes.data || [];
         const products = prodsRes.data || [];
         const prodMap = new Map(products.map(p => [p.id, p]));
+        const serialEntitled = typeof hasPlanFeature === 'function' ? hasPlanFeature('serialTracking') : true;
 
         const inStock = serials.filter(s => s.status === 'IN_STOCK').length;
         const sold = serials.filter(s => s.status === 'SOLD').length;
@@ -21419,16 +22464,29 @@
         container.innerHTML = `
           <div class="view-header">
             <div>
-              <h1 class="view-title">Serial Number Registry</h1>
-              <div class="view-subtitle">Individual piece tracking, status lifecycle audit, and warranty/sale verification</div>
+              <h1 class="view-title">Serial Number Registry &amp; Stock Groups ${!serialEntitled ? '<span class="badge-pill badge-purple" style="font-size: 11px; vertical-align: middle;">PRO</span>' : ''}</h1>
+              <div class="view-subtitle">Serial stock intake groups (per-lot cost &amp; selling price), unique NB-S barcodes, label printing &amp; lifecycle tracking</div>
             </div>
             <button class="btn btn-primary" id="btnOpenRegisterSerialsModal">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-              Register Serial Numbers
+              Register Serial Stock Group
             </button>
           </div>
 
+          ${!serialEntitled ? `
+            <div class="card" style="border-color: var(--accent-primary); background: rgba(99, 102, 241, 0.08); display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;">
+              <div style="font-size: 13px;">
+                <strong>Serial Tracking is a Pro / Enterprise feature.</strong> Historical records stay visible, and registering new serial groups requires upgrading your plan.
+              </div>
+              <button class="btn btn-primary btn-sm" onclick="navigateTo('subscription')">Upgrade to Pro</button>
+            </div>
+          ` : ''}
+
           <div class="kpi-grid">
+            <div class="kpi-card">
+              <div class="kpi-label">Stock Intake Groups</div>
+              <div class="kpi-value" style="color: var(--accent-primary);">${groups.length}</div>
+            </div>
             <div class="kpi-card">
               <div class="kpi-label">In-Stock Serials</div>
               <div class="kpi-value" style="color: var(--status-success);">${inStock}</div>
@@ -21438,25 +22496,52 @@
               <div class="kpi-value">${sold}</div>
             </div>
             <div class="kpi-card">
-              <div class="kpi-label">Quarantined</div>
-              <div class="kpi-value" style="color: var(--status-warning);">${quarantined}</div>
-            </div>
-            <div class="kpi-card">
-              <div class="kpi-label">Damaged / Written-Off</div>
-              <div class="kpi-value" style="color: var(--status-danger);">${damaged}</div>
+              <div class="kpi-label">Quarantined / Damaged</div>
+              <div class="kpi-value" style="color: var(--status-warning);">${quarantined + damaged}</div>
             </div>
           </div>
 
+          ${groups.length > 0 ? `
+            <div class="card">
+              <div class="card-title">Serial Stock Intake Groups (${groups.length})</div>
+              <div style="display: flex; flex-direction: column; gap: 10px;">
+                ${groups.map(g => {
+                  const prod = prodMap.get(g.productId);
+                  const prodLabel = g.productName ? `${g.productSku || ''} - ${g.productName}` : (prod ? `${prod.sku} - ${prod.name}` : g.productId);
+                  return `
+                    <div style="border: 1px solid var(--border-subtle); border-radius: 10px; padding: 12px; background: var(--bg-hover);">
+                      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 6px;">
+                        <div>
+                          <strong style="font-family: monospace; color: var(--accent-primary);">${escapeHtml(g.groupCode)}</strong>
+                          <span style="margin-left: 8px; font-weight: 600;">${escapeHtml(prodLabel)}</span>
+                        </div>
+                        <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                          <span class="badge-pill ${g.remainingQuantity > 0 ? 'badge-green' : 'badge-yellow'}">${g.remainingQuantity} / ${g.initialQuantity} In Stock</span>
+                          <button class="btn btn-primary btn-sm" onclick="openSerialGroupLabelPrintModal('${escapeHtml(g.id)}')">Print Group Labels</button>
+                        </div>
+                      </div>
+                      <div style="font-size: 12px; color: var(--text-secondary); display: flex; gap: 16px; flex-wrap: wrap;">
+                        <span>Purchase Cost: <strong style="color: var(--text-primary);">${formatTenantMoney(g.purchaseCost)}</strong></span>
+                        <span>Selling Price: <strong style="color: var(--accent-primary);">${formatTenantMoney(g.sellingPrice)}</strong></span>
+                        <span>Received: ${escapeHtml(new Date(g.receivedAt).toLocaleDateString())}</span>
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            </div>
+          ` : ''}
+
           <div class="card">
             <div class="card-title">
-              <span>Tracked Serials</span>
-              <input type="text" id="serialSearchInput" class="form-input" placeholder="Quick search serial #..." style="width: 240px; padding: 4px 8px; font-size: 13px;">
+              <span>Tracked Serials (${serials.length})</span>
+              <input type="text" id="serialSearchInput" class="form-input" placeholder="Search serial # or NB-S barcode..." style="width: 240px; padding: 4px 8px; font-size: 13px;">
             </div>
             ${serials.length === 0 ? `
               <div class="empty-state-card">
                 <svg class="empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="4" width="18" height="16" rx="2"></rect><line x1="7" y1="8" x2="17" y2="8"></line><line x1="7" y1="12" x2="12" y2="12"></line><line x1="7" y1="16" x2="12" y2="16"></line></svg>
                 <div class="empty-state-title">No serial numbers found</div>
-                <p class="empty-state-desc">No serials found. Click "Register Serial Numbers" to intake items.</p>
+                <p class="empty-state-desc">No serials found. Click "Register Serial Stock Group" to intake items.</p>
               </div>
             ` : `
               <div class="desktop-table-container">
@@ -21465,11 +22550,10 @@
                     <thead>
                       <tr>
                         <th>Serial Number</th>
+                        <th>Barcode &amp; Group</th>
                         <th>Product</th>
-                        <th>Lifecycle Status</th>
-                        <th>Unit Cost (${escapeHtml(getTenantCurrency())})</th>
-                        <th>Received At</th>
-                        <th>Sold At</th>
+                        <th>Status</th>
+                        <th>Cost / Sell Price</th>
                         <th>Actions</th>
                       </tr>
                     </thead>
@@ -21480,17 +22564,26 @@
                         if (s.status === 'SOLD') badgeClass = 'badge-blue';
                         else if (s.status === 'QUARANTINED') badgeClass = 'badge-yellow';
                         else if (s.status === 'DAMAGED' || s.status === 'WRITTEN_OFF') badgeClass = 'badge-red';
+                        const searchHay = `${s.serialNumber} ${s.internalBarcode || ''} ${s.groupCode || ''}`.toLowerCase();
 
                         return `
-                          <tr class="serial-row" data-sn="${s.serialNumber.toLowerCase()}">
-                            <td><strong style="font-family: monospace; font-size: 13px;">${s.serialNumber}</strong></td>
-                            <td>${prod ? `${prod.sku} - ${prod.name}` : s.productId}</td>
-                            <td><span class="badge-pill ${badgeClass}">${s.status}</span></td>
-                            <td>${formatTenantMoney(s.unitCost)}</td>
-                            <td>${new Date(s.receivedAt).toLocaleDateString()}</td>
-                            <td>${s.soldAt ? new Date(s.soldAt).toLocaleDateString() : '—'}</td>
+                          <tr class="serial-row" data-sn="${escapeHtml(searchHay)}">
+                            <td><strong style="font-family: monospace; font-size: 13px;">${escapeHtml(s.serialNumber)}</strong></td>
                             <td>
-                              <button class="btn btn-secondary btn-sm" onclick="openSerialTransitionModal('${s.id}', '${s.serialNumber}', '${s.status}')">Transition Status</button>
+                              ${s.internalBarcode ? `<code style="font-size: 11px;">${escapeHtml(s.internalBarcode)}</code>` : `<button class="btn btn-secondary btn-sm" style="font-size: 11px; padding: 2px 6px;" onclick="generateSingleSerialBarcode('${escapeHtml(s.id)}')">Gen Barcode</button>`}
+                              ${s.groupCode ? `<div style="font-size: 11px; color: var(--text-secondary);">Group: ${escapeHtml(s.groupCode)}</div>` : ''}
+                            </td>
+                            <td>${prod ? `${escapeHtml(prod.sku)} - ${escapeHtml(prod.name)}` : escapeHtml(s.productId)}</td>
+                            <td><span class="badge-pill ${badgeClass}">${escapeHtml(s.status)}</span></td>
+                            <td>
+                              <div>Cost: ${formatTenantMoney(s.unitCost)}</div>
+                              ${s.sellingPrice != null ? `<div style="font-size: 11px; color: var(--accent-primary);">Sell: <strong>${formatTenantMoney(s.sellingPrice)}</strong></div>` : ''}
+                            </td>
+                            <td>
+                              <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                                ${s.serialGroupId ? `<button class="btn btn-secondary btn-sm" onclick="openSerialGroupLabelPrintModal('${escapeHtml(s.serialGroupId)}')">Labels</button>` : ''}
+                                <button class="btn btn-secondary btn-sm" onclick="openSerialTransitionModal('${escapeHtml(s.id)}', '${escapeHtml(s.serialNumber)}', '${escapeHtml(s.status)}')">Status</button>
+                              </div>
                             </td>
                           </tr>
                         `;
@@ -21508,30 +22601,32 @@
                   if (s.status === 'SOLD') badgeClass = 'badge-blue';
                   else if (s.status === 'QUARANTINED') badgeClass = 'badge-yellow';
                   else if (s.status === 'DAMAGED' || s.status === 'WRITTEN_OFF') badgeClass = 'badge-red';
+                  const searchHay = `${s.serialNumber} ${s.internalBarcode || ''} ${s.groupCode || ''}`.toLowerCase();
 
                   return `
-                    <div class="entity-card serial-row" data-sn="${s.serialNumber.toLowerCase()}">
+                    <div class="entity-card serial-row" data-sn="${escapeHtml(searchHay)}">
                       <div class="entity-card-header">
                         <span class="entity-card-code"><strong style="font-family: monospace;">${escapeHtml(s.serialNumber)}</strong></span>
-                        <span class="badge-pill ${badgeClass}">${s.status}</span>
+                        <span class="badge-pill ${badgeClass}">${escapeHtml(s.status)}</span>
                       </div>
                       <div class="entity-card-title">${prodTitle}</div>
                       <div class="entity-card-details">
                         <div class="detail-row">
-                          <span class="detail-label">Unit Cost</span>
-                          <span class="detail-value">${formatTenantMoney(s.unitCost)}</span>
+                          <span class="detail-label">Internal Barcode</span>
+                          <span class="detail-value" style="font-family: monospace;">${escapeHtml(s.internalBarcode || 'Not generated')}</span>
                         </div>
                         <div class="detail-row">
-                          <span class="detail-label">Received At</span>
-                          <span class="detail-value">${new Date(s.receivedAt).toLocaleDateString()}</span>
+                          <span class="detail-label">Cost / Selling</span>
+                          <span class="detail-value">${formatTenantMoney(s.unitCost)} / ${s.sellingPrice != null ? formatTenantMoney(s.sellingPrice) : 'Default'}</span>
                         </div>
                         <div class="detail-row">
-                          <span class="detail-label">Sold At</span>
-                          <span class="detail-value">${s.soldAt ? new Date(s.soldAt).toLocaleDateString() : '—'}</span>
+                          <span class="detail-label">Stock Group</span>
+                          <span class="detail-value">${escapeHtml(s.groupCode || '—')}</span>
                         </div>
                       </div>
-                      <div class="entity-card-footer">
-                        <button class="btn btn-secondary btn-sm" style="width: 100%;" onclick="openSerialTransitionModal('${s.id}', '${s.serialNumber}', '${s.status}')">Transition Status</button>
+                      <div class="entity-card-footer" style="display: flex; gap: 6px; flex-wrap: wrap;">
+                        ${s.serialGroupId ? `<button class="btn btn-primary btn-sm" style="flex: 1;" onclick="openSerialGroupLabelPrintModal('${escapeHtml(s.serialGroupId)}')">Print Labels</button>` : ''}
+                        <button class="btn btn-secondary btn-sm" style="flex: 1;" onclick="openSerialTransitionModal('${escapeHtml(s.id)}', '${escapeHtml(s.serialNumber)}', '${escapeHtml(s.status)}')">Status</button>
                       </div>
                     </div>
                   `;
@@ -21550,7 +22645,7 @@
           });
         };
       } catch (err) {
-        container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load serials: ${err.message}</div>`;
+        container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load serials: ${escapeHtml(err.message)}</div>`;
       }
     }
 
@@ -21577,30 +22672,48 @@
         return;
       }
 
+      const firstProd = serialTracked[0];
+      const defaultCost = firstProd?.purchaseCost ? parseFloat(firstProd.purchaseCost).toFixed(2) : getCurrencyDefaultCost();
+      const defaultSell = firstProd?.sellingPrice ? parseFloat(firstProd.sellingPrice).toFixed(2) : getCurrencyDefaultPrice();
       const prodOptions = serialTracked.map(p =>
-        `<option value="${p.id}">${escapeHtml(p.sku)} - ${escapeHtml(p.name)} (SERIAL)</option>`
+        `<option value="${escapeHtml(p.id)}" data-cost="${escapeHtml(p.purchaseCost || '0')}" data-sell="${escapeHtml(p.sellingPrice || '0')}">${escapeHtml(p.sku)} - ${escapeHtml(p.name)} (SERIAL)</option>`
       ).join('');
 
       const html = `
-        <div style="font-size: 18px; font-weight: 700; margin-bottom: 16px;">Register Serial Numbers</div>
+        <div style="font-size: 18px; font-weight: 700; margin-bottom: 12px;">Register Serial Stock Intake Group</div>
         <form id="registerSerialsForm">
-          <div class="form-group">
-            <label class="form-label">Product</label>
-            <select class="form-select" id="regSerialProductId" required>
-              ${prodOptions}
-            </select>
+          <div class="modal-grid-2">
+            <div class="form-group">
+              <label class="form-label">Product *</label>
+              <select class="form-select" id="regSerialProductId" required onchange="const opt=this.options[this.selectedIndex]; if(opt){const c=document.getElementById('regSerialCost'); const s=document.getElementById('regSerialSellingPrice'); if(c) c.value=parseFloat(opt.dataset.cost||'0').toFixed(2); if(s) s.value=parseFloat(opt.dataset.sell||'0').toFixed(2);}">
+                ${prodOptions}
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Stock Group Code (Optional)</label>
+              <input type="text" class="form-input" id="regSerialGroupCode" placeholder="Auto-generated if blank">
+            </div>
+          </div>
+          <div class="modal-grid-2">
+            <div class="form-group">
+              <label class="form-label">Purchase Cost (${escapeHtml(getTenantCurrency())}) *</label>
+              <input type="number" step="${getCurrencyInputStep()}" min="0" class="form-input" id="regSerialCost" value="${defaultCost}" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Group Selling Price (${escapeHtml(getTenantCurrency())}) *</label>
+              <input type="number" step="${getCurrencyInputStep()}" min="0" class="form-input" id="regSerialSellingPrice" value="${defaultSell}" required>
+            </div>
           </div>
           <div class="form-group">
-            <label class="form-label">Serial Numbers (One per line or comma-separated)</label>
+            <label class="form-label">Serial Numbers (One per line or comma-separated) *</label>
             <textarea class="form-input" id="regSerialNumbers" rows="4" placeholder="SN-10001&#10;SN-10002&#10;SN-10003" required style="font-family: monospace;"></textarea>
           </div>
-          <div class="form-group">
-            <label class="form-label">Unit Cost (${escapeHtml(getTenantCurrency())})</label>
-            <input type="number" step="${getCurrencyInputStep()}" min="0" class="form-input" id="regSerialCost" value="${getCurrencyDefaultCost()}" required>
-          </div>
-          <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px;">
+          <label style="display: flex; align-items: center; gap: 8px; font-size: 12px; cursor: pointer; margin-bottom: 12px;">
+            <input type="checkbox" id="regSerialAutoPrint" checked /> Generate NB-S barcodes &amp; open label print workflow immediately
+          </label>
+          <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px;">
             <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-            <button type="submit" id="btnSubmitRegisterSerials" class="btn btn-primary">Intake Serials</button>
+            <button type="submit" id="btnSubmitRegisterSerials" class="btn btn-primary">Intake Serial Group</button>
           </div>
         </form>
       `;
@@ -21620,42 +22733,42 @@
 
           if (serialNumbers.length === 0) {
             showToast('Please enter at least one serial number', 'error');
-            if (submitBtn) {
-              submitBtn.disabled = false;
-              submitBtn.textContent = 'Intake Serials';
-            }
             return;
           }
 
+          const groupCode = document.getElementById('regSerialGroupCode')?.value?.trim() || undefined;
           const payload = {
             branchId: state.branchId,
             warehouseId: state.warehouseId,
             productId: document.getElementById('regSerialProductId').value,
+            ...(groupCode ? { groupCode } : {}),
             serialNumbers,
-            unitCost: parseFloat(document.getElementById('regSerialCost').value).toFixed(4)
+            unitCost: parseFloat(document.getElementById('regSerialCost').value).toFixed(4),
+            sellingPrice: parseFloat(document.getElementById('regSerialSellingPrice').value).toFixed(4),
+            generateBarcodes: true
           };
 
-          const idempotencyKey = crypto.randomUUID();
-
-          await apiFetch('/v1/inventory/serials', {
+          const createdSerials = await apiFetch('/v1/inventory/serials', {
             method: 'POST',
             headers: {
-              'idempotency-key': idempotencyKey
+              'idempotency-key': crypto.randomUUID()
             },
             body: JSON.stringify(payload)
           });
 
-          showToast(`Successfully registered ${serialNumbers.length} serials and recorded stock intake in ledger`, 'success');
+          const shouldAutoPrint = Boolean(document.getElementById('regSerialAutoPrint')?.checked);
+          showToast(`Registered ${serialNumbers.length} serials with unique NB-S barcodes`, 'success');
           closeModal();
-          renderSerialsView();
-          if (typeof renderBalancesView === 'function') renderBalancesView();
-          if (typeof renderMovementsView === 'function') renderMovementsView();
+          await renderSerialsView();
+          if (shouldAutoPrint && Array.isArray(createdSerials) && createdSerials[0]?.serialGroupId) {
+            openSerialGroupLabelPrintModal(createdSerials[0].serialGroupId);
+          }
         } catch (err) {
-          showToast(`Error registering serials: ${err.message}`, 'error');
+          // Single toast already shown by apiFetch (prevents duplicate notifications)
         } finally {
           if (submitBtn) {
             submitBtn.disabled = false;
-            submitBtn.textContent = 'Intake Serials';
+            submitBtn.textContent = 'Intake Serial Group';
           }
         }
       };
@@ -21702,9 +22815,9 @@
 
           showToast(`Serial "${serialNumber}" updated to ${payload.toStatus}`, 'success');
           closeModal();
-          renderSerialsView();
+          await renderSerialsView();
         } catch (err) {
-          showToast(`Transition failed: ${err.message}`, 'error');
+          // Error toast already displayed by apiFetch
         }
       };
     }

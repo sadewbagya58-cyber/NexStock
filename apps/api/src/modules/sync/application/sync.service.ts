@@ -393,21 +393,21 @@ async function executeDomainSyncCommand(
         await assertFeatureEntitlement(
           cmdTrx,
           isMobile ? 'mobileOfflinePos' : 'desktopOfflinePos',
-          'Offline device synchronization requires a Professional or Enterprise subscription plan.',
+          'Offline device synchronization requires a Pro or Enterprise subscription plan.',
         );
       }
       if (rawCmdType === 'INV_REQUEST_TRANSFER') {
         await assertFeatureEntitlement(
           cmdTrx,
           'stockTransfers',
-          'Inter-branch stock transfers require a Professional or Enterprise plan.',
+          'Inter-branch stock transfers require a Pro or Enterprise plan.',
         );
       }
       if (rawCmdType === 'INV_SERIAL_OPERATION') {
         await assertFeatureEntitlement(
           cmdTrx,
           'serialTracking',
-          'Serial number tracking requires a Professional or Enterprise plan.',
+          'Serial number tracking requires a Pro or Enterprise plan.',
         );
       }
     } catch (err) {

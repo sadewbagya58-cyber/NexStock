@@ -227,7 +227,7 @@ export function assertOfflineSecurityAndCapability(params: {
     if (!params.isOnline && isWriteOp && snap.offlineEntitled === false) {
       throw new OfflineEngineError(
         'OFFLINE_SUBSCRIPTION_NOT_ENTITLED',
-        `Offline POS & Inventory requires a Professional or Enterprise plan (current plan: ${snap.planCode}).`,
+        `Offline POS & Offline Inventory require a Pro or Enterprise plan (current plan: ${snap.planCode}).`,
         403,
       );
     }
@@ -238,7 +238,7 @@ export function assertOfflineSecurityAndCapability(params: {
     ) {
       throw new OfflineEngineError(
         'OFFLINE_SUBSCRIPTION_NOT_ENTITLED',
-        'Offline stock transfer requests require a Professional or Enterprise plan.',
+        'Offline stock transfer requests require a Pro or Enterprise plan.',
         403,
       );
     }
@@ -249,7 +249,7 @@ export function assertOfflineSecurityAndCapability(params: {
     ) {
       throw new OfflineEngineError(
         'OFFLINE_SUBSCRIPTION_NOT_ENTITLED',
-        'Serial number tracking requires a Professional or Enterprise plan.',
+        'Serial number tracking requires a Pro or Enterprise plan.',
         403,
       );
     }

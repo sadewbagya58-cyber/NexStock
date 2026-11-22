@@ -182,6 +182,33 @@ export async function uploadProductImage(
   // Use the verified binary format (reconciles client/browser MIME discrepancies)
   const effectiveMime: AllowedMimeType = detectedMime;
 
+  const canonicalBase64 = buffer.toString('base64');
+  const existingDuplicate = await trx.db
+    .selectFrom('product_media_assets')
+    .select(['id', 'mime_type', 'file_size', 'storage_path', 'data_base64'])
+    .where('tenant_id', '=', trx.tenantId)
+    .where('file_size', '=', buffer.length)
+    .where('mime_type', '=', effectiveMime)
+    .execute();
+
+  const matchedAsset = existingDuplicate.find(
+    (asset) => asset.data_base64 === canonicalBase64,
+  );
+  if (matchedAsset) {
+    const matchedExt =
+      matchedAsset.mime_type === 'image/jpeg'
+        ? 'jpg'
+        : matchedAsset.mime_type === 'image/png'
+          ? 'png'
+          : 'webp';
+    return {
+      imageUrl: `/v1/media/${trx.tenantId}/${matchedAsset.id}.${matchedExt}`,
+      mimeType: matchedAsset.mime_type,
+      size: matchedAsset.file_size,
+      storagePath: matchedAsset.storage_path,
+    };
+  }
+
   const ent = await getTenantSubscriptionEntitlement(trx);
   if (!ent.allowAdminOverride) {
     const usedBytes = await calculateTenantStorageUsageBytes(trx);
@@ -217,7 +244,7 @@ export async function uploadProductImage(
       mime_type: effectiveMime,
       file_size: buffer.length,
       storage_path: storagePath,
-      data_base64: buffer.toString('base64'),
+      data_base64: canonicalBase64,
       created_at: new Date(),
     })
     .execute();

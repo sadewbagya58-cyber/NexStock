@@ -45,7 +45,7 @@ describe('@nexstock/offline-engine — Phase 10.5 Offline Subscription & Read-On
       offlineAuthExpiresAt: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
       subscriptionSnapshot: {
         planCode: sub.planCode,
-        planName: sub.planCode === 'STARTER' ? 'Starter' : 'Professional',
+        planName: sub.planCode === 'STARTER' ? 'Starter' : 'Pro',
         status: sub.status as 'ACTIVE',
         isReadOnly: sub.status === 'READ_ONLY' || sub.status === 'EXPIRED' || sub.status === 'SUSPENDED',
         inGracePeriod: sub.status === 'GRACE_PERIOD',
@@ -271,7 +271,7 @@ describe('@nexstock/offline-engine — Phase 10.5 Offline Subscription & Read-On
           isOnline: false,
         },
       }),
-    ).rejects.toThrow(/Professional|Offline POS/i);
+    ).rejects.toThrow(/Pro|Offline POS/i);
 
     await expect(
       inventory.recordStockAdjustment({
@@ -286,6 +286,6 @@ describe('@nexstock/offline-engine — Phase 10.5 Offline Subscription & Read-On
           isOnline: false,
         },
       }),
-    ).rejects.toThrow(/Professional|Offline Inventory/i);
+    ).rejects.toThrow(/Pro|Offline Inventory/i);
   });
 });

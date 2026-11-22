@@ -130,6 +130,7 @@ export interface TenantsTable {
   status: Generated<TenantLifecycleStatus>;
   shop_display_name?: string | null;
   logo_url?: string | null;
+  onboarding_idempotency_key?: string | null;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
 }
@@ -728,6 +729,8 @@ export interface ProductUnitConversionsTable {
   uom_code: string;
   uom_name: string;
   conversion_factor_to_base: string;
+  is_default_purchasing: Generated<boolean>;
+  is_default_selling: Generated<boolean>;
   is_active: Generated<boolean>;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
@@ -924,6 +927,9 @@ export interface SalesInvoiceLinesTable {
   unit_cost_snapshot: Generated<string>;
   batch_id: string | null;
   serial_id: string | null;
+  serial_group_id: ColumnType<string | null, string | null | undefined, string | null | undefined>;
+  serial_number: ColumnType<string | null, string | null | undefined, string | null | undefined>;
+  serial_internal_barcode: ColumnType<string | null, string | null | undefined, string | null | undefined>;
   original_entered_qty: string | null;
   original_uom_code: string | null;
   conversion_factor_to_base: string | null;
@@ -1002,17 +1008,63 @@ export type SerialStatusDb =
   | 'DAMAGED'
   | 'WRITTEN_OFF';
 
+export interface SerialStockGroupsTable {
+  id: string;
+  tenant_id: string;
+  branch_id: string;
+  warehouse_id: string;
+  product_id: string;
+  supplier_id: string | null;
+  goods_receipt_id: string | null;
+  group_code: string;
+  purchase_cost: string;
+  selling_price: string;
+  currency_code: string;
+  initial_quantity: number;
+  remaining_quantity: number;
+  received_at: Generated<Date>;
+  notes: string | null;
+  created_by_user_id: string | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface SerialBarcodePrintLogsTable {
+  id: string;
+  tenant_id: string;
+  branch_id: string | null;
+  product_id: string;
+  serial_group_id: string | null;
+  serial_id: string;
+  internal_barcode: string;
+  label_format:
+    | 'THERMAL_40X30'
+    | 'THERMAL_50X30'
+    | 'THERMAL_50X40'
+    | 'THERMAL_58'
+    | 'THERMAL_80'
+    | 'A4_SHEET';
+  is_reprint: Generated<boolean>;
+  printed_by_user_id: string;
+  printed_at: Generated<Date>;
+}
+
 export interface InventorySerialsTable {
   id: string;
   tenant_id: string;
   product_id: string;
   batch_id: string | null;
+  serial_group_id: ColumnType<string | null, string | null | undefined, string | null | undefined>;
   warehouse_id: string;
   branch_id: string;
   serial_number: string;
+  internal_barcode: ColumnType<string | null, string | null | undefined, string | null | undefined>;
   status: Generated<SerialStatusDb>;
   unit_cost: Generated<string>;
+  selling_price: ColumnType<string | null, string | null | undefined, string | null | undefined>;
   currency_code: string;
+  label_print_count: Generated<number>;
+  last_label_printed_at: Date | string | null;
   received_at: Generated<Date>;
   sold_at: Date | string | null;
   last_movement_id: string | null;
@@ -1977,6 +2029,10 @@ export interface PriceSuggestionsTable {
     | 'CEIL_10';
   reason: string;
   effective_date: Generated<string | Date>;
+  market_price: ColumnType<string | null, string | null | undefined, string | null | undefined>;
+  market_price_source: ColumnType<string | null, string | null | undefined, string | null | undefined>;
+  incoming_purchase_cost: ColumnType<string | null, string | null | undefined, string | null | undefined>;
+  moving_avg_cost: ColumnType<string | null, string | null | undefined, string | null | undefined>;
   status: Generated<'PENDING' | 'APPROVED' | 'MODIFIED_APPROVED' | 'REJECTED' | 'DEFERRED' | 'SUPERSEDED'>;
   created_by_user_id: string;
   reviewed_by_user_id: string | null;
@@ -2149,6 +2205,8 @@ export interface NexStockDatabase {
   sales_invoice_lines: SalesInvoiceLinesTable;
   sales_payments: SalesPaymentsTable;
   inventory_batches: InventoryBatchesTable;
+  serial_stock_groups: SerialStockGroupsTable;
+  serial_barcode_print_logs: SerialBarcodePrintLogsTable;
   inventory_serials: InventorySerialsTable;
   inventory_serial_transitions: InventorySerialTransitionsTable;
   inventory_cost_layers: InventoryCostLayersTable;
