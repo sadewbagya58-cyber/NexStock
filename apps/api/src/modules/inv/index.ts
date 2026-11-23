@@ -1,5 +1,6 @@
 export * from './application/inv.service.js';
 export * from './application/transfer.service.js';
+export * from './application/stock-intake.service.js';
 export {
   createBatch,
   getBatchById,

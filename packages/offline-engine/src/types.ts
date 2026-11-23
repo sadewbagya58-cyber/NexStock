@@ -109,6 +109,7 @@ export interface OfflineUnitConversionRecord {
   readonly uomCode: string;
   readonly uomName: string;
   readonly conversionFactorToBase: string;
+  readonly sellingPrice?: string | null;
 }
 
 export interface OfflineBarcodeLookupResult {
@@ -118,6 +119,10 @@ export interface OfflineBarcodeLookupResult {
   readonly name: string | null;
   readonly baseUom: string | null;
   readonly priceUom: string | null;
+  readonly resolvedSellingUom?: string | null;
+  readonly resolvedConversionFactorToBase?: string | null;
+  readonly stockIntakeLotId?: string | null;
+  readonly intakeCode?: string | null;
   readonly batchId: string | null;
   readonly batchNumber: string | null;
   readonly serialId: string | null;
@@ -125,7 +130,13 @@ export interface OfflineBarcodeLookupResult {
   readonly internalBarcode: string | null;
   readonly availableQuantity: string | null;
   readonly sellingPrice: string | null;
-  readonly pricingSource: 'EXPLICIT_BATCH_PRICE' | 'BRANCH_OVERRIDE' | 'PRODUCT_DEFAULT' | null;
+  readonly pricingSource:
+    | 'EXPLICIT_BATCH_PRICE'
+    | 'INTAKE_SPECIFIC'
+    | 'PACKAGE_EXPLICIT'
+    | 'BRANCH_OVERRIDE'
+    | 'PRODUCT_DEFAULT'
+    | null;
   readonly expiryDate: string | null;
   readonly allocationPolicy: string | null;
   readonly isBlocked: boolean;
@@ -139,6 +150,8 @@ export interface OfflineCartLineInput {
   readonly lineDiscount?: string;
   readonly batchId?: string | null;
   readonly serialId?: string | null;
+  readonly stockIntakeLotId?: string | null;
+  readonly intakeCode?: string | null;
   readonly scannedBarcode?: string | null;
   readonly overrideSellingPrice?: string | null;
   readonly entrySource?: 'BARCODE_SCAN' | 'MANUAL' | 'MANUAL_WEIGHT' | 'SCALE_WEIGHT' | 'QUICK_PICK';
@@ -152,6 +165,9 @@ export interface OfflineComputedCartLine {
   readonly batchId: string | null;
   readonly batchNumber: string | null;
   readonly serialId: string | null;
+  readonly stockIntakeLotId?: string | null;
+  readonly intakeCode?: string | null;
+  readonly scannedBarcode?: string | null;
   readonly uomCode: string;
   readonly enteredQty: string;
   readonly conversionFactorToBase: string;

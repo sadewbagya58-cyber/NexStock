@@ -762,6 +762,7 @@ export async function postGoodsReceipt(
         uomCode: receivedUom,
         quantity: receivedQty.toDecimalString(),
         unitCost: unitCostPerBase.toDecimalString(),
+        ...(line.sellingPrice != null ? { sellingPrice: line.sellingPrice, sellingUom: product.priceUom || product.baseUom } : {}),
         referenceType: 'GOODS_RECEIPT',
         referenceId: grnId,
         entrySource: 'PURCHASE_RECEIPT',
@@ -830,6 +831,14 @@ export async function postGoodsReceipt(
         reason: `Goods Receipt ${grnNumber} (${unitCostPerBase.toDecimalString()}/${product.baseUom})`,
         scopeBranchId: input.branchId,
       });
+      if (createdSuggestion && ledgerRes.configAlertId) {
+        await trx.db
+          .updateTable('stock_config_alerts')
+          .set({ price_suggestion_id: createdSuggestion.id, updated_at: now })
+          .where('tenant_id', '=', trx.tenantId)
+          .where('id', '=', ledgerRes.configAlertId)
+          .execute();
+      }
     } else if (batchId) {
       // D-04: Batch cost stays isolated on the batch; generate BATCH-scoped suggestion only
       createdSuggestion = await triggerCostChangeSuggestionIfApplicable(trx, {

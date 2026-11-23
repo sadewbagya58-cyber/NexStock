@@ -274,6 +274,12 @@ export const ErrorCodeSchema = Type.Union([
   Type.Literal('INV_TRANSFER_BRANCH_CONFLICT'),
   Type.Literal('ERR_INTERNAL_SERVER_ERROR'),
   Type.Literal('SYNC_DEVICE_REVOKED'),
+  Type.Literal('POS_INTAKE_LOT_NOT_FOUND'),
+  Type.Literal('POS_INTAKE_LOT_INACTIVE'),
+  Type.Literal('POS_INTAKE_LOT_EXHAUSTED'),
+  Type.Literal('CAT_BARCODE_IN_USE_DEACTIVATE_ONLY'),
+  Type.Literal('CAT_BARCODE_INACTIVE'),
+  Type.Literal('INV_CONFIG_ALERT_NOT_FOUND'),
 ]);
 export type ErrorCode = Static<typeof ErrorCodeSchema>;
 
@@ -723,6 +729,7 @@ export const ProductUnitConversionInputSchema = Type.Object(
     conversionFactorToBase: DecimalQuantityStringSchema,
     isDefaultPurchasing: Type.Optional(Type.Boolean()),
     isDefaultSelling: Type.Optional(Type.Boolean()),
+    sellingPrice: Type.Optional(Type.Union([DecimalMoneyStringSchema, Type.Null()])),
   },
   { additionalProperties: false },
 );
@@ -925,6 +932,14 @@ export const ListProductsQuerySchema = Type.Object(
 );
 export type ListProductsQuery = Static<typeof ListProductsQuerySchema>;
 
+export const BarcodePriceSourceModeSchema = Type.Union([
+  Type.Literal('INHERIT'),
+  Type.Literal('INTAKE_SPECIFIC'),
+  Type.Literal('BATCH_SPECIFIC'),
+  Type.Literal('PACKAGE_EXPLICIT'),
+]);
+export type BarcodePriceSourceMode = Static<typeof BarcodePriceSourceModeSchema>;
+
 export const ProductBarcodeResponseSchema = Type.Object({
   id: UuidSchema,
   barcode: Type.String(),
@@ -933,6 +948,20 @@ export const ProductBarcodeResponseSchema = Type.Object({
   uomCode: Type.String(),
   isPrimary: Type.Boolean(),
   isActive: Type.Boolean(),
+  stockIntakeLotId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
+  intakeCode: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  batchId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
+  batchNumber: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  branchId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
+  warehouseId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
+  conversionFactorToBase: Type.Optional(Type.Union([DecimalQuantityStringSchema, Type.Null()])),
+  priceSourceMode: Type.Optional(BarcodePriceSourceModeSchema),
+  sellingPriceOverride: Type.Optional(Type.Union([DecimalMoneyStringSchema, Type.Null()])),
+  effectiveSellingPrice: Type.Optional(Type.Union([DecimalMoneyStringSchema, Type.Null()])),
+  labelNote: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  deactivatedAt: Type.Optional(Type.Union([IsoTimestampSchema, Type.Null()])),
+  createdAt: Type.Optional(IsoTimestampSchema),
+  updatedAt: Type.Optional(IsoTimestampSchema),
 });
 export type ProductBarcodeResponse = Static<
   typeof ProductBarcodeResponseSchema
@@ -964,6 +993,14 @@ export const CreateProductBarcodeRequestSchema = Type.Object(
     uomCode: Type.Optional(Type.String({ minLength: 1, maxLength: 16 })),
     isPrimary: Type.Optional(Type.Boolean()),
     isActive: Type.Optional(Type.Boolean()),
+    stockIntakeLotId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
+    batchId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
+    branchId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
+    warehouseId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
+    conversionFactorToBase: Type.Optional(Type.Union([DecimalQuantityStringSchema, Type.Null()])),
+    priceSourceMode: Type.Optional(BarcodePriceSourceModeSchema),
+    sellingPriceOverride: Type.Optional(Type.Union([DecimalMoneyStringSchema, Type.Null()])),
+    labelNote: Type.Optional(Type.Union([Type.String({ maxLength: 240 }), Type.Null()])),
   },
   { additionalProperties: false },
 );
@@ -977,6 +1014,14 @@ export const UpdateProductBarcodeRequestSchema = Type.Object(
     isPrimary: Type.Optional(Type.Boolean()),
     isActive: Type.Optional(Type.Boolean()),
     promotedBarcodeId: Type.Optional(UuidSchema),
+    stockIntakeLotId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
+    batchId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
+    branchId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
+    warehouseId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
+    conversionFactorToBase: Type.Optional(Type.Union([DecimalQuantityStringSchema, Type.Null()])),
+    priceSourceMode: Type.Optional(BarcodePriceSourceModeSchema),
+    sellingPriceOverride: Type.Optional(Type.Union([DecimalMoneyStringSchema, Type.Null()])),
+    labelNote: Type.Optional(Type.Union([Type.String({ maxLength: 240 }), Type.Null()])),
   },
   { additionalProperties: false },
 );
@@ -1038,6 +1083,7 @@ export const ProductUnitConversionResponseSchema = Type.Object({
   conversionFactorToBase: DecimalQuantityStringSchema,
   isDefaultPurchasing: Type.Optional(Type.Boolean()),
   isDefaultSelling: Type.Optional(Type.Boolean()),
+  sellingPrice: Type.Optional(Type.Union([DecimalMoneyStringSchema, Type.Null()])),
   isActive: Type.Boolean(),
 });
 export type ProductUnitConversionResponse = Static<
@@ -1307,6 +1353,9 @@ export const PostStockMovementRequestSchema = Type.Object(
     quantity: DecimalQuantityStringSchema,
     uomCode: Type.Optional(Type.String({ minLength: 1, maxLength: 16 })),
     unitCost: Type.Optional(DecimalMoneyStringSchema),
+    sellingPrice: Type.Optional(Type.Union([DecimalMoneyStringSchema, Type.Null()])),
+    sellingUom: Type.Optional(Type.Union([Type.String({ minLength: 1, maxLength: 16 }), Type.Null()])),
+    stockIntakeLotId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
     referenceType: Type.Optional(
       Type.Union([Type.String({ maxLength: 64 }), Type.Null()]),
     ),
@@ -1402,6 +1451,9 @@ export const StockMovementResponseSchema = Type.Object({
   productName: Type.Optional(Type.Union([Type.String(), Type.Null()])),
   batchId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
   serialId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
+  stockIntakeLotId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
+  intakeCode: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  configAlertId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
   supplierId: Type.Union([UuidSchema, Type.Null()]),
   movementType: StockMovementTypeSchema,
   uomCode: Type.String(),
@@ -1762,6 +1814,7 @@ export const CheckoutCartLineInputSchema = Type.Object(
     serialNumber: Type.Optional(
       Type.Union([Type.String({ minLength: 1, maxLength: 100 }), Type.Null()]),
     ),
+    stockIntakeLotId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
     scannedBarcode: Type.Optional(
       Type.Union([Type.String({ minLength: 1, maxLength: 128 }), Type.Null()]),
     ),
@@ -1846,6 +1899,8 @@ export const SalesInvoiceLineResponseSchema = Type.Object({
     Type.Union([
       Type.Literal('BATCH_EXPLICIT'),
       Type.Literal('SERIAL_GROUP'),
+      Type.Literal('INTAKE_SPECIFIC'),
+      Type.Literal('PACKAGE_EXPLICIT'),
       Type.Literal('POS_MANUAL_OVERRIDE'),
       Type.Literal('PRODUCT_FALLBACK'),
       Type.Literal('BRANCH_OVERRIDE'),
@@ -1853,6 +1908,9 @@ export const SalesInvoiceLineResponseSchema = Type.Object({
       Type.Null(),
     ]),
   ),
+  stockIntakeLotId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
+  intakeCode: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  scannedBarcode: Type.Optional(Type.Union([Type.String(), Type.Null()])),
   serialId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
   serialGroupId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
   serialNumber: Type.Optional(Type.Union([Type.String(), Type.Null()])),
@@ -1989,6 +2047,8 @@ export const PrintableReceiptLineSchema = Type.Object({
     Type.Union([
       Type.Literal('BATCH_EXPLICIT'),
       Type.Literal('SERIAL_GROUP'),
+      Type.Literal('INTAKE_SPECIFIC'),
+      Type.Literal('PACKAGE_EXPLICIT'),
       Type.Literal('POS_MANUAL_OVERRIDE'),
       Type.Literal('PRODUCT_FALLBACK'),
       Type.Literal('BRANCH_OVERRIDE'),
@@ -1996,6 +2056,9 @@ export const PrintableReceiptLineSchema = Type.Object({
       Type.Null(),
     ]),
   ),
+  stockIntakeLotId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
+  intakeCode: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  scannedBarcode: Type.Optional(Type.Union([Type.String(), Type.Null()])),
   serialId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
   serialGroupId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
   serialNumber: Type.Optional(Type.Union([Type.String(), Type.Null()])),
@@ -5397,6 +5460,12 @@ export const SyncCatalogPricingResponseSchema = Type.Object({
         barcodeType: Type.String(),
         uomCode: Type.String(),
         isPrimary: Type.Boolean(),
+        isActive: Type.Optional(Type.Boolean()),
+        stockIntakeLotId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
+        batchId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
+        conversionFactorToBase: Type.Optional(Type.Union([DecimalQuantityStringSchema, Type.Null()])),
+        priceSourceMode: Type.Optional(BarcodePriceSourceModeSchema),
+        sellingPriceOverride: Type.Optional(Type.Union([DecimalMoneyStringSchema, Type.Null()])),
       }),
     ),
   ),
@@ -5408,7 +5477,44 @@ export const SyncCatalogPricingResponseSchema = Type.Object({
         uomCode: Type.String(),
         uomName: Type.String(),
         conversionFactorToBase: DecimalQuantityStringSchema,
+        isDefaultPurchasing: Type.Optional(Type.Boolean()),
+        isDefaultSelling: Type.Optional(Type.Boolean()),
+        sellingPrice: Type.Optional(Type.Union([DecimalMoneyStringSchema, Type.Null()])),
         isActive: Type.Boolean(),
+      }),
+    ),
+  ),
+  intakeLots: Type.Optional(
+    Type.Array(
+      Type.Object({
+        id: UuidSchema,
+        branchId: UuidSchema,
+        warehouseId: UuidSchema,
+        productId: UuidSchema,
+        batchId: Type.Union([UuidSchema, Type.Null()]),
+        intakeCode: Type.String(),
+        sourceMethod: Type.String(),
+        receivedUom: Type.String(),
+        receivedQty: DecimalQuantityStringSchema,
+        conversionFactorToBase: DecimalQuantityStringSchema,
+        baseQtyReceived: DecimalQuantityStringSchema,
+        baseQtyRemaining: DecimalQuantityStringSchema,
+        purchaseCostPerBaseUom: DecimalMoneyStringSchema,
+        pricingMode: Type.Union([
+          Type.Literal('INHERIT_PRODUCT'),
+          Type.Literal('INHERIT_BRANCH'),
+          Type.Literal('INTAKE_SPECIFIC'),
+        ]),
+        sellingUom: Type.String(),
+        sellingPrice: Type.Union([DecimalMoneyStringSchema, Type.Null()]),
+        isLegacyAggregate: Type.Boolean(),
+        status: Type.Union([
+          Type.Literal('ACTIVE'),
+          Type.Literal('DEPLETED'),
+          Type.Literal('INACTIVE'),
+          Type.Literal('REVERSED'),
+        ]),
+        receivedAt: IsoTimestampSchema,
       }),
     ),
   ),
@@ -5563,6 +5669,58 @@ export const ResolveBarcodeResponseSchema = Type.Object({
   normalizedBarcode: Type.String(),
   isExactBatchLocked: Type.Boolean(),
   isExactSerialLocked: Type.Optional(Type.Boolean()),
+  isExactIntakeLotLocked: Type.Optional(Type.Boolean()),
+  resolvedSellingUom: Type.Optional(Type.String()),
+  resolvedConversionFactorToBase: Type.Optional(DecimalQuantityStringSchema),
+  matchedBarcode: Type.Optional(
+    Type.Union([
+      Type.Object({
+        id: UuidSchema,
+        barcode: Type.String(),
+        barcodeType: BarcodeTypeSchema,
+        uomCode: Type.String(),
+        conversionFactorToBase: Type.Union([DecimalQuantityStringSchema, Type.Null()]),
+        stockIntakeLotId: Type.Union([UuidSchema, Type.Null()]),
+        batchId: Type.Union([UuidSchema, Type.Null()]),
+        priceSourceMode: BarcodePriceSourceModeSchema,
+        sellingPriceOverride: Type.Union([DecimalMoneyStringSchema, Type.Null()]),
+      }),
+      Type.Null(),
+    ]),
+  ),
+  exactIntakeLot: Type.Optional(
+    Type.Union([
+      Type.Object({
+        id: UuidSchema,
+        intakeCode: Type.String(),
+        sourceMethod: Type.String(),
+        warehouseId: UuidSchema,
+        branchId: UuidSchema,
+        receivedUom: Type.String(),
+        receivedQty: DecimalQuantityStringSchema,
+        conversionFactorToBase: DecimalQuantityStringSchema,
+        baseQtyReceived: DecimalQuantityStringSchema,
+        baseQtyRemaining: DecimalQuantityStringSchema,
+        purchaseCostPerBaseUom: DecimalMoneyStringSchema,
+        pricingMode: Type.Union([
+          Type.Literal('INHERIT_PRODUCT'),
+          Type.Literal('INHERIT_BRANCH'),
+          Type.Literal('INTAKE_SPECIFIC'),
+        ]),
+        sellingUom: Type.String(),
+        sellingPrice: Type.Union([DecimalMoneyStringSchema, Type.Null()]),
+        isLegacyAggregate: Type.Boolean(),
+        status: Type.Union([
+          Type.Literal('ACTIVE'),
+          Type.Literal('DEPLETED'),
+          Type.Literal('INACTIVE'),
+          Type.Literal('REVERSED'),
+        ]),
+        receivedAt: IsoTimestampSchema,
+      }),
+      Type.Null(),
+    ]),
+  ),
   gs1Parsed: Type.Object({
     isGs1: Type.Boolean(),
     gtin: Type.Union([Type.String(), Type.Null()]),
@@ -5610,6 +5768,8 @@ export const ResolveBarcodeResponseSchema = Type.Object({
   priceSource: Type.Union([
     Type.Literal('BATCH_EXPLICIT'),
     Type.Literal('SERIAL_GROUP'),
+    Type.Literal('INTAKE_SPECIFIC'),
+    Type.Literal('PACKAGE_EXPLICIT'),
     Type.Literal('PRODUCT_FALLBACK'),
     Type.Literal('BRANCH_OVERRIDE'),
     Type.Literal('GLOBAL_PRODUCT'),
@@ -6817,6 +6977,199 @@ export const SubscriptionNotificationResponseSchema = Type.Object({
 });
 export type SubscriptionNotificationResponse = Static<
   typeof SubscriptionNotificationResponseSchema
+>;
+
+// ============================================================================
+// Smart Stock Intake Lots & Stock Configuration Change Alerts Contracts
+// ============================================================================
+
+export const StockIntakeSourceMethodSchema = Type.Union([
+  Type.Literal('GRN'),
+  Type.Literal('OPENING_STOCK'),
+  Type.Literal('STOCK_IN'),
+  Type.Literal('ADJUSTMENT_POSITIVE'),
+  Type.Literal('STOCKTAKE'),
+  Type.Literal('TRANSFER_IN'),
+  Type.Literal('LEGACY_BACKFILL'),
+  Type.Literal('FIFO_LAYER_BACKFILL'),
+]);
+export type StockIntakeSourceMethod = Static<typeof StockIntakeSourceMethodSchema>;
+
+export const StockIntakePricingModeSchema = Type.Union([
+  Type.Literal('INHERIT_PRODUCT'),
+  Type.Literal('INHERIT_BRANCH'),
+  Type.Literal('INTAKE_SPECIFIC'),
+]);
+export type StockIntakePricingMode = Static<typeof StockIntakePricingModeSchema>;
+
+export const StockIntakeStatusSchema = Type.Union([
+  Type.Literal('ACTIVE'),
+  Type.Literal('DEPLETED'),
+  Type.Literal('INACTIVE'),
+  Type.Literal('REVERSED'),
+]);
+export type StockIntakeStatus = Static<typeof StockIntakeStatusSchema>;
+
+export const StockIntakeLotResponseSchema = Type.Object({
+  id: UuidSchema,
+  tenantId: UuidSchema,
+  branchId: UuidSchema,
+  warehouseId: UuidSchema,
+  productId: UuidSchema,
+  productSku: Type.Optional(Type.String()),
+  productName: Type.Optional(Type.String()),
+  batchId: Type.Union([UuidSchema, Type.Null()]),
+  ledgerEntryId: Type.Union([UuidSchema, Type.Null()]),
+  supplierId: Type.Union([UuidSchema, Type.Null()]),
+  intakeCode: Type.String(),
+  sourceMethod: StockIntakeSourceMethodSchema,
+  sourceReferenceType: Type.Union([Type.String(), Type.Null()]),
+  sourceReferenceId: Type.Union([Type.String(), Type.Null()]),
+  receivedUom: Type.String(),
+  receivedQty: DecimalQuantityStringSchema,
+  conversionFactorToBase: DecimalQuantityStringSchema,
+  baseQtyReceived: DecimalQuantityStringSchema,
+  baseQtyRemaining: DecimalQuantityStringSchema,
+  baseQtyReserved: DecimalQuantityStringSchema,
+  purchaseCostPerReceivedUom: DecimalMoneyStringSchema,
+  purchaseCostPerBaseUom: DecimalMoneyStringSchema,
+  pricingMode: StockIntakePricingModeSchema,
+  sellingUom: Type.String(),
+  sellingPrice: Type.Union([DecimalMoneyStringSchema, Type.Null()]),
+  effectiveSellingPrice: Type.Optional(DecimalMoneyStringSchema),
+  minSellingPrice: Type.Union([DecimalMoneyStringSchema, Type.Null()]),
+  maxDiscountPct: Type.Union([DecimalPctStringSchema, Type.Null()]),
+  currencyCode: CurrencyCodeSchema,
+  isLegacyAggregate: Type.Boolean(),
+  status: StockIntakeStatusSchema,
+  configSnapshot: Type.Record(Type.String(), Type.Unknown()),
+  notes: Type.Union([Type.String(), Type.Null()]),
+  receivedAt: IsoTimestampSchema,
+  createdByUserId: Type.Union([UuidSchema, Type.Null()]),
+  createdAt: IsoTimestampSchema,
+  updatedAt: IsoTimestampSchema,
+});
+export type StockIntakeLotResponse = Static<typeof StockIntakeLotResponseSchema>;
+
+export const ListStockIntakeLotsQuerySchema = Type.Object(
+  {
+    branchId: Type.Optional(UuidSchema),
+    warehouseId: Type.Optional(UuidSchema),
+    productId: Type.Optional(UuidSchema),
+    status: Type.Optional(StockIntakeStatusSchema),
+    includeDepleted: Type.Optional(Type.Union([Type.Literal('true'), Type.Literal('false')])),
+    limit: Type.Optional(PaginationLimitQueryParamSchema),
+  },
+  { additionalProperties: false },
+);
+export type ListStockIntakeLotsQuery = Static<typeof ListStockIntakeLotsQuerySchema>;
+
+export const UpdateStockIntakeLotRequestSchema = Type.Object(
+  {
+    pricingMode: Type.Optional(StockIntakePricingModeSchema),
+    sellingUom: Type.Optional(Type.String({ minLength: 1, maxLength: 16 })),
+    sellingPrice: Type.Optional(Type.Union([DecimalMoneyStringSchema, Type.Null()])),
+    minSellingPrice: Type.Optional(Type.Union([DecimalMoneyStringSchema, Type.Null()])),
+    maxDiscountPct: Type.Optional(Type.Union([DecimalPctStringSchema, Type.Null()])),
+    status: Type.Optional(
+      Type.Union([Type.Literal('ACTIVE'), Type.Literal('INACTIVE')]),
+    ),
+    notes: Type.Optional(Type.Union([Type.String({ maxLength: 500 }), Type.Null()])),
+  },
+  { additionalProperties: false },
+);
+export type UpdateStockIntakeLotRequest = Static<typeof UpdateStockIntakeLotRequestSchema>;
+
+export const StockConfigAlertSeveritySchema = Type.Union([
+  Type.Literal('INFO'),
+  Type.Literal('WARNING'),
+  Type.Literal('CONFLICT'),
+]);
+export type StockConfigAlertSeverity = Static<typeof StockConfigAlertSeveritySchema>;
+
+export const StockConfigAlertStatusSchema = Type.Union([
+  Type.Literal('PENDING'),
+  Type.Literal('RESOLVED'),
+  Type.Literal('DISMISSED'),
+]);
+export type StockConfigAlertStatus = Static<typeof StockConfigAlertStatusSchema>;
+
+export const StockConfigAlertResolutionActionSchema = Type.Union([
+  Type.Literal('KEEP_GLOBAL_PRICE'),
+  Type.Literal('SET_INTAKE_SPECIFIC_PRICE'),
+  Type.Literal('CREATE_INTAKE_BARCODE'),
+  Type.Literal('UPDATE_GLOBAL_WITH_APPROVAL'),
+  Type.Literal('UPDATE_UOM_CONVERSION'),
+  Type.Literal('DISMISS'),
+]);
+export type StockConfigAlertResolutionAction = Static<
+  typeof StockConfigAlertResolutionActionSchema
+>;
+
+export const StockConfigAlertResponseSchema = Type.Object({
+  id: UuidSchema,
+  tenantId: UuidSchema,
+  branchId: UuidSchema,
+  warehouseId: UuidSchema,
+  productId: UuidSchema,
+  productSku: Type.Optional(Type.String()),
+  productName: Type.Optional(Type.String()),
+  baseUom: Type.Optional(Type.String()),
+  stockIntakeLotId: Type.Union([UuidSchema, Type.Null()]),
+  intakeCode: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  batchId: Type.Union([UuidSchema, Type.Null()]),
+  ledgerEntryId: Type.Union([UuidSchema, Type.Null()]),
+  priceSuggestionId: Type.Union([UuidSchema, Type.Null()]),
+  sourceMethod: Type.String(),
+  sourceEventKey: Type.String(),
+  severity: StockConfigAlertSeveritySchema,
+  changeTypes: Type.Array(Type.String()),
+  previousConfig: Type.Record(Type.String(), Type.Unknown()),
+  incomingConfig: Type.Record(Type.String(), Type.Unknown()),
+  summary: Type.String(),
+  impactExplanation: Type.String(),
+  recommendedAction: Type.String(),
+  status: StockConfigAlertStatusSchema,
+  resolutionAction: Type.Union([StockConfigAlertResolutionActionSchema, Type.Null()]),
+  resolutionNotes: Type.Union([Type.String(), Type.Null()]),
+  resolutionPayload: Type.Union([Type.Record(Type.String(), Type.Unknown()), Type.Null()]),
+  createdByUserId: Type.Union([UuidSchema, Type.Null()]),
+  resolvedByUserId: Type.Union([UuidSchema, Type.Null()]),
+  createdAt: IsoTimestampSchema,
+  resolvedAt: Type.Union([IsoTimestampSchema, Type.Null()]),
+  updatedAt: IsoTimestampSchema,
+});
+export type StockConfigAlertResponse = Static<typeof StockConfigAlertResponseSchema>;
+
+export const ListStockConfigAlertsQuerySchema = Type.Object(
+  {
+    branchId: Type.Optional(UuidSchema),
+    warehouseId: Type.Optional(UuidSchema),
+    productId: Type.Optional(UuidSchema),
+    stockIntakeLotId: Type.Optional(UuidSchema),
+    status: Type.Optional(StockConfigAlertStatusSchema),
+    severity: Type.Optional(StockConfigAlertSeveritySchema),
+    limit: Type.Optional(PaginationLimitQueryParamSchema),
+  },
+  { additionalProperties: false },
+);
+export type ListStockConfigAlertsQuery = Static<typeof ListStockConfigAlertsQuerySchema>;
+
+export const ResolveStockConfigAlertRequestSchema = Type.Object(
+  {
+    action: StockConfigAlertResolutionActionSchema,
+    sellingPrice: Type.Optional(DecimalMoneyStringSchema),
+    sellingUom: Type.Optional(Type.String({ minLength: 1, maxLength: 16 })),
+    barcode: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
+    barcodeType: Type.Optional(BarcodeTypeSchema),
+    uomCode: Type.Optional(Type.String({ minLength: 1, maxLength: 16 })),
+    conversionFactorToBase: Type.Optional(DecimalQuantityStringSchema),
+    notes: Type.Optional(Type.Union([Type.String({ maxLength: 500 }), Type.Null()])),
+  },
+  { additionalProperties: false },
+);
+export type ResolveStockConfigAlertRequest = Static<
+  typeof ResolveStockConfigAlertRequestSchema
 >;
 
 

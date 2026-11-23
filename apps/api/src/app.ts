@@ -72,6 +72,12 @@ import {
   SupplierReturnResponseSchema,
   UnitOfMeasureResponseSchema,
   ListStockMovementsQuerySchema,
+  ListStockIntakeLotsQuerySchema,
+  StockIntakeLotResponseSchema,
+  UpdateStockIntakeLotRequestSchema,
+  ListStockConfigAlertsQuerySchema,
+  StockConfigAlertResponseSchema,
+  ResolveStockConfigAlertRequestSchema,
   MarketPriceLookupQuerySchema,
   MarketPriceLookupResponseSchema,
   ListStocktakeSessionsQuerySchema,
@@ -435,6 +441,10 @@ import {
   listStockTransfers,
   dispatchStockTransfer,
   receiveStockTransfer,
+  listStockIntakeLots,
+  updateStockIntakeLot,
+  listStockConfigAlerts,
+  resolveStockConfigAlert,
 } from './modules/inv/index.js';
 import {
   archiveBranch,
@@ -7732,6 +7742,133 @@ export async function buildApp(
         options.db,
         { tenantId, userId: principal.userId, traceId },
         (trx) => listFifoCostLayers(trx, request.query),
+      );
+    },
+  );
+
+  // 3B. Smart Stock Intake Layers & Configuration Alerts
+  app.get(
+    '/v1/inventory/intake-lots',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        querystring: ListStockIntakeLotsQuerySchema,
+        response: {
+          200: Type.Array(StockIntakeLotResponseSchema),
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => listStockIntakeLots(trx, request.query),
+      );
+    },
+  );
+
+  app.patch(
+    '/v1/inventory/intake-lots/:intakeLotId',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ intakeLotId: UuidSchema }, { additionalProperties: false }),
+        body: UpdateStockIntakeLotRequestSchema,
+        response: {
+          200: StockIntakeLotResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => updateStockIntakeLot(trx, request.params.intakeLotId, request.body),
+      );
+    },
+  );
+
+  app.get(
+    '/v1/inventory/config-alerts',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        querystring: ListStockConfigAlertsQuerySchema,
+        response: {
+          200: Type.Array(StockConfigAlertResponseSchema),
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => listStockConfigAlerts(trx, request.query),
+      );
+    },
+  );
+
+  app.post(
+    '/v1/inventory/config-alerts/:alertId/resolve',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ alertId: UuidSchema }, { additionalProperties: false }),
+        body: ResolveStockConfigAlertRequestSchema,
+        response: {
+          200: StockConfigAlertResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => resolveStockConfigAlert(trx, request.params.alertId, request.body),
       );
     },
   );

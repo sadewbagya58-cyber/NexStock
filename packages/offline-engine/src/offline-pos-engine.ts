@@ -210,6 +210,7 @@ export class OfflinePosEngine {
 
       const uomCode = (lineInput.uomCode ?? prod.baseUom).toUpperCase();
       let convFactor = Quantity.fromInteger(1);
+      let explicitPackagePrice: string | null = null;
       if (uomCode !== prod.baseUom.toUpperCase()) {
         const convs = await this.storage.getProductUnitConversions({
           tenantId: params.tenantId,
@@ -224,6 +225,7 @@ export class OfflinePosEngine {
           );
         }
         convFactor = Quantity.fromDecimalString(matchConv.conversionFactorToBase);
+        explicitPackagePrice = matchConv.sellingPrice ?? null;
       }
 
       const baseQty =
@@ -288,8 +290,13 @@ export class OfflinePosEngine {
         }
       }
 
+      let isPricePerSellingUom = false;
       if (lineInput.overrideSellingPrice) {
         resolvedUnitPriceStr = lineInput.overrideSellingPrice;
+        isPricePerSellingUom = uomCode !== prod.baseUom.toUpperCase();
+      } else if (explicitPackagePrice) {
+        resolvedUnitPriceStr = explicitPackagePrice;
+        isPricePerSellingUom = true;
       }
 
       const unitPrice = Money.fromDecimalString(resolvedUnitPriceStr, currencyCode);
@@ -300,10 +307,13 @@ export class OfflinePosEngine {
       // Price floor & max discount validation using synchronized approved policy
       if (prod.minSellingPrice) {
         const minPrice = Money.fromDecimalString(prod.minSellingPrice, currencyCode);
-        if (unitPrice.compare(minPrice) < 0) {
+        const effectiveMin = isPricePerSellingUom
+          ? minPrice.multiplyByQuantity(convFactor)
+          : minPrice;
+        if (unitPrice.compare(effectiveMin) < 0) {
           throw new OfflineEngineError(
             'OFFLINE_PRICE_BELOW_MIN',
-            `Unit price for "${prod.name}" cannot be below approved minimum (${prod.minSellingPrice}).`,
+            `Unit price for "${prod.name}" cannot be below approved minimum (${effectiveMin.toDecimalString()}).`,
             422,
           );
         }
@@ -325,7 +335,7 @@ export class OfflinePosEngine {
       // Note: convert price per base UoM cleanly when UoM differs from priceUom
       const lineCalc = calculateLinePricingAndTax({
         unitPrice,
-        quantity: baseQty,
+        quantity: isPricePerSellingUom ? enteredQty : baseQty,
         lineDiscount: lineDisc,
         isTaxInclusive: false,
         taxRules,
@@ -359,6 +369,9 @@ export class OfflinePosEngine {
         batchId: selectedBatchId,
         batchNumber: selectedBatchNumber,
         serialId: lineInput.serialId ?? null,
+        stockIntakeLotId: lineInput.stockIntakeLotId ?? null,
+        intakeCode: lineInput.intakeCode ?? null,
+        scannedBarcode: lineInput.scannedBarcode ?? null,
         uomCode,
         enteredQty: enteredQty.toDecimalString(),
         conversionFactorToBase: convFactor.toDecimalString(),
@@ -578,6 +591,8 @@ export class OfflinePosEngine {
         productId: l.productId,
         ...(l.batchId ? { batchId: l.batchId } : {}),
         ...(l.serialId ? { serialId: l.serialId } : {}),
+        ...(l.stockIntakeLotId ? { stockIntakeLotId: l.stockIntakeLotId } : {}),
+        ...(l.scannedBarcode ? { scannedBarcode: l.scannedBarcode } : {}),
         quantity: l.enteredQty,
         uomCode: l.uomCode,
         entrySource: l.entrySource,

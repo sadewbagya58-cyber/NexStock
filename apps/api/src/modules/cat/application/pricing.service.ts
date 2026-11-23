@@ -2376,6 +2376,7 @@ export async function getSyncCatalogPricingSnapshot(
     registers,
     balances,
     serials,
+    intakeLots,
   ] = await Promise.all([
     trx.db
       .selectFrom('tenants')
@@ -2495,13 +2496,35 @@ export async function getSyncCatalogPricingSnapshot(
       .execute(),
     trx.db
       .selectFrom('product_barcodes')
-      .select(['id', 'product_id', 'barcode', 'barcode_type', 'uom_code', 'is_primary'])
+      .select([
+        'id',
+        'product_id',
+        'barcode',
+        'barcode_type',
+        'uom_code',
+        'is_primary',
+        'is_active',
+        'stock_intake_lot_id',
+        'batch_id',
+        'conversion_factor_to_base',
+        'price_source_mode',
+        'selling_price_override',
+      ])
       .where('tenant_id', '=', trx.tenantId)
-      .where('is_active', '=', true)
+      .orderBy('is_active', 'desc')
+      .orderBy('is_primary', 'desc')
       .execute(),
     trx.db
       .selectFrom('product_unit_conversions')
-      .select(['id', 'product_id', 'uom_code', 'uom_name', 'conversion_factor_to_base', 'is_active'])
+      .select([
+        'id',
+        'product_id',
+        'uom_code',
+        'uom_name',
+        'conversion_factor_to_base',
+        'selling_price',
+        'is_active',
+      ])
       .where('tenant_id', '=', trx.tenantId)
       .where('is_active', '=', true)
       .execute(),
@@ -2576,6 +2599,36 @@ export async function getSyncCatalogPricingSnapshot(
           .where('tenant_id', '=', trx.tenantId)
           .where('status', '=', 'IN_STOCK')
           .$if(scopedBranchIds !== null, (qb) => qb.where('branch_id', 'in', scopedBranchIds!))
+          .execute()
+      : Promise.resolve([]),
+    hasAnyBranchScope
+      ? trx.db
+          .selectFrom('stock_intake_lots')
+          .select([
+            'id',
+            'product_id',
+            'branch_id',
+            'warehouse_id',
+            'batch_id',
+            'intake_code',
+            'source_method',
+            'received_uom',
+            'received_qty',
+            'conversion_factor_to_base',
+            'base_qty_received',
+            'base_qty_remaining',
+            'purchase_cost_per_base_uom',
+            'selling_price',
+            'selling_uom',
+            'pricing_mode',
+            'is_legacy_aggregate',
+            'status',
+            'received_at',
+          ])
+          .where('tenant_id', '=', trx.tenantId)
+          .where('status', '=', 'ACTIVE')
+          .$if(scopedBranchIds !== null, (qb) => qb.where('branch_id', 'in', scopedBranchIds!))
+          .orderBy('received_at', 'asc')
           .execute()
       : Promise.resolve([]),
   ]);
@@ -2742,6 +2795,22 @@ export async function getSyncCatalogPricingSnapshot(
       barcodeType: bc.barcode_type,
       uomCode: bc.uom_code,
       isPrimary: Boolean(bc.is_primary),
+      isActive: Boolean(bc.is_active),
+      stockIntakeLotId: bc.stock_intake_lot_id ?? null,
+      batchId: bc.batch_id ?? null,
+      conversionFactorToBase:
+        bc.conversion_factor_to_base != null
+          ? Quantity.fromDecimalString(String(bc.conversion_factor_to_base)).toDecimalString()
+          : null,
+      priceSourceMode: (bc.price_source_mode ?? 'INHERIT') as
+        | 'INHERIT'
+        | 'INTAKE_SPECIFIC'
+        | 'BATCH_SPECIFIC'
+        | 'PACKAGE_EXPLICIT',
+      sellingPriceOverride:
+        bc.selling_price_override != null
+          ? Money.fromDecimalString(String(bc.selling_price_override), currencyCode).toDecimalString()
+          : null,
     })),
     unitConversions: unitConversions.map((u) => ({
       id: u.id,
@@ -2751,6 +2820,10 @@ export async function getSyncCatalogPricingSnapshot(
       conversionFactorToBase: Quantity.fromDecimalString(
         String(u.conversion_factor_to_base),
       ).toDecimalString(),
+      sellingPrice:
+        u.selling_price != null
+          ? Money.fromDecimalString(String(u.selling_price), currencyCode).toDecimalString()
+          : null,
       isActive: Boolean(u.is_active),
     })),
     taxGroups: taxGroups.map((tg) => ({
@@ -2827,6 +2900,41 @@ export async function getSyncCatalogPricingSnapshot(
       serialNumber: s.serial_number,
       status: s.status,
       unitCost: Money.fromDecimalString(String(s.unit_cost || '0'), currencyCode).toDecimalString(),
+    })),
+    intakeLots: intakeLots.map((lot) => ({
+      id: lot.id,
+      productId: lot.product_id,
+      branchId: lot.branch_id,
+      warehouseId: lot.warehouse_id,
+      batchId: lot.batch_id ?? null,
+      intakeCode: lot.intake_code,
+      sourceMethod: lot.source_method,
+      receivedUom: lot.received_uom,
+      receivedQty: Quantity.fromDecimalString(
+        String(lot.received_qty || lot.base_qty_received || '0.000000'),
+      ).toDecimalString(),
+      conversionFactorToBase: Quantity.fromDecimalString(
+        String(lot.conversion_factor_to_base || '1.000000'),
+      ).toDecimalString(),
+      baseQtyReceived: Quantity.fromDecimalString(
+        String(lot.base_qty_received || '0.000000'),
+      ).toDecimalString(),
+      baseQtyRemaining: Quantity.fromDecimalString(
+        String(lot.base_qty_remaining || '0.000000'),
+      ).toDecimalString(),
+      purchaseCostPerBaseUom: Money.fromDecimalString(
+        String(lot.purchase_cost_per_base_uom || '0'),
+        currencyCode,
+      ).toDecimalString(),
+      sellingPrice:
+        lot.selling_price != null
+          ? Money.fromDecimalString(String(lot.selling_price), currencyCode).toDecimalString()
+          : null,
+      sellingUom: lot.selling_uom,
+      pricingMode: lot.pricing_mode as 'INHERIT_PRODUCT' | 'INHERIT_BRANCH' | 'INTAKE_SPECIFIC',
+      status: lot.status as 'ACTIVE' | 'DEPLETED' | 'INACTIVE' | 'REVERSED',
+      isLegacyAggregate: Boolean(lot.is_legacy_aggregate),
+      receivedAt: new Date(lot.received_at).toISOString(),
     })),
     deviceAuthorization: {
       actorUserId: authCtx.userId,

@@ -1532,6 +1532,10 @@ export async function searchPosProducts(
       ).toDecimalString(),
       isDefaultPurchasing: Boolean(u.is_default_purchasing ?? false),
       isDefaultSelling: Boolean(u.is_default_selling ?? false),
+      sellingPrice:
+        u.selling_price != null
+          ? Money.fromDecimalString(String(u.selling_price), baseCurrency).toDecimalString()
+          : null,
       isActive: u.is_active,
     });
     uomsByProduct.set(u.product_id, list);
@@ -1772,6 +1776,9 @@ export async function checkoutSale(
     readonly batchNumber: string | null;
     readonly internalBarcode: string | null;
     readonly expiryDate: string | null;
+    stockIntakeLotId: string | null;
+    intakeCode: string | null;
+    readonly scannedBarcode: string | null;
     readonly priceSource:
       | 'BATCH_EXPLICIT'
       | 'SERIAL_GROUP'
@@ -1779,6 +1786,8 @@ export async function checkoutSale(
       | 'PRODUCT_FALLBACK'
       | 'BRANCH_OVERRIDE'
       | 'GLOBAL_PRODUCT'
+      | 'INTAKE_SPECIFIC'
+      | 'PACKAGE_EXPLICIT'
       | null;
     readonly serialId: string | null;
     readonly serialGroupId: string | null;
@@ -1840,10 +1849,58 @@ export async function checkoutSale(
       });
     }
 
-    const uomCode = (lineItem.uomCode ?? product.base_uom).trim().toUpperCase();
+    let matchedProductBarcodeRow:
+      | {
+          id: string;
+          barcode: string;
+          uom_code: string;
+          is_active: boolean;
+          stock_intake_lot_id?: string | null | undefined;
+          batch_id?: string | null | undefined;
+          price_source_mode?: string | undefined;
+          selling_price_override?: string | null | undefined;
+        }
+      | undefined;
+
+    if (lineItem.scannedBarcode && product.tracking_mode === 'NONE') {
+      const cleanScanned = lineItem.scannedBarcode.trim();
+      matchedProductBarcodeRow = await trx.db
+        .selectFrom('product_barcodes')
+        .select([
+          'id',
+          'barcode',
+          'uom_code',
+          'is_active',
+          'stock_intake_lot_id',
+          'batch_id',
+          'price_source_mode',
+          'selling_price_override',
+        ])
+        .where('tenant_id', '=', trx.tenantId)
+        .where('product_id', '=', product.id)
+        .where('barcode', '=', cleanScanned)
+        .executeTakeFirst();
+
+      if (matchedProductBarcodeRow && matchedProductBarcodeRow.is_active === false) {
+        throw new AppError({
+          statusCode: 409,
+          errorCode: 'CAT_BARCODE_INACTIVE',
+          title: 'Barcode Inactive',
+          detail: `Scanned barcode "${cleanScanned}" is currently inactive and cannot be used for sales.`,
+        });
+      }
+    }
+
+    const uomCode = (
+      lineItem.uomCode ??
+      matchedProductBarcodeRow?.uom_code ??
+      product.base_uom
+    )
+      .trim()
+      .toUpperCase();
     const convRows = await trx.db
       .selectFrom('product_unit_conversions')
-      .select(['uom_code', 'conversion_factor_to_base'])
+      .select(['uom_code', 'conversion_factor_to_base', 'selling_price'])
       .where('tenant_id', '=', trx.tenantId)
       .where('product_id', '=', product.id)
       .where('is_active', '=', true)
@@ -1852,6 +1909,7 @@ export async function checkoutSale(
     const customConversions = convRows.map((c) => ({
       uomCode: c.uom_code,
       conversionFactorToBase: String(c.conversion_factor_to_base),
+      sellingPrice: c.selling_price != null ? String(c.selling_price) : null,
     }));
 
     let convToBase: { convertedQuantity: Quantity; factorDecimal6: string };
@@ -2120,10 +2178,13 @@ export async function checkoutSale(
       readonly sliceQty: Quantity;
       readonly sliceBaseQty: Quantity;
       readonly sliceConvFactorToBase: string;
+      readonly slicePriceUom?: string;
       readonly batchId: string | null;
       readonly batchNumber: string | null;
       readonly internalBarcode: string | null;
       readonly expiryDate: string | null;
+      readonly stockIntakeLotId?: string | null;
+      readonly intakeCode?: string | null;
       readonly effectiveUnitPriceStr: string;
       readonly minSellingPriceFloor: string | null;
       readonly maxDiscountPctPolicy: string | null;
@@ -2131,6 +2192,8 @@ export async function checkoutSale(
       readonly priceSource:
         | 'BATCH_EXPLICIT'
         | 'SERIAL_GROUP'
+        | 'INTAKE_SPECIFIC'
+        | 'PACKAGE_EXPLICIT'
         | 'POS_MANUAL_OVERRIDE'
         | 'PRODUCT_FALLBACK'
         | 'BRANCH_OVERRIDE'
@@ -2534,14 +2597,134 @@ export async function checkoutSale(
         }
       }
     } else {
+      const targetIntakeLotId =
+        lineItem.stockIntakeLotId ??
+        matchedProductBarcodeRow?.stock_intake_lot_id ??
+        null;
+      let resolvedIntakeLotId: string | null = null;
+      let resolvedIntakeCode: string | null = null;
+      let resolvedIntakeSellingPrice: string | null = null;
+      let resolvedIntakePriceUom: string | null = null;
+      let resolvedIntakeUnitCost: string | null = null;
+
+      if (targetIntakeLotId && product.track_inventory) {
+        const lotRow = await trx.db
+          .selectFrom('stock_intake_lots')
+          .selectAll()
+          .where('tenant_id', '=', trx.tenantId)
+          .where('id', '=', targetIntakeLotId)
+          .forUpdate()
+          .executeTakeFirst();
+
+        if (
+          !lotRow ||
+          lotRow.product_id !== product.id ||
+          lotRow.warehouse_id !== register.warehouse_id
+        ) {
+          throw new AppError({
+            statusCode: 404,
+            errorCode: 'POS_INTAKE_LOT_NOT_FOUND',
+            title: 'Stock Intake Reference Not Found',
+            detail: `Stock intake reference "${targetIntakeLotId}" was not found for product "${product.sku}" in this warehouse.`,
+          });
+        }
+
+        if (lotRow.status !== 'ACTIVE') {
+          throw new AppError({
+            statusCode: 409,
+            errorCode: 'POS_INTAKE_LOT_INACTIVE',
+            title: 'Referenced Stock Intake Unavailable',
+            detail: `Stock intake reference "${lotRow.intake_code}" has status "${lotRow.status}" and cannot be sold.`,
+          });
+        }
+
+        const remBase = Quantity.fromDecimalString(String(lotRow.base_qty_remaining));
+        const resBase = Quantity.fromDecimalString(
+          String(lotRow.base_qty_reserved ?? '0.000000'),
+        );
+        const availBase = remBase.subtract(resBase);
+        if (!allowNegative && availBase.compare(normalizedBaseQty) < 0) {
+          throw new AppError({
+            statusCode: 409,
+            errorCode: 'POS_INTAKE_LOT_EXHAUSTED',
+            title: 'Referenced Stock Intake Exhausted',
+            detail: `Stock intake reference "${lotRow.intake_code}" has only ${availBase.toDecimalString()} ${product.base_uom} available, which is insufficient for requested ${normalizedBaseQty.toDecimalString()} ${product.base_uom}.`,
+          });
+        }
+
+        resolvedIntakeLotId = lotRow.id;
+        resolvedIntakeCode = lotRow.intake_code;
+        resolvedIntakeUnitCost = Money.fromDecimalString(
+          String(lotRow.purchase_cost_per_base_uom),
+          currencyCode,
+        ).toDecimalString();
+        if (
+          lotRow.pricing_mode === 'INTAKE_SPECIFIC' &&
+          lotRow.selling_price != null
+        ) {
+          resolvedIntakeSellingPrice = Money.fromDecimalString(
+            String(lotRow.selling_price),
+            currencyCode,
+          ).toDecimalString();
+          resolvedIntakePriceUom = String(
+            lotRow.selling_uom || effectivePriceUom,
+          ).toUpperCase();
+        }
+      }
+
+      const matchedPackageConv = customConversions.find(
+        (c) =>
+          c.uomCode.toUpperCase() === uomCode &&
+          c.sellingPrice !== null &&
+          c.sellingPrice !== undefined &&
+          c.sellingPrice.trim() !== '',
+      );
+      const barcodePriceOverride =
+        matchedProductBarcodeRow?.selling_price_override != null
+          ? Money.fromDecimalString(
+              String(matchedProductBarcodeRow.selling_price_override),
+              currencyCode,
+            ).toDecimalString()
+          : null;
+      const packageExplicitPrice =
+        matchedPackageConv?.sellingPrice != null
+          ? Money.fromDecimalString(
+              matchedPackageConv.sellingPrice,
+              currencyCode,
+            ).toDecimalString()
+          : null;
+
       let effectiveUnitPriceStr =
-        resolvedSerialSellingPrice ?? branchPriceCfg.effectivePrice;
+        resolvedSerialSellingPrice ??
+        barcodePriceOverride ??
+        resolvedIntakeSellingPrice ??
+        packageExplicitPrice ??
+        branchPriceCfg.effectivePrice;
+
+      let slicePriceUom =
+        barcodePriceOverride != null
+          ? uomCode
+          : resolvedIntakeSellingPrice != null && resolvedIntakePriceUom
+            ? resolvedIntakePriceUom
+            : packageExplicitPrice != null
+              ? uomCode
+              : effectivePriceUom;
+
       let resolvedPriceSource: CheckoutSlice['priceSource'] =
         resolvedSerialSellingPrice
           ? 'SERIAL_GROUP'
-          : branchPriceCfg.priceSource === 'BRANCH_OVERRIDE'
-            ? 'BRANCH_OVERRIDE'
-            : 'GLOBAL_PRODUCT';
+          : barcodePriceOverride != null
+            ? matchedProductBarcodeRow?.price_source_mode === 'INTAKE_SPECIFIC'
+              ? 'INTAKE_SPECIFIC'
+              : 'PACKAGE_EXPLICIT'
+            : resolvedIntakeSellingPrice != null
+              ? 'INTAKE_SPECIFIC'
+              : packageExplicitPrice != null
+                ? 'PACKAGE_EXPLICIT'
+                : branchPriceCfg.priceSource === 'BRANCH_OVERRIDE'
+                  ? 'BRANCH_OVERRIDE'
+                  : 'GLOBAL_PRODUCT';
+
       if (
         isPriceOverrideAuthorized &&
         lineItem.overrideSellingPrice !== undefined &&
@@ -2566,6 +2749,7 @@ export async function checkoutSale(
           }
         }
         effectiveUnitPriceStr = overrideMoney.toDecimalString();
+        slicePriceUom = uomCode;
         resolvedPriceSource = 'POS_MANUAL_OVERRIDE';
       }
 
@@ -2573,14 +2757,20 @@ export async function checkoutSale(
         sliceQty: lineQty,
         sliceBaseQty: normalizedBaseQty,
         sliceConvFactorToBase: conversionFactorToBaseStr,
+        slicePriceUom,
         batchId: null,
         batchNumber: null,
         internalBarcode: resolvedSerialInternalBarcode,
         expiryDate: null,
+        stockIntakeLotId: resolvedIntakeLotId,
+        intakeCode: resolvedIntakeCode,
         effectiveUnitPriceStr,
         minSellingPriceFloor: branchPriceCfg.minSellingPrice,
         maxDiscountPctPolicy: branchPriceCfg.maxDiscountPct,
-        unitCostSnapshot: resolvedSerialUnitCost ?? product.purchase_cost,
+        unitCostSnapshot:
+          resolvedSerialUnitCost ??
+          resolvedIntakeUnitCost ??
+          product.purchase_cost,
         priceSource: resolvedPriceSource,
       });
     }
@@ -2609,11 +2799,12 @@ export async function checkoutSale(
         currencyCode,
       );
 
+      const sliceEffectivePriceUom = slice.slicePriceUom ?? effectivePriceUom;
       let propPricing: ReturnType<typeof computeProportionateUnitPriceAndTotal>;
       try {
         propPricing = computeProportionateUnitPriceAndTotal({
           sellingPricePerPriceUom: pricePerPriceUomMoney.toDecimalString(),
-          priceUom: effectivePriceUom,
+          priceUom: sliceEffectivePriceUom,
           enteredQty: slice.sliceQty.toDecimalString(),
           sellingUom: uomCode,
           currencyCode,
@@ -2658,14 +2849,14 @@ export async function checkoutSale(
 
         if (lineDiscountMoney.isPositive()) {
           const qtyInPriceUomStr =
-            effectivePriceUom === product.base_uom
+            sliceEffectivePriceUom === product.base_uom
               ? slice.sliceBaseQty.toDecimalString()
-              : effectivePriceUom === uomCode
+              : sliceEffectivePriceUom === uomCode
                 ? slice.sliceQty.toDecimalString()
                 : convertQuantityBetweenUoms({
                     quantity: slice.sliceQty.toDecimalString(),
                     fromUom: uomCode,
-                    toUom: effectivePriceUom,
+                    toUom: sliceEffectivePriceUom,
                     productBaseUom: product.base_uom,
                     customConversions,
                     densityGPerMl: product.density_g_per_ml,
@@ -2701,11 +2892,11 @@ export async function checkoutSale(
       try {
         lineCalc = calculateLinePricingAndTax({
           unitPrice:
-            uomCode === effectivePriceUom
+            uomCode === sliceEffectivePriceUom
               ? unitPriceMoney
               : propPricing.effectiveLineSubtotal,
           quantity:
-            uomCode === effectivePriceUom ? slice.sliceQty : Quantity.fromInteger(1),
+            uomCode === sliceEffectivePriceUom ? slice.sliceQty : Quantity.fromInteger(1),
           lineDiscount: lineDiscountMoney,
           isTaxInclusive: false,
           taxRules: lineTaxRules,
@@ -2732,7 +2923,7 @@ export async function checkoutSale(
         quantity: slice.sliceQty,
         conversionFactorToBase: slice.sliceConvFactorToBase,
         normalizedBaseQty: slice.sliceBaseQty,
-        priceUom: effectivePriceUom,
+        priceUom: sliceEffectivePriceUom,
         pricePerPriceUom: pricePerPriceUomMoney,
         entrySource: resolvedEntrySource,
         unitPrice: unitPriceMoney,
@@ -2747,6 +2938,9 @@ export async function checkoutSale(
         batchNumber: slice.batchNumber,
         internalBarcode: slice.internalBarcode,
         expiryDate: slice.expiryDate,
+        stockIntakeLotId: slice.stockIntakeLotId ?? null,
+        intakeCode: slice.intakeCode ?? null,
+        scannedBarcode: lineItem.scannedBarcode?.trim() ?? null,
         priceSource: slice.priceSource,
         serialId:
           product.tracking_mode === 'SERIAL' && sIdx === 0 ? serialId : null,
@@ -3048,6 +3242,7 @@ export async function checkoutSale(
           productId: line.productId,
           batchId: line.batchId ?? null,
           serialId: line.serialId ?? null,
+          stockIntakeLotId: line.stockIntakeLotId ?? null,
           movementType: 'STOCK_OUT',
           quantity: deductionQtyStr,
           uomCode: line.uomCode,
@@ -3064,6 +3259,19 @@ export async function checkoutSale(
         },
         { skipPermissionCheck: true, skipRealtimePublish: true },
       );
+
+      if (!line.stockIntakeLotId && moveResult.stockIntakeLotId) {
+        line.stockIntakeLotId = moveResult.stockIntakeLotId;
+        const allocatedLot = await trx.db
+          .selectFrom('stock_intake_lots')
+          .select(['intake_code'])
+          .where('tenant_id', '=', trx.tenantId)
+          .where('id', '=', moveResult.stockIntakeLotId)
+          .executeTakeFirst();
+        if (allocatedLot) {
+          line.intakeCode = allocatedLot.intake_code;
+        }
+      }
 
       balanceAfterByProduct.set(line.productId, moveResult.balanceAfter);
       if (line.batchId) {
@@ -3160,11 +3368,16 @@ export async function checkoutSale(
     priceSource?:
       | 'BATCH_EXPLICIT'
       | 'SERIAL_GROUP'
+      | 'INTAKE_SPECIFIC'
+      | 'PACKAGE_EXPLICIT'
       | 'POS_MANUAL_OVERRIDE'
       | 'PRODUCT_FALLBACK'
       | 'BRANCH_OVERRIDE'
       | 'GLOBAL_PRODUCT'
       | null;
+    stockIntakeLotId?: string | null;
+    intakeCode?: string | null;
+    scannedBarcode?: string | null;
     serialId?: string | null;
     serialGroupId?: string | null;
     serialNumber?: string | null;
@@ -3210,6 +3423,9 @@ export async function checkoutSale(
         price_uom: line.priceUom,
         price_per_price_uom: line.pricePerPriceUom.toDecimalString(),
         entry_source: line.entrySource,
+        stock_intake_lot_id: line.stockIntakeLotId ?? null,
+        intake_code_snapshot: line.intakeCode ?? null,
+        scanned_barcode: line.scannedBarcode ?? null,
       })
       .execute();
 
@@ -3231,6 +3447,9 @@ export async function checkoutSale(
       internalBarcode: line.internalBarcode ?? null,
       expiryDate: line.expiryDate ?? null,
       priceSource: line.priceSource ?? null,
+      stockIntakeLotId: line.stockIntakeLotId ?? null,
+      intakeCode: line.intakeCode ?? null,
+      scannedBarcode: line.scannedBarcode ?? null,
       serialId: line.serialId ?? null,
       serialGroupId: line.serialGroupId ?? null,
       serialNumber: line.serialNumber ?? null,
@@ -3537,6 +3756,7 @@ export async function voidSale(
       'sales_invoice_lines.unit_cost_snapshot',
       'sales_invoice_lines.batch_id',
       'sales_invoice_lines.serial_id',
+      'sales_invoice_lines.stock_intake_lot_id',
       'products.track_inventory',
     ])
     .where('sales_invoice_lines.tenant_id', '=', trx.tenantId)
@@ -3557,6 +3777,7 @@ export async function voidSale(
           productId: line.product_id,
           batchId: line.batch_id ?? null,
           serialId: line.serial_id ?? null,
+          stockIntakeLotId: line.stock_intake_lot_id ?? null,
           movementType: 'CUSTOMER_RETURN_RESTOCK',
           quantity: line.quantity,
           uomCode: line.uom_code,
@@ -3814,6 +4035,9 @@ export async function getSaleById(
       ).toDecimalString(),
       unitCostSnapshot: l.unit_cost_snapshot,
       batchId: l.batch_id ?? null,
+      stockIntakeLotId: l.stock_intake_lot_id ?? null,
+      intakeCode: l.intake_code_snapshot ?? null,
+      scannedBarcode: l.scanned_barcode ?? null,
       serialId: l.serial_id ?? null,
       serialGroupId: l.serial_group_id ?? null,
       serialNumber: l.serial_number ?? null,
@@ -4263,6 +4487,9 @@ export async function getReceiptData(
       ).toDecimalString(),
       unitCostSnapshot: l.unit_cost_snapshot,
       batchId: l.batch_id ?? null,
+      stockIntakeLotId: l.stock_intake_lot_id ?? null,
+      intakeCode: l.intake_code_snapshot ?? null,
+      scannedBarcode: l.scanned_barcode ?? null,
       serialId: l.serial_id ?? null,
       serialGroupId: l.serial_group_id ?? null,
       serialNumber: l.serial_number ?? null,

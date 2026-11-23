@@ -909,6 +909,10 @@ async function hydrateProductsBatch(
       ).toDecimalString(),
       isDefaultPurchasing: Boolean(u.is_default_purchasing ?? false),
       isDefaultSelling: Boolean(u.is_default_selling ?? false),
+      sellingPrice:
+        u.selling_price != null
+          ? Money.fromDecimalString(String(u.selling_price), baseCurrency).toDecimalString()
+          : null,
       isActive: u.is_active,
     });
     uomsByProductId.set(u.product_id, list);
@@ -987,6 +991,7 @@ interface NormalizedProductConversion {
   readonly conversionFactorToBase: string;
   readonly isDefaultPurchasing: boolean;
   readonly isDefaultSelling: boolean;
+  readonly sellingPrice: string | null;
 }
 
 function normalizeProductUnitConversionsInput(
@@ -998,6 +1003,7 @@ function normalizeProductUnitConversionsInput(
         conversionFactorToBase: string;
         isDefaultPurchasing?: boolean;
         isDefaultSelling?: boolean;
+        sellingPrice?: string | null;
       }>
     | undefined,
 ): NormalizedProductConversion[] {
@@ -1048,6 +1054,7 @@ function normalizeProductUnitConversionsInput(
       factorDisplay: formatQuantityForDisplay(factor.toDecimalString()),
       isDefaultPurchasing: Boolean(conv.isDefaultPurchasing),
       isDefaultSelling: Boolean(conv.isDefaultSelling),
+      sellingPrice: conv.sellingPrice ?? null,
     };
   });
 
@@ -1082,6 +1089,7 @@ function normalizeProductUnitConversionsInput(
       conversionFactorToBase: item.factorDecimal,
       isDefaultPurchasing: item.isDefaultPurchasing,
       isDefaultSelling: item.isDefaultSelling,
+      sellingPrice: item.sellingPrice,
     });
   }
 
@@ -1433,6 +1441,9 @@ export async function createProduct(
         conversion_factor_to_base: conv.conversionFactorToBase,
         is_default_purchasing: conv.isDefaultPurchasing || uomConfig.purchaseUom === conv.uomCode,
         is_default_selling: conv.isDefaultSelling,
+        selling_price: conv.sellingPrice
+          ? validateAndNormalizeMoney(conv.sellingPrice, baseCurrency, 'sellingPrice')
+          : null,
         is_active: true,
         created_at: now,
         updated_at: now,
@@ -1905,6 +1916,9 @@ export async function updateProduct(
           conversion_factor_to_base: conv.conversionFactorToBase,
           is_default_purchasing: conv.isDefaultPurchasing,
           is_default_selling: conv.isDefaultSelling,
+          selling_price: conv.sellingPrice
+            ? validateAndNormalizeMoney(conv.sellingPrice, baseCurrency, 'sellingPrice')
+            : null,
           is_active: true,
           created_at: now,
           updated_at: now,
@@ -2069,28 +2083,75 @@ export async function updateProduct(
       }
     }
 
-    await trx.db
-      .deleteFrom('product_barcodes')
-      .where('tenant_id', '=', trx.tenantId)
-      .where('product_id', '=', productId)
-      .execute();
-
-    for (const bc of barcodeEntries) {
+    if (input.alternateBarcodes === undefined) {
+      // Only primaryBarcode was updated via Edit Product form: preserve all non-primary/intake/package barcodes!
       await trx.db
-        .insertInto('product_barcodes')
-        .values({
-          id: generateUuidV7(),
-          tenant_id: trx.tenantId,
-          product_id: productId,
-          barcode: bc.barcode,
-          barcode_type: bc.barcodeType,
-          uom_code: bc.uomCode,
-          is_primary: bc.isPrimary,
-          is_active: bc.isActive,
-          created_at: now,
-          updated_at: now,
-        })
+        .deleteFrom('product_barcodes')
+        .where('tenant_id', '=', trx.tenantId)
+        .where('product_id', '=', productId)
+        .where('is_primary', '=', true)
         .execute();
+
+      if (nextPrimaryBarcode) {
+        const existingSameCode = await trx.db
+          .selectFrom('product_barcodes')
+          .select(['id'])
+          .where('tenant_id', '=', trx.tenantId)
+          .where('product_id', '=', productId)
+          .where('barcode', '=', nextPrimaryBarcode)
+          .executeTakeFirst();
+
+        if (existingSameCode) {
+          await trx.db
+            .updateTable('product_barcodes')
+            .set({ is_primary: true, is_active: true, updated_at: now })
+            .where('tenant_id', '=', trx.tenantId)
+            .where('id', '=', existingSameCode.id)
+            .execute();
+        } else {
+          await trx.db
+            .insertInto('product_barcodes')
+            .values({
+              id: generateUuidV7(),
+              tenant_id: trx.tenantId,
+              product_id: productId,
+              barcode: nextPrimaryBarcode,
+              barcode_type: 'CODE128',
+              uom_code: nextBaseUom,
+              is_primary: true,
+              is_active: true,
+              created_at: now,
+              updated_at: now,
+            })
+            .execute();
+        }
+      }
+    } else {
+      await trx.db
+        .deleteFrom('product_barcodes')
+        .where('tenant_id', '=', trx.tenantId)
+        .where('product_id', '=', productId)
+        .where('stock_intake_lot_id', 'is', null)
+        .where('batch_id', 'is', null)
+        .execute();
+
+      for (const bc of barcodeEntries) {
+        await trx.db
+          .insertInto('product_barcodes')
+          .values({
+            id: generateUuidV7(),
+            tenant_id: trx.tenantId,
+            product_id: productId,
+            barcode: bc.barcode,
+            barcode_type: bc.barcodeType,
+            uom_code: bc.uomCode,
+            is_primary: bc.isPrimary,
+            is_active: bc.isActive,
+            created_at: now,
+            updated_at: now,
+          })
+          .execute();
+      }
     }
   }
 
@@ -2987,6 +3048,53 @@ export async function executeLegacyUomCorrection(
       })
       .where('tenant_id', '=', trx.tenantId)
       .where('id', '=', layer.id)
+      .execute();
+  }
+
+  // Rebase stock intake lots for this product
+  const intakeLots = await trx.db
+    .selectFrom('stock_intake_lots')
+    .selectAll()
+    .where('tenant_id', '=', trx.tenantId)
+    .where('product_id', '=', product.id)
+    .forUpdate()
+    .execute();
+
+  for (const lot of intakeLots) {
+    const ccy = lot.currency_code || baseCurrency;
+    const newBaseRec = scaleQtyByFactor(String(lot.base_qty_received), factor);
+    const newBaseRem = scaleQtyByFactor(String(lot.base_qty_remaining), factor);
+    const newBaseRes = scaleQtyByFactor(String(lot.base_qty_reserved ?? '0'), factor);
+    const newConvFactor = scaleQtyByFactor(
+      String(lot.conversion_factor_to_base ?? '1'),
+      factor,
+    );
+    const newBaseCost = divideMoneyByFactor(
+      String(lot.purchase_cost_per_base_uom),
+      factor,
+      ccy,
+    );
+    const isOldBaseSelling =
+      String(lot.selling_uom).toUpperCase() === oldBaseUom.toUpperCase();
+    const newLotSellingPrice =
+      lot.selling_price != null && isOldBaseSelling
+        ? divideMoneyByFactor(String(lot.selling_price), factor, ccy).toDecimalString()
+        : lot.selling_price;
+
+    await trx.db
+      .updateTable('stock_intake_lots')
+      .set({
+        conversion_factor_to_base: newConvFactor.toDecimalString(),
+        base_qty_received: newBaseRec.toDecimalString(),
+        base_qty_remaining: newBaseRem.toDecimalString(),
+        base_qty_reserved: newBaseRes.toDecimalString(),
+        purchase_cost_per_base_uom: newBaseCost.toDecimalString(),
+        ...(isOldBaseSelling ? { selling_uom: targetBaseUom } : {}),
+        selling_price: newLotSellingPrice,
+        updated_at: now,
+      })
+      .where('tenant_id', '=', trx.tenantId)
+      .where('id', '=', lot.id)
       .execute();
   }
 

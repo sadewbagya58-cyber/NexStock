@@ -28,6 +28,13 @@ export * from './batch.service.js';
 export * from './serial.service.js';
 export * from './costing.service.js';
 export * from './stocktake.service.js';
+export * from './stock-intake.service.js';
+import {
+  type ConsumedIntakeSlice,
+  createInboundStockIntakeAndEvaluate,
+  consumeStockIntakeLotsForOutbound,
+  restoreStockIntakeLotQuantity,
+} from './stock-intake.service.js';
 import {
   type CursorPaginatedResult,
   resolveProductForInventory,
@@ -90,6 +97,9 @@ function mapStockMovementRow(
     product_name?: string | null;
     batch_id?: string | null;
     serial_id?: string | null;
+    stock_intake_lot_id?: string | null | undefined;
+    intake_code?: string | null | undefined;
+    config_alert_id?: string | null | undefined;
     supplier_id: string | null;
     movement_type: StockMovementType;
     uom_code: string;
@@ -123,6 +133,13 @@ function mapStockMovementRow(
     productName: row.product_name ?? null,
     batchId: row.batch_id ?? null,
     serialId: row.serial_id ?? null,
+    ...(row.stock_intake_lot_id !== undefined
+      ? { stockIntakeLotId: row.stock_intake_lot_id ?? null }
+      : {}),
+    ...(row.intake_code !== undefined ? { intakeCode: row.intake_code ?? null } : {}),
+    ...(row.config_alert_id !== undefined
+      ? { configAlertId: row.config_alert_id ?? null }
+      : {}),
     supplierId: row.supplier_id,
     movementType: row.movement_type,
     uomCode: row.uom_code,
@@ -788,6 +805,41 @@ export async function postStockMovement(
     }
   }
 
+  // Smart Stock Intake Lots handling for non-batch / non-serial (`trackingMode === 'NONE'`) products
+  const isNonBatchNonSerial = product.trackingMode === 'NONE' && !input.batchId && !input.serialId;
+  let assignedIntakeLotId: string | null = input.stockIntakeLotId ?? null;
+  let consumedIntakeSlices: readonly ConsumedIntakeSlice[] = [];
+  const isGenuineInboundIntake =
+    isNonBatchNonSerial &&
+    qtyDelta.isPositive() &&
+    input.movementType !== 'CUSTOMER_RETURN_RESTOCK';
+
+  if (isGenuineInboundIntake) {
+    assignedIntakeLotId = input.stockIntakeLotId ?? generateUuidV7();
+  } else if (
+    isNonBatchNonSerial &&
+    qtyDelta.isPositive() &&
+    input.movementType === 'CUSTOMER_RETURN_RESTOCK'
+  ) {
+    assignedIntakeLotId = await restoreStockIntakeLotQuantity(trx, {
+      warehouseId: input.warehouseId,
+      productId: input.productId,
+      qtyToRestoreBase: qtyDelta,
+      explicitIntakeLotId: input.stockIntakeLotId ?? null,
+    });
+  } else if (isNonBatchNonSerial && qtyDelta.isNegative()) {
+    consumedIntakeSlices = await consumeStockIntakeLotsForOutbound(trx, {
+      warehouseId: input.warehouseId,
+      productId: input.productId,
+      qtyToConsumeBase: qtyDelta.abs(),
+      explicitIntakeLotId: input.stockIntakeLotId ?? null,
+      enforceExplicitLotStock: Boolean(input.stockIntakeLotId),
+    });
+    if (!assignedIntakeLotId && consumedIntakeSlices.length > 0) {
+      assignedIntakeLotId = consumedIntakeSlices[0]!.intakeLotId;
+    }
+  }
+
   // 1. Insert immutable ledger entry FIRST so `inventory_balances_ledger_integrity_trg` succeeds
   await trx.db
     .insertInto('stock_ledger_entries')
@@ -799,6 +851,7 @@ export async function postStockMovement(
       product_id: input.productId,
       batch_id: input.batchId ?? null,
       serial_id: input.serialId ?? null,
+      stock_intake_lot_id: assignedIntakeLotId,
       supplier_id: supplierId,
       movement_type: input.movementType,
       uom_code: uomCode,
@@ -823,6 +876,7 @@ export async function postStockMovement(
         sku: product.sku,
         baseUom: product.baseUom,
         ...(consumedFifoSlices.length > 0 ? { consumedCostLayers: consumedFifoSlices } : {}),
+        ...(consumedIntakeSlices.length > 0 ? { consumedIntakeLots: consumedIntakeSlices } : {}),
       },
     })
     .execute();
@@ -1113,6 +1167,7 @@ export async function postStockMovement(
     });
   }
 
+  let createdMovementSuggestionId: string | null = null;
   if (
     qtyDelta.isPositive() &&
     !unitCostMoney.isZero() &&
@@ -1125,7 +1180,7 @@ export async function postStockMovement(
   ) {
     const prevProdCost = Money.fromDecimalString(product.purchaseCost, baseCurrency);
     if (unitCostMoney.scaledUnits !== prevProdCost.scaledUnits) {
-      await triggerCostChangeSuggestionIfApplicable(trx, {
+      const createdSugg = await triggerCostChangeSuggestionIfApplicable(trx, {
         productId: input.productId,
         oldCost: prevProdCost.toDecimalString(),
         newCost: unitCostMoney.toDecimalString(),
@@ -1135,7 +1190,51 @@ export async function postStockMovement(
         reason: `Stock movement (${input.movementType}) at ${unitCostMoney.toDecimalString()}/${product.baseUom}`,
         scopeBranchId: input.branchId,
       });
+      createdMovementSuggestionId = createdSugg?.id ?? null;
     }
+  }
+
+  let createdIntakeCode: string | null = null;
+  let createdConfigAlertId: string | null = null;
+  if (isGenuineInboundIntake && assignedIntakeLotId) {
+    const sourceMethod =
+      input.referenceType === 'GOODS_RECEIPT' || resolvedEntrySource === 'PURCHASE_RECEIPT'
+        ? 'GRN'
+        : input.referenceType === 'STOCKTAKE' || resolvedEntrySource === 'STOCKTAKE'
+          ? 'STOCKTAKE'
+          : input.movementType === 'OPENING_STOCK'
+            ? 'OPENING_STOCK'
+            : input.movementType === 'TRANSFER_IN'
+              ? 'TRANSFER_IN'
+              : input.movementType === 'ADJUSTMENT_POSITIVE'
+                ? 'ADJUSTMENT_POSITIVE'
+                : 'STOCK_IN';
+
+    const intakeRes = await createInboundStockIntakeAndEvaluate(trx, {
+      intakeLotId: assignedIntakeLotId,
+      branchId: input.branchId,
+      warehouseId: input.warehouseId,
+      productId: input.productId,
+      batchId: input.batchId ?? null,
+      ledgerEntryId: movementId,
+      supplierId,
+      sourceMethod,
+      sourceReferenceType: input.referenceType?.trim() || null,
+      sourceReferenceId: input.referenceId?.trim() || null,
+      receivedUom: uomCode,
+      receivedQty: inputQty,
+      conversionFactorToBase: conversionFactorStr,
+      baseQtyReceived: qtyDelta,
+      purchaseCostPerBaseUom: unitCostMoney,
+      proposedSellingPrice: input.sellingPrice ?? null,
+      proposedSellingUom: input.sellingUom ?? null,
+      previousProductPurchaseCost: product.purchaseCost,
+      priceSuggestionId: createdMovementSuggestionId,
+      notes: reason,
+      occurredAt,
+    });
+    createdIntakeCode = intakeRes.intakeLot.intakeCode;
+    createdConfigAlertId = intakeRes.configAlert?.id ?? null;
   }
 
   const inserted = await trx.db
@@ -1149,6 +1248,9 @@ export async function postStockMovement(
       ...inserted,
       product_sku: product.sku,
       product_name: product.name,
+      stock_intake_lot_id: assignedIntakeLotId,
+      intake_code: createdIntakeCode,
+      config_alert_id: createdConfigAlertId,
     },
     baseCurrency,
   );
@@ -1502,6 +1604,68 @@ export async function reverseStockMovement(
           .where('tenant_id', '=', trx.tenantId)
           .where('id', '=', createdLayer.id)
           .execute();
+      }
+    }
+  }
+
+  // Restore or reverse Stock Intake Lots for non-batch / non-serial (`NONE`) items
+  if (product.trackingMode === 'NONE' && !original.batch_id && !original.serial_id) {
+    if (reversalQtyDelta.isPositive()) {
+      const originalMeta = (original.metadata_json ?? {}) as {
+        consumedIntakeLots?: Array<{
+          intakeLotId: string;
+          qtyConsumedBase: string;
+        }>;
+      };
+      await restoreStockIntakeLotQuantity(trx, {
+        warehouseId: original.warehouse_id,
+        productId: original.product_id,
+        qtyToRestoreBase: reversalQtyDelta,
+        explicitIntakeLotId: original.stock_intake_lot_id ?? null,
+        consumedSlices: Array.isArray(originalMeta.consumedIntakeLots)
+          ? originalMeta.consumedIntakeLots
+          : [],
+      });
+    } else if (reversalQtyDelta.isNegative()) {
+      const createdLot = await trx.db
+        .selectFrom('stock_intake_lots')
+        .select(['id', 'base_qty_remaining'])
+        .where('tenant_id', '=', trx.tenantId)
+        .where('ledger_entry_id', '=', original.id)
+        .forUpdate()
+        .executeTakeFirst();
+
+      if (createdLot) {
+        const curRem = Quantity.fromDecimalString(String(createdLot.base_qty_remaining));
+        const nextRem = curRem.subtract(reversalQtyDelta.abs());
+        const clampedRem = nextRem.isNegative() ? Quantity.zero() : nextRem;
+        await trx.db
+          .updateTable('stock_intake_lots')
+          .set({
+            base_qty_remaining: clampedRem.toDecimalString(),
+            status: clampedRem.isZero() ? 'REVERSED' : 'ACTIVE',
+            updated_at: now,
+          })
+          .where('tenant_id', '=', trx.tenantId)
+          .where('id', '=', createdLot.id)
+          .execute();
+
+        if (clampedRem.isZero()) {
+          await trx.db
+            .updateTable('stock_config_alerts')
+            .set({
+              status: 'DISMISSED',
+              resolution_action: 'DISMISS',
+              resolution_notes: 'Originating stock movement was reversed',
+              resolved_by_user_id: trx.userId,
+              resolved_at: now,
+              updated_at: now,
+            })
+            .where('tenant_id', '=', trx.tenantId)
+            .where('stock_intake_lot_id', '=', createdLot.id)
+            .where('status', '=', 'PENDING')
+            .execute();
+        }
       }
     }
   }

@@ -44,6 +44,7 @@ import {
 } from '../../shared/index.js';
 import { assertSubscriptionEntitlement } from '../../sub/index.js';
 import { postStockMovement } from './inv.service.js';
+import { resolvePackageAwareSellingPrice } from './stock-intake.service.js';
 
 export function calculateBatchExpiryStatus(
   expiryDate: string | Date | null | undefined,
@@ -2183,7 +2184,7 @@ export async function resolveHybridBarcode(
     return buildSerialMatchResponse('SERIAL_BARCODE', serialBarcodeMatch);
   }
 
-  // Helper to lookup product by barcode candidates
+  // Helper to lookup product & optional product_barcodes row by barcode candidates
   async function findProductByBarcodeCandidates(candidates: readonly string[]) {
     if (candidates.length === 0) return undefined;
     const expanded = [
@@ -2193,40 +2194,117 @@ export async function resolveHybridBarcode(
     ];
     const pbMatch = await trx.db
       .selectFrom('product_barcodes')
-      .select(['product_id', 'barcode'])
+      .selectAll()
       .where('tenant_id', '=', trx.tenantId)
-      .where('is_active', '=', true)
       .where('barcode', 'in', expanded)
+      .orderBy('is_active', 'desc')
       .executeTakeFirst();
     if (pbMatch) {
-      return trx.db
+      const prodRow = await trx.db
         .selectFrom('products')
         .selectAll()
         .where('tenant_id', '=', trx.tenantId)
         .where('id', '=', pbMatch.product_id)
         .executeTakeFirst();
+      if (prodRow) {
+        return { productRow: prodRow, barcodeRow: pbMatch };
+      }
     }
-    return trx.db
+    const primaryMatch = await trx.db
       .selectFrom('products')
       .selectAll()
       .where('tenant_id', '=', trx.tenantId)
       .where('primary_barcode', 'in', expanded)
       .executeTakeFirst();
+    if (primaryMatch) {
+      return { productRow: primaryMatch, barcodeRow: null };
+    }
+    return undefined;
   }
 
-  // Helper to build product-barcode match + optional FEFO/FIFO preview
+  // Helper to build product-barcode match + optional FEFO/FIFO preview, Intake Lot lock & Multi-UoM resolution
   async function buildProductMatchResponse(
     matchedBy: 'GS1_PRODUCT_ONLY' | 'MANUFACTURER_PRODUCT_BARCODE' | 'SKU',
-    productRow: NonNullable<Awaited<ReturnType<typeof findProductByBarcodeCandidates>>>,
+    productRow: NonNullable<
+      Awaited<ReturnType<typeof findProductByBarcodeCandidates>>
+    >['productRow'],
     matchedBarcodeText: string,
+    barcodeRow: NonNullable<
+      Awaited<ReturnType<typeof findProductByBarcodeCandidates>>
+    >['barcodeRow'] = null,
   ): Promise<ResolveBarcodeResponse> {
+    if (barcodeRow && barcodeRow.is_active === false) {
+      const inactiveSummary = mapProductSummary(productRow, '0.000000');
+      return {
+        matchedBy,
+        rawBarcode: input.rawBarcode,
+        normalizedBarcode: barcodeRow.barcode,
+        isExactBatchLocked: false,
+        isExactIntakeLotLocked: Boolean(barcodeRow.stock_intake_lot_id),
+        resolvedSellingUom: String(barcodeRow.uom_code || productRow.base_uom).toUpperCase(),
+        gs1Parsed: {
+          isGs1: gs1.isGs1,
+          gtin: gs1.gtin14 ?? null,
+          batchNumber: gs1.batchNumber ?? null,
+          expiryDate: gs1.expiryDate ?? null,
+          serialNumber: gs1.serialNumber ?? null,
+        },
+        product: inactiveSummary,
+        exactBatch: null,
+        availableQuantityTotal: '0.000000',
+        effectiveUnitPrice: null,
+        priceSource: 'MISSING_BLOCKED',
+        requiresPricePrompt: false,
+        blockedReason: 'BARCODE_INACTIVE',
+        fefoPreview: [],
+      };
+    }
+
+    if (barcodeRow?.batch_id) {
+      const boundBatch = await trx.db
+        .selectFrom('inventory_batches')
+        .selectAll()
+        .where('tenant_id', '=', trx.tenantId)
+        .where('id', '=', barcodeRow.batch_id)
+        .executeTakeFirst();
+      if (boundBatch) {
+        return buildExactBatchResponse(
+          matchedBy === 'MANUFACTURER_PRODUCT_BARCODE'
+            ? 'INTERNAL_BATCH'
+            : 'GS1_BATCH_AND_PRODUCT',
+          boundBatch,
+        );
+      }
+    }
+
     const targetWarehouseId = await resolveTargetWarehouseId();
-    const balanceAvailStr = await resolveProductAvailableBalance(
-      productRow.id,
-      Boolean(productRow.track_inventory),
-      targetWarehouseId,
-    );
+    const [balanceAvailStr, convRows] = await Promise.all([
+      resolveProductAvailableBalance(
+        productRow.id,
+        Boolean(productRow.track_inventory),
+        targetWarehouseId,
+      ),
+      trx.db
+        .selectFrom('product_unit_conversions')
+        .select(['uom_code', 'conversion_factor_to_base', 'selling_price'])
+        .where('tenant_id', '=', trx.tenantId)
+        .where('product_id', '=', productRow.id)
+        .where('is_active', '=', true)
+        .execute(),
+    ]);
     let availableQuantityTotal = balanceAvailStr;
+
+    const baseUom = String(productRow.base_uom || 'PCS').toUpperCase();
+    const priceUom = String(productRow.price_uom || baseUom).toUpperCase();
+    const resolvedSellingUom = String(
+      barcodeRow?.uom_code || baseUom,
+    ).toUpperCase();
+
+    const customConvs = convRows.map((c) => ({
+      uomCode: c.uom_code.toUpperCase(),
+      conversionFactorToBase: String(c.conversion_factor_to_base),
+      sellingPrice: c.selling_price != null ? String(c.selling_price) : null,
+    }));
 
     const baseProductSummary = mapProductSummary(productRow, availableQuantityTotal);
     const { branchSellingPrice } = await resolveProductEffectivePriceContext(
@@ -2234,14 +2312,159 @@ export async function resolveHybridBarcode(
       String(productRow.selling_price),
     );
 
+    const pkgPriceInfo = resolvePackageAwareSellingPrice({
+      targetSellingUom: resolvedSellingUom,
+      productBaseUom: baseUom,
+      productPriceUom: priceUom,
+      baseUnitPriceStr: branchSellingPrice ?? baseProductSummary.sellingPrice,
+      unitConversions: customConvs,
+      densityGPerMl: productRow.density_g_per_ml
+        ? String(productRow.density_g_per_ml)
+        : null,
+      currencyCode: baseCurrency,
+    });
+
+    const resolvedConversionFactorToBase =
+      barcodeRow?.conversion_factor_to_base != null
+        ? Quantity.fromDecimalString(
+            String(barcodeRow.conversion_factor_to_base),
+          ).toDecimalString()
+        : pkgPriceInfo.conversionFactorToBase;
+
     let fefoPreview: FefoBatchAllocation[] = [];
     let effectiveUnitPrice: string | null =
-      branchSellingPrice ?? baseProductSummary.sellingPrice;
-    let priceSource: ResolveBarcodeResponse['priceSource'] = branchSellingPrice
-      ? 'BRANCH_OVERRIDE'
-      : 'GLOBAL_PRODUCT';
+      pkgPriceInfo.unitPriceInSellingUom.toDecimalString();
+    let priceSource: ResolveBarcodeResponse['priceSource'] =
+      pkgPriceInfo.isPackageExplicitPrice
+        ? 'PACKAGE_EXPLICIT'
+        : branchSellingPrice
+          ? 'BRANCH_OVERRIDE'
+          : 'GLOBAL_PRODUCT';
     let requiresPricePrompt = false;
     let blockedReason: string | null = null;
+    let isExactIntakeLotLocked = false;
+    let exactIntakeLot: ResolveBarcodeResponse['exactIntakeLot'] = null;
+
+    if (barcodeRow?.selling_price_override != null) {
+      effectiveUnitPrice = Money.fromDecimalString(
+        String(barcodeRow.selling_price_override),
+        baseCurrency,
+      ).toDecimalString();
+      priceSource =
+        barcodeRow.price_source_mode === 'INTAKE_SPECIFIC'
+          ? 'INTAKE_SPECIFIC'
+          : 'PACKAGE_EXPLICIT';
+    }
+
+    if (barcodeRow?.stock_intake_lot_id) {
+      isExactIntakeLotLocked = true;
+      const lot = await trx.db
+        .selectFrom('stock_intake_lots')
+        .selectAll()
+        .where('tenant_id', '=', trx.tenantId)
+        .where('id', '=', barcodeRow.stock_intake_lot_id)
+        .executeTakeFirst();
+
+      if (!lot || lot.product_id !== productRow.id) {
+        blockedReason = 'INTAKE_LOT_NOT_FOUND';
+        availableQuantityTotal = '0.000000';
+      } else {
+        const wrongWarehouse =
+          (targetWarehouseId && lot.warehouse_id !== targetWarehouseId) ||
+          (input.branchId && lot.branch_id !== input.branchId);
+        const remBase = Quantity.fromDecimalString(String(lot.base_qty_remaining));
+        const resBase = Quantity.fromDecimalString(
+          String(lot.base_qty_reserved ?? '0.000000'),
+        );
+        const availBase = remBase.subtract(resBase);
+        const reqQtyInSelling = Quantity.fromDecimalString(
+          input.requestedQty ?? '1',
+        );
+        const convFactorQty = Quantity.fromDecimalString(
+          resolvedConversionFactorToBase,
+        );
+        const neededBase = Quantity.fromMicroUnits(
+          (reqQtyInSelling.microUnits * convFactorQty.microUnits) / 1_000_000n,
+        );
+
+        availableQuantityTotal =
+          lot.status === 'ACTIVE' && !wrongWarehouse && availBase.isPositive()
+            ? availBase.toDecimalString()
+            : '0.000000';
+
+        if (wrongWarehouse) {
+          blockedReason = 'INTAKE_LOT_WRONG_WAREHOUSE';
+        } else if (lot.status !== 'ACTIVE') {
+          blockedReason = `INTAKE_LOT_${lot.status}`;
+        } else if (availBase.compare(neededBase) < 0) {
+          blockedReason = 'INTAKE_LOT_EXHAUSTED';
+        }
+
+        if (
+          barcodeRow.selling_price_override == null &&
+          lot.pricing_mode === 'INTAKE_SPECIFIC' &&
+          lot.selling_price != null
+        ) {
+          const lotPriceInfo = resolvePackageAwareSellingPrice({
+            targetSellingUom: resolvedSellingUom,
+            productBaseUom: baseUom,
+            productPriceUom: priceUom,
+            baseUnitPriceStr: Money.fromDecimalString(
+              String(lot.selling_price),
+              baseCurrency,
+            ).toDecimalString(),
+            basePriceUom: String(lot.selling_uom || priceUom).toUpperCase(),
+            unitConversions: customConvs,
+            densityGPerMl: productRow.density_g_per_ml
+              ? String(productRow.density_g_per_ml)
+              : null,
+            currencyCode: baseCurrency,
+          });
+          effectiveUnitPrice = lotPriceInfo.unitPriceInSellingUom.toDecimalString();
+          priceSource = 'INTAKE_SPECIFIC';
+        }
+
+        exactIntakeLot = {
+          id: lot.id,
+          intakeCode: lot.intake_code,
+          sourceMethod: lot.source_method,
+          warehouseId: lot.warehouse_id,
+          branchId: lot.branch_id,
+          receivedUom: lot.received_uom,
+          receivedQty: Quantity.fromDecimalString(
+            String(lot.received_qty),
+          ).toDecimalString(),
+          conversionFactorToBase: Quantity.fromDecimalString(
+            String(lot.conversion_factor_to_base ?? '1.000000'),
+          ).toDecimalString(),
+          baseQtyReceived: Quantity.fromDecimalString(
+            String(lot.base_qty_received),
+          ).toDecimalString(),
+          baseQtyRemaining: availBase.isPositive()
+            ? availBase.toDecimalString()
+            : '0.000000',
+          purchaseCostPerBaseUom: Money.fromDecimalString(
+            String(lot.purchase_cost_per_base_uom),
+            baseCurrency,
+          ).toDecimalString(),
+          pricingMode: lot.pricing_mode as
+            | 'INHERIT_PRODUCT'
+            | 'INHERIT_BRANCH'
+            | 'INTAKE_SPECIFIC',
+          sellingUom: lot.selling_uom,
+          sellingPrice:
+            lot.selling_price != null
+              ? Money.fromDecimalString(
+                  String(lot.selling_price),
+                  baseCurrency,
+                ).toDecimalString()
+              : null,
+          isLegacyAggregate: Boolean(lot.is_legacy_aggregate),
+          status: lot.status as 'ACTIVE' | 'DEPLETED' | 'INACTIVE' | 'REVERSED',
+          receivedAt: new Date(lot.received_at).toISOString(),
+        };
+      }
+    }
 
     if (
       (productRow.tracking_mode === 'BATCH' ||
@@ -2337,6 +2560,33 @@ export async function resolveHybridBarcode(
       rawBarcode: input.rawBarcode,
       normalizedBarcode: matchedBarcodeText,
       isExactBatchLocked: false,
+      isExactIntakeLotLocked,
+      resolvedSellingUom,
+      resolvedConversionFactorToBase,
+      matchedBarcode: barcodeRow
+        ? {
+            id: barcodeRow.id,
+            barcode: barcodeRow.barcode,
+            barcodeType: barcodeRow.barcode_type,
+            uomCode: resolvedSellingUom,
+            conversionFactorToBase: resolvedConversionFactorToBase,
+            stockIntakeLotId: barcodeRow.stock_intake_lot_id ?? null,
+            batchId: barcodeRow.batch_id ?? null,
+            priceSourceMode: (barcodeRow.price_source_mode ?? 'INHERIT') as
+              | 'INHERIT'
+              | 'INTAKE_SPECIFIC'
+              | 'BATCH_SPECIFIC'
+              | 'PACKAGE_EXPLICIT',
+            sellingPriceOverride:
+              barcodeRow.selling_price_override != null
+                ? Money.fromDecimalString(
+                    String(barcodeRow.selling_price_override),
+                    baseCurrency,
+                  ).toDecimalString()
+                : null,
+          }
+        : null,
+      exactIntakeLot,
       gs1Parsed: {
         isGs1: gs1.isGs1,
         gtin: gs1.gtin14 ?? null,
@@ -2358,14 +2608,14 @@ export async function resolveHybridBarcode(
   // Priority 2: GS1 composite barcode
   if (gs1.isGs1 && gs1.gtin14) {
     const gtinCandidates = normalizeBarcodeCandidates(gs1.gtin14);
-    const gs1Product = await findProductByBarcodeCandidates(gtinCandidates);
-    if (gs1Product) {
+    const gs1Match = await findProductByBarcodeCandidates(gtinCandidates);
+    if (gs1Match) {
       if (gs1.batchNumber) {
         let batchLookup = trx.db
           .selectFrom('inventory_batches')
           .selectAll()
           .where('tenant_id', '=', trx.tenantId)
-          .where('product_id', '=', gs1Product.id)
+          .where('product_id', '=', gs1Match.productRow.id)
           .where('batch_number', '=', gs1.batchNumber.toUpperCase());
         if (input.warehouseId) {
           batchLookup = batchLookup.where('warehouse_id', '=', input.warehouseId);
@@ -2379,20 +2629,22 @@ export async function resolveHybridBarcode(
       }
       return buildProductMatchResponse(
         'GS1_PRODUCT_ONLY',
-        gs1Product,
+        gs1Match.productRow,
         gs1.gtin14,
+        gs1Match.barcodeRow,
       );
     }
   }
 
-  // Priority 3: Standard manufacturer product barcode
+  // Priority 3: Standard manufacturer or package/intake product barcode
   const candidates = normalizeBarcodeCandidates(input.rawBarcode);
   const productMatch = await findProductByBarcodeCandidates(candidates);
   if (productMatch) {
     return buildProductMatchResponse(
       'MANUFACTURER_PRODUCT_BARCODE',
-      productMatch,
-      candidates[0] ?? normalizedBarcode,
+      productMatch.productRow,
+      productMatch.barcodeRow?.barcode ?? candidates[0] ?? normalizedBarcode,
+      productMatch.barcodeRow,
     );
   }
 

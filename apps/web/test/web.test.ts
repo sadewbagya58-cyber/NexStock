@@ -3452,4 +3452,50 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       expect(html).toContain('hasPlanFeature(');
     });
   });
+
+  // ============================================================================
+  // SMART STOCK INTAKE, CHANGE DETECTION ALERTS, CENTRALIZED BARCODES & MULTI-UOM
+  // ============================================================================
+  describe('38. Smart Stock Change Detection, Unified Stock Intake Layers, Centralized Barcode Management & Multi-UoM POS Suite', () => {
+    it('supports responsive Multi-UoM package pricing, POS Multi-UoM selection (TEST-RICE-001), stock intake barcode mapping, batch label printing, and Smart Stock Config Alerts workflow', () => {
+      const html = readFileSync(resolve(WEB_ROOT, 'public/index.html'), 'utf8');
+      const offlineJs = readFileSync(resolve(WEB_ROOT, 'public/nexstock-offline-client.js'), 'utf8');
+
+      // 1. Responsive CSS grids for Package & Multi-UoM conversion editor and Barcode Management modal
+      expect(html).toContain('.uom-conv-row');
+      expect(html).toContain('.barcode-add-grid');
+      expect(html).toContain('.barcode-mapping-card');
+      expect(html).toContain('.stock-config-alert-card');
+      expect(html).toContain('class="form-input uom-conv-price"');
+
+      // 2. POS Multi-UoM selection (TEST-RICE-001 fix) & inline cart UoM switching
+      expect(html).toContain('function getPosProductSellableUoms(');
+      expect(html).toContain('function changeCartItemUom(');
+      expect(html).toContain('function getTotalCartBaseQtyForIntakeLot(');
+      expect(html).toContain('isPricePerSellingUom');
+
+      // 3. Centralized Barcode Management with stock intake reference, selling UoM, price override & multi-select batch printing
+      expect(html).toContain('id="newAltBarcodeUom"');
+      expect(html).toContain('id="newAltBarcodeStockRef"');
+      expect(html).toContain('id="newAltBarcodePriceOverride"');
+      expect(html).toContain('function printSelectedBarcodeEntries(');
+      expect(html).toContain('CAT_BARCODE_IN_USE_DEACTIVATE_ONLY');
+
+      // 4. Smart Stock Configuration Alerts & Review Workflow UI
+      expect(html).toContain('async function openStockConfigAlertsModal(');
+      expect(html).toContain('async function resolveStockConfigAlertAction(');
+      expect(html).toContain('/v1/inventory/config-alerts');
+      expect(html).toContain('/v1/inventory/intake-lots');
+      expect(html).toContain('CREATE_INTAKE_BARCODE');
+      expect(html).toContain('SET_INTAKE_SPECIFIC_PRICE');
+      expect(html).toContain('KEEP_GLOBAL_PRICE');
+      expect(html).toContain('UPDATE_GLOBAL_WITH_APPROVAL');
+
+      // 5. Offline IndexedDB client support for intakeLots, BARCODE_INACTIVE, INTAKE_LOT_EXHAUSTED, and resolvedSellingUom
+      expect(offlineJs).toContain('intakeLots: snapshot.intakeLots || []');
+      expect(offlineJs).toContain("blockedReason: 'BARCODE_INACTIVE'");
+      expect(offlineJs).toContain("blockedReason: 'INTAKE_LOT_EXHAUSTED'");
+      expect(offlineJs).toContain('resolvedSellingUom: resolvedUom');
+    });
+  });
 });

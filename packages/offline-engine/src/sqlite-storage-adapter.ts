@@ -297,6 +297,26 @@ export class SqliteOfflineStorageAdapter implements OfflineStoragePort {
              VALUES (?, ?, ?, ?, ?, ?, ?)`,
           )
           .run(bc.id, tenantId, bc.productId, bc.barcode, allowedType, bc.uomCode, bc.isPrimary ? 1 : 0);
+        this.db
+          .prepare(
+            `INSERT OR REPLACE INTO local_barcode_intake_mappings
+             (barcode_id, tenant_id, product_id, barcode, uom_code, stock_intake_lot_id, batch_id, conversion_factor_to_base, price_source_mode, selling_price_override, is_active, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          )
+          .run(
+            bc.id,
+            tenantId,
+            bc.productId,
+            bc.barcode,
+            bc.uomCode,
+            bc.stockIntakeLotId ?? null,
+            bc.batchId ?? null,
+            bc.conversionFactorToBase ?? null,
+            bc.priceSourceMode ?? 'INHERIT',
+            bc.sellingPriceOverride ?? null,
+            bc.isActive === false ? 0 : 1,
+            now,
+          );
       }
 
       for (const uc of snapshot.unitConversions ?? []) {
@@ -308,6 +328,45 @@ export class SqliteOfflineStorageAdapter implements OfflineStoragePort {
              VALUES (?, ?, ?, ?, ?, ?, ?)`,
           )
           .run(uc.id, tenantId, uc.productId, uc.uomCode, uc.uomName, Math.max(1, factorMicro), uc.isActive ? 1 : 0);
+        this.db
+          .prepare(
+            `INSERT OR REPLACE INTO local_uom_package_pricing
+             (conversion_id, tenant_id, product_id, uom_code, selling_price, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?)`,
+          )
+          .run(uc.id, tenantId, uc.productId, uc.uomCode, uc.sellingPrice ?? null, now);
+      }
+
+      for (const lot of snapshot.intakeLots ?? []) {
+        this.db
+          .prepare(
+            `INSERT OR REPLACE INTO local_stock_intake_lots
+             (id, tenant_id, branch_id, warehouse_id, product_id, batch_id, intake_code, source_method, received_uom, received_qty, conversion_factor_to_base, base_qty_received, base_qty_remaining, purchase_cost_per_base_uom, selling_price, selling_uom, pricing_mode, status, is_legacy_aggregate, received_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          )
+          .run(
+            lot.id,
+            tenantId,
+            lot.branchId,
+            lot.warehouseId,
+            lot.productId,
+            lot.batchId ?? null,
+            lot.intakeCode,
+            lot.sourceMethod,
+            lot.receivedUom,
+            lot.receivedQty,
+            lot.conversionFactorToBase,
+            lot.baseQtyReceived,
+            lot.baseQtyRemaining,
+            lot.purchaseCostPerBaseUom,
+            lot.sellingPrice ?? null,
+            lot.sellingUom,
+            lot.pricingMode ?? 'INHERIT_PRODUCT',
+            lot.status,
+            lot.isLegacyAggregate ? 1 : 0,
+            lot.receivedAt,
+            now,
+          );
       }
 
       for (const ov of snapshot.branchOverrides) {
@@ -745,21 +804,25 @@ export class SqliteOfflineStorageAdapter implements OfflineStoragePort {
   }): readonly OfflineUnitConversionRecord[] {
     const rows = this.db
       .prepare(
-        `SELECT product_id, uom_code, uom_name, conversion_factor_micro
-         FROM local_product_unit_conversions
-         WHERE tenant_id = ? AND product_id = ? AND is_active = 1`,
+        `SELECT uc.product_id, uc.uom_code, uc.uom_name, uc.conversion_factor_micro, upp.selling_price
+         FROM local_product_unit_conversions uc
+         LEFT JOIN local_uom_package_pricing upp
+           ON upp.tenant_id = uc.tenant_id AND upp.conversion_id = uc.id
+         WHERE uc.tenant_id = ? AND uc.product_id = ? AND uc.is_active = 1`,
       )
       .all(params.tenantId, params.productId) as {
       product_id: string;
       uom_code: string;
       uom_name: string;
       conversion_factor_micro: number;
+      selling_price: string | null;
     }[];
     return rows.map((r) => ({
       productId: r.product_id,
       uomCode: r.uom_code,
       uomName: r.uom_name,
       conversionFactorToBase: (r.conversion_factor_micro / 1_000_000).toFixed(6),
+      sellingPrice: r.selling_price ?? null,
     }));
   }
 
@@ -926,15 +989,72 @@ export class SqliteOfflineStorageAdapter implements OfflineStoragePort {
       };
     }
 
-    // 2. Product barcode / primary barcode / SKU lookup
-    const prodMatch = this.db
+    // 2. Product barcode / primary barcode / SKU lookup (including intake lot & package UoM mapping)
+    const barcodeMapRow = this.db
       .prepare(
-        `SELECT id FROM local_products WHERE tenant_id = ? AND (primary_barcode = ? OR UPPER(sku) = UPPER(?))
-         UNION
-         SELECT product_id AS id FROM local_product_barcodes WHERE tenant_id = ? AND barcode = ?
+        `SELECT product_id, uom_code, stock_intake_lot_id, batch_id, conversion_factor_to_base,
+                price_source_mode, selling_price_override, is_active
+         FROM local_barcode_intake_mappings
+         WHERE tenant_id = ? AND barcode = ?
+         ORDER BY is_active DESC
          LIMIT 1`,
       )
-      .get(params.tenantId, code, code, params.tenantId, code) as { id: string } | undefined;
+      .get(params.tenantId, code) as
+      | {
+          product_id: string;
+          uom_code: string;
+          stock_intake_lot_id: string | null;
+          batch_id: string | null;
+          conversion_factor_to_base: string | null;
+          price_source_mode: string;
+          selling_price_override: string | null;
+          is_active: number;
+        }
+      | undefined;
+
+    if (barcodeMapRow && barcodeMapRow.is_active === 0) {
+      const prod = this.getProductById({
+        tenantId: params.tenantId,
+        branchId: params.branchId,
+        warehouseId: params.warehouseId,
+        productId: barcodeMapRow.product_id,
+      });
+      return {
+        matchType: 'PRODUCT_BARCODE',
+        productId: barcodeMapRow.product_id,
+        sku: prod?.sku ?? null,
+        name: prod?.name ?? null,
+        baseUom: prod?.baseUom ?? null,
+        priceUom: prod?.priceUom ?? null,
+        resolvedSellingUom: barcodeMapRow.uom_code,
+        resolvedConversionFactorToBase: barcodeMapRow.conversion_factor_to_base ?? '1.000000',
+        stockIntakeLotId: barcodeMapRow.stock_intake_lot_id,
+        intakeCode: null,
+        batchId: barcodeMapRow.batch_id,
+        batchNumber: null,
+        serialId: null,
+        serialNumber: null,
+        internalBarcode: null,
+        availableQuantity: '0.000000',
+        sellingPrice: prod?.effectivePrice ?? null,
+        pricingSource: 'PRODUCT_DEFAULT',
+        expiryDate: null,
+        allocationPolicy: null,
+        isBlocked: true,
+        blockReason: 'BARCODE_INACTIVE',
+      };
+    }
+
+    const prodMatch = barcodeMapRow
+      ? { id: barcodeMapRow.product_id }
+      : (this.db
+          .prepare(
+            `SELECT id FROM local_products WHERE tenant_id = ? AND (primary_barcode = ? OR UPPER(sku) = UPPER(?))
+             UNION
+             SELECT product_id AS id FROM local_product_barcodes WHERE tenant_id = ? AND barcode = ?
+             LIMIT 1`,
+          )
+          .get(params.tenantId, code, code, params.tenantId, code) as { id: string } | undefined);
 
     if (prodMatch) {
       const prod = this.getProductById({
@@ -944,6 +1064,97 @@ export class SqliteOfflineStorageAdapter implements OfflineStoragePort {
         productId: prodMatch.id,
       });
       if (prod) {
+        const resolvedUom = (barcodeMapRow?.uom_code || prod.baseUom).toUpperCase();
+        const convs = this.getProductUnitConversions({
+          tenantId: params.tenantId,
+          productId: prod.id,
+        });
+        const matchedConv = convs.find((c) => c.uomCode.toUpperCase() === resolvedUom);
+        const resolvedConvFactor =
+          resolvedUom === prod.baseUom.toUpperCase()
+            ? '1.000000'
+            : (barcodeMapRow?.conversion_factor_to_base ??
+              matchedConv?.conversionFactorToBase ??
+              '1.000000');
+
+        if (barcodeMapRow?.stock_intake_lot_id) {
+          const intakeLot = this.db
+            .prepare(
+              `SELECT id, warehouse_id, intake_code, base_qty_remaining, selling_price, pricing_mode, status
+               FROM local_stock_intake_lots
+               WHERE tenant_id = ? AND id = ?`,
+            )
+            .get(params.tenantId, barcodeMapRow.stock_intake_lot_id) as
+            | {
+                id: string;
+                warehouse_id: string;
+                intake_code: string;
+                base_qty_remaining: string;
+                selling_price: string | null;
+                pricing_mode: string;
+                status: string;
+              }
+            | undefined;
+
+          const remQty = Number.parseFloat(intakeLot?.base_qty_remaining ?? '0');
+          const reqQty = Number.parseFloat(resolvedConvFactor || '1');
+          const isIntakeBlocked =
+            !intakeLot ||
+            intakeLot.warehouse_id !== params.warehouseId ||
+            intakeLot.status !== 'ACTIVE' ||
+            remQty < reqQty;
+          const baseUnitSellPrice =
+            intakeLot?.pricing_mode === 'INTAKE_SPECIFIC' && intakeLot.selling_price
+              ? intakeLot.selling_price
+              : prod.effectivePrice;
+          const resolvedSellPrice =
+            barcodeMapRow.selling_price_override ??
+            (resolvedUom !== prod.baseUom.toUpperCase() && matchedConv?.sellingPrice
+              ? matchedConv.sellingPrice
+              : resolvedUom !== prod.baseUom.toUpperCase()
+                ? (Number.parseFloat(baseUnitSellPrice) * reqQty).toFixed(4)
+                : baseUnitSellPrice);
+
+          return {
+            matchType: 'PRODUCT_BARCODE',
+            productId: prod.id,
+            sku: prod.sku,
+            name: prod.name,
+            baseUom: prod.baseUom,
+            priceUom: prod.priceUom,
+            resolvedSellingUom: resolvedUom,
+            resolvedConversionFactorToBase: resolvedConvFactor,
+            stockIntakeLotId: intakeLot?.id ?? barcodeMapRow.stock_intake_lot_id,
+            intakeCode: intakeLot?.intake_code ?? null,
+            batchId: null,
+            batchNumber: null,
+            serialId: null,
+            serialNumber: null,
+            internalBarcode: null,
+            availableQuantity: intakeLot?.base_qty_remaining ?? '0.000000',
+            sellingPrice: resolvedSellPrice,
+            pricingSource:
+              barcodeMapRow.selling_price_override ||
+              (resolvedUom !== prod.baseUom.toUpperCase() && matchedConv?.sellingPrice)
+                ? 'PACKAGE_EXPLICIT'
+                : intakeLot?.pricing_mode === 'INTAKE_SPECIFIC' && intakeLot.selling_price
+                  ? 'INTAKE_SPECIFIC'
+                  : 'PRODUCT_DEFAULT',
+            expiryDate: null,
+            allocationPolicy: 'MANUAL',
+            isBlocked: isIntakeBlocked,
+            blockReason: !intakeLot
+              ? 'INTAKE_LOT_EXHAUSTED'
+              : intakeLot.warehouse_id !== params.warehouseId
+                ? 'INTAKE_LOT_WRONG_WAREHOUSE'
+                : intakeLot.status !== 'ACTIVE'
+                  ? `INTAKE_LOT_${intakeLot.status}`
+                  : remQty < reqQty
+                    ? 'INTAKE_LOT_EXHAUSTED'
+                    : null,
+          };
+        }
+
         const batches = this.listBatchesForProduct({
           tenantId: params.tenantId,
           warehouseId: params.warehouseId,
@@ -963,7 +1174,9 @@ export class SqliteOfflineStorageAdapter implements OfflineStoragePort {
               }
               return (a.expiryDate ?? '9999-12-31').localeCompare(b.expiryDate ?? '9999-12-31');
             });
-          const bestBatch = eligible[0] ?? null;
+          const bestBatch = barcodeMapRow?.batch_id
+            ? (batches.find((b) => b.batchId === barcodeMapRow.batch_id) ?? null)
+            : (eligible[0] ?? null);
           return {
             matchType: 'PRODUCT_BARCODE',
             productId: prod.id,
@@ -971,6 +1184,10 @@ export class SqliteOfflineStorageAdapter implements OfflineStoragePort {
             name: prod.name,
             baseUom: prod.baseUom,
             priceUom: prod.priceUom,
+            resolvedSellingUom: resolvedUom,
+            resolvedConversionFactorToBase: resolvedConvFactor,
+            stockIntakeLotId: null,
+            intakeCode: null,
             batchId: bestBatch?.batchId ?? null,
             batchNumber: bestBatch?.batchNumber ?? null,
             serialId: null,
@@ -992,6 +1209,15 @@ export class SqliteOfflineStorageAdapter implements OfflineStoragePort {
           };
         }
 
+        const reqFactorNum = Number.parseFloat(resolvedConvFactor || '1');
+        const resolvedStandardPrice =
+          barcodeMapRow?.selling_price_override ??
+          (resolvedUom !== prod.baseUom.toUpperCase() && matchedConv?.sellingPrice
+            ? matchedConv.sellingPrice
+            : resolvedUom !== prod.baseUom.toUpperCase()
+              ? (Number.parseFloat(prod.effectivePrice) * reqFactorNum).toFixed(4)
+              : prod.effectivePrice);
+
         return {
           matchType: 'PRODUCT_BARCODE',
           productId: prod.id,
@@ -999,14 +1225,22 @@ export class SqliteOfflineStorageAdapter implements OfflineStoragePort {
           name: prod.name,
           baseUom: prod.baseUom,
           priceUom: prod.priceUom,
+          resolvedSellingUom: resolvedUom,
+          resolvedConversionFactorToBase: resolvedConvFactor,
+          stockIntakeLotId: null,
+          intakeCode: null,
           batchId: null,
           batchNumber: null,
           serialId: null,
           serialNumber: null,
           internalBarcode: null,
           availableQuantity: prod.availableQuantity,
-          sellingPrice: prod.effectivePrice,
-          pricingSource: 'PRODUCT_DEFAULT',
+          sellingPrice: resolvedStandardPrice,
+          pricingSource:
+            barcodeMapRow?.selling_price_override ||
+            (resolvedUom !== prod.baseUom.toUpperCase() && matchedConv?.sellingPrice)
+              ? 'PACKAGE_EXPLICIT'
+              : 'PRODUCT_DEFAULT',
           expiryDate: null,
           allocationPolicy: null,
           isBlocked: false,
@@ -1286,6 +1520,55 @@ export class SqliteOfflineStorageAdapter implements OfflineStoragePort {
               l.unitPrice,
               invoice.createdAt,
             );
+        }
+
+        if (l.stockIntakeLotId || l.scannedBarcode) {
+          this.db
+            .prepare(
+              `INSERT INTO local_sales_line_intake_links
+               (line_id, tenant_id, invoice_id, stock_intake_lot_id, intake_code_snapshot, selling_uom, conversion_factor_to_base, normalized_base_qty, scanned_barcode, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            )
+            .run(
+              lineId,
+              invoice.tenantId,
+              invoice.invoiceId,
+              l.stockIntakeLotId ?? null,
+              l.intakeCode ?? null,
+              l.uomCode,
+              l.conversionFactorToBase,
+              l.normalizedBaseQty,
+              l.scannedBarcode ?? null,
+              invoice.createdAt,
+            );
+        }
+
+        if (l.stockIntakeLotId) {
+          const lotRow = this.db
+            .prepare(
+              `SELECT base_qty_remaining FROM local_stock_intake_lots WHERE tenant_id = ? AND id = ?`,
+            )
+            .get(invoice.tenantId, l.stockIntakeLotId) as { base_qty_remaining: string } | undefined;
+          if (lotRow) {
+            const rem = Math.max(
+              0,
+              Number.parseFloat(lotRow.base_qty_remaining) -
+                Number.parseFloat(l.normalizedBaseQty || '0'),
+            );
+            this.db
+              .prepare(
+                `UPDATE local_stock_intake_lots
+                 SET base_qty_remaining = ?, status = ?, updated_at = ?
+                 WHERE tenant_id = ? AND id = ?`,
+              )
+              .run(
+                rem.toFixed(6),
+                rem <= 0 ? 'DEPLETED' : 'ACTIVE',
+                invoice.createdAt,
+                invoice.tenantId,
+                l.stockIntakeLotId,
+              );
+          }
         }
       }
 

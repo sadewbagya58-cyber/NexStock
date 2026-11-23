@@ -648,6 +648,13 @@ export function loadQaMasterEnhancementsMigrationSql(): string {
   return sqlText;
 }
 
+export function loadSmartStockIntakeAndBarcodesMigrationSql(): string {
+  const filename = '0032_smart_stock_intake_and_barcodes.sql';
+  const sqlText = readFileSync(resolve(migrationsDir, filename), 'utf-8');
+  assertPostgresMigrationSqlCompatible(sqlText, filename);
+  return sqlText;
+}
+
 export function getOrderedPostgresMigrations(): readonly PostgresMigrationSpec[] {
   return [
     {
@@ -866,6 +873,13 @@ export function getOrderedPostgresMigrations(): readonly PostgresMigrationSpec[]
       name: '0031_qa_master_enhancements',
       filename: '0031_qa_master_enhancements.sql',
       sql: loadQaMasterEnhancementsMigrationSql(),
+    },
+    {
+      dialect: 'postgres',
+      version: 32,
+      name: '0032_smart_stock_intake_and_barcodes',
+      filename: '0032_smart_stock_intake_and_barcodes.sql',
+      sql: loadSmartStockIntakeAndBarcodesMigrationSql(),
     },
   ];
 }

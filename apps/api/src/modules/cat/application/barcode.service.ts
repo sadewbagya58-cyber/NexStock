@@ -1,4 +1,5 @@
 import {
+  type BarcodePriceSourceMode,
   type BarcodeType,
   type CreateProductBarcodeRequest,
   type GenerateBarcodeQuery,
@@ -8,6 +9,13 @@ import {
   type UpdateProductBarcodeRequest,
   type UpdateTenantBarcodeSettingsRequest,
 } from '@nexstock/contracts';
+import {
+  Money,
+  Quantity,
+  UomConversionError,
+  convertQuantityBetweenUoms,
+  divideAndRoundBigInt,
+} from '@nexstock/domain-core';
 import { sql } from 'kysely';
 import { assertAuthorized } from '../../iam/index.js';
 import {
@@ -254,7 +262,7 @@ export async function generateInternalBarcode(
 }
 
 /**
- * Lists all registered barcodes for a product.
+ * Lists all registered barcodes for a product, enriched with stock intake / batch / package UoM context.
  */
 export async function listProductBarcodes(
   trx: TenantTransactionContext,
@@ -262,24 +270,173 @@ export async function listProductBarcodes(
 ): Promise<ProductBarcodeResponse[]> {
   await assertAuthorized(trx, { permission: 'cat:product:read' });
 
-  const rows = await trx.db
-    .selectFrom('product_barcodes')
-    .selectAll()
-    .where('tenant_id', '=', trx.tenantId)
-    .where('product_id', '=', productId)
-    .orderBy('is_primary', 'desc')
-    .orderBy('created_at', 'asc')
-    .execute();
+  const [tenantRow, productRow, convRows, rows] = await Promise.all([
+    trx.db
+      .selectFrom('tenants')
+      .select(['base_currency'])
+      .where('id', '=', trx.tenantId)
+      .executeTakeFirst(),
+    trx.db
+      .selectFrom('products')
+      .select(['id', 'base_uom', 'price_uom', 'selling_price', 'density_g_per_ml'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('id', '=', productId)
+      .executeTakeFirst(),
+    trx.db
+      .selectFrom('product_unit_conversions')
+      .select(['uom_code', 'conversion_factor_to_base', 'selling_price'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('product_id', '=', productId)
+      .where('is_active', '=', true)
+      .execute(),
+    trx.db
+      .selectFrom('product_barcodes')
+      .leftJoin('stock_intake_lots', (join) =>
+        join
+          .onRef('product_barcodes.tenant_id', '=', 'stock_intake_lots.tenant_id')
+          .onRef(
+            'product_barcodes.stock_intake_lot_id',
+            '=',
+            'stock_intake_lots.id',
+          ),
+      )
+      .leftJoin('inventory_batches', (join) =>
+        join
+          .onRef('product_barcodes.tenant_id', '=', 'inventory_batches.tenant_id')
+          .onRef('product_barcodes.batch_id', '=', 'inventory_batches.id'),
+      )
+      .selectAll('product_barcodes')
+      .select([
+        'stock_intake_lots.intake_code as intake_code',
+        'stock_intake_lots.selling_price as intake_selling_price',
+        'stock_intake_lots.selling_uom as intake_selling_uom',
+        'stock_intake_lots.pricing_mode as intake_pricing_mode',
+        'inventory_batches.batch_number as batch_number',
+        'inventory_batches.selling_price as batch_selling_price',
+      ])
+      .where('product_barcodes.tenant_id', '=', trx.tenantId)
+      .where('product_barcodes.product_id', '=', productId)
+      .orderBy('product_barcodes.is_primary', 'desc')
+      .orderBy('product_barcodes.created_at', 'asc')
+      .execute(),
+  ]);
 
-  return rows.map((r) => ({
-    id: r.id,
-    barcode: r.barcode,
-    barcodeType: r.barcode_type as BarcodeType,
-    symbology: r.barcode_type as BarcodeType,
-    uomCode: r.uom_code,
-    isPrimary: r.is_primary,
-    isActive: r.is_active ?? true,
+  const baseCurrency = tenantRow?.base_currency?.trim() ?? 'LKR';
+  const baseUom = String(productRow?.base_uom || 'PCS').toUpperCase();
+  const priceUom = String(productRow?.price_uom || baseUom).toUpperCase();
+  const customConvs = convRows.map((c) => ({
+    uomCode: c.uom_code.toUpperCase(),
+    conversionFactorToBase: String(c.conversion_factor_to_base),
+    sellingPrice: c.selling_price != null ? String(c.selling_price) : null,
   }));
+
+  return rows.map((r) => {
+    const uomCode = String(r.uom_code || baseUom).toUpperCase();
+    let factorStr = r.conversion_factor_to_base
+      ? Quantity.fromDecimalString(String(r.conversion_factor_to_base)).toDecimalString()
+      : null;
+    if (!factorStr) {
+      try {
+        factorStr = convertQuantityBetweenUoms({
+          quantity: '1',
+          fromUom: uomCode,
+          toUom: baseUom,
+          productBaseUom: baseUom,
+          customConversions: customConvs,
+          densityGPerMl: productRow?.density_g_per_ml
+            ? String(productRow.density_g_per_ml)
+            : null,
+        }).factorDecimal6;
+      } catch {
+        factorStr = '1.000000';
+      }
+    }
+
+    const priceOverrideStr =
+      r.selling_price_override != null
+        ? Money.fromDecimalString(String(r.selling_price_override), baseCurrency).toDecimalString()
+        : null;
+
+    let effectiveSellingPrice: string | null = priceOverrideStr;
+    if (!effectiveSellingPrice && r.stock_intake_lot_id && r.intake_selling_price != null) {
+      effectiveSellingPrice = Money.fromDecimalString(
+        String(r.intake_selling_price),
+        baseCurrency,
+      ).toDecimalString();
+    }
+    if (!effectiveSellingPrice && r.batch_id && r.batch_selling_price != null) {
+      effectiveSellingPrice = Money.fromDecimalString(
+        String(r.batch_selling_price),
+        baseCurrency,
+      ).toDecimalString();
+    }
+    if (!effectiveSellingPrice) {
+      const pkgRow = customConvs.find(
+        (c) => c.uomCode === uomCode && c.sellingPrice != null,
+      );
+      if (pkgRow && pkgRow.sellingPrice) {
+        effectiveSellingPrice = Money.fromDecimalString(
+          pkgRow.sellingPrice,
+          baseCurrency,
+        ).toDecimalString();
+      } else if (productRow?.selling_price != null) {
+        const basePriceMoney = Money.fromDecimalString(
+          String(productRow.selling_price),
+          baseCurrency,
+        );
+        if (uomCode === priceUom) {
+          effectiveSellingPrice = basePriceMoney.toDecimalString();
+        } else {
+          try {
+            const convToPrice = convertQuantityBetweenUoms({
+              quantity: '1',
+              fromUom: uomCode,
+              toUom: priceUom,
+              productBaseUom: baseUom,
+              customConversions: customConvs,
+              densityGPerMl: productRow?.density_g_per_ml
+                ? String(productRow.density_g_per_ml)
+                : null,
+            });
+            effectiveSellingPrice = Money.fromScaledUnits(
+              divideAndRoundBigInt(
+                basePriceMoney.scaledUnits * convToPrice.numerator,
+                convToPrice.denominator,
+                'HALF_EVEN',
+              ),
+              baseCurrency,
+            ).toDecimalString();
+          } catch {
+            effectiveSellingPrice = basePriceMoney.toDecimalString();
+          }
+        }
+      }
+    }
+
+    return {
+      id: r.id,
+      barcode: r.barcode,
+      barcodeType: r.barcode_type as BarcodeType,
+      symbology: r.barcode_type as BarcodeType,
+      uomCode,
+      isPrimary: r.is_primary,
+      isActive: r.is_active ?? true,
+      stockIntakeLotId: r.stock_intake_lot_id ?? null,
+      intakeCode: r.intake_code ?? null,
+      batchId: r.batch_id ?? null,
+      batchNumber: r.batch_number ?? null,
+      branchId: r.branch_id ?? null,
+      warehouseId: r.warehouse_id ?? null,
+      conversionFactorToBase: factorStr,
+      priceSourceMode: (r.price_source_mode ?? 'INHERIT') as BarcodePriceSourceMode,
+      sellingPriceOverride: priceOverrideStr,
+      effectiveSellingPrice,
+      labelNote: r.label_note ?? null,
+      deactivatedAt: r.deactivated_at ? new Date(r.deactivated_at).toISOString() : null,
+      createdAt: new Date(r.created_at).toISOString(),
+      updatedAt: new Date(r.updated_at).toISOString(),
+    };
+  });
 }
 
 /**
@@ -312,13 +469,34 @@ export async function addProductBarcode(
     });
   }
 
-  // Verify product exists in tenant
-  const product = await trx.db
-    .selectFrom('products')
-    .select(['id', 'sku', 'base_uom', 'primary_barcode'])
-    .where('tenant_id', '=', trx.tenantId)
-    .where('id', '=', productId)
-    .executeTakeFirst();
+  const [tenantRow, product, convRows] = await Promise.all([
+    trx.db
+      .selectFrom('tenants')
+      .select(['base_currency'])
+      .where('id', '=', trx.tenantId)
+      .executeTakeFirst(),
+    trx.db
+      .selectFrom('products')
+      .select([
+        'id',
+        'sku',
+        'base_uom',
+        'price_uom',
+        'selling_price',
+        'primary_barcode',
+        'density_g_per_ml',
+      ])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('id', '=', productId)
+      .executeTakeFirst(),
+    trx.db
+      .selectFrom('product_unit_conversions')
+      .select(['uom_code', 'conversion_factor_to_base', 'selling_price'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('product_id', '=', productId)
+      .where('is_active', '=', true)
+      .execute(),
+  ]);
 
   if (!product) {
     throw new AppError({
@@ -327,6 +505,71 @@ export async function addProductBarcode(
       title: 'Product Not Found',
       detail: `Product "${productId}" was not found in this organization.`,
     });
+  }
+
+  const baseCurrency = tenantRow?.base_currency?.trim() ?? 'LKR';
+  const baseUom = product.base_uom.trim().toUpperCase();
+
+  let linkedIntakeLot:
+    | {
+        id: string;
+        intake_code: string;
+        branch_id: string;
+        warehouse_id: string;
+        selling_price: string | null;
+        selling_uom: string;
+      }
+    | undefined;
+  if (input.stockIntakeLotId) {
+    linkedIntakeLot = await trx.db
+      .selectFrom('stock_intake_lots')
+      .select([
+        'id',
+        'intake_code',
+        'branch_id',
+        'warehouse_id',
+        'selling_price',
+        'selling_uom',
+      ])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('product_id', '=', productId)
+      .where('id', '=', input.stockIntakeLotId)
+      .executeTakeFirst();
+    if (!linkedIntakeLot) {
+      throw new AppError({
+        statusCode: 404,
+        errorCode: 'POS_INTAKE_LOT_NOT_FOUND',
+        title: 'Stock Intake Reference Not Found',
+        detail: `Stock intake reference "${input.stockIntakeLotId}" was not found for product "${product.sku}".`,
+      });
+    }
+  }
+
+  let linkedBatch:
+    | {
+        id: string;
+        batch_number: string;
+        branch_id: string | null;
+        warehouse_id: string;
+        selling_price: string | null;
+      }
+    | undefined;
+  if (input.batchId) {
+    linkedBatch = await trx.db
+      .selectFrom('inventory_batches')
+      .select(['id', 'batch_number', 'branch_id', 'warehouse_id', 'selling_price'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('product_id', '=', productId)
+      .where('id', '=', input.batchId)
+      .executeTakeFirst();
+    if (!linkedBatch) {
+      throw new AppError({
+        statusCode: 404,
+        errorCode: 'INV_BATCH_NOT_FOUND',
+        title: 'Batch Not Found',
+        detail: `Batch "${input.batchId}" was not found for product "${product.sku}".`,
+      });
+    }
   }
 
   const conflict = await trx.db
@@ -350,14 +593,54 @@ export async function addProductBarcode(
     productIdToAllowSameProductBarcode: false,
   });
 
-  const uomCode = (input.uomCode ?? product.base_uom).trim().toUpperCase();
+  const uomCode = (
+    input.uomCode ??
+    linkedIntakeLot?.selling_uom ??
+    baseUom
+  )
+    .trim()
+    .toUpperCase();
+
+  let conversionFactorToBaseStr: string;
+  if (input.conversionFactorToBase) {
+    conversionFactorToBaseStr = Quantity.fromDecimalString(
+      input.conversionFactorToBase,
+    ).toDecimalString();
+  } else {
+    try {
+      conversionFactorToBaseStr = convertQuantityBetweenUoms({
+        quantity: '1',
+        fromUom: uomCode,
+        toUom: baseUom,
+        productBaseUom: baseUom,
+        customConversions: convRows.map((c) => ({
+          uomCode: c.uom_code.toUpperCase(),
+          conversionFactorToBase: String(c.conversion_factor_to_base),
+        })),
+        densityGPerMl: product.density_g_per_ml
+          ? String(product.density_g_per_ml)
+          : null,
+      }).factorDecimal6;
+    } catch (err) {
+      if (err instanceof UomConversionError) {
+        throw new AppError({
+          statusCode: 400,
+          errorCode: 'CAT_INVALID_UOM_CONVERSION',
+          title: 'Incompatible Barcode UoM',
+          detail: err.message,
+        });
+      }
+      throw err;
+    }
+  }
+
+  const isStockSpecific = Boolean(input.stockIntakeLotId || input.batchId);
   const isPrimary = Boolean(input.isPrimary);
   const isActive = input.isActive !== false;
   const now = new Date();
   const id = generateUuidV7();
 
   if (isPrimary) {
-    // Clear is_primary on other barcodes for this product
     await trx.db
       .updateTable('product_barcodes')
       .set({ is_primary: false, updated_at: now })
@@ -365,15 +648,13 @@ export async function addProductBarcode(
       .where('product_id', '=', productId)
       .execute();
 
-    // Update primary_barcode on product
     await trx.db
       .updateTable('products')
       .set({ primary_barcode: cleanBarcode, updated_at: now })
       .where('tenant_id', '=', trx.tenantId)
       .where('id', '=', productId)
       .execute();
-  } else if (!product.primary_barcode && input.isPrimary !== false) {
-    // If no primary barcode exists and not explicitly opted out, promote this one
+  } else if (!product.primary_barcode && input.isPrimary !== false && !isStockSpecific) {
     await trx.db
       .updateTable('products')
       .set({ primary_barcode: cleanBarcode, updated_at: now })
@@ -382,7 +663,32 @@ export async function addProductBarcode(
       .execute();
   }
 
-  const willBePrimary = isPrimary || (!product.primary_barcode && input.isPrimary !== false);
+  const willBePrimary =
+    isPrimary ||
+    (!product.primary_barcode && input.isPrimary !== false && !isStockSpecific);
+
+  const sellingPriceOverride =
+    input.sellingPriceOverride != null
+      ? Money.fromDecimalString(input.sellingPriceOverride, baseCurrency).toDecimalString()
+      : null;
+
+  const priceSourceMode: BarcodePriceSourceMode =
+    input.priceSourceMode ??
+    (sellingPriceOverride
+      ? 'PACKAGE_EXPLICIT'
+      : input.stockIntakeLotId
+        ? 'INTAKE_SPECIFIC'
+        : input.batchId
+          ? 'BATCH_SPECIFIC'
+          : 'INHERIT');
+
+  const branchId =
+    input.branchId ?? linkedIntakeLot?.branch_id ?? linkedBatch?.branch_id ?? null;
+  const warehouseId =
+    input.warehouseId ??
+    linkedIntakeLot?.warehouse_id ??
+    linkedBatch?.warehouse_id ??
+    null;
 
   await trx.db
     .insertInto('product_barcodes')
@@ -395,6 +701,15 @@ export async function addProductBarcode(
       uom_code: uomCode,
       is_primary: willBePrimary,
       is_active: isActive,
+      stock_intake_lot_id: input.stockIntakeLotId ?? null,
+      batch_id: input.batchId ?? null,
+      branch_id: branchId,
+      warehouse_id: warehouseId,
+      conversion_factor_to_base: conversionFactorToBaseStr,
+      price_source_mode: priceSourceMode,
+      selling_price_override: sellingPriceOverride,
+      label_note: input.labelNote?.trim() ?? null,
+      deactivated_at: isActive ? null : now,
       created_at: now,
       updated_at: now,
     })
@@ -409,20 +724,42 @@ export async function addProductBarcode(
       sku: product.sku,
       barcode: cleanBarcode,
       format,
+      uomCode,
+      stockIntakeLotId: input.stockIntakeLotId ?? null,
+      batchId: input.batchId ?? null,
+      priceSourceMode,
+      sellingPriceOverride,
       isPrimary: willBePrimary,
       isActive,
     },
   });
 
-  return {
-    id,
-    barcode: cleanBarcode,
-    barcodeType: format,
-    symbology: format,
-    uomCode,
-    isPrimary: willBePrimary,
-    isActive,
-  };
+  const allBarcodes = await listProductBarcodes(trx, productId);
+  return (
+    allBarcodes.find((b) => b.id === id) ?? {
+      id,
+      barcode: cleanBarcode,
+      barcodeType: format,
+      symbology: format,
+      uomCode,
+      isPrimary: willBePrimary,
+      isActive,
+      stockIntakeLotId: input.stockIntakeLotId ?? null,
+      intakeCode: linkedIntakeLot?.intake_code ?? null,
+      batchId: input.batchId ?? null,
+      batchNumber: linkedBatch?.batch_number ?? null,
+      branchId,
+      warehouseId,
+      conversionFactorToBase: conversionFactorToBaseStr,
+      priceSourceMode,
+      sellingPriceOverride,
+      effectiveSellingPrice: sellingPriceOverride,
+      labelNote: input.labelNote?.trim() ?? null,
+      deactivatedAt: isActive ? null : now.toISOString(),
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+    }
+  );
 }
 
 /**
@@ -542,6 +879,47 @@ export async function updateProductBarcode(
       .execute();
   }
 
+  const tenantRow = await trx.db
+    .selectFrom('tenants')
+    .select(['base_currency'])
+    .where('id', '=', trx.tenantId)
+    .executeTakeFirst();
+  const baseCurrency = tenantRow?.base_currency?.trim() ?? 'LKR';
+
+  const nextIntakeLotId =
+    input.stockIntakeLotId !== undefined
+      ? input.stockIntakeLotId
+      : (existing.stock_intake_lot_id ?? null);
+  const nextBatchId =
+    input.batchId !== undefined ? input.batchId : (existing.batch_id ?? null);
+  const nextBranchId =
+    input.branchId !== undefined ? input.branchId : (existing.branch_id ?? null);
+  const nextWarehouseId =
+    input.warehouseId !== undefined
+      ? input.warehouseId
+      : (existing.warehouse_id ?? null);
+  const nextConvFactor =
+    input.conversionFactorToBase !== undefined
+      ? input.conversionFactorToBase !== null
+        ? Quantity.fromDecimalString(input.conversionFactorToBase).toDecimalString()
+        : null
+      : (existing.conversion_factor_to_base ?? null);
+  const nextPriceOverride =
+    input.sellingPriceOverride !== undefined
+      ? input.sellingPriceOverride !== null
+        ? Money.fromDecimalString(input.sellingPriceOverride, baseCurrency).toDecimalString()
+        : null
+      : (existing.selling_price_override ?? null);
+  const nextPriceMode =
+    input.priceSourceMode ??
+    (existing.price_source_mode as BarcodePriceSourceMode | undefined) ??
+    'INHERIT';
+  const nextLabelNote =
+    input.labelNote !== undefined ? input.labelNote : (existing.label_note ?? null);
+  const nextDeactivatedAt = !nextIsActive
+    ? existing.deactivated_at ?? now
+    : null;
+
   await trx.db
     .updateTable('product_barcodes')
     .set({
@@ -549,6 +927,15 @@ export async function updateProductBarcode(
       uom_code: nextUom,
       is_primary: effectiveIsPrimary,
       is_active: nextIsActive,
+      stock_intake_lot_id: nextIntakeLotId,
+      batch_id: nextBatchId,
+      branch_id: nextBranchId,
+      warehouse_id: nextWarehouseId,
+      conversion_factor_to_base: nextConvFactor,
+      price_source_mode: nextPriceMode,
+      selling_price_override: nextPriceOverride,
+      label_note: nextLabelNote,
+      deactivated_at: nextDeactivatedAt,
       updated_at: now,
     })
     .where('tenant_id', '=', trx.tenantId)
@@ -562,24 +949,41 @@ export async function updateProductBarcode(
     metadata: {
       productId,
       barcode: existing.barcode,
+      uomCode: nextUom,
+      stockIntakeLotId: nextIntakeLotId,
+      batchId: nextBatchId,
+      priceSourceMode: nextPriceMode,
+      sellingPriceOverride: nextPriceOverride,
       isPrimary: effectiveIsPrimary,
       isActive: nextIsActive,
     },
   });
 
-  return {
-    id: barcodeId,
-    barcode: existing.barcode,
-    barcodeType: nextType as BarcodeType,
-    symbology: nextType as BarcodeType,
-    uomCode: nextUom,
-    isPrimary: effectiveIsPrimary,
-    isActive: nextIsActive,
-  };
+  const allBarcodes = await listProductBarcodes(trx, productId);
+  return (
+    allBarcodes.find((b) => b.id === barcodeId) ?? {
+      id: barcodeId,
+      barcode: existing.barcode,
+      barcodeType: nextType as BarcodeType,
+      symbology: nextType as BarcodeType,
+      uomCode: nextUom,
+      isPrimary: effectiveIsPrimary,
+      isActive: nextIsActive,
+      stockIntakeLotId: nextIntakeLotId,
+      batchId: nextBatchId,
+      branchId: nextBranchId,
+      warehouseId: nextWarehouseId,
+      conversionFactorToBase: nextConvFactor,
+      priceSourceMode: nextPriceMode,
+      sellingPriceOverride: nextPriceOverride,
+      labelNote: nextLabelNote,
+      deactivatedAt: nextDeactivatedAt ? new Date(nextDeactivatedAt).toISOString() : null,
+    }
+  );
 }
 
 /**
- * Removes or deactivates a barcode mapping.
+ * Removes a barcode mapping if never used in sales transactions; rejects hard delete if referenced historically.
  */
 export async function deleteProductBarcode(
   trx: TenantTransactionContext,
@@ -602,6 +1006,31 @@ export async function deleteProductBarcode(
       errorCode: 'ERR_NOT_FOUND',
       title: 'Barcode Not Found',
       detail: `Barcode mapping "${barcodeId}" not found for product "${productId}".`,
+    });
+  }
+
+  // Prevent hard-deletion of barcodes referenced in historical sales transactions (Section 7.3)
+  const usedInSale = await trx.db
+    .selectFrom('sales_invoice_lines')
+    .select(['id'])
+    .where('tenant_id', '=', trx.tenantId)
+    .where('product_id', '=', productId)
+    .where((eb) =>
+      eb.or([
+        eb('scanned_barcode', '=', existing.barcode),
+        ...(existing.stock_intake_lot_id
+          ? [eb('stock_intake_lot_id', '=', existing.stock_intake_lot_id)]
+          : []),
+      ]),
+    )
+    .executeTakeFirst();
+
+  if (usedInSale) {
+    throw new AppError({
+      statusCode: 409,
+      errorCode: 'CAT_BARCODE_IN_USE_DEACTIVATE_ONLY',
+      title: 'Barcode Referenced in Historical Sales',
+      detail: `Barcode "${existing.barcode}" is referenced by completed sales transactions and cannot be permanently deleted. Deactivate it instead to preserve historical traceability.`,
     });
   }
 

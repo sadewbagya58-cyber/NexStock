@@ -691,6 +691,15 @@ export interface ProductBarcodesTable {
   uom_code: string;
   is_primary: Generated<boolean>;
   is_active: Generated<boolean>;
+  stock_intake_lot_id?: ColumnType<string | null, string | null | undefined, string | null | undefined>;
+  batch_id?: ColumnType<string | null, string | null | undefined, string | null | undefined>;
+  branch_id?: ColumnType<string | null, string | null | undefined, string | null | undefined>;
+  warehouse_id?: ColumnType<string | null, string | null | undefined, string | null | undefined>;
+  conversion_factor_to_base?: ColumnType<string | null, string | null | undefined, string | null | undefined>;
+  price_source_mode?: Generated<'INHERIT' | 'INTAKE_SPECIFIC' | 'BATCH_SPECIFIC' | 'PACKAGE_EXPLICIT'>;
+  selling_price_override?: ColumnType<string | null, string | null | undefined, string | null | undefined>;
+  label_note?: ColumnType<string | null, string | null | undefined, string | null | undefined>;
+  deactivated_at?: ColumnType<Date | null, Date | string | null | undefined, Date | string | null | undefined>;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
 }
@@ -731,6 +740,7 @@ export interface ProductUnitConversionsTable {
   conversion_factor_to_base: string;
   is_default_purchasing: Generated<boolean>;
   is_default_selling: Generated<boolean>;
+  selling_price?: ColumnType<string | null, string | null | undefined, string | null | undefined>;
   is_active: Generated<boolean>;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
@@ -825,6 +835,7 @@ export interface StockLedgerEntriesTable {
     | 'SCALE_WEIGHT'
     | 'SYSTEM_REVERSAL'
   >;
+  stock_intake_lot_id?: ColumnType<string | null, string | null | undefined, string | null | undefined>;
 }
 
 export interface InventoryBalancesTable {
@@ -937,6 +948,9 @@ export interface SalesInvoiceLinesTable {
   price_uom: string | null;
   price_per_price_uom: string | null;
   entry_source: Generated<'BARCODE_SCAN' | 'MANUAL' | 'MANUAL_WEIGHT' | 'SCALE_WEIGHT' | 'QUICK_PICK' | 'API'>;
+  stock_intake_lot_id?: ColumnType<string | null, string | null | undefined, string | null | undefined>;
+  intake_code_snapshot?: ColumnType<string | null, string | null | undefined, string | null | undefined>;
+  scanned_barcode?: ColumnType<string | null, string | null | undefined, string | null | undefined>;
   created_at: Generated<Date>;
 }
 
@@ -1924,6 +1938,7 @@ export interface PosReturnLinesTable {
   refund_amount: string;
   batch_id: ColumnType<string | null, string | null | undefined, string | null | undefined>;
   serial_id: ColumnType<string | null, string | null | undefined, string | null | undefined>;
+  stock_intake_lot_id?: ColumnType<string | null, string | null | undefined, string | null | undefined>;
   ledger_entry_id: string | null;
   created_at: Generated<Date>;
 }
@@ -2147,7 +2162,94 @@ export interface StockTransferLinesTable {
   batch_number_snapshot: string | null;
   dispatch_ledger_entry_id: string | null;
   receive_ledger_entry_id: string | null;
+  source_intake_lot_id?: ColumnType<string | null, string | null | undefined, string | null | undefined>;
+  destination_intake_lot_id?: ColumnType<string | null, string | null | undefined, string | null | undefined>;
   created_at: Generated<Date>;
+}
+
+export type StockIntakeSourceMethodDb =
+  | 'GRN'
+  | 'OPENING_STOCK'
+  | 'STOCK_IN'
+  | 'ADJUSTMENT_POSITIVE'
+  | 'STOCKTAKE'
+  | 'TRANSFER_IN'
+  | 'LEGACY_BACKFILL'
+  | 'FIFO_LAYER_BACKFILL';
+
+export interface StockIntakeLotsTable {
+  id: string;
+  tenant_id: string;
+  branch_id: string;
+  warehouse_id: string;
+  product_id: string;
+  batch_id: string | null;
+  ledger_entry_id: string | null;
+  supplier_id: string | null;
+  intake_code: string;
+  source_method: StockIntakeSourceMethodDb;
+  source_reference_type: string | null;
+  source_reference_id: string | null;
+  received_uom: string;
+  received_qty: string;
+  conversion_factor_to_base: Generated<string>;
+  base_qty_received: string;
+  base_qty_remaining: string;
+  base_qty_reserved: Generated<string>;
+  purchase_cost_per_received_uom: Generated<string>;
+  purchase_cost_per_base_uom: Generated<string>;
+  pricing_mode: Generated<'INHERIT_PRODUCT' | 'INHERIT_BRANCH' | 'INTAKE_SPECIFIC'>;
+  selling_uom: string;
+  selling_price: string | null;
+  min_selling_price: string | null;
+  max_discount_pct: string | null;
+  currency_code: Generated<string>;
+  is_legacy_aggregate: Generated<boolean>;
+  status: Generated<'ACTIVE' | 'DEPLETED' | 'INACTIVE' | 'REVERSED'>;
+  config_snapshot_json: Generated<unknown>;
+  notes: string | null;
+  received_at: ColumnType<Date, Date | string | undefined, Date | string | undefined>;
+  created_by_user_id: string | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export type StockConfigAlertResolutionActionDb =
+  | 'KEEP_GLOBAL_PRICE'
+  | 'SET_INTAKE_SPECIFIC_PRICE'
+  | 'CREATE_INTAKE_BARCODE'
+  | 'UPDATE_GLOBAL_WITH_APPROVAL'
+  | 'UPDATE_UOM_CONVERSION'
+  | 'DISMISS';
+
+export interface StockConfigAlertsTable {
+  id: string;
+  tenant_id: string;
+  branch_id: string;
+  warehouse_id: string;
+  product_id: string;
+  stock_intake_lot_id: string | null;
+  batch_id: string | null;
+  ledger_entry_id: string | null;
+  price_suggestion_id: string | null;
+  source_method: string;
+  source_event_key: string;
+  severity: 'INFO' | 'WARNING' | 'CONFLICT';
+  change_types_json: Generated<unknown>;
+  previous_config_json: Generated<unknown>;
+  incoming_config_json: Generated<unknown>;
+  summary: string;
+  impact_explanation: string;
+  recommended_action: string;
+  status: Generated<'PENDING' | 'RESOLVED' | 'DISMISSED'>;
+  resolution_action: StockConfigAlertResolutionActionDb | null;
+  resolution_notes: string | null;
+  resolution_payload_json: unknown | null;
+  created_by_user_id: string | null;
+  resolved_by_user_id: string | null;
+  created_at: Generated<Date>;
+  resolved_at: ColumnType<Date | null, Date | string | null | undefined, Date | string | null | undefined>;
+  updated_at: Generated<Date>;
 }
 
 export interface NexStockDatabase {
@@ -2262,4 +2364,6 @@ export interface NexStockDatabase {
   batch_barcode_print_logs: BatchBarcodePrintLogsTable;
   stock_transfers: StockTransfersTable;
   stock_transfer_lines: StockTransferLinesTable;
+  stock_intake_lots: StockIntakeLotsTable;
+  stock_config_alerts: StockConfigAlertsTable;
 }

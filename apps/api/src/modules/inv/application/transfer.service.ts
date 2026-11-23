@@ -1275,6 +1275,10 @@ export async function receiveStockTransfer(
         quantity: receiveQty.toDecimalString(),
         uomCode: line.uom_code,
         unitCost: String(line.transfer_unit_cost),
+        sellingPrice:
+          line.transfer_selling_price != null
+            ? String(line.transfer_selling_price)
+            : null,
         referenceType: 'STOCK_TRANSFER',
         referenceId: transfer.transfer_number,
         reason: input?.notes
@@ -1288,6 +1292,7 @@ export async function receiveStockTransfer(
       .updateTable('stock_transfer_lines')
       .set({
         destination_batch_id: destinationBatchId,
+        destination_intake_lot_id: movement.stockIntakeLotId ?? null,
         received_qty: receiveQty.toDecimalString(),
         receive_ledger_entry_id: movement.id,
       })

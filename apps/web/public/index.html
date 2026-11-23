@@ -961,6 +961,68 @@
       color: #0F172A;
       margin-top: 4px;
     }
+
+    /* Responsive Package & Multi-UoM Editor & Barcode Management Grid (360px - 1920px) */
+    .uom-conv-row {
+      display: grid;
+      grid-template-columns: 90px minmax(110px, 1fr) 110px 130px auto auto auto;
+      gap: 8px;
+      align-items: center;
+      padding: 8px 10px;
+      background: var(--surface-bg);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+    }
+    .barcode-add-grid {
+      display: grid;
+      grid-template-columns: minmax(150px, 1.4fr) 120px 110px minmax(160px, 1.5fr) 140px auto;
+      gap: 8px;
+      align-items: end;
+    }
+    .barcode-mapping-card {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      background: var(--card-bg);
+      border-radius: 8px;
+      flex-wrap: wrap;
+    }
+    .stock-config-alert-card {
+      padding: 14px;
+      background: var(--surface-bg);
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    @media (max-width: 1024px) {
+      .uom-conv-row {
+        grid-template-columns: 1fr 1fr 1fr;
+      }
+      .barcode-add-grid {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+    @media (max-width: 768px) {
+      .uom-conv-row {
+        grid-template-columns: 1fr 1fr;
+        padding: 10px;
+      }
+      .uom-conv-row .uom-conv-name,
+      .uom-conv-row .uom-conv-price {
+        grid-column: span 2;
+      }
+      .barcode-add-grid {
+        grid-template-columns: 1fr;
+      }
+      .barcode-mapping-card {
+        flex-direction: column;
+        align-items: stretch;
+      }
+    }
     .barcode-svg-container {
       display: flex;
       justify-content: center;
@@ -4276,13 +4338,48 @@
       return (num * fFrom) / fTo;
     }
 
+    function getPosProductSellableUoms(product) {
+      if (!product) return ['PCS'];
+      const baseUom = String(product.baseUom || 'PCS').trim().toUpperCase();
+      const rawAllowed = Array.isArray(product.allowedSellingUoms) && product.allowedSellingUoms.length > 0
+        ? product.allowedSellingUoms.map(u => String(u || '').trim().toUpperCase()).filter(Boolean)
+        : [baseUom];
+      const convCodes = Array.isArray(product.unitConversions)
+        ? product.unitConversions
+            .filter(c => c && c.isActive !== false && (c.isDefaultSelling || rawAllowed.includes(String(c.uomCode || '').trim().toUpperCase())))
+            .map(c => String(c.uomCode || '').trim().toUpperCase())
+            .filter(Boolean)
+        : [];
+      const merged = Array.from(new Set([...rawAllowed, ...convCodes]));
+      const valid = merged.filter(u => u === baseUom || convertClientUomQty(1, u, baseUom, product) !== null);
+      return valid.length > 0 ? valid : [baseUom];
+    }
+
     function computeClientProportionateTotal(qty, sellingUom, pricePerPriceUom, product) {
+      const cleanSellUom = String(sellingUom || product?.baseUom || 'PCS').trim().toUpperCase();
+      const baseUom = String(product?.baseUom || cleanSellUom || 'PCS').trim().toUpperCase();
+      if (cleanSellUom !== baseUom && Array.isArray(product?.unitConversions)) {
+        const pkgConv = product.unitConversions.find(
+          c => c && c.isActive !== false && String(c.uomCode || '').trim().toUpperCase() === cleanSellUom
+        );
+        const explicitPkgRate = pkgConv?.sellingPrice != null ? parseFloat(pkgConv.sellingPrice) : NaN;
+        if (Number.isFinite(explicitPkgRate) && explicitPkgRate > 0) {
+          const lineTotal = Math.round(qty * explicitPkgRate * 100) / 100;
+          return {
+            qtyInPriceUom: qty,
+            priceUom: cleanSellUom,
+            unitRate: explicitPkgRate,
+            lineTotal,
+            isPackageExplicit: true
+          };
+        }
+      }
       const priceUom = String(product?.priceUom || product?.baseUom || sellingUom || 'PCS').trim().toUpperCase();
       const qtyInPriceUom = convertClientUomQty(qty, sellingUom, priceUom, product);
       const unitRate = parseFloat(pricePerPriceUom || product?.sellingPrice || '0');
       if (qtyInPriceUom === null || !Number.isFinite(unitRate)) return null;
       const lineTotal = Math.round(qtyInPriceUom * unitRate * 100) / 100;
-      return { qtyInPriceUom, priceUom, unitRate, lineTotal };
+      return { qtyInPriceUom, priceUom, unitRate, lineTotal, isPackageExplicit: false };
     }
 
     function formatEntrySourceBadge(source) {
@@ -8035,20 +8132,24 @@
       const factor = row.conversionFactorToBase != null && row.conversionFactorToBase !== ''
         ? escapeHtml(formatQty(row.conversionFactorToBase))
         : '';
+      const pkgPrice = row.sellingPrice != null && row.sellingPrice !== ''
+        ? escapeHtml(parseFloat(row.sellingPrice).toFixed(2))
+        : '';
       const defPurch = Boolean(row.isDefaultPurchasing);
       const defSell = Boolean(row.isDefaultSelling);
       return `
-        <div class="uom-conv-row" style="display: grid; grid-template-columns: 92px 1fr 110px auto auto auto; gap: 6px; align-items: center; padding: 6px 8px; border: 1px solid var(--border-subtle); border-radius: 6px; background: var(--bg-primary); margin-bottom: 6px;">
-          <input type="text" class="form-input uom-conv-code" value="${code}" placeholder="BAG" style="padding: 4px 6px; font-size: 12px; text-transform: uppercase;" oninput="syncProductCustomUomOptions('${prefix}')">
-          <input type="text" class="form-input uom-conv-name" value="${label}" placeholder="Label (e.g. 25 KG Bag)" style="padding: 4px 6px; font-size: 12px;">
-          <input type="number" step="0.000001" min="0.000001" class="form-input uom-conv-factor" value="${factor}" placeholder="= ${escapeHtml(baseUom)}" style="padding: 4px 6px; font-size: 12px;">
+        <div class="uom-conv-row" style="margin-bottom: 6px;">
+          <input type="text" class="form-input uom-conv-code" value="${code}" placeholder="BAG" style="padding: 6px 8px; font-size: 12px; text-transform: uppercase;" oninput="syncProductCustomUomOptions('${prefix}')">
+          <input type="text" class="form-input uom-conv-name" value="${label}" placeholder="Label (e.g. 25 PCS Bag)" style="padding: 6px 8px; font-size: 12px;">
+          <input type="number" step="0.000001" min="0.000001" class="form-input uom-conv-factor" value="${factor}" placeholder="= ${escapeHtml(baseUom)}" title="Conversion factor to base unit (e.g. 25 for 1 BAG = 25 ${escapeHtml(baseUom)})" style="padding: 6px 8px; font-size: 12px;">
+          <input type="number" step="0.01" min="0" class="form-input uom-conv-price" value="${pkgPrice}" placeholder="Pkg Price (Auto)" title="Optional explicit selling price per package unit (leave blank for automatic conversion)" style="padding: 6px 8px; font-size: 12px;">
           <label style="display: inline-flex; align-items: center; gap: 3px; font-size: 11px; white-space: nowrap; cursor: pointer;" title="Set as default purchasing package">
             <input type="checkbox" class="uom-conv-purch" ${defPurch ? 'checked' : ''} onchange="onCustomUomDefaultPurchChange('${prefix}', this)"> Purch
           </label>
           <label style="display: inline-flex; align-items: center; gap: 3px; font-size: 11px; white-space: nowrap; cursor: pointer;" title="Allow selling in this unit at POS">
             <input type="checkbox" class="uom-conv-sell" ${defSell ? 'checked' : ''}> Sell
           </label>
-          <button type="button" class="btn btn-secondary btn-sm" style="padding: 2px 7px; font-size: 12px; color: var(--status-danger);" onclick="this.closest('.uom-conv-row').remove(); syncProductCustomUomOptions('${prefix}');" title="Remove conversion">&times;</button>
+          <button type="button" class="btn btn-secondary btn-sm" style="padding: 4px 8px; font-size: 12px; color: var(--status-danger);" onclick="this.closest('.uom-conv-row').remove(); syncProductCustomUomOptions('${prefix}');" title="Remove conversion">&times;</button>
         </div>
       `;
     }
@@ -8315,6 +8416,8 @@
         const uCode = (row.querySelector('.uom-conv-code')?.value || '').trim().toUpperCase();
         const uLabel = (row.querySelector('.uom-conv-name')?.value || '').trim();
         const uFactor = parseFloat(row.querySelector('.uom-conv-factor')?.value || '0');
+        const uPriceRaw = (row.querySelector('.uom-conv-price')?.value || '').trim();
+        const uPriceNum = uPriceRaw !== '' ? parseFloat(uPriceRaw) : NaN;
         const isPurch = Boolean(row.querySelector('.uom-conv-purch')?.checked);
         const isSell = Boolean(row.querySelector('.uom-conv-sell')?.checked);
         if (uCode && Number.isFinite(uFactor) && uFactor > 0 && uCode !== baseUom) {
@@ -8324,6 +8427,7 @@
             uomCode: uCode,
             uomName: uLabel || `${uCode} (${factorLabel} ${baseUom})`,
             conversionFactorToBase: factorFixed,
+            sellingPrice: Number.isFinite(uPriceNum) && uPriceNum > 0 ? uPriceNum.toFixed(4) : null,
             isDefaultPurchasing: isPurch || purchaseUom === uCode,
             isDefaultSelling: isSell || checkedSelling.includes(uCode)
           });
@@ -10616,6 +10720,7 @@
             </div>
             <div style="display: flex; gap: 8px; flex-wrap: wrap;">
               <button class="btn btn-secondary" onclick="openBranchSwitcherModal()">⇄ ${escapeHtml(state.branchId ? (state.branchName || 'Switch Branch') : 'All Branches')}</button>
+              <button class="btn btn-secondary" onclick="openStockConfigAlertsModal()">🔔 Stock Config Alerts &amp; Intake Layers</button>
               <button class="btn btn-secondary" onclick="renderMovementsView('transfers')">Stock Transfers</button>
               <button class="btn btn-primary" onclick="openRecordStockMovementModal()">+ Post Movement</button>
             </div>
@@ -10624,6 +10729,7 @@
           <div style="display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap;">
             <button class="btn btn-primary btn-sm" onclick="renderMovementsView('ledger')">Stock Ledger</button>
             <button class="btn btn-secondary btn-sm" onclick="renderMovementsView('transfers')">Stock Transfers</button>
+            <button class="btn btn-secondary btn-sm" onclick="openStockConfigAlertsModal()">🔔 Smart Stock Config Alerts</button>
           </div>
 
           <div class="card">
@@ -11582,9 +11688,15 @@
             </div>
           </div>
           <div id="moveNormalizedPreview" style="margin: -4px 0 12px; padding: 8px 10px; border-radius: 6px; background: var(--bg-primary); font-size: 12px; color: var(--text-secondary);"></div>
-          <div class="form-group">
-            <label class="form-label">Unit Cost (${escapeHtml(getTenantCurrency())}) *</label>
-            <input type="number" step="${getCurrencyInputStep()}" class="form-input" id="moveCost" value="${firstProd?.purchaseCost ? parseFloat(firstProd.purchaseCost).toFixed(2) : getCurrencyDefaultCost()}" required>
+          <div class="modal-grid-2">
+            <div class="form-group">
+              <label class="form-label">Unit Cost (${escapeHtml(getTenantCurrency())}) *</label>
+              <input type="number" step="${getCurrencyInputStep()}" class="form-input" id="moveCost" value="${firstProd?.purchaseCost ? parseFloat(firstProd.purchaseCost).toFixed(2) : getCurrencyDefaultCost()}" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Selling Price (${escapeHtml(getTenantCurrency())}, Optional Intake Price)</label>
+              <input type="number" step="${getCurrencyInputStep()}" min="0" class="form-input" id="moveSellingPrice" placeholder="Keep current (${firstProd?.sellingPrice ? parseFloat(firstProd.sellingPrice).toFixed(2) : 'Auto'})">
+            </div>
           </div>
           <div class="form-group">
             <label class="form-label">Reason / Notes</label>
@@ -11606,6 +11718,8 @@
           if (submitBtn) submitBtn.disabled = !p;
           const costEl = document.getElementById('moveCost');
           if (costEl && p?.purchaseCost) costEl.value = parseFloat(p.purchaseCost).toFixed(2);
+          const sellEl = document.getElementById('moveSellingPrice');
+          if (sellEl) sellEl.placeholder = `Keep current (${p?.sellingPrice ? parseFloat(p.sellingPrice).toFixed(2) : 'Auto'})`;
           refreshStockMovementUomOptions();
         }
       });
@@ -11673,7 +11787,12 @@
           return;
         }
 
-        await apiFetch('/v1/inventory/movements', {
+        const rawSellingStr = (document.getElementById('moveSellingPrice')?.value || '').trim();
+        const sellingPrice = rawSellingStr && parseFloat(rawSellingStr) > 0
+          ? parseFloat(rawSellingStr).toFixed(4)
+          : undefined;
+
+        const movementRes = await apiFetch('/v1/inventory/movements', {
           method: 'POST',
           headers: {
             'idempotency-key': idempotencyKey
@@ -11686,15 +11805,24 @@
             quantity,
             uomCode,
             unitCost,
+            ...(sellingPrice ? { sellingPrice } : {}),
             entrySource,
             reason: notes,
             notes: notes
           })
         });
 
-        showToast('Stock movement recorded in immutable ledger', 'success');
+        showToast(
+          movementRes?.intakeCode
+            ? `Stock movement recorded [${movementRes.intakeCode}]${movementRes.configAlertId ? ' — Configuration difference detected!' : ''}`
+            : 'Stock movement recorded in immutable ledger',
+          movementRes?.configAlertId ? 'warning' : 'success'
+        );
         closeModal();
         renderMovementsView();
+        if (movementRes?.configAlertId) {
+          openStockConfigAlertsModal('PENDING');
+        }
       } catch (err) {
         if (window.NexStockOfflineClient && err && (err.name === 'TypeError' || /fetch|network/i.test(err.message || ''))) {
           try {
@@ -11737,6 +11865,168 @@
         showToast('Compensating reversal movement recorded', 'success');
         renderMovementsView();
       } catch (err) {}
+    }
+
+    async function openStockConfigAlertsModal(statusFilter = 'PENDING') {
+      openModal({
+        title: '🔔 Smart Stock Configuration Alerts & Intake Layers',
+        maxWidth: '820px',
+        bodyHtml: `
+          <div style="text-align: center; padding: 24px;">
+            <div class="spinner-sm"></div> Loading stock configuration alerts &amp; intake layers...
+          </div>
+        `
+      });
+
+      try {
+        const branchParam = state.branchId ? `&branchId=${encodeURIComponent(state.branchId)}` : '';
+        const [alerts, intakeLots] = await Promise.all([
+          apiFetch(`/v1/inventory/config-alerts?status=${encodeURIComponent(statusFilter)}${branchParam}&limit=50`).catch(() => []),
+          apiFetch(`/v1/inventory/intake-lots?includeDepleted=false${branchParam}&limit=50`).catch(() => [])
+        ]);
+
+        const alertsList = Array.isArray(alerts) ? alerts : [];
+        const lotsList = Array.isArray(intakeLots) ? intakeLots : [];
+
+        const bodyHtml = `
+          <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px;">
+            <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+              <button class="btn btn-sm ${statusFilter === 'PENDING' ? 'btn-primary' : 'btn-secondary'}" onclick="openStockConfigAlertsModal('PENDING')">Pending Review</button>
+              <button class="btn btn-sm ${statusFilter === 'RESOLVED' ? 'btn-primary' : 'btn-secondary'}" onclick="openStockConfigAlertsModal('RESOLVED')">Resolved</button>
+              <button class="btn btn-sm ${statusFilter === 'DISMISSED' ? 'btn-primary' : 'btn-secondary'}" onclick="openStockConfigAlertsModal('DISMISSED')">Dismissed</button>
+            </div>
+            <div style="font-size: 12px; color: var(--text-secondary);">
+              Active Stock Intake Layers: <strong>${lotsList.length}</strong>
+            </div>
+          </div>
+
+          ${alertsList.length === 0 ? `
+            <div class="card" style="text-align: center; padding: 24px; background: var(--surface-bg); color: var(--text-secondary); margin-bottom: 14px;">
+              No <strong>${escapeHtml(statusFilter)}</strong> stock configuration alerts found.
+            </div>
+          ` : `
+            <div style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px;">
+              ${alertsList.map(a => {
+                const sevClass = a.severity === 'CONFLICT' ? 'badge-red' : (a.severity === 'WARNING' ? 'badge-yellow' : 'badge-blue');
+                const prev = a.previousConfig || {};
+                const inc = a.incomingConfig || {};
+                const reasons = Array.isArray(a.changeTypes) ? a.changeTypes.join(', ') : (Array.isArray(a.changeReasons) ? a.changeReasons.join(', ') : '');
+                return `
+                  <div class="stock-config-alert-card">
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; flex-wrap: wrap;">
+                      <div>
+                        <div style="font-weight: 700; font-size: 14px;">
+                          ${escapeHtml(a.productSku)} &mdash; ${escapeHtml(a.productName)}
+                          ${a.intakeCode ? `<span class="badge-pill badge-green" style="font-size: 11px; margin-left: 6px;">${escapeHtml(a.intakeCode)}</span>` : ''}
+                        </div>
+                        <div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">
+                          Source: <code>${escapeHtml(a.sourceMethod)}</code> &bull; Trigger: <strong>${escapeHtml(reasons)}</strong>
+                        </div>
+                      </div>
+                      <div style="display: flex; gap: 6px; align-items: center;">
+                        <span class="badge-pill ${sevClass}" style="font-size: 11px;">${escapeHtml(a.severity)}</span>
+                        <span class="badge-pill" style="font-size: 11px;">${escapeHtml(a.status)}</span>
+                      </div>
+                    </div>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; padding: 8px 10px; background: var(--bg-primary); border-radius: 6px; font-size: 12px;">
+                      <div>
+                        <div style="font-weight: 600; color: var(--text-secondary); margin-bottom: 2px;">Current Active Config</div>
+                        <div>Cost: <strong>${formatTenantMoney(prev.purchaseCostPerBaseUom || 0)}</strong> / ${escapeHtml(prev.baseUom || 'PCS')}</div>
+                        <div>POS Price: <strong>${formatTenantMoney(prev.sellingPrice || prev.globalSellingPrice || 0)}</strong> / ${escapeHtml(prev.sellingUom || prev.baseUom || 'PCS')}</div>
+                      </div>
+                      <div>
+                        <div style="font-weight: 600; color: var(--accent-primary); margin-bottom: 2px;">Incoming Stock Intake Config</div>
+                        <div>Cost: <strong>${formatTenantMoney(inc.purchaseCostPerBaseUom || 0)}</strong> (${formatQty(inc.baseQtyReceived || 0)} ${escapeHtml(inc.receivedUom || 'PCS')})</div>
+                        <div>Proposed Price: <strong>${(inc.sellingPrice || inc.proposedSellingPrice) ? formatTenantMoney(inc.sellingPrice || inc.proposedSellingPrice) : 'Inherit Global'}</strong></div>
+                      </div>
+                    </div>
+                    ${a.status === 'PENDING' ? `
+                      <div style="display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end;">
+                        <button class="btn btn-secondary btn-sm" onclick="resolveStockConfigAlertAction('${a.id}', 'KEEP_GLOBAL_PRICE')">Keep Current POS Price</button>
+                        <button class="btn btn-secondary btn-sm" onclick="resolveStockConfigAlertAction('${a.id}', 'SET_INTAKE_SPECIFIC_PRICE', '${escapeHtml(inc.sellingPrice || inc.proposedSellingPrice || prev.sellingPrice || prev.globalSellingPrice || '')}')">Set Intake-Specific Price</button>
+                        <button class="btn btn-primary btn-sm" onclick="resolveStockConfigAlertAction('${a.id}', 'CREATE_INTAKE_BARCODE', '${escapeHtml(inc.sellingPrice || inc.proposedSellingPrice || '')}')">🏷️ Create Intake Barcode</button>
+                        <button class="btn btn-secondary btn-sm" onclick="resolveStockConfigAlertAction('${a.id}', 'UPDATE_GLOBAL_WITH_APPROVAL', '${escapeHtml(inc.sellingPrice || inc.proposedSellingPrice || prev.sellingPrice || prev.globalSellingPrice || '')}')">Approve as Global Price</button>
+                        <button class="btn btn-secondary btn-sm" onclick="resolveStockConfigAlertAction('${a.id}', 'DISMISS')">Dismiss</button>
+                      </div>
+                    ` : `
+                      <div style="font-size: 11px; color: var(--text-secondary);">
+                        Resolution: <strong>${escapeHtml(a.resolutionAction || '—')}</strong> ${a.resolutionNotes ? `&mdash; ${escapeHtml(a.resolutionNotes)}` : ''}
+                      </div>
+                    `}
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          `}
+
+          <details ${alertsList.length === 0 ? 'open' : ''}>
+            <summary style="cursor: pointer; font-weight: 600; font-size: 13px; margin-bottom: 8px;">📦 Active Stock Intake References (${lotsList.length})</summary>
+            <div style="display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow-y: auto;">
+              ${lotsList.map(l => `
+                <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 10px; background: var(--bg-primary); border: 1px solid var(--border-subtle); border-radius: 6px; font-size: 12px;">
+                  <div>
+                    <code>${escapeHtml(l.intakeCode)}</code> &bull; <strong>${escapeHtml(l.productSku)}</strong> (${escapeHtml(l.productName)})
+                    <span class="badge-pill badge-blue" style="font-size: 10px;">${escapeHtml(l.sourceMethod)}</span>
+                    ${l.isLegacyAggregate ? `<span class="badge-pill badge-yellow" style="font-size: 10px;">Historical Backfill</span>` : ''}
+                  </div>
+                  <div style="display: flex; gap: 10px; align-items: center;">
+                    <span>Rem: <strong>${formatQty(l.baseQtyRemaining)} / ${formatQty(l.baseQtyReceived)} ${escapeHtml(l.receivedUom)}</strong></span>
+                    <span>Cost: <strong>${formatTenantMoney(l.purchaseCostPerBaseUom)}</strong></span>
+                    <span>Price: <strong>${l.sellingPrice ? formatTenantMoney(l.sellingPrice) : 'Global'}</strong> (${escapeHtml(l.pricingMode)})</span>
+                    <button class="btn btn-secondary btn-sm" style="padding: 2px 8px; font-size: 11px;" onclick="closeModal(); openBarcodeLabelModal('${l.productId}')">🏷️ Barcodes</button>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          </details>
+        `;
+        const modalBodyEl = document.getElementById('modalBody');
+        if (modalBodyEl) modalBodyEl.innerHTML = bodyHtml;
+      } catch (err) {
+        showToast(`Failed to load stock configuration alerts: ${err.message}`, 'error');
+      }
+    }
+
+    async function resolveStockConfigAlertAction(alertId, action, defaultPrice = '') {
+      let sellingPrice = undefined;
+      let barcode = undefined;
+      if (action === 'SET_INTAKE_SPECIFIC_PRICE' || action === 'UPDATE_GLOBAL_WITH_APPROVAL') {
+        const input = prompt(
+          action === 'SET_INTAKE_SPECIFIC_PRICE'
+            ? 'Enter selling price for this specific stock intake lot:'
+            : 'Enter approved new global selling price for this product:',
+          defaultPrice || ''
+        );
+        if (!input || !(parseFloat(input) > 0)) return;
+        sellingPrice = parseFloat(input).toFixed(4);
+      } else if (action === 'CREATE_INTAKE_BARCODE') {
+        const pricePrompt = prompt('Optional selling price for this stock intake barcode (leave blank to use intake/global price):', defaultPrice || '');
+        if (pricePrompt === null) return;
+        if (pricePrompt.trim() !== '' && parseFloat(pricePrompt) > 0) {
+          sellingPrice = parseFloat(pricePrompt).toFixed(4);
+        }
+        const bcPrompt = prompt('Optional custom barcode value (leave blank to auto-generate unique intake barcode):', '');
+        if (bcPrompt === null) return;
+        if (bcPrompt.trim() !== '') {
+          barcode = bcPrompt.trim();
+        }
+      }
+
+      try {
+        await apiFetch(`/v1/inventory/config-alerts/${encodeURIComponent(alertId)}/resolve`, {
+          method: 'POST',
+          body: JSON.stringify({
+            action,
+            ...(sellingPrice ? { sellingPrice } : {}),
+            ...(barcode ? { barcode } : {}),
+            notes: `Resolved via Smart Stock Config Alerts UI (${action})`
+          })
+        });
+        showToast(`Stock configuration alert resolved (${action})`, 'success');
+        openStockConfigAlertsModal('PENDING');
+      } catch (err) {
+        showToast(`Failed to resolve alert: ${err.detail || err.message}`, 'error');
+      }
     }
 
     async function renderBalancesView() {
@@ -13066,6 +13356,14 @@
         return;
       }
 
+      const sellableUoms = getPosProductSellableUoms(p);
+      const baseUomUpper = String(p.baseUom || 'PCS').trim().toUpperCase();
+      if (sellableUoms.length > 1) {
+        openVariableQtyPosModal(p.id, null, 'MANUAL');
+        return;
+      }
+
+      const defaultSellUom = sellableUoms[0] || baseUomUpper;
       // Instant fast-path (<5ms) for Batch-Tracked products using pre-warmed active warehouse batches
       if (p.trackingMode === 'BATCH' || p.trackingMode === 'BATCH_EXPIRY') {
         const cachedBatches = state.posBatchesByProductId instanceof Map
@@ -13076,7 +13374,7 @@
           return;
         }
         if (Array.isArray(cachedBatches) && cachedBatches.length > 0) {
-          const addedBatch = addNextFefoBatchLineSync(p, cachedBatches, null, 1, p.baseUom || 'PCS');
+          const addedBatch = addNextFefoBatchLineSync(p, cachedBatches, null, 1, defaultSellUom);
           if (addedBatch) {
             if (!addedBatch.promptedOverride) {
               playScanChime(true);
@@ -13093,9 +13391,16 @@
         }
       }
 
-      // Instant synchronous cart add (<5ms) for standard products — zero network round-trip!
-      const price = p.retailPrice || p.sellingPrice || '0.0000';
-      addToCart(p.id, p.sku, p.name, price, p.baseUom || 'PCS', p.trackInventory !== false, p.availableQuantity);
+      // Instant synchronous cart add (<5ms) for standard products — supports package UoM (e.g. BAG = 25 PCS)
+      const basePrice = p.retailPrice || p.sellingPrice || '0.0000';
+      const calcPkg = defaultSellUom !== baseUomUpper
+        ? computeClientProportionateTotal(1, defaultSellUom, basePrice, p)
+        : null;
+      const effectivePrice = calcPkg ? calcPkg.lineTotal.toFixed(4) : basePrice;
+      addToCart(p.id, p.sku, p.name, effectivePrice, defaultSellUom, p.trackInventory !== false, p.availableQuantity, {
+        isPricePerSellingUom: defaultSellUom !== baseUomUpper,
+        pricePerPriceUom: basePrice
+      });
     }
 
     function renderPosProductCardsHtml(productList) {
@@ -13500,6 +13805,11 @@
             playScanChime(false);
             if (resolved.requiresPricePrompt || String(resolved.blockedReason || '').includes('PRICE')) {
               openPosBatchOverridePriceModal(resolved, cleanCode);
+            } else if (resolved.blockedReason === 'BARCODE_INACTIVE') {
+              showToast(`Barcode "${cleanCode}" is inactive and cannot be used for POS sales.`, 'error');
+            } else if (String(resolved.blockedReason || '').startsWith('INTAKE_LOT_')) {
+              const lotCode = resolved.exactIntakeLot?.intakeCode || '';
+              showToast(`Blocked (${resolved.blockedReason}): Stock intake lot ${lotCode} has no sellable stock remaining in this warehouse.`, 'error');
             } else if (resolved.exactSerial) {
               const sInfo = resolved.exactSerial;
               const reasonText = resolved.blockedReason === 'SERIAL_WRONG_WAREHOUSE'
@@ -13513,6 +13823,7 @@
           }
 
           const p = resolved.product;
+          const resolvedSellUom = resolved.resolvedSellingUom || p.baseUom || 'PCS';
           if (resolved.isExactSerialLocked && resolved.exactSerial) {
             const s = resolved.exactSerial;
             if ((state.cart || []).some(item => item.serialId && item.serialId === s.id)) {
@@ -13536,6 +13847,34 @@
             return;
           }
 
+          if (resolved.isExactIntakeLotLocked && resolved.exactIntakeLot) {
+            const lot = resolved.exactIntakeLot;
+            const lotAvail = parseFloat(lot.baseQtyRemaining ?? resolved.availableQuantityTotal ?? '0') || 0;
+            const lotUnitPrice = resolved.effectiveUnitPrice ?? lot.sellingPrice ?? p.sellingPrice ?? '0.0000';
+            playScanChime(true);
+            addToCart(
+              p.id,
+              p.sku,
+              p.name,
+              lotUnitPrice,
+              resolvedSellUom,
+              p.trackInventory !== false,
+              Math.max(0, lotAvail),
+              {
+                baseUom: p.baseUom || 'PCS',
+                stockIntakeLotId: lot.id,
+                intakeCode: lot.intakeCode,
+                isExactIntakeLotLocked: true,
+                isPricePerSellingUom: true,
+                scannedBarcode: cleanCode,
+                priceSource: resolved.priceSource || 'INTAKE_SPECIFIC',
+                entrySource: 'BARCODE_SCAN'
+              }
+            );
+            showToast(`Scanned ${p.name} [${lot.intakeCode} • ${resolvedSellUom}] — ${formatTenantMoney(lotUnitPrice)}`, 'success');
+            return;
+          }
+
           if (resolved.isExactBatchLocked && resolved.exactBatch) {
             const b = resolved.exactBatch;
             const exactAvail = parseFloat(b.availableQty ?? b.availableQuantity ?? resolved.fefoPreview?.[0]?.availableQty ?? b.currentQuantity ?? '0') - (parseFloat(b.reservedQuantity ?? '0') || 0);
@@ -13550,15 +13889,17 @@
               p.sku,
               p.name,
               resolved.effectiveUnitPrice,
-              p.baseUom || 'PCS',
+              resolvedSellUom,
               p.trackInventory !== false,
               Math.max(0, exactAvail),
               {
+                baseUom: p.baseUom || 'PCS',
                 batchId: b.id,
                 batchNumber: b.batchNumber,
                 internalBarcode: b.internalBarcode || cleanCode,
                 expiryDate: b.expiryDate || null,
                 isExactBatchLocked: true,
+                isPricePerSellingUom: true,
                 scannedBarcode: cleanCode,
                 priceSource: resolved.priceSource || 'BATCH_EXPLICIT',
                 fefoPreview: resolved.fefoPreview || null,
@@ -13575,7 +13916,7 @@
           }
 
           if (Array.isArray(resolved.fefoPreview) && resolved.fefoPreview.length > 0) {
-            const added = await addNextFefoBatchLine(p, resolved.fefoPreview, scanOpts.fromTileProduct ? null : cleanCode, 1, p.baseUom || 'PCS');
+            const added = await addNextFefoBatchLine(p, resolved.fefoPreview, scanOpts.fromTileProduct ? null : cleanCode, 1, resolvedSellUom);
             if (added) {
               playScanChime(true);
               const firstB = resolved.fefoPreview[0];
@@ -13598,11 +13939,14 @@
             0;
           const fallbackPrice = resolved.effectiveUnitPrice ?? p.sellingPrice ?? scanOpts.fromTileProduct?.retailPrice ?? cachedProd?.retailPrice ?? '0.0000';
           playScanChime(true);
-          addToCart(p.id, p.sku, p.name, fallbackPrice, p.baseUom || 'PCS', p.trackInventory !== false, resolvedAvail, {
+          addToCart(p.id, p.sku, p.name, fallbackPrice, resolvedSellUom, p.trackInventory !== false, resolvedAvail, {
+            baseUom: p.baseUom || 'PCS',
+            isPricePerSellingUom: true,
             scannedBarcode: scanOpts.fromTileProduct ? null : cleanCode,
+            priceSource: resolved.priceSource || 'PRODUCT',
             entrySource: scanOpts.fromTileProduct ? 'MANUAL' : 'BARCODE_SCAN'
           });
-          showToast(`Scanned: ${p.name}`, 'success');
+          showToast(`Scanned: ${p.name} (${resolvedSellUom})`, 'success');
           return;
         }
       } catch (resolveErr) {
@@ -13628,19 +13972,39 @@
           if (offRes) {
             if (offRes.isBlocked) {
               playScanChime(false);
-              showToast(offRes.message || 'Batch blocked in offline catalog', 'error');
+              showToast(offRes.message || 'Barcode or stock layer blocked in offline catalog', 'error');
+              return;
+            }
+            const offUom = offRes.resolvedSellingUom || offRes.product?.baseUom || 'PCS';
+            if (offRes.isExactIntakeLotLocked && offRes.exactIntakeLot && offRes.product) {
+              const lot = offRes.exactIntakeLot;
+              const p = offRes.product;
+              playScanChime(true);
+              addToCart(p.id, p.sku, p.name, offRes.effectiveUnitPrice || p.retailPrice, offUom, p.trackInventory !== false, lot.baseQtyRemaining, {
+                baseUom: p.baseUom || 'PCS',
+                stockIntakeLotId: lot.id,
+                intakeCode: lot.intakeCode,
+                isExactIntakeLotLocked: true,
+                isPricePerSellingUom: true,
+                scannedBarcode: cleanCode,
+                priceSource: offRes.priceSource || 'INTAKE_SPECIFIC',
+                entrySource: 'BARCODE_SCAN'
+              });
+              showToast(`Scanned offline: ${p.name} [${lot.intakeCode} • ${offUom}]`, 'success');
               return;
             }
             if (offRes.lockedBatch && offRes.product) {
               const b = offRes.lockedBatch;
               const p = offRes.product;
               playScanChime(true);
-              addToCart(p.id, p.sku, p.name, offRes.effectiveUnitPrice || p.retailPrice, p.baseUom || 'PCS', p.trackInventory !== false, b.availableQuantity, {
+              addToCart(p.id, p.sku, p.name, offRes.effectiveUnitPrice || p.retailPrice, offUom, p.trackInventory !== false, b.availableQuantity, {
+                baseUom: p.baseUom || 'PCS',
                 batchId: b.batchId,
                 batchNumber: b.batchNumber,
                 internalBarcode: b.internalBarcode || cleanCode,
                 expiryDate: b.expiryDate || null,
                 isExactBatchLocked: true,
+                isPricePerSellingUom: true,
                 scannedBarcode: cleanCode,
                 priceSource: offRes.priceSource || 'BATCH_EXPLICIT',
                 entrySource: 'BARCODE_SCAN'
@@ -13650,13 +14014,26 @@
             }
             if (Array.isArray(offRes.fefoPreview) && offRes.fefoPreview.length > 0 && offRes.product) {
               const p = offRes.product;
-              const added = await addNextFefoBatchLine(p, offRes.fefoPreview, scanOpts.fromTileProduct ? null : cleanCode, 1, p.baseUom || 'PCS');
+              const added = await addNextFefoBatchLine(p, offRes.fefoPreview, scanOpts.fromTileProduct ? null : cleanCode, 1, offUom);
               if (added) {
                 playScanChime(true);
                 const firstB = offRes.fefoPreview[0];
                 showToast(`Scanned offline: ${p.name} — Batch ${firstB.batchNumber}`, 'success');
                 return;
               }
+            }
+            if (offRes.product) {
+              const p = offRes.product;
+              playScanChime(true);
+              addToCart(p.id, p.sku, p.name, offRes.effectiveUnitPrice || p.retailPrice, offUom, p.trackInventory !== false, offRes.availableQuantityTotal || p.availableQuantity, {
+                baseUom: p.baseUom || 'PCS',
+                isPricePerSellingUom: true,
+                scannedBarcode: scanOpts.fromTileProduct ? null : cleanCode,
+                priceSource: offRes.priceSource || 'PRODUCT',
+                entrySource: scanOpts.fromTileProduct ? 'MANUAL' : 'BARCODE_SCAN'
+              });
+              showToast(`Scanned offline: ${p.name} (${offUom})`, 'success');
+              return;
             }
           }
         } catch {}
@@ -14252,75 +14629,131 @@
       });
 
       try {
-        const barcodes = await apiFetch(`/v1/products/${productId}/barcodes`).catch(() => []);
+        const [barcodes, intakeLots, prodBatches] = await Promise.all([
+          apiFetch(`/v1/products/${productId}/barcodes`).catch(() => []),
+          apiFetch(`/v1/inventory/intake-lots?productId=${encodeURIComponent(productId)}&includeDepleted=false`).catch(() => []),
+          apiFetch(`/v1/inventory/batches?productId=${encodeURIComponent(productId)}`).catch(() => [])
+        ]);
+        state.activeBarcodeModalContext = {
+          productId,
+          product: p,
+          barcodes: Array.isArray(barcodes) ? barcodes : [],
+          intakeLots: Array.isArray(intakeLots) ? intakeLots : [],
+          batches: Array.isArray(prodBatches?.data) ? prodBatches.data : (Array.isArray(prodBatches) ? prodBatches : [])
+        };
         const primaryBarcodeObj = barcodes.find(b => b.isPrimary);
         const primaryBarcode = primaryBarcodeObj?.barcode || p.primaryBarcode || '';
         if (p && primaryBarcodeObj?.barcode) {
           p.primaryBarcode = primaryBarcodeObj.barcode;
         }
-        const priceFormatted = formatTenantMoney(p.sellingPrice);
+        const priceFormatted = formatTenantMoney(primaryBarcodeObj?.effectiveSellingPrice || p.sellingPrice);
+        const sellableUoms = getPosProductSellableUoms(p);
+        const allProductUoms = Array.from(new Set([
+          p.baseUom || 'PCS',
+          ...sellableUoms,
+          ...(Array.isArray(p.unitConversions) ? p.unitConversions.map(c => String(c.uomCode || '').toUpperCase()).filter(Boolean) : [])
+        ]));
 
         const modalBody = `
           <!-- Printable Label Preview & Output Configuration -->
           <div class="card" style="margin-bottom: 16px; background: var(--surface-bg);">
             <div style="display: flex; gap: 16px; align-items: center; flex-wrap: wrap;">
               <div class="barcode-label-card" id="printableBarcodeLabel" style="flex: 1; min-width: 200px; margin: 0;">
-                <div class="barcode-label-sku">${escapeHtml(p.sku)} &bull; ${escapeHtml(p.baseUom || 'PCS')}</div>
+                <div class="barcode-label-sku" id="previewLabelMeta">${escapeHtml(p.sku)} &bull; ${escapeHtml(primaryBarcodeObj?.uomCode || p.baseUom || 'PCS')}${primaryBarcodeObj?.intakeCode ? ` &bull; ${escapeHtml(primaryBarcodeObj.intakeCode)}` : ''}</div>
                 <div class="barcode-label-title" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</div>
-                <div class="barcode-svg-container">
+                <div class="barcode-svg-container" id="previewLabelSvg">
                   ${primaryBarcode ? renderBarcodeSvg(primaryBarcode, 'CODE128', { height: 44, barWidth: 1.8 }) : '<div style="padding:16px; color:#64748B;">No primary barcode assigned</div>'}
                 </div>
-                <div class="barcode-label-price">${priceFormatted}</div>
+                <div class="barcode-label-price" id="previewLabelPrice">${priceFormatted}</div>
               </div>
-              <div style="min-width: 220px; display: flex; flex-direction: column; gap: 8px;">
-                <div style="font-weight: 600; font-size: 13px;">🖨️ Printer Setup</div>
+              <div style="min-width: 220px; display: flex; flex-direction: column; gap: 8px; flex: 1;">
+                <div style="font-weight: 600; font-size: 13px;">🖨️ Label &amp; Batch Print Setup</div>
                 <div>
-                  <label class="form-label" style="font-size: 11px; margin-bottom: 2px;">Printer Layout</label>
+                  <label class="form-label" style="font-size: 11px; margin-bottom: 2px;">Printer / Sheet Layout</label>
                   <select class="form-select" id="labelPrintFormat" style="font-size: 12px; padding: 5px;">
                     <option value="THERMAL_50X30" selected>Thermal 50 &times; 30 mm</option>
                     <option value="THERMAL_40X30">Thermal 40 &times; 30 mm</option>
                     <option value="THERMAL_50X40">Thermal 50 &times; 40 mm</option>
                     <option value="THERMAL_58">Thermal Roll 58 mm</option>
                     <option value="THERMAL_80">Thermal Roll 80 mm</option>
-                    <option value="A4_SHEET">A4 Sheet (21 Labels Grid)</option>
+                    <option value="A4_SHEET">A4 Sheet (21 Labels Grid / PDF)</option>
                   </select>
                 </div>
                 <div>
-                  <label class="form-label" style="font-size: 11px; margin-bottom: 2px;">Quantity to Print</label>
+                  <label class="form-label" style="font-size: 11px; margin-bottom: 2px;">Copies per Selected Barcode</label>
                   <select class="form-select" id="labelPrintQty" style="font-size: 12px; padding: 5px;">
-                    <option value="1" selected>1 Label</option>
-                    <option value="4">4 Labels</option>
-                    <option value="12">12 Labels</option>
-                    <option value="24">24 Labels</option>
+                    <option value="1" selected>1 Copy</option>
+                    <option value="2">2 Copies</option>
+                    <option value="4">4 Copies</option>
+                    <option value="12">12 Copies</option>
+                    <option value="21">21 Copies (Full A4)</option>
+                    <option value="24">24 Copies</option>
                   </select>
                 </div>
-                <button class="btn btn-primary btn-sm" style="margin-top: 4px;" onclick="printBarcodeLabels('${productId}')" ${!primaryBarcode ? 'disabled' : ''}>
-                  Print Labels
-                </button>
+                <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px;">
+                  <button class="btn btn-primary btn-sm" onclick="printSelectedBarcodeEntries('${productId}', false)">
+                    🖨️ Print Selected
+                  </button>
+                  <button class="btn btn-secondary btn-sm" onclick="printSelectedBarcodeEntries('${productId}', true)">
+                    Print All Active
+                  </button>
+                </div>
               </div>
             </div>
           </div>
 
-          <!-- Registered Barcodes (Single Responsive Card-Based Layout - BUG-029) -->
-          <div style="font-weight: 600; font-size: 14px; margin-bottom: 8px;">Registered Barcodes (${barcodes.length})</div>
+          <!-- Registered Barcodes Toolbar & Filter -->
+          <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <label style="display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; cursor: pointer;">
+                <input type="checkbox" id="chkSelectAllBarcodes" onchange="toggleSelectAllBarcodeCards(this.checked)">
+                Registered Barcodes (${barcodes.length})
+              </label>
+            </div>
+            <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
+              <select class="form-select" id="filterBarcodeStockRef" style="font-size: 11px; padding: 4px 8px; width: auto;" onchange="filterRegisteredBarcodeCards()">
+                <option value="ALL">All Stock References</option>
+                <option value="GLOBAL">Product-Wide (Global)</option>
+                ${(state.activeBarcodeModalContext.intakeLots || []).map(l => `<option value="LOT:${escapeHtml(l.id)}">Intake ${escapeHtml(l.intakeCode)} (${formatTenantMoney(l.sellingPrice || p.sellingPrice)})</option>`).join('')}
+                ${(state.activeBarcodeModalContext.batches || []).map(b => `<option value="BATCH:${escapeHtml(b.id)}">Batch ${escapeHtml(b.batchNumber)}</option>`).join('')}
+              </select>
+            </div>
+          </div>
+
+          <!-- Registered Barcodes (Responsive Card Layout) -->
           <div class="barcode-card-list" id="barcodeCardList" style="margin-bottom: 16px;">
             ${barcodes.length === 0 ? `
               <div class="card" style="text-align: center; color: var(--text-secondary); padding: 16px; background: var(--surface-bg);">
-                No barcodes registered yet. Use the form below to register additional barcodes.
+                No barcodes registered yet. Use the form below to map product-wide, stock-intake-specific, or package-unit barcodes.
               </div>
-            ` : barcodes.map(b => `
-              <div class="card" id="barcodeCard-${b.id}" style="padding: 12px; margin-bottom: 8px; background: var(--bg-primary); border: 1px solid var(--border-subtle);">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 8px;">
-                  <div style="display: flex; align-items: center; gap: 8px;">
+            ` : barcodes.map(b => {
+              const effPrice = b.effectiveSellingPrice || b.sellingPriceOverride || p.sellingPrice;
+              const uomCode = b.uomCode || p.baseUom || 'PCS';
+              const convFactor = parseFloat(b.conversionFactorToBase || '1') || 1;
+              const stockRefKey = b.stockIntakeLotId ? `LOT:${b.stockIntakeLotId}` : (b.batchId ? `BATCH:${b.batchId}` : 'GLOBAL');
+              const stockRefBadge = b.intakeCode
+                ? `<span class="badge-pill badge-green" style="font-size: 10px;" title="Mapped to Stock Intake Layer ${escapeHtml(b.intakeCode)}">Lot: ${escapeHtml(b.intakeCode)}</span>`
+                : b.batchNumber
+                  ? `<span class="badge-pill badge-yellow" style="font-size: 10px;" title="Mapped to Batch ${escapeHtml(b.batchNumber)}">Batch: ${escapeHtml(b.batchNumber)}</span>`
+                  : `<span class="badge-pill" style="font-size: 10px; background: var(--bg-hover); color: var(--text-secondary);">Product-Wide</span>`;
+              return `
+              <div class="card barcode-reg-item" id="barcodeCard-${b.id}" data-stock-ref="${escapeHtml(stockRefKey)}" style="padding: 12px; margin-bottom: 8px; background: var(--bg-primary); border: 1px solid var(--border-subtle);">
+                <div class="barcode-mapping-card" style="padding: 0; background: transparent;">
+                  <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                    <input type="checkbox" class="barcode-select-cb" value="${escapeHtml(b.id)}" ${b.isActive ? 'checked' : ''} style="width: auto;">
                     <code style="font-size: 14px; font-weight: 700; color: var(--text-primary);">${escapeHtml(b.barcode)}</code>
-                    <span class="badge-pill badge-blue" style="font-size: 11px;">${escapeHtml(b.barcodeType || b.symbology || 'CODE128')}</span>
+                    <span class="badge-pill badge-blue" style="font-size: 10px;">${escapeHtml(b.barcodeType || b.symbology || 'CODE128')}</span>
+                    <span class="badge-pill badge-blue" style="font-size: 10px;">${escapeHtml(uomCode)}${convFactor > 1 ? ` (=${formatQty(convFactor)} ${escapeHtml(p.baseUom || 'PCS')})` : ''}</span>
+                    ${stockRefBadge}
+                    <span style="font-size: 12px; font-weight: 700; color: var(--accent-primary);">${formatTenantMoney(effPrice)} / ${escapeHtml(uomCode)}</span>
                   </div>
-                  <div style="display: flex; gap: 6px; align-items: center;">
-                    ${b.isPrimary ? '<span class="badge-pill badge-green" style="font-size: 11px;">PRIMARY</span>' : ''}
-                    <span class="badge-pill ${b.isActive ? 'badge-green' : 'badge-red'}" style="font-size: 11px;">${b.isActive ? 'ACTIVE' : 'INACTIVE'}</span>
+                  <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
+                    ${b.isPrimary ? '<span class="badge-pill badge-green" style="font-size: 10px;">PRIMARY</span>' : ''}
+                    <span class="badge-pill ${b.isActive ? 'badge-green' : 'badge-red'}" style="font-size: 10px;">${b.isActive ? 'ACTIVE' : 'INACTIVE'}</span>
                   </div>
                 </div>
-                <div style="display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap;">
+                <div style="display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; margin-top: 8px;">
+                  <button class="btn btn-secondary btn-sm" style="padding: 3px 8px; font-size: 11px;" onclick="previewAndPrintSingleBarcode('${productId}', '${b.id}')">🖨️ Print</button>
                   ${!b.isPrimary && b.isActive ? `
                     <button class="btn btn-secondary btn-sm" id="btnMakePrimary-${b.id}" style="padding: 3px 8px; font-size: 11px;" onclick="setBarcodePrimary('${productId}', '${b.id}', this)">Make Primary</button>
                   ` : ''}
@@ -14332,17 +14765,17 @@
                   ` : ''}
                 </div>
               </div>
-            `).join('')}
+            `}).join('')}
           </div>
 
-          <!-- Add Alternate Barcode Card -->
+          <!-- Add Alternate / Stock-Specific / Package-UoM Barcode Card -->
           <div class="card" style="background: var(--surface-bg);">
-            <div style="font-weight: 600; font-size: 13px; margin-bottom: 8px;">+ Add Additional Barcode</div>
-            <div style="display: grid; grid-template-columns: 1fr 110px auto; gap: 8px; align-items: flex-end;">
+            <div style="font-weight: 600; font-size: 13px; margin-bottom: 10px;">+ Add Barcode Mapping (Product-Wide, Stock Intake Layer, Batch, or Package UoM)</div>
+            <div class="barcode-add-grid">
               <div>
-                <label class="form-label" style="font-size: 11px;">Barcode Code</label>
+                <label class="form-label" style="font-size: 11px;">Barcode Code *</label>
                 <div style="display: flex; gap: 4px;">
-                  <input type="text" class="form-input" id="newAltBarcodeCode" placeholder="Enter or scan code...">
+                  <input type="text" class="form-input" id="newAltBarcodeCode" placeholder="Enter or generate...">
                   <button type="button" class="btn btn-secondary btn-sm" onclick="generateBarcodeForInput('newAltBarcodeCode', 'newAltBarcodeSymbology')" title="Generate unique code">⚡</button>
                 </div>
               </div>
@@ -14359,7 +14792,29 @@
                   <option value="CUSTOM">Custom</option>
                 </select>
               </div>
-              <button class="btn btn-primary btn-sm" id="btnAddBarcodeConfirm" onclick="submitAddAlternateBarcode('${productId}')">Add</button>
+              <div>
+                <label class="form-label" style="font-size: 11px;">Selling UoM</label>
+                <select class="form-select" id="newAltBarcodeUom">
+                  ${allProductUoms.map(u => `<option value="${escapeHtml(u)}">${escapeHtml(u)}</option>`).join('')}
+                </select>
+              </div>
+              <div>
+                <label class="form-label" style="font-size: 11px;">Stock Reference / Layer</label>
+                <select class="form-select" id="newAltBarcodeStockRef">
+                  <option value="">Product-Wide (All Stock)</option>
+                  ${(state.activeBarcodeModalContext.intakeLots || []).map(l => `
+                    <option value="LOT:${escapeHtml(l.id)}">Lot ${escapeHtml(l.intakeCode)} — Rem: ${formatQty(l.baseQtyRemaining)} ${escapeHtml(p.baseUom || 'PCS')} @ ${formatTenantMoney(l.sellingPrice || p.sellingPrice)}</option>
+                  `).join('')}
+                  ${(state.activeBarcodeModalContext.batches || []).map(b => `
+                    <option value="BATCH:${escapeHtml(b.id)}">Batch ${escapeHtml(b.batchNumber)} — Rem: ${formatQty(b.currentQuantity || b.availableQuantity || 0)}</option>
+                  `).join('')}
+                </select>
+              </div>
+              <div>
+                <label class="form-label" style="font-size: 11px;">Price Override (Optional)</label>
+                <input type="number" step="0.01" min="0" class="form-input" id="newAltBarcodePriceOverride" placeholder="Auto / Inherit">
+              </div>
+              <button class="btn btn-primary btn-sm" id="btnAddBarcodeConfirm" style="height: 36px;" onclick="submitAddAlternateBarcode('${productId}')">Add Barcode</button>
             </div>
           </div>
         `;
@@ -14371,16 +14826,144 @@
       }
     }
 
+    function toggleSelectAllBarcodeCards(checked) {
+      document.querySelectorAll('#barcodeCardList .barcode-reg-item').forEach(card => {
+        if (card.style.display === 'none') return;
+        const cb = card.querySelector('.barcode-select-cb');
+        if (cb) cb.checked = Boolean(checked);
+      });
+    }
+
+    function filterRegisteredBarcodeCards() {
+      const refVal = document.getElementById('filterBarcodeStockRef')?.value || 'ALL';
+      document.querySelectorAll('#barcodeCardList .barcode-reg-item').forEach(card => {
+        const cardRef = card.getAttribute('data-stock-ref') || 'GLOBAL';
+        const show = refVal === 'ALL' || cardRef === refVal;
+        card.style.display = show ? '' : 'none';
+      });
+    }
+
+    function previewAndPrintSingleBarcode(productId, barcodeId) {
+      const ctx = state.activeBarcodeModalContext;
+      const b = ctx?.barcodes?.find(x => x.id === barcodeId);
+      if (!b) return;
+      document.querySelectorAll('#barcodeCardList .barcode-select-cb').forEach(cb => {
+        cb.checked = cb.value === barcodeId;
+      });
+      printSelectedBarcodeEntries(productId, false);
+    }
+
+    function printSelectedBarcodeEntries(productId, allActive = false) {
+      const ctx = state.activeBarcodeModalContext;
+      const p = ctx?.product || (state.cachedProducts || []).find(x => x.id === productId);
+      if (!p) return;
+      const barcodes = ctx?.barcodes || [];
+      let chosen = [];
+      if (allActive) {
+        chosen = barcodes.filter(b => b.isActive);
+      } else {
+        const selectedIds = new Set(
+          Array.from(document.querySelectorAll('#barcodeCardList .barcode-select-cb:checked')).map(cb => cb.value)
+        );
+        chosen = barcodes.filter(b => selectedIds.has(b.id));
+      }
+      if (chosen.length === 0) {
+        if (p.primaryBarcode) {
+          printBarcodeLabels(productId);
+          return;
+        }
+        showToast('Select at least one barcode to print.', 'warning');
+        return;
+      }
+
+      const format = document.getElementById('labelPrintFormat')?.value || 'THERMAL_50X30';
+      const copies = Math.max(1, parseInt(document.getElementById('labelPrintQty')?.value || '1', 10));
+      const spec = getThermalLabelFormatSpec(format);
+      const cardsHtml = [];
+      for (const b of chosen) {
+        const uom = b.uomCode || p.baseUom || 'PCS';
+        const effPrice = formatTenantMoney(b.effectiveSellingPrice || b.sellingPriceOverride || p.sellingPrice);
+        const refTag = b.intakeCode ? ` • ${b.intakeCode}` : (b.batchNumber ? ` • ${b.batchNumber}` : '');
+        const svg = renderBarcodeSvg(b.barcode, b.barcodeType || 'CODE128', {
+          height: spec.bcH,
+          barWidth: spec.bcBarW,
+          fontSize: spec.bcFont,
+          quietZone: 8,
+          svgStyle: `width:100%; max-width:${spec.svgMaxW}; height:${spec.svgH}; max-height:${spec.svgH}; display:block; margin:0 auto;`
+        });
+        const card = `
+          <div class="print-label-item batch-print-item">
+            <div class="print-sku">${escapeHtml(p.sku)} &bull; ${escapeHtml(uom)}${escapeHtml(refTag)}</div>
+            <div class="print-name">${escapeHtml(p.name)}</div>
+            <div class="print-barcode">${svg}</div>
+            <div class="print-price">${effPrice}</div>
+          </div>
+        `;
+        for (let c = 0; c < copies; c++) {
+          cardsHtml.push(card);
+        }
+      }
+
+      if (!spec.isA4Grid) {
+        const pageStyles = `
+          @page { size: ${spec.w} ${spec.h}; margin: 0mm; }
+          html, body { width: ${spec.w}; margin: 0; padding: 0; }
+          .print-label-item { width: ${spec.w}; height: ${spec.h}; max-height: ${spec.h}; padding: ${spec.pad}; box-sizing: border-box; overflow: hidden; display: flex; flex-direction: column; justify-content: space-between; align-items: center; text-align: center; page-break-inside: avoid; break-inside: avoid; page-break-after: avoid; break-after: avoid; }
+          .print-label-item:not(:last-child) { page-break-after: always; break-after: page; }
+          .print-sku { font-size: ${spec.metaPt}; font-weight: 700; text-transform: uppercase; line-height: 1.05; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+          .print-name { font-size: ${spec.prodPt}; font-weight: 700; line-height: 1.1; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+          .print-barcode { width: 100%; display: flex; justify-content: center; align-items: center; overflow: hidden; }
+          .print-price { font-size: ${spec.pricePt}; font-weight: 800; line-height: 1.05; white-space: nowrap; }
+        `;
+        printHtmlDocument(cardsHtml.join(''), pageStyles, { w: spec.w, h: spec.h });
+      } else {
+        const pageStyles = `
+          @page { size: A4 portrait; margin: 8mm 7mm; }
+          html, body { width: 210mm; margin: 0; padding: 0; }
+          .print-sheet-grid { display: grid; grid-template-columns: repeat(3, ${spec.w}); grid-auto-rows: ${spec.h}; gap: 0mm 2.5mm; justify-content: center; }
+          .print-label-item { width: ${spec.w}; height: ${spec.h}; max-height: ${spec.h}; border: 0.5px dashed #bbb; padding: ${spec.pad}; box-sizing: border-box; overflow: hidden; display: flex; flex-direction: column; justify-content: space-between; align-items: center; text-align: center; page-break-inside: avoid; break-inside: avoid; }
+          .print-sku { font-size: ${spec.metaPt}; font-weight: 700; text-transform: uppercase; line-height: 1.05; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+          .print-name { font-size: ${spec.prodPt}; font-weight: 700; line-height: 1.1; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+          .print-barcode { width: 100%; display: flex; justify-content: center; align-items: center; overflow: hidden; }
+          .print-price { font-size: ${spec.pricePt}; font-weight: 800; line-height: 1.05; white-space: nowrap; }
+        `;
+        printHtmlDocument(`<div class="print-sheet-grid">${cardsHtml.join('')}</div>`, pageStyles, { w: '210mm', h: '297mm' });
+      }
+    }
+
     async function submitAddAlternateBarcode(productId) {
       const codeInput = document.getElementById('newAltBarcodeCode');
       const symbologySelect = document.getElementById('newAltBarcodeSymbology');
+      const uomSelect = document.getElementById('newAltBarcodeUom');
+      const stockRefSelect = document.getElementById('newAltBarcodeStockRef');
+      const priceOverrideInput = document.getElementById('newAltBarcodePriceOverride');
       const addBtn = document.getElementById('btnAddBarcodeConfirm');
       const code = codeInput ? codeInput.value.trim() : '';
       const symbology = symbologySelect ? symbologySelect.value : 'CODE128';
+      const uomCode = uomSelect ? uomSelect.value : undefined;
+      const stockRef = stockRefSelect ? stockRefSelect.value : '';
+      const priceOverrideVal = priceOverrideInput ? priceOverrideInput.value.trim() : '';
 
       if (!code) {
         showToast('Please enter or generate a barcode', 'warning');
         return;
+      }
+
+      let stockIntakeLotId = null;
+      let batchId = null;
+      let priceSourceMode = 'INHERIT';
+      if (stockRef.startsWith('LOT:')) {
+        stockIntakeLotId = stockRef.slice(4);
+        priceSourceMode = 'INTAKE_SPECIFIC';
+      } else if (stockRef.startsWith('BATCH:')) {
+        batchId = stockRef.slice(6);
+        priceSourceMode = 'BATCH_SPECIFIC';
+      }
+      const sellingPriceOverride = priceOverrideVal && parseFloat(priceOverrideVal) > 0
+        ? parseFloat(priceOverrideVal).toFixed(4)
+        : null;
+      if (sellingPriceOverride) {
+        priceSourceMode = 'PACKAGE_EXPLICIT';
       }
 
       if (addBtn) {
@@ -14394,18 +14977,23 @@
           body: JSON.stringify({
             barcode: code,
             symbology,
+            ...(uomCode ? { uomCode } : {}),
+            ...(stockIntakeLotId ? { stockIntakeLotId } : {}),
+            ...(batchId ? { batchId } : {}),
+            priceSourceMode,
+            ...(sellingPriceOverride ? { sellingPriceOverride } : {}),
             isPrimary: false,
             isActive: true
           })
         });
-        showToast(`Barcode ${code} added`, 'success');
+        showToast(`Barcode ${code} mapped (${uomCode || 'base'})`, 'success');
         openBarcodeLabelModal(productId);
       } catch (err) {
         showToast(`Failed to add barcode: ${err.detail || err.message}`, 'error');
       } finally {
         if (addBtn) {
           addBtn.disabled = false;
-          addBtn.textContent = 'Add';
+          addBtn.textContent = 'Add Barcode';
         }
       }
     }
@@ -14509,7 +15097,16 @@
         showToast('Barcode deleted', 'success');
         openBarcodeLabelModal(productId);
       } catch (err) {
-        showToast(`Failed to delete barcode: ${err.detail || err.message}`, 'error');
+        if (err && (err.errorCode === 'CAT_BARCODE_IN_USE_DEACTIVATE_ONLY' || err.status === 409)) {
+          showToast(err.detail || err.message || 'Barcode is referenced in historical sales and can only be deactivated.', 'warning');
+          if (confirm('This barcode has historical sales transactions and cannot be permanently deleted. Would you like to DEACTIVATE it instead?')) {
+            activeBarcodeOps.delete(barcodeId);
+            await toggleBarcodeActive(productId, barcodeId, false, btn);
+            return;
+          }
+        } else {
+          showToast(`Failed to delete barcode: ${err.detail || err.message}`, 'error');
+        }
         if (btn) {
           btn.disabled = false;
           btn.textContent = originalText;
@@ -14987,7 +15584,62 @@
       return conv !== null ? conv : (parseFloat(q) || 0);
     }
 
+    function getTotalCartBaseQtyForIntakeLot(stockIntakeLotId, excludeIndex = -1) {
+      if (!stockIntakeLotId) return 0;
+      let total = 0;
+      for (let i = 0; i < state.cart.length; i++) {
+        if (i === excludeIndex) continue;
+        const c = state.cart[i];
+        if (c.stockIntakeLotId !== stockIntakeLotId) continue;
+        const prod = (state.posCachedProducts || []).find(p => p.id === c.productId);
+        const base = c.baseUom || prod?.baseUom || c.uomCode;
+        const conv = convertClientUomQty(c.qty, c.uomCode, base, prod);
+        total += conv !== null ? conv : (parseFloat(c.qty) || 0);
+      }
+      return total;
+    }
+
+    function changeCartItemUom(index, newUomCode) {
+      const item = state.cart[index];
+      if (!item || !newUomCode) return;
+      const cleanUom = String(newUomCode).trim().toUpperCase();
+      if (cleanUom === item.uomCode) return;
+      const prod = (state.posCachedProducts || []).find(p => p.id === item.productId);
+      const baseUom = String(item.baseUom || prod?.baseUom || 'PCS').trim().toUpperCase();
+      const baseNeeded = convertClientUomQty(item.qty, cleanUom, baseUom, prod);
+      if (baseNeeded === null) {
+        showToast(`Cannot convert "${cleanUom}" to base unit "${baseUom}".`, 'error');
+        return;
+      }
+      if (item.trackInventory) {
+        const usedOther = item.stockIntakeLotId
+          ? getTotalCartBaseQtyForIntakeLot(item.stockIntakeLotId, index)
+          : item.batchId
+            ? getTotalCartBaseQtyForBatch(item.batchId, index)
+            : getTotalCartBaseQtyForProduct(item.productId, index);
+        if (usedOther + baseNeeded > (item.availableQuantity || 0) + 1e-9) {
+          showToast(`Insufficient stock for ${formatQty(item.qty)} ${cleanUom} (${formatQty(baseNeeded)} ${baseUom} required, only ${formatQty(Math.max(0, (item.availableQuantity || 0) - usedOther))} ${baseUom} available).`, 'warning');
+          renderPosCartPanel();
+          return;
+        }
+      }
+      const baseRate = parseFloat(item.baseUnitRate || prod?.retailPrice || prod?.sellingPrice || item.unitPrice || '0');
+      const calc = computeClientProportionateTotal(1, cleanUom, baseRate, prod || item);
+      const newUnitPrice = calc ? calc.lineTotal.toFixed(4) : baseRate.toFixed(4);
+      item.uomCode = cleanUom;
+      item.unitPrice = newUnitPrice;
+      item.pricePerPriceUom = newUnitPrice;
+      item.priceUom = cleanUom;
+      item.isPricePerSellingUom = true;
+      item.normalizedBaseQty = baseNeeded;
+      state.activeCheckoutKey = null;
+      renderPosCartPanel();
+    }
+
     function computeCartLineTotal(item) {
+      if (item.isPricePerSellingUom) {
+        return Math.round(item.qty * (parseFloat(item.unitPrice) || 0) * 100) / 100;
+      }
       const prod = (state.posCachedProducts || []).find(p => p.id === item.productId);
       const pricePer = item.pricePerPriceUom !== undefined ? item.pricePerPriceUom : item.unitPrice;
       const calc = computeClientProportionateTotal(item.qty, item.uomCode, pricePer, prod || item);
@@ -14999,9 +15651,14 @@
       const isVar = line.productQtyMode === 'VARIABLE';
       const isDec = isVar || isDecimalUom(line.uomCode);
       const lineTotal = computeCartLineTotal(line);
-      const pricePerLabel = line.pricePerPriceUom || line.unitPrice;
-      const priceUomLabel = line.priceUom || line.baseUom || line.uomCode;
+      const pricePerLabel = line.isPricePerSellingUom ? line.unitPrice : (line.pricePerPriceUom || line.unitPrice);
+      const priceUomLabel = line.isPricePerSellingUom ? line.uomCode : (line.priceUom || line.baseUom || line.uomCode);
       const sourceBadge = formatEntrySourceBadge(line.entrySource);
+      const prod = (state.posCachedProducts || []).find(p => p.id === line.productId);
+      const sellableUoms = getPosProductSellableUoms(prod || line);
+      const intakeBadgeHtml = line.stockIntakeLotId || line.intakeCode
+        ? `<span class="batch-lock-badge" style="background: rgba(16, 185, 129, 0.14); color: #059669; border-color: rgba(16, 185, 129, 0.35);" title="Locked to Stock Intake Layer ${escapeHtml(line.intakeCode || line.stockIntakeLotId || '')}">Lot: ${escapeHtml(line.intakeCode || 'Intake Locked')}</span>`
+        : '';
       const batchBadgeHtml = line.batchId
         ? (line.isExactBatchLocked
             ? `<span class="batch-lock-badge" title="Scanned exact NB-B batch barcode (FEFO replacement disabled)">NB-B Locked &bull; ${escapeHtml(line.batchNumber || 'Batch')}</span>`
@@ -15013,33 +15670,41 @@
       const maxInSellingUom = (() => {
         if (!line.trackInventory) return 999999;
         if (line.serialId) return 1;
-        const prod = (state.posCachedProducts || []).find(p => p.id === line.productId);
         const base = line.baseUom || prod?.baseUom || line.uomCode;
-        const usedQty = line.batchId
-          ? getTotalCartBaseQtyForBatch(line.batchId, idx)
-          : getTotalCartBaseQtyForProduct(line.productId, idx);
+        const usedQty = line.stockIntakeLotId
+          ? getTotalCartBaseQtyForIntakeLot(line.stockIntakeLotId, idx)
+          : line.batchId
+            ? getTotalCartBaseQtyForBatch(line.batchId, idx)
+            : getTotalCartBaseQtyForProduct(line.productId, idx);
         const remBase = Math.max(0, (line.availableQuantity || 0) - usedQty);
         const conv = convertClientUomQty(remBase, base, line.uomCode, prod);
         return conv !== null ? conv : remBase;
       })();
       return `
-          <div class="cart-line" data-batch-id="${escapeHtml(line.batchId || '')}">
+          <div class="cart-line" data-batch-id="${escapeHtml(line.batchId || '')}" data-intake-lot-id="${escapeHtml(line.stockIntakeLotId || '')}">
             <div class="cart-line-top">
               <div class="cart-line-name" title="${escapeHtml(line.name)}">
                 ${escapeHtml(line.name)}
                 ${sourceBadge ? `<span style="margin-left: 4px;">${sourceBadge}</span>` : ''}
               </div>
-              <div class="cart-line-total">${isVar || (line.priceUom && line.priceUom !== line.uomCode) ? formatTenantMoney(lineTotal) : `${formatTenantMoney(line.qty * (parseFloat(line.unitPrice) || 0))}`}</div>
+              <div class="cart-line-total">${isVar || (!line.isPricePerSellingUom && line.priceUom && line.priceUom !== line.uomCode) ? formatTenantMoney(lineTotal) : `${formatTenantMoney(line.qty * (parseFloat(line.unitPrice) || 0))}`}</div>
             </div>
             <div class="cart-line-bottom">
               <div class="cart-line-meta">
-                <div class="cart-line-sub">
-                  ${isVar || line.uomCode !== priceUomLabel
+                <div class="cart-line-sub" style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                  <span>${isVar || line.uomCode !== priceUomLabel
                     ? `${formatQty(line.qty)} ${escapeHtml(line.uomCode)} &times; ${formatTenantMoney(pricePerLabel)} / ${escapeHtml(priceUomLabel)}`
-                    : `${formatTenantMoney(line.unitPrice)} / ${escapeHtml(line.uomCode)}`}
+                    : `${formatTenantMoney(line.unitPrice)} / ${escapeHtml(line.uomCode)}`}</span>
+                  ${line.uomCode !== (line.baseUom || 'PCS') ? `<span class="badge-pill badge-blue" style="font-size:10px; padding:1px 6px;">=${formatQty(line.normalizedBaseQty || getCartLineBaseQty(line))} ${escapeHtml(line.baseUom || 'PCS')}</span>` : ''}
+                  ${(!line.serialId && sellableUoms.length > 1) ? `
+                    <select class="form-select" aria-label="Selling Unit" style="width:auto; height:22px; min-height:22px; padding:0 18px 0 6px; font-size:11px; font-weight:600;" onchange="changeCartItemUom(${idx}, this.value)">
+                      ${sellableUoms.map(u => `<option value="${escapeHtml(u)}" ${u === line.uomCode ? 'selected' : ''}>${escapeHtml(u)}</option>`).join('')}
+                    </select>
+                  ` : ''}
                 </div>
-                ${(batchBadgeHtml || serialBadgeHtml || line.expiryDate || line.priceSource === 'OVERRIDE') ? `
+                ${(intakeBadgeHtml || batchBadgeHtml || serialBadgeHtml || line.expiryDate || line.priceSource === 'OVERRIDE') ? `
                   <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px;">
+                    ${intakeBadgeHtml}
                     ${batchBadgeHtml}
                     ${serialBadgeHtml}
                     ${line.expiryDate ? `<span style="font-size: 10px; color: var(--text-secondary); white-space: nowrap;">Exp: ${escapeHtml(line.expiryDate)}</span>` : ''}
@@ -15078,19 +15743,18 @@
       const baseUom = p.baseUom || 'KG';
       const priceUom = p.priceUom || baseUom;
       const pricePer = parseFloat(p.retailPrice || p.sellingPrice || '0');
-      const allowedList = (Array.isArray(p.allowedSellingUoms) && p.allowedSellingUoms.length)
-        ? p.allowedSellingUoms.map(u => String(u).toUpperCase())
-        : getCompatibleUomsForProduct(p);
+      const allowedList = getPosProductSellableUoms(p);
       const initialUom = editingLine?.uomCode || (allowedList.includes('G') && baseUom === 'KG' ? 'G' : (allowedList[0] || baseUom));
       const initialQty = editingLine ? formatQty(editingLine.qty) : (initialUom === 'G' || initialUom === 'ML' ? '500' : '1');
       const cat = p.measurementCategory || getUomCategory(baseUom);
+      const pkgPresets = allowedList.filter(u => u !== baseUom.toUpperCase()).flatMap(u => [{ q: 1, u }, { q: 2, u }, { q: 5, u }]);
       const presets = cat === 'WEIGHT'
-        ? [{ q: 100, u: 'G' }, { q: 250, u: 'G' }, { q: 500, u: 'G' }, { q: 1, u: 'KG' }]
+        ? [{ q: 100, u: 'G' }, { q: 250, u: 'G' }, { q: 500, u: 'G' }, { q: 1, u: 'KG' }, ...pkgPresets]
         : cat === 'VOLUME'
-          ? [{ q: 250, u: 'ML' }, { q: 500, u: 'ML' }, { q: 1, u: 'L' }]
+          ? [{ q: 250, u: 'ML' }, { q: 500, u: 'ML' }, { q: 1, u: 'L' }, ...pkgPresets]
           : cat === 'LENGTH'
-            ? [{ q: 50, u: 'CM' }, { q: 1, u: 'M' }, { q: 2, u: 'M' }]
-            : [{ q: 1, u: baseUom }, { q: 5, u: baseUom }];
+            ? [{ q: 50, u: 'CM' }, { q: 1, u: 'M' }, { q: 2, u: 'M' }, ...pkgPresets]
+            : [{ q: 1, u: baseUom }, { q: 5, u: baseUom }, ...pkgPresets];
 
       state.modalVarQtyState = {
         productId,
@@ -15244,14 +15908,16 @@
         sku: p.sku,
         name: p.name,
         unitPrice: effectiveUnitPrice,
-        pricePerPriceUom,
-        priceUom: p.priceUom || p.baseUom || uomCode,
+        baseUnitRate: pricePerPriceUom,
+        pricePerPriceUom: calc?.isPackageExplicit ? effectiveUnitPrice : pricePerPriceUom,
+        priceUom: calc?.isPackageExplicit ? uomCode : (p.priceUom || p.baseUom || uomCode),
         baseUom: p.baseUom || uomCode,
-        productQtyMode: p.productQtyMode || 'VARIABLE',
+        productQtyMode: p.productQtyMode || 'STANDARD',
+        isPricePerSellingUom: true,
         uomCode,
         qty: parseFloat(qtyVal.toFixed(6)),
         normalizedBaseQty: normBase,
-        entrySource: st.entrySource || 'MANUAL_WEIGHT',
+        entrySource: st.entrySource || (p.productQtyMode === 'VARIABLE' ? 'MANUAL_WEIGHT' : 'MANUAL'),
         trackInventory: p.trackInventory !== false,
         availableQuantity: parseFloat(p.availableQuantity || '0') || 0
       };
@@ -15259,7 +15925,7 @@
       if (st.editCartIndex !== null && state.cart[st.editCartIndex]) {
         state.cart[st.editCartIndex] = entryObj;
       } else {
-        const existingIdx = state.cart.findIndex(i => i.productId === p.id && i.uomCode === uomCode);
+        const existingIdx = state.cart.findIndex(i => i.productId === p.id && i.uomCode === uomCode && !i.stockIntakeLotId && !i.batchId);
         if (existingIdx >= 0) {
           state.cart[existingIdx].qty = parseFloat((state.cart[existingIdx].qty + entryObj.qty).toFixed(6));
           state.cart[existingIdx].normalizedBaseQty = getCartLineBaseQty(state.cart[existingIdx]);
@@ -15294,7 +15960,11 @@
       const entrySource = extraMeta?.entrySource || 'MANUAL';
       const batchId = extraMeta?.batchId || null;
       const serialId = extraMeta?.serialId || null;
+      const stockIntakeLotId = extraMeta?.stockIntakeLotId || null;
+      const intakeCode = extraMeta?.intakeCode || null;
       const isExactBatchLocked = Boolean(extraMeta?.isExactBatchLocked);
+      const isExactIntakeLotLocked = Boolean(extraMeta?.isExactIntakeLotLocked);
+      const isPricePerSellingUom = Boolean(extraMeta?.isPricePerSellingUom) || String(uomCode || '').toUpperCase() === String(baseUom || '').toUpperCase();
 
       if (serialId && (state.cart || []).some(i => i.serialId && i.serialId === serialId)) {
         showToast(`Serial unit "${extraMeta?.serialNumber || serialId}" is already in the cart.`, 'warning');
@@ -15311,27 +15981,33 @@
         showToast(`Incompatible UoM "${uomCode}" for base stock unit "${baseUom}" on "${name}".`, 'error');
         return;
       }
-      const existingUsed = batchId
-        ? getTotalCartBaseQtyForBatch(batchId)
-        : getTotalCartBaseQtyForProduct(productId);
+      const existingUsed = stockIntakeLotId
+        ? getTotalCartBaseQtyForIntakeLot(stockIntakeLotId)
+        : batchId
+          ? getTotalCartBaseQtyForBatch(batchId)
+          : getTotalCartBaseQtyForProduct(productId);
       if (isTracked && existingUsed + baseToAdd > avail + 1e-9) {
         showToast(
-          batchId
-            ? `Cannot add more from batch ${extraMeta?.batchNumber || ''}: only ${formatQty(avail)} ${escapeHtml(baseUom)} available`
-            : `Cannot add more of "${name}": stock limit reached (${formatQty(avail)} ${escapeHtml(baseUom)} available)`,
+          stockIntakeLotId
+            ? `Cannot add more from intake lot ${intakeCode || ''}: only ${formatQty(avail)} ${escapeHtml(baseUom)} available`
+            : batchId
+              ? `Cannot add more from batch ${extraMeta?.batchNumber || ''}: only ${formatQty(avail)} ${escapeHtml(baseUom)} available`
+              : `Cannot add more of "${name}": stock limit reached (${formatQty(avail)} ${escapeHtml(baseUom)} available)`,
           'warning'
         );
         return;
       }
 
-      // Key cart lines by productId + batchId + serialId + uomCode + unitPrice so distinct serials/batches never merge silently
+      // Key cart lines by productId + batchId + stockIntakeLotId + serialId + uomCode + unitPrice so distinct layers/units never merge silently
       const existingIndex = serialId ? -1 : state.cart.findIndex(i =>
         i.productId === productId &&
         (i.batchId || null) === batchId &&
+        (i.stockIntakeLotId || null) === stockIntakeLotId &&
         !i.serialId &&
         i.uomCode === uomCode &&
         (parseFloat(i.unitPrice || '0').toFixed(4) === safePrice) &&
-        Boolean(i.isExactBatchLocked) === isExactBatchLocked
+        Boolean(i.isExactBatchLocked) === isExactBatchLocked &&
+        Boolean(i.isExactIntakeLotLocked) === isExactIntakeLotLocked
       );
       if (existingIndex >= 0) {
         const item = state.cart[existingIndex];
@@ -15349,10 +16025,12 @@
           sku,
           name,
           unitPrice: safePrice,
-          pricePerPriceUom: safePrice,
+          baseUnitRate: extraMeta?.pricePerPriceUom || cachedProd?.retailPrice || cachedProd?.sellingPrice || safePrice,
+          pricePerPriceUom: extraMeta?.pricePerPriceUom || safePrice,
           priceUom,
           baseUom,
           productQtyMode,
+          isPricePerSellingUom,
           uomCode,
           qty: qtyToAdd,
           normalizedBaseQty: baseToAdd,
@@ -15364,13 +16042,16 @@
           internalBarcode: extraMeta?.internalBarcode || null,
           expiryDate: extraMeta?.expiryDate || null,
           isExactBatchLocked,
+          stockIntakeLotId,
+          intakeCode,
+          isExactIntakeLotLocked,
           serialId,
           serialGroupId: extraMeta?.serialGroupId || null,
           serialNumber: extraMeta?.serialNumber || null,
           serialInternalBarcode: extraMeta?.serialInternalBarcode || null,
           scannedBarcode: extraMeta?.scannedBarcode || null,
           overrideSellingPrice: extraMeta?.overrideSellingPrice || null,
-          priceSource: extraMeta?.priceSource || (serialId ? 'SERIAL_GROUP' : batchId ? 'BATCH' : 'PRODUCT'),
+          priceSource: extraMeta?.priceSource || (serialId ? 'SERIAL_GROUP' : stockIntakeLotId ? 'INTAKE_SPECIFIC' : batchId ? 'BATCH' : 'PRODUCT'),
           fefoPreview: extraMeta?.fefoPreview || null
         });
       }
@@ -16039,6 +16720,7 @@
       const lines = state.cart.map(c => ({
         productId: c.productId,
         ...(c.batchId ? { batchId: c.batchId } : {}),
+        ...(c.stockIntakeLotId ? { stockIntakeLotId: c.stockIntakeLotId } : {}),
         ...(c.serialId ? { serialId: c.serialId } : {}),
         ...(c.serialGroupId ? { serialGroupId: c.serialGroupId } : {}),
         ...(c.serialNumber ? { serialNumber: c.serialNumber } : {}),

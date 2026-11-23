@@ -475,7 +475,8 @@ async function executeDomainSyncCommand(
       if (err instanceof AppError) {
         const isStockShortage =
           err.errorCode === 'INV_INSUFFICIENT_AVAILABLE_STOCK' ||
-          err.errorCode === 'INV_INSUFFICIENT_BATCH_STOCK';
+          err.errorCode === 'INV_INSUFFICIENT_BATCH_STOCK' ||
+          err.errorCode === 'POS_INTAKE_LOT_EXHAUSTED';
         const lineProductIds = Array.isArray(salePayload.lines)
           ? salePayload.lines
               .map((l) => (typeof l.productId === 'string' ? l.productId : null))

@@ -21,7 +21,7 @@ describe('@nexstock/desktop — Tauri v2 Offline-First SQLite Runtime & Bridge',
     expect(existsSync(resolve(tauriRoot, 'src/lib.rs'))).toBe(true);
     expect(existsSync(resolve(tauriRoot, 'src/db.rs'))).toBe(true);
     expect(existsSync(resolve(tauriRoot, 'src/commands.rs'))).toBe(true);
-    expect(getCanonicalSqliteMigrations()).toHaveLength(9);
+    expect(getCanonicalSqliteMigrations()).toHaveLength(10);
 
     const banner = getDesktopConnectionBanner({
       isOnline: false,
@@ -31,12 +31,12 @@ describe('@nexstock/desktop — Tauri v2 Offline-First SQLite Runtime & Bridge',
     expect(banner).toBeTruthy();
   });
 
-  it('2. Bootstraps SQLite 0001..0007, saves sync snapshot, resolves hybrid barcodes offline (FEFO + explicit NB-B lock + expiry block), and queues POS_RECORD_SALE + print job', () => {
+  it('2. Bootstraps SQLite 0001..0010, saves sync snapshot, resolves hybrid barcodes offline (FEFO + explicit NB-B lock + expiry block), and queues POS_RECORD_SALE + print job', () => {
     const db = new DatabaseSync(':memory:');
     const store = new DesktopOfflineStore(db);
 
     const initialStatus = store.getStatus();
-    expect(initialStatus.schemaVersion).toBe(9);
+    expect(initialStatus.schemaVersion).toBe(10);
     expect(initialStatus.pendingOutboxCount).toBe(0);
 
     const tenantId = '0192b4d0-1111-7000-8000-000000000010';

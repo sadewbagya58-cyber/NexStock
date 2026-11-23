@@ -255,9 +255,11 @@
       registers: snapshot.registers || [],
       balances: snapshot.balances || [],
       serials: snapshot.serials || [],
+      intakeLots: snapshot.intakeLots || [],
       deviceAuthorization: snapshot.deviceAuthorization || null,
       pendingStockDeltas: prevDeltas,
       pendingBatchDeltas: prevBatchDeltas,
+      pendingIntakeDeltas: clearPendingDeltas ? {} : ((prev && prev.pendingIntakeDeltas) ? prev.pendingIntakeDeltas : {}),
     };
 
     await idbPut(STORES.SNAPSHOTS, record);
@@ -410,10 +412,24 @@
         };
       });
 
+    const iDeltas = snap.pendingIntakeDeltas || {};
+    const intakeLots = (snap.intakeLots || [])
+      .filter((lot) => !warehouseId || lot.warehouseId === warehouseId)
+      .map((lot) => {
+        const srvRem = parseFloat(lot.baseQtyRemaining || '0') || 0;
+        const delta = parseFloat(iDeltas[lot.id] || '0') || 0;
+        const proj = Math.max(0, srvRem + delta);
+        return {
+          ...lot,
+          baseQtyRemaining: proj.toFixed(6),
+        };
+      });
+
     return {
       products,
       categories: snap.categories || [],
       batches,
+      intakeLots,
       taxRates: snap.taxRates || [],
       customers: snap.customers || [],
       registers: snap.registers || [],
@@ -431,27 +447,88 @@
       const prod = data.products.find((p) => p.id === exactBatch.productId);
       const isExpired = exactBatch.status === 'EXPIRED' || (exactBatch.expiryDate && exactBatch.expiryDate < today);
       if (isExpired) {
-        return { isBlocked: true, message: `Batch ${exactBatch.batchNumber} is expired (${exactBatch.expiryDate}) and cannot be sold.` };
+        return { isBlocked: true, blockedReason: 'BATCH_EXPIRED', message: `Batch ${exactBatch.batchNumber} is expired (${exactBatch.expiryDate}) and cannot be sold.` };
       }
       if (exactBatch.status !== 'ACTIVE' || parseFloat(exactBatch.availableQuantity) <= 0) {
-        return { isBlocked: true, message: `Batch ${exactBatch.batchNumber} has no sellable stock remaining.` };
+        return { isBlocked: true, blockedReason: 'BATCH_DEPLETED', message: `Batch ${exactBatch.batchNumber} has no sellable stock remaining.` };
       }
       return {
         isBlocked: false,
         product: prod,
         lockedBatch: exactBatch,
+        resolvedSellingUom: prod?.baseUom || 'PCS',
+        resolvedConversionFactorToBase: '1.000000',
         effectiveUnitPrice: (exactBatch.batchPricingMode === 'EXPLICIT' && exactBatch.sellingPrice) ? exactBatch.sellingPrice : prod?.retailPrice,
         priceSource: exactBatch.batchPricingMode === 'EXPLICIT' ? 'BATCH_EXPLICIT' : 'PRODUCT_FALLBACK',
       };
     }
 
     const lower = clean.toLowerCase();
-    const matchedProd = data.products.find((p) =>
-      (p.sku && p.sku.toLowerCase() === lower) ||
-      (p.primaryBarcode && p.primaryBarcode.toLowerCase() === lower) ||
-      (Array.isArray(p.barcodes) && p.barcodes.some((bc) => String(bc.barcode || bc).toLowerCase() === lower)),
-    );
+    let matchedBarcodeEntry = null;
+    const matchedProd = data.products.find((p) => {
+      if (Array.isArray(p.barcodes)) {
+        const bcMatch = p.barcodes.find((bc) => String(bc.barcode || bc).toLowerCase() === lower);
+        if (bcMatch) {
+          matchedBarcodeEntry = typeof bcMatch === 'object' ? bcMatch : null;
+          return true;
+        }
+      }
+      return (
+        (p.sku && p.sku.toLowerCase() === lower) ||
+        (p.primaryBarcode && p.primaryBarcode.toLowerCase() === lower)
+      );
+    });
     if (!matchedProd) return null;
+
+    if (matchedBarcodeEntry && matchedBarcodeEntry.isActive === false) {
+      return {
+        isBlocked: true,
+        blockedReason: 'BARCODE_INACTIVE',
+        product: matchedProd,
+        message: `Barcode "${clean}" is inactive and cannot be used in POS.`,
+      };
+    }
+
+    const resolvedUom = String(matchedBarcodeEntry?.uomCode || matchedProd.baseUom || 'PCS').toUpperCase();
+    const matchedConv = Array.isArray(matchedProd.unitConversions)
+      ? matchedProd.unitConversions.find((u) => String(u.uomCode || '').toUpperCase() === resolvedUom)
+      : null;
+    const convFactorStr = resolvedUom === String(matchedProd.baseUom || 'PCS').toUpperCase()
+      ? '1.000000'
+      : (matchedBarcodeEntry?.conversionFactorToBase || matchedConv?.conversionFactorToBase || '1.000000');
+    const convFactorNum = Math.max(0.000001, parseFloat(convFactorStr) || 1);
+
+    if (matchedBarcodeEntry?.stockIntakeLotId) {
+      const lot = (data.intakeLots || []).find((l) => l.id === matchedBarcodeEntry.stockIntakeLotId);
+      if (!lot || lot.status !== 'ACTIVE' || (parseFloat(lot.baseQtyRemaining) || 0) < convFactorNum) {
+        return {
+          isBlocked: true,
+          blockedReason: 'INTAKE_LOT_EXHAUSTED',
+          product: matchedProd,
+          message: `Stock intake lot ${lot?.intakeCode || matchedBarcodeEntry.stockIntakeLotId} is exhausted or unavailable in this warehouse.`,
+        };
+      }
+      const baseUnitPrice = (lot.pricingMode === 'INTAKE_SPECIFIC' && lot.sellingPrice)
+        ? parseFloat(lot.sellingPrice)
+        : (parseFloat(matchedProd.retailPrice) || 0);
+      const effPrice = matchedBarcodeEntry.sellingPriceOverride
+        ? matchedBarcodeEntry.sellingPriceOverride
+        : (resolvedUom !== String(matchedProd.baseUom || 'PCS').toUpperCase() && matchedConv?.sellingPrice
+            ? matchedConv.sellingPrice
+            : (baseUnitPrice * convFactorNum).toFixed(4));
+      return {
+        isBlocked: false,
+        product: matchedProd,
+        isExactIntakeLotLocked: true,
+        exactIntakeLot: lot,
+        matchedBarcode: matchedBarcodeEntry,
+        resolvedSellingUom: resolvedUom,
+        resolvedConversionFactorToBase: convFactorStr,
+        availableQuantityTotal: lot.baseQtyRemaining,
+        effectiveUnitPrice: effPrice,
+        priceSource: (lot.pricingMode === 'INTAKE_SPECIFIC' && lot.sellingPrice) ? 'INTAKE_SPECIFIC' : 'PRODUCT_FALLBACK',
+      };
+    }
 
     const prodBatches = data.batches
       .filter((b) => b.productId === matchedProd.id && b.status === 'ACTIVE' && (!b.expiryDate || b.expiryDate >= today) && parseFloat(b.availableQuantity) > 0)
@@ -460,12 +537,22 @@
         return String(a.expiryDate || '9999-12-31').localeCompare(String(b.expiryDate || '9999-12-31'));
       });
 
+    const basePriceNum = parseFloat(prodBatches[0]?.sellingPrice || matchedProd.retailPrice || '0') || 0;
+    const resolvedUnitPrice = matchedBarcodeEntry?.sellingPriceOverride
+      ? matchedBarcodeEntry.sellingPriceOverride
+      : (resolvedUom !== String(matchedProd.baseUom || 'PCS').toUpperCase() && matchedConv?.sellingPrice
+          ? matchedConv.sellingPrice
+          : (basePriceNum * convFactorNum).toFixed(4));
+
     return {
       isBlocked: false,
       product: matchedProd,
       fefoPreview: prodBatches,
+      matchedBarcode: matchedBarcodeEntry,
+      resolvedSellingUom: resolvedUom,
+      resolvedConversionFactorToBase: convFactorStr,
       availableQuantityTotal: matchedProd.availableQuantity,
-      effectiveUnitPrice: prodBatches[0]?.sellingPrice || matchedProd.retailPrice,
+      effectiveUnitPrice: resolvedUnitPrice,
       priceSource: prodBatches[0]?.sellingPrice ? 'BATCH_EXPLICIT' : 'PRODUCT_FALLBACK',
     };
   }
@@ -660,12 +747,16 @@
     if (snap) {
       snap.pendingStockDeltas = snap.pendingStockDeltas || {};
       snap.pendingBatchDeltas = snap.pendingBatchDeltas || {};
+      snap.pendingIntakeDeltas = snap.pendingIntakeDeltas || {};
       for (const l of lines) {
         const delta = -(parseFloat(l.normalizedBaseQty ?? l.quantity ?? '0') || 0);
         if (delta < 0) {
           snap.pendingStockDeltas[l.productId] = ((parseFloat(snap.pendingStockDeltas[l.productId] || '0') || 0) + delta).toFixed(6);
           if (l.batchId) {
             snap.pendingBatchDeltas[l.batchId] = ((parseFloat(snap.pendingBatchDeltas[l.batchId] || '0') || 0) + delta).toFixed(6);
+          }
+          if (l.stockIntakeLotId) {
+            snap.pendingIntakeDeltas[l.stockIntakeLotId] = ((parseFloat(snap.pendingIntakeDeltas[l.stockIntakeLotId] || '0') || 0) + delta).toFixed(6);
           }
         }
       }
