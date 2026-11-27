@@ -4381,15 +4381,21 @@
           }
         }
 
+        const rawBranchId = typeof state.branchId === 'string' ? state.branchId.trim() : '';
+        const validBranchId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawBranchId)
+          ? rawBranchId
+          : null;
+        const omitBranchForEndpoint = isAuthBypass || normalizedEndpoint.startsWith('/v1/platform/');
+
         const headers = {
           ...(options.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
           ...(state.tenantId ? { 'x-tenant-id': state.tenantId } : {}),
-          ...(!isAuthBypass && state.branchId && !options.omitBranchHeader ? { 'x-branch-id': state.branchId } : {}),
+          ...(!omitBranchForEndpoint && validBranchId && !options.omitBranchHeader ? { 'x-branch-id': validBranchId } : {}),
           ...(state.token ? { 'Authorization': `Bearer ${state.token}` } : {}),
           ...(options.headers || {})
         };
 
-        if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(options.method)) {
+        if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
           if (!headers['idempotency-key']) {
             headers['idempotency-key'] = crypto.randomUUID();
           }

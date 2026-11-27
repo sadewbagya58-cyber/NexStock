@@ -700,4 +700,72 @@ describe('@nexstock/api — Consolidated QA Fix Assignment (DI-001, Smart Pricin
     expect(balBySerialBc.statusCode).toBe(200);
     expect(balBySerialBc.json().data.some((b: { productId: string }) => b.productId === camId)).toBe(true);
   });
+
+  it('5. CORS Preflight & Module Connectivity: allows x-branch-id, x-device-id, x-tenant-id, Authorization, Content-Type & idempotency-key across Dashboard, Business Reports, Smart Pricing, POS Shift & Stock Movements', async () => {
+    const preflightRes = await app.inject({
+      method: 'OPTIONS',
+      url: '/v1/dashboard/summary',
+      headers: {
+        origin: 'https://nexstock.vercel.app',
+        'access-control-request-method': 'GET',
+        'access-control-request-headers': 'authorization,content-type,idempotency-key,x-branch-id,x-device-id,x-tenant-id',
+      },
+    });
+    expect(preflightRes.statusCode).toBe(204);
+    const allowOrigin = String(preflightRes.headers['access-control-allow-origin'] || '');
+    expect(allowOrigin).toBe('*');
+    const allowHeaders = String(preflightRes.headers['access-control-allow-headers'] || '')
+      .split(',')
+      .map((h) => h.trim().toLowerCase());
+    expect(allowHeaders).toEqual(
+      expect.arrayContaining([
+        'content-type',
+        'authorization',
+        'x-tenant-id',
+        'x-branch-id',
+        'x-device-id',
+        'x-user-id',
+        'idempotency-key',
+      ]),
+    );
+
+    const branchHeaders = authHeaders({
+      origin: 'https://nexstock.vercel.app',
+      'x-branch-id': branch1Id,
+    });
+
+    const [dashRes, reportsRes, pricingRes, shiftRes, movementsRes] = await Promise.all([
+      app.inject({
+        method: 'GET',
+        url: '/v1/dashboard/summary?datePreset=TODAY',
+        headers: branchHeaders,
+      }),
+      app.inject({
+        method: 'GET',
+        url: `/v1/reports/business?category=SALES&branchId=${branch1Id}`,
+        headers: branchHeaders,
+      }),
+      app.inject({
+        method: 'GET',
+        url: `/v1/pricing/dashboard?branchId=${branch1Id}`,
+        headers: branchHeaders,
+      }),
+      app.inject({
+        method: 'GET',
+        url: `/v1/pos/shifts/active?registerId=${reg1Id}&branchId=${branch1Id}`,
+        headers: branchHeaders,
+      }),
+      app.inject({
+        method: 'GET',
+        url: `/v1/inventory/movements?branchId=${branch1Id}&limit=10`,
+        headers: branchHeaders,
+      }),
+    ]);
+
+    for (const res of [dashRes, reportsRes, pricingRes, shiftRes, movementsRes]) {
+      expect(res.statusCode).toBe(200);
+      expect(res.headers['access-control-allow-origin']).toBe('*');
+      expect(String(res.headers['access-control-allow-headers'] || '').toLowerCase()).toContain('x-branch-id');
+    }
+  });
 });

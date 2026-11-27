@@ -777,9 +777,10 @@ export async function buildApp(
     );
     reply.header(
       'access-control-allow-headers',
-      'Content-Type, Authorization, x-tenant-id, idempotency-key',
+      'Content-Type, Authorization, x-tenant-id, x-branch-id, x-device-id, x-user-id, idempotency-key',
     );
     reply.header('access-control-expose-headers', 'x-idempotent-replayed');
+    reply.header('access-control-max-age', '600');
 
     if (
       (request.method === 'POST' || request.method === 'DELETE' || request.method === 'PATCH') &&

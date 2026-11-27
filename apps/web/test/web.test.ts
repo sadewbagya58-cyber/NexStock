@@ -3556,6 +3556,18 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
         /(^|[^\w.])(window\.)?(confirm|prompt|alert)\s*\(/.test(line)
       );
       expect(nativeCalls).toEqual([]);
+
+      // 7. Cross-origin CORS preflight compatibility between SPA apiFetch() and Fastify API hook
+      const apiAppSrc = readFileSync(resolve(WEB_ROOT, '../api/src/app.ts'), 'utf8');
+      const allowHeadersMatch = apiAppSrc.match(/'access-control-allow-headers',\s*\n?\s*'([^']+)'/);
+      expect(allowHeadersMatch).toBeTruthy();
+      const allowedHeaderSet = new Set(
+        allowHeadersMatch![1].split(',').map(h => h.trim().toLowerCase()),
+      );
+      for (const reqHeader of ['content-type', 'authorization', 'x-tenant-id', 'x-branch-id', 'x-device-id', 'idempotency-key']) {
+        expect(allowedHeaderSet.has(reqHeader)).toBe(true);
+      }
+      expect(html).toContain('validBranchId');
     });
   });
 });
