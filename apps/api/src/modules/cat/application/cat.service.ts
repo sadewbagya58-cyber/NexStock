@@ -43,7 +43,133 @@ import {
 } from '../../shared/index.js';
 import { triggerCostChangeSuggestionIfApplicable } from './pricing.service.js';
 import { assertSubscriptionEntitlement } from '../../sub/index.js';
-import { assertAuthorized } from '../../iam/index.js';
+import { assertAuthorized, resolveMemberAuthorizationContext } from '../../iam/index.js';
+
+export type ProductBranchAssignmentSource =
+  | 'CREATED'
+  | 'STOCK_MOVEMENT'
+  | 'GRN'
+  | 'TRANSFER_IN'
+  | 'MANUAL_ASSIGN'
+  | 'LEGACY_BACKFILL';
+
+export async function ensureCategoryAssignedToBranch(
+  trx: TenantTransactionContext,
+  categoryId: string,
+  branchId: string,
+): Promise<void> {
+  const now = new Date();
+  await trx.db
+    .insertInto('category_branch_assignments')
+    .values({
+      id: generateUuidV7(),
+      tenant_id: trx.tenantId,
+      category_id: categoryId,
+      branch_id: branchId,
+      status: 'ACTIVE',
+      created_at: now,
+      updated_at: now,
+    })
+    .onConflict((oc) =>
+      oc.columns(['tenant_id', 'category_id', 'branch_id']).doUpdateSet({
+        status: 'ACTIVE',
+        updated_at: now,
+      }),
+    )
+    .execute();
+}
+
+export async function ensureProductAssignedToBranch(
+  trx: TenantTransactionContext,
+  params: {
+    readonly productId: string;
+    readonly branchId: string;
+    readonly source: ProductBranchAssignmentSource;
+    readonly categoryId?: string | null;
+  },
+): Promise<void> {
+  const now = new Date();
+  await trx.db
+    .insertInto('product_branch_assignments')
+    .values({
+      id: generateUuidV7(),
+      tenant_id: trx.tenantId,
+      product_id: params.productId,
+      branch_id: params.branchId,
+      assignment_source: params.source,
+      status: 'ACTIVE',
+      created_at: now,
+      updated_at: now,
+    })
+    .onConflict((oc) =>
+      oc.columns(['tenant_id', 'product_id', 'branch_id']).doUpdateSet({
+        status: 'ACTIVE',
+        updated_at: now,
+      }),
+    )
+    .execute();
+
+  let catId = params.categoryId ?? null;
+  if (params.categoryId === undefined) {
+    const prod = await trx.db
+      .selectFrom('products')
+      .select(['category_id'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('id', '=', params.productId)
+      .executeTakeFirst();
+    catId = prod?.category_id ?? null;
+  }
+  if (catId) {
+    await ensureCategoryAssignedToBranch(trx, catId, params.branchId);
+  }
+}
+
+export async function isProductVisibleInBranch(
+  trx: TenantTransactionContext,
+  productId: string,
+  branchId: string,
+  requireActive = true,
+): Promise<boolean> {
+  const [prod, branch, assignments] = await Promise.all([
+    trx.db
+      .selectFrom('products')
+      .select(['id', 'status', 'origin_branch_id', 'created_at'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('id', '=', productId)
+      .executeTakeFirst(),
+    trx.db
+      .selectFrom('branches')
+      .select(['id', 'created_at'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('id', '=', branchId)
+      .executeTakeFirst(),
+    trx.db
+      .selectFrom('product_branch_assignments')
+      .select(['branch_id', 'status'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('product_id', '=', productId)
+      .execute(),
+  ]);
+
+  if (!prod || !branch) {
+    return false;
+  }
+
+  const branchAssignment = assignments.find((a) => a.branch_id === branchId);
+  if (branchAssignment) {
+    return requireActive ? branchAssignment.status === 'ACTIVE' : true;
+  }
+
+  // If product has explicit origin_branch_id or explicit branch assignments elsewhere,
+  // it is NOT visible in unassigned branches (strict DI-001 isolation).
+  if (prod.origin_branch_id !== null || assignments.length > 0) {
+    return false;
+  }
+
+  // Un-scoped product with 0 assignments: only visible in branches created at or before product creation
+  // (a newly created empty branch NEVER inherits pre-existing products!)
+  return new Date(prod.created_at).getTime() >= new Date(branch.created_at).getTime();
+}
 
 export interface CursorPaginatedResult<T> {
   data: T[];
@@ -56,6 +182,7 @@ export interface CursorPaginatedResult<T> {
 function mapCategoryRow(row: {
   id: string;
   tenant_id: string;
+  origin_branch_id?: string | null;
   parent_id: string | null;
   name: string;
   description: string | null;
@@ -69,6 +196,7 @@ function mapCategoryRow(row: {
   return {
     id: row.id,
     tenantId: row.tenant_id,
+    ...(row.origin_branch_id !== undefined ? { originBranchId: row.origin_branch_id } : {}),
     parentId: row.parent_id,
     name: row.name,
     description: row.description,
@@ -151,6 +279,7 @@ async function assertNoDuplicateCategoryName(
   name: string,
   parentId: string | null,
   excludeCategoryId?: string,
+  branchId?: string | null,
 ): Promise<void> {
   const normalizedName = name.trim().toLowerCase();
   let query = trx.db
@@ -162,6 +291,12 @@ async function assertNoDuplicateCategoryName(
     query = query.where('parent_id', 'is', null);
   } else {
     query = query.where('parent_id', '=', parentId);
+  }
+
+  if (branchId) {
+    query = query.where('origin_branch_id', '=', branchId);
+  } else {
+    query = query.where('origin_branch_id', 'is', null);
   }
 
   if (excludeCategoryId) {
@@ -187,8 +322,10 @@ export async function createCategory(
   trx: TenantTransactionContext,
   input: CreateCategoryRequest,
 ): Promise<CategoryResponse> {
+  const targetBranchId = input.branchId ?? null;
   await assertAuthorized(trx, {
     permission: 'cat:category:manage',
+    ...(targetBranchId ? { branchId: targetBranchId } : {}),
   });
 
   await assertSubscriptionEntitlement(trx, {
@@ -210,7 +347,7 @@ export async function createCategory(
     await assertValidCategoryParent(trx, parentId);
   }
 
-  await assertNoDuplicateCategoryName(trx, name, parentId);
+  await assertNoDuplicateCategoryName(trx, name, parentId, undefined, targetBranchId);
 
   const categoryId = generateUuidV7();
   const description = input.description?.trim() ?? null;
@@ -222,6 +359,7 @@ export async function createCategory(
     .values({
       id: categoryId,
       tenant_id: trx.tenantId,
+      origin_branch_id: targetBranchId,
       parent_id: parentId,
       name,
       description,
@@ -234,23 +372,28 @@ export async function createCategory(
     })
     .execute();
 
+  if (targetBranchId) {
+    await ensureCategoryAssignedToBranch(trx, categoryId, targetBranchId);
+  }
+
   await appendAuditLog(trx, {
     action: 'CAT_CATEGORY_CREATED',
     resourceType: 'CATEGORY',
     resourceId: categoryId,
-    metadata: { name, parentId, color },
+    metadata: { name, parentId, color, branchId: targetBranchId },
   });
 
   await enqueueOutboxEvent(trx, {
     aggregateType: 'CATEGORY',
     aggregateId: categoryId,
     eventType: 'CATEGORY_CREATED',
-    payload: { categoryId, name, parentId },
+    payload: { categoryId, name, parentId, branchId: targetBranchId },
   });
 
   return {
     id: categoryId,
     tenantId: trx.tenantId,
+    originBranchId: targetBranchId,
     parentId,
     name,
     description,
@@ -343,6 +486,7 @@ export async function updateCategory(
     nextName,
     nextParentId,
     categoryId,
+    existing.origin_branch_id ?? null,
   );
 
   const nextDescription =
@@ -484,8 +628,10 @@ export async function listCategories(
   trx: TenantTransactionContext,
   query: ListCategoriesQuery,
 ): Promise<CursorPaginatedResult<CategoryResponse>> {
+  const authCtx = await resolveMemberAuthorizationContext(trx);
   await assertAuthorized(trx, {
     permission: 'cat:category:read',
+    ...(query.branchId ? { branchId: query.branchId } : {}),
   });
 
   await assertSubscriptionEntitlement(trx, {
@@ -493,6 +639,35 @@ export async function listCategories(
   });
 
   const limit = Math.min(Math.max(Number(query.limit ?? 50), 1), 100);
+
+  let targetBranches: Array<{ id: string; created_at: Date }> = [];
+  if (query.branchId) {
+    const branchRow = await trx.db
+      .selectFrom('branches')
+      .select(['id', 'created_at'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('id', '=', query.branchId)
+      .executeTakeFirst();
+    if (!branchRow) {
+      throw new AppError({
+        statusCode: 404,
+        errorCode: 'ERR_NOT_FOUND',
+        title: 'Branch Not Found',
+        detail: `Branch "${query.branchId}" was not found.`,
+      });
+    }
+    targetBranches = [branchRow];
+  } else if (!authCtx.allLocationsAccess) {
+    if (authCtx.allowedBranchIds.size === 0) {
+      return { data: [], pageInfo: { hasNextPage: false, nextCursor: null } };
+    }
+    targetBranches = await trx.db
+      .selectFrom('branches')
+      .select(['id', 'created_at'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('id', 'in', [...authCtx.allowedBranchIds])
+      .execute();
+  }
 
   let dbQuery = trx.db
     .selectFrom('categories')
@@ -509,15 +684,51 @@ export async function listCategories(
     dbQuery = dbQuery.where('id', '>', query.cursor);
   }
 
-  const rows = await dbQuery.execute();
+  const [rows, allCatAssignments] = await Promise.all([
+    dbQuery.execute(),
+    targetBranches.length > 0
+      ? trx.db
+          .selectFrom('category_branch_assignments')
+          .select(['category_id', 'branch_id', 'status'])
+          .where('tenant_id', '=', trx.tenantId)
+          .execute()
+      : Promise.resolve([]),
+  ]);
+
+  let branchScopedRows = rows;
+  if (targetBranches.length > 0) {
+    const targetBranchIds = new Set(targetBranches.map((b) => b.id));
+    const minCreatedAt = Math.min(
+      ...targetBranches.map((b) => new Date(b.created_at).getTime()),
+    );
+    const assignByCat = new Map<string, Array<{ branch_id: string; status: string }>>();
+    for (const a of allCatAssignments) {
+      const list = assignByCat.get(a.category_id) ?? [];
+      list.push(a);
+      assignByCat.set(a.category_id, list);
+    }
+
+    branchScopedRows = rows.filter((c) => {
+      const cAssigns = assignByCat.get(c.id) ?? [];
+      const matching = cAssigns.find(
+        (a) =>
+          targetBranchIds.has(a.branch_id) &&
+          (!query.status || a.status === query.status),
+      );
+      if (matching) return true;
+      if (c.origin_branch_id !== null || cAssigns.length > 0) return false;
+      return new Date(c.created_at).getTime() >= minCreatedAt;
+    });
+  }
+
   const searchLower = query.search?.trim().toLowerCase();
   const filtered = searchLower
-    ? rows.filter(
+    ? branchScopedRows.filter(
         (r) =>
           r.name.toLowerCase().includes(searchLower) ||
           (r.description?.toLowerCase().includes(searchLower) ?? false),
       )
-    : rows;
+    : branchScopedRows;
 
   const pageRows = filtered.slice(0, limit);
   const hasNextPage = filtered.length > limit;
@@ -615,6 +826,7 @@ function validateAndNormalizeNonNegativeQuantity(
 type ProductRowForHydration = {
   id: string;
   tenant_id: string;
+  origin_branch_id?: string | null;
   sku: string;
   name: string;
   description: string | null;
@@ -857,6 +1069,7 @@ export async function listUnitsOfMeasure(
 async function hydrateProductsBatch(
   trx: TenantTransactionContext,
   rows: readonly ProductRowForHydration[],
+  branchId?: string | null,
 ): Promise<ProductResponse[]> {
   if (rows.length === 0) {
     return [];
@@ -864,7 +1077,7 @@ async function hydrateProductsBatch(
 
   const productIds = rows.map((r) => r.id);
 
-  const [barcodeRows, uomRows, baseCurrency] = await Promise.all([
+  const [barcodeRows, uomRows, baseCurrency, assignmentRows, branchPriceRows] = await Promise.all([
     trx.db
       .selectFrom('product_barcodes')
       .selectAll()
@@ -881,10 +1094,47 @@ async function hydrateProductsBatch(
       .orderBy('uom_code', 'asc')
       .execute(),
     getTenantBaseCurrency(trx),
+    trx.db
+      .selectFrom('product_branch_assignments')
+      .select(['product_id', 'branch_id', 'status'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('product_id', 'in', productIds)
+      .execute(),
+    branchId
+      ? trx.db
+          .selectFrom('product_branch_prices')
+          .select(['product_id', 'selling_price'])
+          .where('tenant_id', '=', trx.tenantId)
+          .where('branch_id', '=', branchId)
+          .where('product_id', 'in', productIds)
+          .where('is_active', '=', true)
+          .execute()
+      : Promise.resolve([]),
   ]);
+
+  const branchPriceMap = new Map<string, string>();
+  for (const bp of branchPriceRows) {
+    branchPriceMap.set(bp.product_id, String(bp.selling_price));
+  }
+
+  const branchIdsByProductId = new Map<string, string[]>();
+  const branchStatusByProductId = new Map<string, RecordLifecycleStatus>();
+  for (const a of assignmentRows) {
+    if (a.status === 'ACTIVE') {
+      const list = branchIdsByProductId.get(a.product_id) ?? [];
+      list.push(a.branch_id);
+      branchIdsByProductId.set(a.product_id, list);
+    }
+    if (branchId && a.branch_id === branchId) {
+      branchStatusByProductId.set(a.product_id, a.status);
+    }
+  }
 
   const barcodesByProductId = new Map<string, ProductBarcodeResponse[]>();
   for (const b of barcodeRows) {
+    if (branchId && b.branch_id && b.branch_id !== branchId) {
+      continue;
+    }
     const list = barcodesByProductId.get(b.product_id) ?? [];
     list.push({
       id: b.id,
@@ -918,70 +1168,77 @@ async function hydrateProductsBatch(
     uomsByProductId.set(u.product_id, list);
   }
 
-  return rows.map((row) => ({
-    id: row.id,
-    tenantId: row.tenant_id,
-    sku: row.sku,
-    name: row.name,
-    description: row.description,
-    productType: row.product_type,
-    status: row.status,
-    categoryId: row.category_id,
-    baseUom: row.base_uom,
-    productQtyMode: (row.product_qty_mode ?? 'STANDARD') as ProductQtyMode,
-    measurementCategory: (row.measurement_category ?? null) as MeasurementCategory | null,
-    purchaseUom: row.purchase_uom ?? row.base_uom,
-    priceUom: row.price_uom ?? row.base_uom,
-    allowedSellingUoms: parseAllowedSellingUomsJson(
-      row.allowed_selling_uoms,
-      row.base_uom,
-    ),
-    qtyDecimalPrecision: row.qty_decimal_precision ?? 0,
-    featuredPos: Boolean(row.featured_pos ?? false),
-    densityGPerMl: row.density_g_per_ml
-      ? Quantity.fromDecimalString(String(row.density_g_per_ml)).toDecimalString()
-      : null,
-    purchaseCost: Money.fromDecimalString(
-      String(row.purchase_cost),
-      baseCurrency,
-    ).toDecimalString(),
-    sellingPrice: Money.fromDecimalString(
-      String(row.selling_price),
-      baseCurrency,
-    ).toDecimalString(),
-    taxGroupId: row.tax_group_id,
-    trackInventory: row.track_inventory,
-    trackingMode: (row.tracking_mode ?? 'NONE') as TrackingMode,
-    valuationMethod: (row.valuation_method ?? 'MOVING_AVG') as ValuationMethod,
-    reorderPoint: Quantity.fromDecimalString(
-      String(row.reorder_point),
-    ).toDecimalString(),
-    reorderQty: Quantity.fromDecimalString(
-      String(row.reorder_qty),
-    ).toDecimalString(),
-    imageUrl: row.image_url,
-    imageAlt: row.image_alt,
-    primaryBarcode: row.primary_barcode,
-    barcodes: barcodesByProductId.get(row.id) ?? [],
-    unitConversions: uomsByProductId.get(row.id) ?? [],
-    allocationPolicy: (
-      row.allocation_policy === 'FIFO' || row.allocation_policy === 'MANUAL'
-        ? row.allocation_policy
-        : 'FEFO'
-    ) as BatchAllocationPolicy,
-    requireBatchSellingPrice: Boolean(row.require_batch_selling_price ?? false),
-    syncVersion: Number(row.sync_version),
-    createdAt: new Date(row.created_at).toISOString(),
-    updatedAt: new Date(row.updated_at).toISOString(),
-    archivedAt: row.archived_at ? new Date(row.archived_at).toISOString() : null,
-  }));
+  return rows.map((row) => {
+    const branchSellOverride = branchPriceMap.get(row.id);
+    const effectiveStatus = branchStatusByProductId.get(row.id) ?? row.status;
+    return {
+      id: row.id,
+      tenantId: row.tenant_id,
+      originBranchId: row.origin_branch_id ?? null,
+      branchIds: branchIdsByProductId.get(row.id) ?? [],
+      sku: row.sku,
+      name: row.name,
+      description: row.description,
+      productType: row.product_type,
+      status: effectiveStatus,
+      categoryId: row.category_id,
+      baseUom: row.base_uom,
+      productQtyMode: (row.product_qty_mode ?? 'STANDARD') as ProductQtyMode,
+      measurementCategory: (row.measurement_category ?? null) as MeasurementCategory | null,
+      purchaseUom: row.purchase_uom ?? row.base_uom,
+      priceUom: row.price_uom ?? row.base_uom,
+      allowedSellingUoms: parseAllowedSellingUomsJson(
+        row.allowed_selling_uoms,
+        row.base_uom,
+      ),
+      qtyDecimalPrecision: row.qty_decimal_precision ?? 0,
+      featuredPos: Boolean(row.featured_pos ?? false),
+      densityGPerMl: row.density_g_per_ml
+        ? Quantity.fromDecimalString(String(row.density_g_per_ml)).toDecimalString()
+        : null,
+      purchaseCost: Money.fromDecimalString(
+        String(row.purchase_cost),
+        baseCurrency,
+      ).toDecimalString(),
+      sellingPrice: Money.fromDecimalString(
+        branchSellOverride ?? String(row.selling_price),
+        baseCurrency,
+      ).toDecimalString(),
+      taxGroupId: row.tax_group_id,
+      trackInventory: row.track_inventory,
+      trackingMode: (row.tracking_mode ?? 'NONE') as TrackingMode,
+      valuationMethod: (row.valuation_method ?? 'MOVING_AVG') as ValuationMethod,
+      reorderPoint: Quantity.fromDecimalString(
+        String(row.reorder_point),
+      ).toDecimalString(),
+      reorderQty: Quantity.fromDecimalString(
+        String(row.reorder_qty),
+      ).toDecimalString(),
+      imageUrl: row.image_url,
+      imageAlt: row.image_alt,
+      primaryBarcode: row.primary_barcode,
+      barcodes: barcodesByProductId.get(row.id) ?? [],
+      unitConversions: uomsByProductId.get(row.id) ?? [],
+      allocationPolicy: (
+        row.allocation_policy === 'FIFO' || row.allocation_policy === 'MANUAL'
+          ? row.allocation_policy
+          : 'FEFO'
+      ) as BatchAllocationPolicy,
+      requireBatchSellingPrice: Boolean(row.require_batch_selling_price ?? false),
+      syncVersion: Number(row.sync_version),
+      createdAt: new Date(row.created_at).toISOString(),
+      updatedAt: new Date(row.updated_at).toISOString(),
+      archivedAt: row.archived_at ? new Date(row.archived_at).toISOString() : null,
+    };
+  });
 }
 
 async function hydrateProductDetails(
   trx: TenantTransactionContext,
   row: ProductRowForHydration,
+  branchId?: string | null,
 ): Promise<ProductResponse> {
-  const [hydrated] = await hydrateProductsBatch(trx, [row]);
+  const [hydrated] = await hydrateProductsBatch(trx, [row], branchId);
   return hydrated!;
 }
 
@@ -1100,9 +1357,28 @@ export async function createProduct(
   trx: TenantTransactionContext,
   input: CreateProductRequest,
 ): Promise<ProductResponse> {
+  const targetBranchId = input.branchId?.trim() || null;
   await assertAuthorized(trx, {
     permission: 'cat:product:manage',
+    ...(targetBranchId ? { branchId: targetBranchId } : {}),
   });
+
+  if (targetBranchId) {
+    const branchExists = await trx.db
+      .selectFrom('branches')
+      .select(['id'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('id', '=', targetBranchId)
+      .executeTakeFirst();
+    if (!branchExists) {
+      throw new AppError({
+        statusCode: 404,
+        errorCode: 'ERR_NOT_FOUND',
+        title: 'Branch Not Found',
+        detail: `Branch "${targetBranchId}" was not found in this organization.`,
+      });
+    }
+  }
 
   const existingProductsCountRow = await trx.db
     .selectFrom('products')
@@ -1170,20 +1446,23 @@ export async function createProduct(
     ? validateAndNormalizeNonNegativeQuantity(input.reorderQty, 'reorderQty')
     : Quantity.zero().toDecimalString();
 
-  // Check SKU uniqueness in current tenant
-  const existingSku = await trx.db
+  // Check SKU uniqueness within branch scope (DI-001) or tenant unscoped catalog
+  let existingSkuQuery = trx.db
     .selectFrom('products')
     .select(['id'])
     .where('tenant_id', '=', trx.tenantId)
-    .where('sku', '=', sku)
-    .executeTakeFirst();
+    .where('sku', '=', sku);
+  existingSkuQuery = targetBranchId
+    ? existingSkuQuery.where('origin_branch_id', '=', targetBranchId)
+    : existingSkuQuery.where('origin_branch_id', 'is', null);
+  const existingSku = await existingSkuQuery.executeTakeFirst();
 
   if (existingSku) {
     throw new AppError({
       statusCode: 409,
       errorCode: 'CAT_DUPLICATE_SKU',
       title: 'Duplicate Product SKU',
-      detail: `A product with SKU "${sku}" already exists in this organization.`,
+      detail: `A product with SKU "${sku}" already exists in this branch.`,
     });
   }
 
@@ -1303,7 +1582,7 @@ export async function createProduct(
   }
 
   if (barcodeEntries.length > 0) {
-    const existingBarcode = await trx.db
+    let existingBarcodeQuery = trx.db
       .selectFrom('product_barcodes')
       .select(['barcode'])
       .where('tenant_id', '=', trx.tenantId)
@@ -1311,15 +1590,18 @@ export async function createProduct(
         'barcode',
         'in',
         barcodeEntries.map((b) => b.barcode),
-      )
-      .executeTakeFirst();
+      );
+    existingBarcodeQuery = targetBranchId
+      ? existingBarcodeQuery.where('branch_id', '=', targetBranchId)
+      : existingBarcodeQuery.where('branch_id', 'is', null);
+    const existingBarcode = await existingBarcodeQuery.executeTakeFirst();
 
     if (existingBarcode) {
       throw new AppError({
         statusCode: 409,
         errorCode: 'CAT_DUPLICATE_BARCODE',
         title: 'Duplicate Barcode',
-        detail: `Barcode "${existingBarcode.barcode}" is already assigned to a product in this organization.`,
+        detail: `Barcode "${existingBarcode.barcode}" is already assigned to a product in this branch.`,
       });
     }
   }
@@ -1356,6 +1638,7 @@ export async function createProduct(
       .values({
         id: productId,
         tenant_id: trx.tenantId,
+        origin_branch_id: targetBranchId,
         sku,
         name,
         description: input.description?.trim() ?? null,
@@ -1462,6 +1745,7 @@ export async function createProduct(
           barcode: bc.barcode,
           barcode_type: bc.barcodeType,
           uom_code: bc.uomCode,
+          branch_id: targetBranchId,
           is_primary: bc.isPrimary,
           is_active: bc.isActive,
           created_at: now,
@@ -1486,6 +1770,15 @@ export async function createProduct(
     }
   }
 
+  if (targetBranchId) {
+    await ensureProductAssignedToBranch(trx, {
+      productId,
+      branchId: targetBranchId,
+      source: 'CREATED',
+      categoryId,
+    });
+  }
+
   await appendAuditLog(trx, {
     action: 'CAT_PRODUCT_CREATED',
     resourceType: 'PRODUCT',
@@ -1498,6 +1791,7 @@ export async function createProduct(
       purchaseCost,
       sellingPrice,
       trackInventory,
+      originBranchId: targetBranchId,
     },
   });
 
@@ -1505,7 +1799,7 @@ export async function createProduct(
     aggregateType: 'PRODUCT',
     aggregateId: productId,
     eventType: 'PRODUCT_CREATED',
-    payload: { productId, sku, name },
+    payload: { productId, sku, name, originBranchId: targetBranchId },
   });
 
   const inserted = await trx.db
@@ -1514,15 +1808,18 @@ export async function createProduct(
     .where('id', '=', productId)
     .executeTakeFirstOrThrow();
 
-  return hydrateProductDetails(trx, inserted);
+  return hydrateProductDetails(trx, inserted, targetBranchId);
 }
 
 export async function getProductById(
   trx: TenantTransactionContext,
   productId: string,
+  branchId?: string | null,
 ): Promise<ProductResponse> {
+  const targetBranchId = branchId?.trim() || null;
   await assertAuthorized(trx, {
     permission: 'cat:product:read',
+    ...(targetBranchId ? { branchId: targetBranchId } : {}),
   });
 
   await assertSubscriptionEntitlement(trx, {
@@ -1544,7 +1841,19 @@ export async function getProductById(
     });
   }
 
-  return hydrateProductDetails(trx, row);
+  if (targetBranchId) {
+    const visible = await isProductVisibleInBranch(trx, productId, targetBranchId, false);
+    if (!visible) {
+      throw new AppError({
+        statusCode: 404,
+        errorCode: 'ERR_NOT_FOUND',
+        title: 'Product Not Found',
+        detail: `Product "${productId}" is not available in the selected branch.`,
+      });
+    }
+  }
+
+  return hydrateProductDetails(trx, row, targetBranchId);
 }
 
 export async function updateProduct(
@@ -1552,8 +1861,10 @@ export async function updateProduct(
   productId: string,
   input: UpdateProductRequest,
 ): Promise<ProductResponse> {
+  const targetBranchId = input.branchId?.trim() || null;
   await assertAuthorized(trx, {
     permission: 'cat:product:manage',
+    ...(targetBranchId ? { branchId: targetBranchId } : {}),
   });
 
   await assertSubscriptionEntitlement(trx, {
@@ -1575,6 +1886,31 @@ export async function updateProduct(
     });
   }
 
+  if (targetBranchId) {
+    const visible = await isProductVisibleInBranch(trx, productId, targetBranchId, false);
+    if (!visible) {
+      throw new AppError({
+        statusCode: 404,
+        errorCode: 'ERR_NOT_FOUND',
+        title: 'Product Not Found',
+        detail: `Product "${productId}" is not available in the selected branch.`,
+      });
+    }
+  }
+
+  const branchAssignments = await trx.db
+    .selectFrom('product_branch_assignments')
+    .select(['id', 'branch_id', 'status'])
+    .where('tenant_id', '=', trx.tenantId)
+    .where('product_id', '=', productId)
+    .execute();
+  const isBranchScopedEdit = Boolean(
+    targetBranchId &&
+      (branchAssignments.length > 1 ||
+        (existing.origin_branch_id !== null &&
+          existing.origin_branch_id !== targetBranchId)),
+  );
+
   const baseCurrency = await getTenantBaseCurrency(trx);
   const nextSku =
     input.sku !== undefined ? input.sku.trim().toUpperCase() : existing.sku;
@@ -1591,20 +1927,23 @@ export async function updateProduct(
   }
 
   if (nextSku !== existing.sku) {
-    const dupSku = await trx.db
+    let dupSkuQuery = trx.db
       .selectFrom('products')
       .select(['id'])
       .where('tenant_id', '=', trx.tenantId)
       .where('sku', '=', nextSku)
-      .where('id', '<>', productId)
-      .executeTakeFirst();
+      .where('id', '<>', productId);
+    dupSkuQuery = existing.origin_branch_id
+      ? dupSkuQuery.where('origin_branch_id', '=', existing.origin_branch_id)
+      : dupSkuQuery.where('origin_branch_id', 'is', null);
+    const dupSku = await dupSkuQuery.executeTakeFirst();
 
     if (dupSku) {
       throw new AppError({
         statusCode: 409,
         errorCode: 'CAT_DUPLICATE_SKU',
         title: 'Duplicate Product SKU',
-        detail: `A product with SKU "${nextSku}" already exists in this organization.`,
+        detail: `A product with SKU "${nextSku}" already exists in this branch.`,
       });
     }
   }
@@ -2060,8 +2399,9 @@ export async function updateProduct(
       });
     }
 
+    const effectiveBarcodeBranchId = targetBranchId ?? existing.origin_branch_id ?? null;
     if (barcodeEntries.length > 0) {
-      const conflictBarcode = await trx.db
+      let conflictBarcodeQuery = trx.db
         .selectFrom('product_barcodes')
         .select(['barcode'])
         .where('tenant_id', '=', trx.tenantId)
@@ -2070,15 +2410,18 @@ export async function updateProduct(
           'barcode',
           'in',
           barcodeEntries.map((b) => b.barcode),
-        )
-        .executeTakeFirst();
+        );
+      conflictBarcodeQuery = effectiveBarcodeBranchId
+        ? conflictBarcodeQuery.where('branch_id', '=', effectiveBarcodeBranchId)
+        : conflictBarcodeQuery.where('branch_id', 'is', null);
+      const conflictBarcode = await conflictBarcodeQuery.executeTakeFirst();
 
       if (conflictBarcode) {
         throw new AppError({
           statusCode: 409,
           errorCode: 'CAT_DUPLICATE_BARCODE',
           title: 'Duplicate Barcode',
-          detail: `Barcode "${conflictBarcode.barcode}" is already assigned to another product in this organization.`,
+          detail: `Barcode "${conflictBarcode.barcode}" is already assigned to another product in this branch.`,
         });
       }
     }
@@ -2118,6 +2461,7 @@ export async function updateProduct(
               barcode: nextPrimaryBarcode,
               barcode_type: 'CODE128',
               uom_code: nextBaseUom,
+              branch_id: effectiveBarcodeBranchId,
               is_primary: true,
               is_active: true,
               created_at: now,
@@ -2145,6 +2489,7 @@ export async function updateProduct(
             barcode: bc.barcode,
             barcode_type: bc.barcodeType,
             uom_code: bc.uomCode,
+            branch_id: effectiveBarcodeBranchId,
             is_primary: bc.isPrimary,
             is_active: bc.isActive,
             created_at: now,
@@ -2156,6 +2501,143 @@ export async function updateProduct(
   }
 
   const nextSyncVersion = Number(existing.sync_version) + 1;
+  const globalSellingPriceToPersist =
+    isBranchScopedEdit && input.sellingPrice !== undefined
+      ? String(existing.selling_price)
+      : nextSellingPrice;
+  const globalStatusToPersist = isBranchScopedEdit ? existing.status : nextStatus;
+  const globalArchivedAtToPersist = isBranchScopedEdit
+    ? existing.archived_at
+    : nextArchivedAt;
+
+  if (isBranchScopedEdit && targetBranchId) {
+    if (input.status !== undefined || input.isActive !== undefined) {
+      const targetBranchStatus = nextStatus;
+      const existingAssignment = branchAssignments.find(
+        (a) => a.branch_id === targetBranchId,
+      );
+      if (existingAssignment) {
+        await trx.db
+          .updateTable('product_branch_assignments')
+          .set({ status: targetBranchStatus, updated_at: now })
+          .where('tenant_id', '=', trx.tenantId)
+          .where('id', '=', existingAssignment.id)
+          .execute();
+      } else {
+        await trx.db
+          .insertInto('product_branch_assignments')
+          .values({
+            id: generateUuidV7(),
+            tenant_id: trx.tenantId,
+            product_id: productId,
+            branch_id: targetBranchId,
+            assignment_source: 'MANUAL_ASSIGN',
+            status: targetBranchStatus,
+            created_at: now,
+            updated_at: now,
+          })
+          .execute();
+      }
+    }
+
+    if (input.sellingPrice !== undefined) {
+      const prevBranchRow = await trx.db
+        .selectFrom('product_branch_prices')
+        .select(['id', 'selling_price'])
+        .where('tenant_id', '=', trx.tenantId)
+        .where('branch_id', '=', targetBranchId)
+        .where('product_id', '=', productId)
+        .where('is_active', '=', true)
+        .executeTakeFirst();
+
+      const prevBranchMoney = Money.fromDecimalString(
+        prevBranchRow ? String(prevBranchRow.selling_price) : String(existing.selling_price),
+        'USD',
+      );
+      const nextBranchMoney = Money.fromDecimalString(nextSellingPrice, 'USD');
+
+      if (prevBranchMoney.scaledUnits !== nextBranchMoney.scaledUnits) {
+        if (prevBranchRow) {
+          await trx.db
+            .updateTable('product_branch_prices')
+            .set({
+              selling_price: nextSellingPrice,
+              needs_review: false,
+              review_reason: null,
+              approved_by_user_id: trx.userId,
+              approved_at: now,
+              updated_at: now,
+            })
+            .where('tenant_id', '=', trx.tenantId)
+            .where('id', '=', prevBranchRow.id)
+            .execute();
+        } else {
+          await trx.db
+            .insertInto('product_branch_prices')
+            .values({
+              id: generateUuidV7(),
+              tenant_id: trx.tenantId,
+              product_id: productId,
+              branch_id: targetBranchId,
+              selling_price: nextSellingPrice,
+              pricing_method: 'COST_MARKUP',
+              target_percentage: null,
+              rounding_rule: 'NONE',
+              min_selling_price: null,
+              max_discount_pct: null,
+              effective_date: now.toISOString().slice(0, 10),
+              is_active: true,
+              needs_review: false,
+              review_reason: null,
+              approved_by_user_id: trx.userId,
+              approved_at: now,
+              sync_version: 1,
+              created_at: now,
+              updated_at: now,
+            })
+            .execute();
+        }
+
+        await trx.db
+          .insertInto('product_price_history')
+          .values({
+            id: generateUuidV7(),
+            tenant_id: trx.tenantId,
+            product_id: productId,
+            scope: 'BRANCH',
+            branch_id: targetBranchId,
+            suggestion_id: null,
+            previous_price: prevBranchMoney.toDecimalString(),
+            new_price: nextBranchMoney.toDecimalString(),
+            cost_snapshot: nextPurchaseCost,
+            pricing_method: null,
+            target_percentage: null,
+            rounding_rule: null,
+            reason: 'Direct branch product selling price edit',
+            actor_user_id: trx.userId,
+            approver_user_id: trx.userId,
+            effective_date: now.toISOString().slice(0, 10),
+            approved_at: now,
+            created_at: now,
+          })
+          .execute();
+
+        realtimeEventHub.publish({
+          tenantId: trx.tenantId,
+          branchId: targetBranchId,
+          eventType: 'PRICE_CHANGED',
+          data: {
+            productId,
+            sku: nextSku,
+            scope: 'BRANCH',
+            branchId: targetBranchId,
+            previousPrice: prevBranchMoney.toDecimalString(),
+            newPrice: nextBranchMoney.toDecimalString(),
+          },
+        });
+      }
+    }
+  }
 
   await trx.db
     .updateTable('products')
@@ -2166,7 +2648,7 @@ export async function updateProduct(
         input.description !== undefined
           ? (input.description?.trim() ?? null)
           : existing.description,
-      status: nextStatus,
+      status: globalStatusToPersist,
       category_id: nextCategoryId,
       base_uom: nextBaseUom,
       product_qty_mode: resolvedUomConfig.productQtyMode,
@@ -2178,7 +2660,7 @@ export async function updateProduct(
       featured_pos: resolvedUomConfig.featuredPos,
       density_g_per_ml: resolvedUomConfig.densityGPerMl,
       purchase_cost: nextPurchaseCost,
-      selling_price: nextSellingPrice,
+      selling_price: globalSellingPriceToPersist,
       tax_group_id: nextTaxGroupId,
       track_inventory: nextTrackInventory,
       reorder_point: nextReorderPoint,
@@ -2207,7 +2689,7 @@ export async function updateProduct(
       primary_barcode: nextPrimaryBarcode,
       sync_version: nextSyncVersion,
       updated_at: now,
-      archived_at: nextArchivedAt,
+      archived_at: globalArchivedAtToPersist,
     })
     .where('tenant_id', '=', trx.tenantId)
     .where('id', '=', productId)
@@ -2228,6 +2710,8 @@ export async function updateProduct(
       nextTrackingMode,
       previousTrackInventory: existing.track_inventory,
       nextTrackInventory,
+      branchId: targetBranchId,
+      isBranchScopedEdit,
     },
   });
 
@@ -2246,7 +2730,7 @@ export async function updateProduct(
 
   const prevPriceMoney = Money.fromDecimalString(String(existing.selling_price), 'USD');
   const nextPriceMoney = Money.fromDecimalString(nextSellingPrice, 'USD');
-  if (prevPriceMoney.scaledUnits !== nextPriceMoney.scaledUnits) {
+  if (!isBranchScopedEdit && prevPriceMoney.scaledUnits !== nextPriceMoney.scaledUnits) {
     await trx.db
       .insertInto('product_price_history')
       .values({
@@ -2304,15 +2788,18 @@ export async function updateProduct(
     .where('id', '=', productId)
     .executeTakeFirstOrThrow();
 
-  return hydrateProductDetails(trx, updated);
+  return hydrateProductDetails(trx, updated, targetBranchId);
 }
 
 export async function archiveProduct(
   trx: TenantTransactionContext,
   productId: string,
+  branchId?: string | null,
 ): Promise<ProductResponse> {
+  const targetBranchId = branchId?.trim() || null;
   await assertAuthorized(trx, {
     permission: 'cat:product:manage',
+    ...(targetBranchId ? { branchId: targetBranchId } : {}),
   });
 
   await assertSubscriptionEntitlement(trx, {
@@ -2334,26 +2821,93 @@ export async function archiveProduct(
     });
   }
 
+  if (targetBranchId) {
+    const visible = await isProductVisibleInBranch(trx, productId, targetBranchId, false);
+    if (!visible) {
+      throw new AppError({
+        statusCode: 404,
+        errorCode: 'ERR_NOT_FOUND',
+        title: 'Product Not Found',
+        detail: `Product "${productId}" is not available in the selected branch.`,
+      });
+    }
+  }
+
   const now = new Date();
   const nextSyncVersion = Number(existing.sync_version) + 1;
 
-  await trx.db
-    .updateTable('products')
-    .set({
-      status: 'ARCHIVED',
-      archived_at: now,
-      sync_version: nextSyncVersion,
-      updated_at: now,
-    })
+  const assignments = await trx.db
+    .selectFrom('product_branch_assignments')
+    .select(['id', 'branch_id', 'status'])
     .where('tenant_id', '=', trx.tenantId)
-    .where('id', '=', productId)
+    .where('product_id', '=', productId)
     .execute();
+
+  const shouldArchiveBranchOnly = Boolean(
+    targetBranchId &&
+      (assignments.length > 1 ||
+        (existing.origin_branch_id !== null &&
+          existing.origin_branch_id !== targetBranchId)),
+  );
+
+  if (shouldArchiveBranchOnly && targetBranchId) {
+    const existingAssignment = assignments.find((a) => a.branch_id === targetBranchId);
+    if (existingAssignment) {
+      await trx.db
+        .updateTable('product_branch_assignments')
+        .set({ status: 'ARCHIVED', updated_at: now })
+        .where('tenant_id', '=', trx.tenantId)
+        .where('id', '=', existingAssignment.id)
+        .execute();
+    } else {
+      await trx.db
+        .insertInto('product_branch_assignments')
+        .values({
+          id: generateUuidV7(),
+          tenant_id: trx.tenantId,
+          product_id: productId,
+          branch_id: targetBranchId,
+          assignment_source: 'MANUAL_ASSIGN',
+          status: 'ARCHIVED',
+          created_at: now,
+          updated_at: now,
+        })
+        .execute();
+    }
+  } else {
+    await trx.db
+      .updateTable('products')
+      .set({
+        status: 'ARCHIVED',
+        archived_at: now,
+        sync_version: nextSyncVersion,
+        updated_at: now,
+      })
+      .where('tenant_id', '=', trx.tenantId)
+      .where('id', '=', productId)
+      .execute();
+
+    if (targetBranchId) {
+      await trx.db
+        .updateTable('product_branch_assignments')
+        .set({ status: 'ARCHIVED', updated_at: now })
+        .where('tenant_id', '=', trx.tenantId)
+        .where('product_id', '=', productId)
+        .where('branch_id', '=', targetBranchId)
+        .execute();
+    }
+  }
 
   await appendAuditLog(trx, {
     action: 'CAT_PRODUCT_ARCHIVED',
     resourceType: 'PRODUCT',
     resourceId: productId,
-    metadata: { sku: existing.sku, name: existing.name },
+    metadata: {
+      sku: existing.sku,
+      name: existing.name,
+      branchId: targetBranchId,
+      branchScopedOnly: shouldArchiveBranchOnly,
+    },
   });
 
   const updated = await trx.db
@@ -2362,15 +2916,18 @@ export async function archiveProduct(
     .where('id', '=', productId)
     .executeTakeFirstOrThrow();
 
-  return hydrateProductDetails(trx, updated);
+  return hydrateProductDetails(trx, updated, targetBranchId);
 }
 
 export async function restoreProduct(
   trx: TenantTransactionContext,
   productId: string,
+  branchId?: string | null,
 ): Promise<ProductResponse> {
+  const targetBranchId = branchId?.trim() || null;
   await assertAuthorized(trx, {
     permission: 'cat:product:manage',
+    ...(targetBranchId ? { branchId: targetBranchId } : {}),
   });
 
   const existingProductsCountRow = await trx.db
@@ -2408,20 +2965,43 @@ export async function restoreProduct(
     });
   }
 
+  if (targetBranchId) {
+    const visible = await isProductVisibleInBranch(trx, productId, targetBranchId, false);
+    if (!visible) {
+      throw new AppError({
+        statusCode: 404,
+        errorCode: 'ERR_NOT_FOUND',
+        title: 'Product Not Found',
+        detail: `Product "${productId}" is not available in the selected branch.`,
+      });
+    }
+  }
+
   const now = new Date();
   const nextSyncVersion = Number(existing.sync_version) + 1;
 
-  await trx.db
-    .updateTable('products')
-    .set({
-      status: 'ACTIVE',
-      archived_at: null,
-      sync_version: nextSyncVersion,
-      updated_at: now,
-    })
-    .where('tenant_id', '=', trx.tenantId)
-    .where('id', '=', productId)
-    .execute();
+  if (targetBranchId) {
+    await ensureProductAssignedToBranch(trx, {
+      productId,
+      branchId: targetBranchId,
+      source: 'MANUAL_ASSIGN',
+      categoryId: existing.category_id,
+    });
+  }
+
+  if (existing.status !== 'ACTIVE' || !targetBranchId) {
+    await trx.db
+      .updateTable('products')
+      .set({
+        status: 'ACTIVE',
+        archived_at: null,
+        sync_version: nextSyncVersion,
+        updated_at: now,
+      })
+      .where('tenant_id', '=', trx.tenantId)
+      .where('id', '=', productId)
+      .execute();
+  }
 
   await appendAuditLog(trx, {
     action: 'CAT_PRODUCT_RESTORED',
@@ -2431,6 +3011,7 @@ export async function restoreProduct(
       sku: existing.sku,
       name: existing.name,
       previousStatus: existing.status,
+      branchId: targetBranchId,
     },
   });
 
@@ -2441,15 +3022,17 @@ export async function restoreProduct(
     .where('id', '=', productId)
     .executeTakeFirstOrThrow();
 
-  return hydrateProductDetails(trx, updated);
+  return hydrateProductDetails(trx, updated, targetBranchId);
 }
 
 export async function listProducts(
   trx: TenantTransactionContext,
   query: ListProductsQuery,
 ): Promise<CursorPaginatedResult<ProductResponse>> {
+  const targetBranchId = query.branchId?.trim() || null;
   await assertAuthorized(trx, {
     permission: 'cat:product:read',
+    ...(targetBranchId ? { branchId: targetBranchId } : {}),
   });
 
   await assertSubscriptionEntitlement(trx, {
@@ -2458,12 +3041,15 @@ export async function listProducts(
 
   const limit = Math.min(Math.max(Number(query.limit ?? 50), 1), 100);
 
-  let dbQuery = trx.db.selectFrom('products').selectAll();
+  let dbQuery = trx.db
+    .selectFrom('products')
+    .selectAll()
+    .where('tenant_id', '=', trx.tenantId);
 
   if (query.categoryId) {
     dbQuery = dbQuery.where('category_id', '=', query.categoryId);
   }
-  if (query.status) {
+  if (query.status && !targetBranchId) {
     dbQuery = dbQuery.where('status', '=', query.status);
   }
   if (query.productType) {
@@ -2492,36 +3078,96 @@ export async function listProducts(
   }
 
   const searchLower = query.search?.trim().toLowerCase();
-  if (!searchLower) {
+  if (!searchLower && !targetBranchId) {
     dbQuery = dbQuery.limit(limit + 1);
   }
 
   const rows = await dbQuery.execute();
 
+  let branchScopedRows = rows;
+  if (targetBranchId) {
+    const [branchRow, assignmentRows] = await Promise.all([
+      trx.db
+        .selectFrom('branches')
+        .select(['id', 'created_at'])
+        .where('tenant_id', '=', trx.tenantId)
+        .where('id', '=', targetBranchId)
+        .executeTakeFirst(),
+      trx.db
+        .selectFrom('product_branch_assignments')
+        .select(['product_id', 'branch_id', 'status'])
+        .where('tenant_id', '=', trx.tenantId)
+        .execute(),
+    ]);
+
+    if (!branchRow) {
+      return {
+        data: [],
+        pageInfo: { hasNextPage: false, nextCursor: null },
+      };
+    }
+
+    const branchCreatedAtMs = new Date(branchRow.created_at).getTime();
+    const assignmentsByProduct = new Map<
+      string,
+      Array<{ branch_id: string; status: string }>
+    >();
+    for (const a of assignmentRows) {
+      const list = assignmentsByProduct.get(a.product_id) ?? [];
+      list.push(a);
+      assignmentsByProduct.set(a.product_id, list);
+    }
+
+    branchScopedRows = rows.filter((r) => {
+      const pAssignments = assignmentsByProduct.get(r.id) ?? [];
+      const currentBranchAssignment = pAssignments.find(
+        (a) => a.branch_id === targetBranchId,
+      );
+      if (currentBranchAssignment) {
+        return query.status
+          ? currentBranchAssignment.status === query.status
+          : true;
+      }
+      if (r.origin_branch_id !== null || pAssignments.length > 0) {
+        return false;
+      }
+      const isLegacyVisible =
+        new Date(r.created_at).getTime() >= branchCreatedAtMs;
+      if (!isLegacyVisible) {
+        return false;
+      }
+      return query.status ? r.status === query.status : true;
+    });
+  }
+
   let matchedProductIdsByBarcode: Set<string> | null = null;
   if (searchLower) {
     const bcRows = await trx.db
       .selectFrom('product_barcodes')
-      .select(['product_id', 'barcode'])
+      .select(['product_id', 'barcode', 'branch_id'])
       .where('tenant_id', '=', trx.tenantId)
       .execute();
 
     matchedProductIdsByBarcode = new Set(
       bcRows
-        .filter((b) => b.barcode.toLowerCase().includes(searchLower))
+        .filter(
+          (b) =>
+            (!targetBranchId || b.branch_id === null || b.branch_id === targetBranchId) &&
+            b.barcode.toLowerCase().includes(searchLower),
+        )
         .map((b) => b.product_id),
     );
   }
 
   const filtered = searchLower
-    ? rows.filter(
+    ? branchScopedRows.filter(
         (r) =>
           r.name.toLowerCase().includes(searchLower) ||
           r.sku.toLowerCase().includes(searchLower) ||
           (r.description?.toLowerCase().includes(searchLower) ?? false) ||
           (matchedProductIdsByBarcode?.has(r.id) ?? false),
       )
-    : rows;
+    : branchScopedRows;
 
   const pageRows = filtered.slice(0, limit);
   const hasNextPage = filtered.length > limit;
@@ -2530,7 +3176,7 @@ export async function listProducts(
       ? pageRows[pageRows.length - 1]!.id
       : null;
 
-  const hydrated = await hydrateProductsBatch(trx, pageRows);
+  const hydrated = await hydrateProductsBatch(trx, pageRows, targetBranchId);
 
   return {
     data: hydrated,

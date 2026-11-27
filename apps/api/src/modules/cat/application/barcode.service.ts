@@ -479,6 +479,7 @@ export async function addProductBarcode(
       .selectFrom('products')
       .select([
         'id',
+        'origin_branch_id',
         'sku',
         'base_uom',
         'price_uom',
@@ -572,25 +573,32 @@ export async function addProductBarcode(
     }
   }
 
-  const conflict = await trx.db
+  const effectiveBranchId =
+    input.branchId ?? linkedIntakeLot?.branch_id ?? linkedBatch?.branch_id ?? product.origin_branch_id ?? null;
+
+  let conflictQuery = trx.db
     .selectFrom('product_barcodes')
     .select(['product_id', 'barcode'])
     .where('tenant_id', '=', trx.tenantId)
-    .where('barcode', '=', cleanBarcode)
-    .executeTakeFirst();
+    .where('barcode', '=', cleanBarcode);
+  conflictQuery = effectiveBranchId
+    ? conflictQuery.where('branch_id', '=', effectiveBranchId)
+    : conflictQuery.where('branch_id', 'is', null);
+  const conflict = await conflictQuery.executeTakeFirst();
 
   if (conflict) {
     throw new AppError({
       statusCode: 409,
       errorCode: 'CAT_DUPLICATE_BARCODE',
       title: 'Duplicate Barcode',
-      detail: `Barcode "${cleanBarcode}" is already assigned to a product in this organization.`,
+      detail: `Barcode "${cleanBarcode}" is already assigned to a product in this branch.`,
     });
   }
 
-  // Enforce cross-table tenant-scoped uniqueness (primary barcodes, SKUs, batch barcodes, serials)
+  // Enforce branch-scoped / tenant-scoped uniqueness (primary barcodes, SKUs, batch barcodes, serials)
   await assertBarcodeGloballyUniqueAcrossEntities(trx, cleanBarcode, {
     productIdToAllowSameProductBarcode: false,
+    branchId: effectiveBranchId,
   });
 
   const uomCode = (
@@ -682,8 +690,7 @@ export async function addProductBarcode(
           ? 'BATCH_SPECIFIC'
           : 'INHERIT');
 
-  const branchId =
-    input.branchId ?? linkedIntakeLot?.branch_id ?? linkedBatch?.branch_id ?? null;
+  const branchId = effectiveBranchId;
   const warehouseId =
     input.warehouseId ??
     linkedIntakeLot?.warehouse_id ??
@@ -1259,6 +1266,7 @@ export async function assertBarcodeGloballyUniqueAcrossEntities(
     excludeBatchId?: string;
     excludeSerialId?: string;
     productIdToAllowSameProductBarcode?: boolean;
+    branchId?: string | null;
   },
 ): Promise<void> {
   const clean = candidate.trim();
@@ -1266,11 +1274,19 @@ export async function assertBarcodeGloballyUniqueAcrossEntities(
     return;
   }
 
+  const branchId = options?.branchId ?? null;
+
   let productBarcodeQuery = trx.db
     .selectFrom('product_barcodes')
     .select(['id', 'product_id'])
     .where('tenant_id', '=', trx.tenantId)
     .where('barcode', '=', clean);
+
+  if (branchId) {
+    productBarcodeQuery = productBarcodeQuery.where((eb) =>
+      eb.or([eb('branch_id', '=', branchId), eb('branch_id', 'is', null)]),
+    );
+  }
 
   if (options?.excludeProductId && options.productIdToAllowSameProductBarcode) {
     productBarcodeQuery = productBarcodeQuery.where('product_id', '!=', options.excludeProductId);
@@ -1284,6 +1300,12 @@ export async function assertBarcodeGloballyUniqueAcrossEntities(
       eb.or([eb('primary_barcode', '=', clean), eb('sku', '=', clean)]),
     );
 
+  if (branchId) {
+    productPrimaryQuery = productPrimaryQuery.where((eb) =>
+      eb.or([eb('origin_branch_id', '=', branchId), eb('origin_branch_id', 'is', null)]),
+    );
+  }
+
   if (options?.excludeProductId) {
     productPrimaryQuery = productPrimaryQuery.where('id', '!=', options.excludeProductId);
   }
@@ -1294,6 +1316,12 @@ export async function assertBarcodeGloballyUniqueAcrossEntities(
     .where('tenant_id', '=', trx.tenantId)
     .where('internal_barcode', '=', clean);
 
+  if (branchId) {
+    batchQuery = batchQuery.where((eb) =>
+      eb.or([eb('branch_id', '=', branchId), eb('branch_id', 'is', null)]),
+    );
+  }
+
   if (options?.excludeBatchId) {
     batchQuery = batchQuery.where('id', '!=', options.excludeBatchId);
   }
@@ -1303,6 +1331,12 @@ export async function assertBarcodeGloballyUniqueAcrossEntities(
     .select(['id', 'serial_number'])
     .where('tenant_id', '=', trx.tenantId)
     .where('serial_number', '=', clean);
+
+  if (branchId) {
+    serialQuery = serialQuery.where((eb) =>
+      eb.or([eb('branch_id', '=', branchId), eb('branch_id', 'is', null)]),
+    );
+  }
 
   if (options?.excludeSerialId) {
     serialQuery = serialQuery.where('id', '!=', options.excludeSerialId);

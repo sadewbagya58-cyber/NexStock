@@ -37,6 +37,7 @@ import {
 } from './stock-intake.service.js';
 import {
   type CursorPaginatedResult,
+  ensureProductAssignedToBranch,
   resolveProductForInventory,
   triggerCostChangeSuggestionIfApplicable,
 } from '../../cat/index.js';
@@ -100,6 +101,7 @@ function mapStockMovementRow(
     stock_intake_lot_id?: string | null | undefined;
     intake_code?: string | null | undefined;
     config_alert_id?: string | null | undefined;
+    price_suggestion_id?: string | null | undefined;
     supplier_id: string | null;
     movement_type: StockMovementType;
     uom_code: string;
@@ -139,6 +141,9 @@ function mapStockMovementRow(
     ...(row.intake_code !== undefined ? { intakeCode: row.intake_code ?? null } : {}),
     ...(row.config_alert_id !== undefined
       ? { configAlertId: row.config_alert_id ?? null }
+      : {}),
+    ...(row.price_suggestion_id !== undefined
+      ? { priceSuggestionId: row.price_suggestion_id ?? null }
       : {}),
     supplierId: row.supplier_id,
     movementType: row.movement_type,
@@ -279,6 +284,16 @@ export async function postStockMovement(
   options?: {
     readonly skipPermissionCheck?: boolean;
     readonly skipRealtimePublish?: boolean;
+    readonly preloadedContext?: {
+      readonly subscriptionVerified?: boolean;
+      readonly baseCurrency?: string;
+      readonly warehouseMeta?: {
+        readonly warehouseId: string;
+        readonly branchId: string;
+        readonly allowNegativeStock: boolean;
+      };
+      readonly product?: Awaited<ReturnType<typeof resolveProductForInventory>>;
+    };
   },
 ): Promise<StockMovementResponse> {
   if (!options?.skipPermissionCheck) {
@@ -289,17 +304,23 @@ export async function postStockMovement(
     });
   }
 
-  await assertSubscriptionEntitlement(trx, {
-    requireWriteAccess: true,
-  });
+  if (!options?.preloadedContext?.subscriptionVerified) {
+    await assertSubscriptionEntitlement(trx, {
+      requireWriteAccess: true,
+    });
+  }
 
-  const warehouseMeta = await verifyBranchAndWarehouseRelationship(
-    trx,
-    input.branchId,
-    input.warehouseId,
-  );
+  const warehouseMeta =
+    options?.preloadedContext?.warehouseMeta ??
+    (await verifyBranchAndWarehouseRelationship(
+      trx,
+      input.branchId,
+      input.warehouseId,
+    ));
 
-  const product = await resolveProductForInventory(trx, input.productId);
+  const product =
+    options?.preloadedContext?.product ??
+    (await resolveProductForInventory(trx, input.productId));
   if (product.status !== 'ACTIVE') {
     throw new AppError({
       statusCode: 409,
@@ -456,7 +477,9 @@ export async function postStockMovement(
           ? 'SUPPLIER_RETURN'
           : 'MANUAL');
 
-  const baseCurrency = await getTenantBaseCurrency(trx);
+  const baseCurrency =
+    options?.preloadedContext?.baseCurrency ??
+    (await getTenantBaseCurrency(trx));
   const unitCostMoney = Money.fromDecimalString(
     input.unitCost ?? product.purchaseCost,
     baseCurrency,
@@ -1167,10 +1190,29 @@ export async function postStockMovement(
     });
   }
 
+  if (qtyDelta.isPositive()) {
+    const assignmentSource =
+      input.movementType === 'TRANSFER_IN'
+        ? 'TRANSFER_IN'
+        : input.referenceType === 'GOODS_RECEIPT' || resolvedEntrySource === 'PURCHASE_RECEIPT'
+          ? 'GRN'
+          : 'STOCK_MOVEMENT';
+    await ensureProductAssignedToBranch(trx, {
+      productId: input.productId,
+      branchId: input.branchId,
+      source: assignmentSource,
+    });
+  }
+
+  const isWeighedOrMeasured =
+    product.productQtyMode === 'VARIABLE' ||
+    ['WEIGHT', 'VOLUME', 'LENGTH'].includes(
+      String(product.measurementCategory ?? '').toUpperCase(),
+    );
+
   let createdMovementSuggestionId: string | null = null;
   if (
     qtyDelta.isPositive() &&
-    !unitCostMoney.isZero() &&
     input.referenceType !== 'GOODS_RECEIPT' &&
     input.movementType !== 'TRANSFER_IN' &&
     product.trackingMode !== 'BATCH' &&
@@ -1179,12 +1221,21 @@ export async function postStockMovement(
     resolvedEntrySource !== 'POS_VOID'
   ) {
     const prevProdCost = Money.fromDecimalString(product.purchaseCost, baseCurrency);
-    if (unitCostMoney.scaledUnits !== prevProdCost.scaledUnits) {
+    const hasCostChange =
+      (!unitCostMoney.isZero() || isWeighedOrMeasured) &&
+      unitCostMoney.scaledUnits !== prevProdCost.scaledUnits;
+    const hasProposedPrice =
+      input.sellingPrice != null && input.sellingPrice.trim() !== '';
+
+    if (hasCostChange || (isWeighedOrMeasured && hasProposedPrice)) {
       const createdSugg = await triggerCostChangeSuggestionIfApplicable(trx, {
         productId: input.productId,
         oldCost: prevProdCost.toDecimalString(),
         newCost: unitCostMoney.toDecimalString(),
         movingAvgCost: nextMovingAvgCost.toDecimalString(),
+        explicitProposedPrice: hasProposedPrice ? input.sellingPrice! : null,
+        explicitProposedSellingUom: input.sellingUom ?? null,
+        forceOnCostOrPriceChange: isWeighedOrMeasured,
         sourceEventType: 'STOCK_MOVEMENT',
         sourceEventKey: `MOVE:${movementId}`,
         reason: `Stock movement (${input.movementType}) at ${unitCostMoney.toDecimalString()}/${product.baseUom}`,
@@ -1251,6 +1302,7 @@ export async function postStockMovement(
       stock_intake_lot_id: assignedIntakeLotId,
       intake_code: createdIntakeCode,
       config_alert_id: createdConfigAlertId,
+      price_suggestion_id: createdMovementSuggestionId,
     },
     baseCurrency,
   );
@@ -2093,6 +2145,7 @@ export async function listInventoryBalances(
       'products.sku as sku',
       'products.name as product_name',
       'products.base_uom as base_uom',
+      'products.primary_barcode as primary_barcode',
       'products.image_url as image_url',
       'warehouses.name as warehouse_name',
       'branches.name as branch_name',
@@ -2144,16 +2197,87 @@ export async function listInventoryBalances(
   const rows = await dbQuery.execute();
   const searchLower = query.search?.trim().toLowerCase();
 
-  const mapped: InventoryBalanceResponse[] = [];
-  for (const r of rows) {
-    if (
-      searchLower &&
-      !r.sku.toLowerCase().includes(searchLower) &&
-      !r.product_name.toLowerCase().includes(searchLower)
-    ) {
-      continue;
+  let matchedProductIdsFromCodes: Set<string> | null = null;
+  if (searchLower && rows.length > 0) {
+    const rowProductIds = [...new Set(rows.map((r) => r.product_id))];
+    const [pbMatches, batchMatches, serialMatches] = await Promise.all([
+      trx.db
+        .selectFrom('product_barcodes')
+        .select(['product_id', 'barcode'])
+        .where('tenant_id', '=', trx.tenantId)
+        .where('product_id', 'in', rowProductIds)
+        .execute(),
+      trx.db
+        .selectFrom('inventory_batches')
+        .select(['product_id', 'internal_barcode', 'batch_number'])
+        .where('tenant_id', '=', trx.tenantId)
+        .where('product_id', 'in', rowProductIds)
+        .execute(),
+      trx.db
+        .selectFrom('inventory_serials')
+        .select(['product_id', 'internal_barcode', 'serial_number'])
+        .where('tenant_id', '=', trx.tenantId)
+        .where('product_id', 'in', rowProductIds)
+        .execute(),
+    ]);
+    matchedProductIdsFromCodes = new Set<string>();
+    for (const pb of pbMatches) {
+      if (pb.barcode.toLowerCase().includes(searchLower)) {
+        matchedProductIdsFromCodes.add(pb.product_id);
+      }
     }
+    for (const b of batchMatches) {
+      if (
+        (b.internal_barcode?.toLowerCase().includes(searchLower) ?? false) ||
+        b.batch_number.toLowerCase().includes(searchLower)
+      ) {
+        matchedProductIdsFromCodes.add(b.product_id);
+      }
+    }
+    for (const s of serialMatches) {
+      if (
+        (s.internal_barcode?.toLowerCase().includes(searchLower) ?? false) ||
+        s.serial_number.toLowerCase().includes(searchLower)
+      ) {
+        matchedProductIdsFromCodes.add(s.product_id);
+      }
+    }
+  }
 
+  const barcodeListByProduct = new Map<string, string[]>();
+  const matchedRows = rows.filter((r) => {
+    if (!searchLower) return true;
+    return (
+      r.sku.toLowerCase().includes(searchLower) ||
+      r.product_name.toLowerCase().includes(searchLower) ||
+      (r.primary_barcode?.toLowerCase().includes(searchLower) ?? false) ||
+      (matchedProductIdsFromCodes?.has(r.product_id) ?? false)
+    );
+  });
+
+  if (matchedRows.length > 0) {
+    const prodIdsForBc = [...new Set(matchedRows.map((r) => r.product_id))];
+    const bcRows = await trx.db
+      .selectFrom('product_barcodes')
+      .select(['product_id', 'barcode', 'branch_id'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('product_id', 'in', prodIdsForBc)
+      .where('is_active', '=', true)
+      .execute();
+    for (const bc of bcRows) {
+      if (query.branchId && bc.branch_id !== null && bc.branch_id !== query.branchId) {
+        continue;
+      }
+      const list = barcodeListByProduct.get(bc.product_id) ?? [];
+      if (!list.includes(bc.barcode)) {
+        list.push(bc.barcode);
+      }
+      barcodeListByProduct.set(bc.product_id, list);
+    }
+  }
+
+  const mapped: InventoryBalanceResponse[] = [];
+  for (const r of matchedRows) {
     const qtyOnHand = Quantity.fromDecimalString(String(r.qty_on_hand));
     const qtyReserved = Quantity.fromDecimalString(String(r.qty_reserved));
     const qtyInTransit = Quantity.fromDecimalString(String(r.qty_in_transit));
@@ -2175,6 +2299,11 @@ export async function listInventoryBalances(
       continue;
     }
 
+    const rowBarcodes = barcodeListByProduct.get(r.product_id) ?? [];
+    if (r.primary_barcode && !rowBarcodes.includes(r.primary_barcode)) {
+      rowBarcodes.unshift(r.primary_barcode);
+    }
+
     mapped.push({
       id: r.id,
       tenantId: r.tenant_id,
@@ -2183,6 +2312,8 @@ export async function listInventoryBalances(
       productId: r.product_id,
       sku: r.sku,
       productName: r.product_name,
+      primaryBarcode: r.primary_barcode ?? rowBarcodes[0] ?? null,
+      barcodes: rowBarcodes,
       uomCode: r.uom_code,
       baseUom: r.base_uom ?? r.uom_code,
       imageUrl: r.image_url ?? null,

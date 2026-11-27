@@ -622,6 +622,7 @@ export interface SupervisorOverrideLogsTable {
 export interface CategoriesTable {
   id: string;
   tenant_id: string;
+  origin_branch_id: ColumnType<string | null, string | null | undefined, string | null | undefined>;
   parent_id: string | null;
   name: string;
   description: string | null;
@@ -648,6 +649,7 @@ export interface UnitsOfMeasureTable {
 export interface ProductsTable {
   id: string;
   tenant_id: string;
+  origin_branch_id: ColumnType<string | null, string | null | undefined, string | null | undefined>;
   sku: string;
   name: string;
   description: string | null;
@@ -1522,6 +1524,10 @@ export interface CustomersTable {
   email: string | null;
   phone: string | null;
   address: string | null;
+  address_line1: ColumnType<string | null, string | null | undefined, string | null | undefined>;
+  city: ColumnType<string | null, string | null | undefined, string | null | undefined>;
+  postal_code: ColumnType<string | null, string | null | undefined, string | null | undefined>;
+  company_name: ColumnType<string | null, string | null | undefined, string | null | undefined>;
   tax_id: string | null;
   notes: string | null;
   status: Generated<'ACTIVE' | 'INACTIVE' | 'ARCHIVED'>;
@@ -2366,4 +2372,29 @@ export interface NexStockDatabase {
   stock_transfer_lines: StockTransferLinesTable;
   stock_intake_lots: StockIntakeLotsTable;
   stock_config_alerts: StockConfigAlertsTable;
+  product_branch_assignments: ProductBranchAssignmentsTable;
+  category_branch_assignments: CategoryBranchAssignmentsTable;
+}
+
+export interface ProductBranchAssignmentsTable {
+  id: Generated<string>;
+  tenant_id: string;
+  product_id: string;
+  branch_id: string;
+  assignment_source: Generated<
+    'CREATED' | 'STOCK_MOVEMENT' | 'GRN' | 'TRANSFER_IN' | 'MANUAL_ASSIGN' | 'LEGACY_BACKFILL'
+  >;
+  status: Generated<'ACTIVE' | 'ARCHIVED'>;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface CategoryBranchAssignmentsTable {
+  id: Generated<string>;
+  tenant_id: string;
+  category_id: string;
+  branch_id: string;
+  status: Generated<'ACTIVE' | 'ARCHIVED'>;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
 }

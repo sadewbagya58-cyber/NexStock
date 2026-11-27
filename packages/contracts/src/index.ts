@@ -411,6 +411,7 @@ export type HealthStatusResponse = Static<typeof HealthStatusResponseSchema>;
 export const AuthenticatedTenantHeadersSchema = Type.Object({
   authorization: Type.Optional(Type.String()),
   'x-tenant-id': UuidSchema,
+  'x-branch-id': Type.Optional(UuidSchema),
 });
 export type AuthenticatedTenantHeaders = Static<
   typeof AuthenticatedTenantHeadersSchema
@@ -419,6 +420,7 @@ export type AuthenticatedTenantHeaders = Static<
 export const AuthenticatedIdempotentHeadersSchema = Type.Object({
   authorization: Type.Optional(Type.String()),
   'x-tenant-id': UuidSchema,
+  'x-branch-id': Type.Optional(UuidSchema),
   'idempotency-key': UuidSchema,
 });
 export type AuthenticatedIdempotentHeaders = Static<
@@ -630,6 +632,7 @@ export const CreateCategoryRequestSchema = Type.Object(
     ),
     parentId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
     color: Type.Optional(Type.Union([Type.String({ maxLength: 30 }), Type.Null()])),
+    branchId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
   },
   { additionalProperties: false },
 );
@@ -653,6 +656,7 @@ export const ListCategoriesQuerySchema = Type.Object(
     search: Type.Optional(Type.String({ maxLength: 120 })),
     status: Type.Optional(RecordLifecycleStatusSchema),
     parentId: Type.Optional(UuidSchema),
+    branchId: Type.Optional(UuidSchema),
     limit: Type.Optional(PaginationLimitQueryParamSchema),
     cursor: Type.Optional(UuidSchema),
   },
@@ -663,6 +667,7 @@ export type ListCategoriesQuery = Static<typeof ListCategoriesQuerySchema>;
 export const CategoryResponseSchema = Type.Object({
   id: UuidSchema,
   tenantId: UuidSchema,
+  originBranchId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
   parentId: Type.Union([UuidSchema, Type.Null()]),
   name: Type.String(),
   description: Type.Union([Type.String(), Type.Null()]),
@@ -837,6 +842,7 @@ export const CreateProductRequestSchema = Type.Object(
     ),
     allocationPolicy: Type.Optional(ProductAllocationPolicySchema),
     requireBatchSellingPrice: Type.Optional(Type.Boolean()),
+    branchId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
   },
   { additionalProperties: false },
 );
@@ -896,6 +902,7 @@ export const UpdateProductRequestSchema = Type.Object(
     ),
     allocationPolicy: Type.Optional(ProductAllocationPolicySchema),
     requireBatchSellingPrice: Type.Optional(Type.Boolean()),
+    branchId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
     isActive: Type.Optional(Type.Boolean()),
     status: Type.Optional(RecordLifecycleStatusSchema),
   },
@@ -907,6 +914,7 @@ export const ListProductsQuerySchema = Type.Object(
   {
     search: Type.Optional(Type.String({ maxLength: 160 })),
     categoryId: Type.Optional(UuidSchema),
+    branchId: Type.Optional(UuidSchema),
     status: Type.Optional(RecordLifecycleStatusSchema),
     productType: Type.Optional(ProductTypeSchema),
     trackingMode: Type.Optional(TrackingModeSchema),
@@ -1127,6 +1135,8 @@ export const ProductResponseSchema = Type.Object({
   unitConversions: Type.Array(ProductUnitConversionResponseSchema),
   allocationPolicy: Type.Optional(ProductAllocationPolicySchema),
   requireBatchSellingPrice: Type.Optional(Type.Boolean()),
+  originBranchId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
+  branchIds: Type.Optional(Type.Array(UuidSchema)),
   syncVersion: Type.Integer(),
   createdAt: IsoTimestampSchema,
   updatedAt: IsoTimestampSchema,
@@ -1454,6 +1464,7 @@ export const StockMovementResponseSchema = Type.Object({
   stockIntakeLotId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
   intakeCode: Type.Optional(Type.Union([Type.String(), Type.Null()])),
   configAlertId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
+  priceSuggestionId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
   supplierId: Type.Union([UuidSchema, Type.Null()]),
   movementType: StockMovementTypeSchema,
   uomCode: Type.String(),
@@ -1524,6 +1535,8 @@ export const InventoryBalanceResponseSchema = Type.Object({
   productId: UuidSchema,
   sku: Type.String(),
   productName: Type.String(),
+  primaryBarcode: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  barcodes: Type.Optional(Type.Array(Type.String())),
   uomCode: Type.String(),
   baseUom: Type.Optional(Type.String()),
   imageUrl: Type.Optional(Type.Union([Type.String(), Type.Null()])),
@@ -1884,6 +1897,8 @@ export const SalesInvoiceLineResponseSchema = Type.Object({
   productId: UuidSchema,
   sku: Type.String(),
   productName: Type.String(),
+  primaryBarcode: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  barcodes: Type.Optional(Type.Array(Type.String())),
   uomCode: Type.String(),
   quantity: DecimalQuantityStringSchema,
   unitPrice: DecimalMoneyStringSchema,
@@ -3992,7 +4007,7 @@ export type ExpenseAttachmentListResponse = Static<typeof ExpenseAttachmentListR
 export const UploadExpenseAttachmentRequestSchema = Type.Object(
   {
     fileName: Type.String({ minLength: 1, maxLength: 255 }),
-    mimeType: Type.String({ pattern: '^(image\\/(png|jpeg|webp)|application\\/pdf)$' }),
+    mimeType: Type.String({ pattern: '^(image\\/(png|jpe?g|webp)|application\\/pdf)$' }),
     dataBase64: Type.String({ minLength: 1 }),
   },
   { additionalProperties: false },
@@ -4094,6 +4109,12 @@ export const CustomerResponseSchema = Type.Object({
   email: Type.Union([Type.String(), Type.Null()]),
   phone: Type.Union([Type.String(), Type.Null()]),
   address: Type.Union([Type.String(), Type.Null()]),
+  addressLine1: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  addressCity: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  addressPostalCode: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  city: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  postalCode: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  companyName: Type.Optional(Type.Union([Type.String(), Type.Null()])),
   taxId: Type.Union([Type.String(), Type.Null()]),
   notes: Type.Union([Type.String(), Type.Null()]),
   status: CustomerStatusSchema,
@@ -4117,6 +4138,8 @@ export const CreateCustomerRequestSchema = Type.Object(
     addressLine1: Type.Optional(Type.Union([Type.String({ maxLength: 255 }), Type.Null()])),
     addressCity: Type.Optional(Type.Union([Type.String({ maxLength: 100 }), Type.Null()])),
     addressPostalCode: Type.Optional(Type.Union([Type.String({ maxLength: 20 }), Type.Null()])),
+    city: Type.Optional(Type.Union([Type.String({ maxLength: 100 }), Type.Null()])),
+    postalCode: Type.Optional(Type.Union([Type.String({ maxLength: 20 }), Type.Null()])),
     companyName: Type.Optional(Type.Union([Type.String({ maxLength: 255 }), Type.Null()])),
     taxId: Type.Optional(Type.Union([Type.String({ maxLength: 100 }), Type.Null()])),
     notes: Type.Optional(Type.Union([Type.String({ maxLength: 1000 }), Type.Null()])),
@@ -4136,6 +4159,8 @@ export const UpdateCustomerRequestSchema = Type.Object(
     addressLine1: Type.Optional(Type.Union([Type.String({ maxLength: 255 }), Type.Null()])),
     addressCity: Type.Optional(Type.Union([Type.String({ maxLength: 100 }), Type.Null()])),
     addressPostalCode: Type.Optional(Type.Union([Type.String({ maxLength: 20 }), Type.Null()])),
+    city: Type.Optional(Type.Union([Type.String({ maxLength: 100 }), Type.Null()])),
+    postalCode: Type.Optional(Type.Union([Type.String({ maxLength: 20 }), Type.Null()])),
     companyName: Type.Optional(Type.Union([Type.String({ maxLength: 255 }), Type.Null()])),
     taxId: Type.Optional(Type.Union([Type.String({ maxLength: 100 }), Type.Null()])),
     notes: Type.Optional(Type.Union([Type.String({ maxLength: 1000 }), Type.Null()])),

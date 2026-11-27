@@ -3498,4 +3498,64 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       expect(offlineJs).toContain('resolvedSellingUom: resolvedUom');
     });
   });
+
+  describe('39. Consolidated QA Fixes — Branch Isolation, Thermal Print, Rounding, Modals, NexSelect & Unified Dialogs', () => {
+    it('implements DI-001 branch headers & cache reset, zero native confirm/prompt dialogs, NexSelect enhancement, and HALF_EVEN BigInt rounding', () => {
+      const html = readFileSync(resolve(WEB_ROOT, 'public/index.html'), 'utf8');
+
+      // 1. DI-001: x-branch-id propagation & branch context cache clear
+      expect(html).toContain("'x-branch-id'");
+      expect(html).toContain('function switchActiveBranchContext(');
+      expect(html).toContain('state.posProductsMap = new Map()');
+
+      // 2. Barcode & Print crash fix + Android concrete @page mm height
+      expect(html).toContain('getLabelFormatSpec(format)');
+      expect(html).toContain('spec.bcHeight');
+      expect(html).not.toContain('getThermalLabelFormatSpec(');
+      expect(html).not.toMatch(/\bspec\.bcH\b/);
+      expect(html).toContain('.thermal-receipt-sheet');
+      expect(html).toContain('activeReceiptPrintOps');
+
+      // 3. BigInt HALF_EVEN precision (matches 500 ML @ 3533.33/L -> 1766.66 + 180.00 = 1946.66)
+      expect(html).toContain('function roundHalfEvenBigInt(');
+      expect(html).toContain('function toFixedIntScaled(');
+      const mathBlockMatch = html.match(/const CLIENT_UOM_CATALOG = \{[\s\S]*?function computeClientProportionateTotal\([\s\S]*?\n {4}\}/);
+      expect(mathBlockMatch).toBeTruthy();
+      const fnFactory = new Function(`const getTenantCurrency = () => 'LKR'; const getCurrencyMinorUnits = () => 2; ${mathBlockMatch![0]}; return { computeClientProportionateTotal, roundHalfEvenBigInt };`);
+      const { computeClientProportionateTotal } = fnFactory();
+      const petrolLine = computeClientProportionateTotal('500', 'ML', '3533.3300', { baseUom: 'L', priceUom: 'L' });
+      const item2 = computeClientProportionateTotal('1', 'PCS', '180.0000', { baseUom: 'PCS', priceUom: 'PCS' });
+      expect(petrolLine).toBeTruthy();
+      expect(item2).toBeTruthy();
+      expect(petrolLine.lineTotal + item2.lineTotal).toBeCloseTo(1946.66, 2);
+
+      // 4. Expenses instant modal, inline receipt upload & MIME normalization
+      expect(html).toContain('id="expModalAttachmentInput"');
+      expect(html).toContain('function inferExpenseAttachmentMimeType(');
+      expect(html).toContain("rawType === 'image/jpg'");
+
+      // 5. Customers structured address inputs & dashboard/reports race guards
+      expect(html).toContain('id="custAddress1Input"');
+      expect(html).toContain('id="custCityInput"');
+      expect(html).toContain('id="custPostalInput"');
+      expect(html).toContain('function openReportsFromDashboard(');
+      expect(html).toContain('dashboardFetchSeq');
+      expect(html).toContain('reportFetchSeq');
+
+      // 6. Section 11 NexSelect & Section 12 Unified Dialog Overlay (no native confirm/prompt/alert in <script>)
+      expect(html).toContain('id="nexDialogOverlay"');
+      expect(html).toContain('function nexConfirm(');
+      expect(html).toContain('function nexPrompt(');
+      expect(html).toContain('function enhanceNexSelect(');
+      expect(html).toContain('.nex-select-menu');
+
+      const scriptMatch = html.match(/<script>([\s\S]*?)<\/script>\s*<\/body>/);
+      expect(scriptMatch).toBeTruthy();
+      const scriptLines = scriptMatch![1].split('\n');
+      const nativeCalls = scriptLines.filter(line =>
+        /(^|[^\w.])(window\.)?(confirm|prompt|alert)\s*\(/.test(line)
+      );
+      expect(nativeCalls).toEqual([]);
+    });
+  });
 });

@@ -33,10 +33,13 @@ import type {
 import {
   calculateSuggestedSellingPrice,
   computeActualMarginPct,
+  convertQuantityBetweenUoms,
+  divideAndRoundBigInt,
   evaluateMarginHealth,
   Money,
   PricingCalculationError,
   Quantity,
+  QUANTITY_SCALE_FACTOR,
 } from '@nexstock/domain-core';
 import { assertAuthorized } from '../../iam/index.js';
 import {
@@ -941,6 +944,9 @@ export async function triggerCostChangeSuggestionIfApplicable(
     readonly oldCost: string;
     readonly newCost: string;
     readonly movingAvgCost?: string;
+    readonly explicitProposedPrice?: string | null;
+    readonly explicitProposedSellingUom?: string | null;
+    readonly forceOnCostOrPriceChange?: boolean;
     readonly marketPrice?: string | null;
     readonly marketPriceSource?: string | null;
     readonly sourceEventType: 'GRN_POSTED' | 'COST_EDIT' | 'STOCK_MOVEMENT';
@@ -952,58 +958,170 @@ export async function triggerCostChangeSuggestionIfApplicable(
   },
 ): Promise<PriceSuggestionResponse | null> {
   const settings = await ensureTenantPricingSettings(trx);
-  if (!settings.auto_create_suggestions_on_cost_change) {
+  if (!settings.auto_create_suggestions_on_cost_change && !params.forceOnCostOrPriceChange) {
     return null;
   }
 
   const currencyCode = await getTenantBaseCurrency(trx);
-  const oldCostMoney = Money.fromDecimalString(params.oldCost, currencyCode);
-  const newCostMoney = Money.fromDecimalString(params.newCost, currencyCode);
+  const rawOldCostMoney = Money.fromDecimalString(params.oldCost, currencyCode);
+  const rawNewCostMoney = Money.fromDecimalString(params.newCost, currencyCode);
 
-  if (oldCostMoney.scaledUnits === newCostMoney.scaledUnits) {
+  const [productRow, convRows] = await Promise.all([
+    trx.db
+      .selectFrom('products')
+      .select([
+        'id',
+        'base_uom',
+        'price_uom',
+        'selling_price',
+        'density_g_per_ml',
+      ])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('id', '=', params.productId)
+      .executeTakeFirst(),
+    trx.db
+      .selectFrom('product_unit_conversions')
+      .select(['uom_code', 'conversion_factor_to_base'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('product_id', '=', params.productId)
+      .where('is_active', '=', true)
+      .execute(),
+  ]);
+
+  const baseUom = (productRow?.base_uom ?? 'PCS').trim().toUpperCase();
+  const priceUom = (productRow?.price_uom ?? baseUom).trim().toUpperCase();
+  const customConversions = convRows.map((c) => ({
+    uomCode: c.uom_code.trim().toUpperCase(),
+    conversionFactorToBase: String(c.conversion_factor_to_base),
+  }));
+  const densityGPerMl = productRow?.density_g_per_ml
+    ? String(productRow.density_g_per_ml)
+    : null;
+
+  let priceUomFactorMicros = QUANTITY_SCALE_FACTOR;
+  if (priceUom !== baseUom) {
+    try {
+      const conv = convertQuantityBetweenUoms({
+        quantity: '1',
+        fromUom: priceUom,
+        toUom: baseUom,
+        productBaseUom: baseUom,
+        customConversions,
+        densityGPerMl,
+      });
+      if (conv.convertedQuantity.microUnits > 0n) {
+        priceUomFactorMicros = conv.convertedQuantity.microUnits;
+      }
+    } catch {
+      // Fallback to 1:1 if UoMs belong to incompatible families
+    }
+  }
+
+  const scaleToPriceUom = (m: Money): Money =>
+    priceUomFactorMicros === QUANTITY_SCALE_FACTOR
+      ? m
+      : Money.fromScaledUnits(
+          divideAndRoundBigInt(
+            m.scaledUnits * priceUomFactorMicros,
+            QUANTITY_SCALE_FACTOR,
+            'HALF_EVEN',
+          ),
+          currencyCode,
+        );
+
+  const oldCostMoney = scaleToPriceUom(rawOldCostMoney);
+  const newCostMoney = scaleToPriceUom(rawNewCostMoney);
+
+  let normalizedExplicitProposedPrice: string | undefined;
+  if (params.explicitProposedPrice != null && params.explicitProposedPrice.trim() !== '') {
+    let explicitMoney = Money.fromDecimalString(
+      params.explicitProposedPrice.trim(),
+      currencyCode,
+    );
+    const proposedUom = params.explicitProposedSellingUom?.trim().toUpperCase();
+    if (proposedUom && proposedUom !== priceUom) {
+      try {
+        const uomScale = convertQuantityBetweenUoms({
+          quantity: '1',
+          fromUom: priceUom,
+          toUom: proposedUom,
+          productBaseUom: baseUom,
+          customConversions,
+          densityGPerMl,
+        });
+        if (uomScale.convertedQuantity.microUnits > 0n) {
+          explicitMoney = Money.fromScaledUnits(
+            divideAndRoundBigInt(
+              explicitMoney.scaledUnits * uomScale.convertedQuantity.microUnits,
+              QUANTITY_SCALE_FACTOR,
+              'HALF_EVEN',
+            ),
+            currencyCode,
+          );
+        }
+      } catch {
+        // Keep explicit price as entered
+      }
+    }
+    normalizedExplicitProposedPrice = explicitMoney.toDecimalString();
+  }
+
+  const currentProdPriceStr = productRow
+    ? Money.fromDecimalString(String(productRow.selling_price), currencyCode).toDecimalString()
+    : '0.0000';
+  const hasExplicitPriceDiff =
+    normalizedExplicitProposedPrice !== undefined &&
+    normalizedExplicitProposedPrice !== currentProdPriceStr;
+
+  const costChanged = rawOldCostMoney.scaledUnits !== rawNewCostMoney.scaledUnits;
+  if (!costChanged && !hasExplicitPriceDiff) {
     return null;
   }
 
-  const isDecrease = newCostMoney.scaledUnits < oldCostMoney.scaledUnits;
-  if (isDecrease && !settings.auto_create_suggestions_on_cost_decrease) {
+  const isDecrease = rawNewCostMoney.scaledUnits < rawOldCostMoney.scaledUnits;
+  if (
+    isDecrease &&
+    !settings.auto_create_suggestions_on_cost_decrease &&
+    !params.forceOnCostOrPriceChange &&
+    !hasExplicitPriceDiff
+  ) {
     return null;
   }
 
   const rule = await resolveEffectiveRuleForProduct(trx, params.productId, settings);
-  if (!rule.suggestionsEnabled) {
+  if (!rule.suggestionsEnabled && !params.forceOnCostOrPriceChange) {
     return null;
   }
 
   let basisCostStr = newCostMoney.toDecimalString();
   if (rule.costBasis === 'MOVING_AVERAGE_COST') {
     if (params.movingAvgCost) {
-      basisCostStr = Money.fromDecimalString(
-        params.movingAvgCost,
-        currencyCode,
+      basisCostStr = scaleToPriceUom(
+        Money.fromDecimalString(params.movingAvgCost, currencyCode),
       ).toDecimalString();
     } else {
-      basisCostStr = (
-        await resolveCostByBasis({
-          trx,
-          productId: params.productId,
-          productPurchaseCost: newCostMoney.toDecimalString(),
-          currencyCode,
-          costBasis: 'MOVING_AVERAGE_COST',
-        })
-      ).toDecimalString();
+      const macPerBase = await resolveCostByBasis({
+        trx,
+        productId: params.productId,
+        productPurchaseCost: rawNewCostMoney.toDecimalString(),
+        currencyCode,
+        costBasis: 'MOVING_AVERAGE_COST',
+      });
+      basisCostStr = scaleToPriceUom(macPerBase).toDecimalString();
     }
   } else if (rule.costBasis === 'HIGHEST_RECENT_COST') {
-    const highest = await resolveCostByBasis({
+    const highestPerBase = await resolveCostByBasis({
       trx,
       productId: params.productId,
-      productPurchaseCost: newCostMoney.toDecimalString(),
+      productPurchaseCost: rawNewCostMoney.toDecimalString(),
       currencyCode,
       costBasis: 'HIGHEST_RECENT_COST',
     });
+    const scaledHighest = scaleToPriceUom(highestPerBase);
     basisCostStr =
-      newCostMoney.scaledUnits > highest.scaledUnits
+      newCostMoney.scaledUnits > scaledHighest.scaledUnits
         ? newCostMoney.toDecimalString()
-        : highest.toDecimalString();
+        : scaledHighest.toDecimalString();
   }
 
   // Deduplicate exact same event key first
@@ -1039,6 +1157,12 @@ export async function triggerCostChangeSuggestionIfApplicable(
   }
   await supersedeQuery.execute();
 
+  const scaledMovingAvgStr = params.movingAvgCost
+    ? scaleToPriceUom(
+        Money.fromDecimalString(params.movingAvgCost, currencyCode),
+      ).toDecimalString()
+    : basisCostStr;
+
   return createSuggestionInternal(trx, {
     productId: params.productId,
     scope: targetScope,
@@ -1056,10 +1180,11 @@ export async function triggerCostChangeSuggestionIfApplicable(
     minSellingPrice: rule.minSellingPrice,
     effectiveDate: formatDateOnly(new Date()),
     reason: params.reason,
+    explicitProposedPrice: normalizedExplicitProposedPrice,
     marketPrice: params.marketPrice ?? null,
     marketPriceSource: params.marketPriceSource ?? null,
     incomingPurchaseCost: newCostMoney.toDecimalString(),
-    movingAvgCost: params.movingAvgCost ?? basisCostStr,
+    movingAvgCost: scaledMovingAvgStr,
   });
 }
 
@@ -2359,14 +2484,14 @@ export async function getSyncCatalogPricingSnapshot(
   const currencyCode = await getTenantBaseCurrency(trx);
   const [
     tenantRow,
-    products,
+    rawProducts,
     rules,
     settings,
     branchOverrides,
     batches,
-    categories,
-    barcodes,
-    unitConversions,
+    rawCategories,
+    rawBarcodes,
+    rawUnitConversions,
     taxGroups,
     taxRates,
     customers,
@@ -2377,6 +2502,8 @@ export async function getSyncCatalogPricingSnapshot(
     balances,
     serials,
     intakeLots,
+    productBranchAssignments,
+    categoryBranchAssignments,
   ] = await Promise.all([
     trx.db
       .selectFrom('tenants')
@@ -2387,6 +2514,7 @@ export async function getSyncCatalogPricingSnapshot(
       .selectFrom('products')
       .select([
         'id',
+        'origin_branch_id',
         'sku',
         'name',
         'category_id',
@@ -2406,6 +2534,7 @@ export async function getSyncCatalogPricingSnapshot(
         'track_inventory',
         'primary_barcode',
         'sync_version',
+        'created_at',
       ])
       .where('tenant_id', '=', trx.tenantId)
       .where('status', '=', 'ACTIVE')
@@ -2489,7 +2618,7 @@ export async function getSyncCatalogPricingSnapshot(
       : Promise.resolve([]),
     trx.db
       .selectFrom('categories')
-      .select(['id', 'parent_id', 'name', 'status', 'sync_version'])
+      .select(['id', 'origin_branch_id', 'parent_id', 'name', 'status', 'sync_version', 'created_at'])
       .where('tenant_id', '=', trx.tenantId)
       .where('status', '=', 'ACTIVE')
       .orderBy('name', 'asc')
@@ -2499,6 +2628,7 @@ export async function getSyncCatalogPricingSnapshot(
       .select([
         'id',
         'product_id',
+        'branch_id',
         'barcode',
         'barcode_type',
         'uom_code',
@@ -2551,7 +2681,7 @@ export async function getSyncCatalogPricingSnapshot(
     hasAnyBranchScope
       ? trx.db
           .selectFrom('branches')
-          .select(['id', 'code', 'name', 'is_active', 'default_warehouse_id'])
+          .select(['id', 'code', 'name', 'is_active', 'default_warehouse_id', 'created_at'])
           .where('tenant_id', '=', trx.tenantId)
           .where('is_active', '=', true)
           .$if(scopedBranchIds !== null, (qb) => qb.where('id', 'in', scopedBranchIds!))
@@ -2631,7 +2761,85 @@ export async function getSyncCatalogPricingSnapshot(
           .orderBy('received_at', 'asc')
           .execute()
       : Promise.resolve([]),
+    hasAnyBranchScope
+      ? trx.db
+          .selectFrom('product_branch_assignments')
+          .select(['product_id', 'branch_id', 'status'])
+          .where('tenant_id', '=', trx.tenantId)
+          .execute()
+      : Promise.resolve([]),
+    hasAnyBranchScope
+      ? trx.db
+          .selectFrom('category_branch_assignments')
+          .select(['category_id', 'branch_id', 'status'])
+          .where('tenant_id', '=', trx.tenantId)
+          .execute()
+      : Promise.resolve([]),
   ]);
+
+  const branchCreatedAtById = new Map(
+    branches.map((b) => [b.id, new Date(b.created_at).getTime()]),
+  );
+  const effectiveScopeIds =
+    scopedBranchIds !== null ? scopedBranchIds : branches.map((b) => b.id);
+
+  let products = rawProducts;
+  let categories = rawCategories;
+  if (scopedBranchIds !== null) {
+    const pbaByProduct = new Map<string, Array<{ branch_id: string; status: string }>>();
+    for (const a of productBranchAssignments) {
+      const list = pbaByProduct.get(a.product_id) ?? [];
+      list.push(a);
+      pbaByProduct.set(a.product_id, list);
+    }
+
+    products = rawProducts.filter((p) => {
+      const assigns = pbaByProduct.get(p.id) ?? [];
+      const activeMatch = assigns.some(
+        (a) => scopedBranchIds.includes(a.branch_id) && a.status === 'ACTIVE',
+      );
+      if (activeMatch) return true;
+      if (p.origin_branch_id !== null || assigns.length > 0) return false;
+      const pCreated = new Date(p.created_at).getTime();
+      return effectiveScopeIds.some((bid) => {
+        const bCreated = branchCreatedAtById.get(bid);
+        return bCreated !== undefined && pCreated >= bCreated;
+      });
+    });
+
+    const cbaByCategory = new Map<string, Array<{ branch_id: string; status: string }>>();
+    for (const a of categoryBranchAssignments) {
+      const list = cbaByCategory.get(a.category_id) ?? [];
+      list.push(a);
+      cbaByCategory.set(a.category_id, list);
+    }
+
+    categories = rawCategories.filter((c) => {
+      const assigns = cbaByCategory.get(c.id) ?? [];
+      const activeMatch = assigns.some(
+        (a) => scopedBranchIds.includes(a.branch_id) && a.status === 'ACTIVE',
+      );
+      if (activeMatch) return true;
+      if (c.origin_branch_id !== null || assigns.length > 0) return false;
+      const cCreated = new Date(c.created_at).getTime();
+      return effectiveScopeIds.some((bid) => {
+        const bCreated = branchCreatedAtById.get(bid);
+        return bCreated !== undefined && cCreated >= bCreated;
+      });
+    });
+  }
+
+  const visibleProductIds = new Set(products.map((p) => p.id));
+  const barcodes = rawBarcodes.filter(
+    (bc) =>
+      visibleProductIds.has(bc.product_id) &&
+      (scopedBranchIds === null ||
+        !bc.branch_id ||
+        scopedBranchIds.includes(bc.branch_id)),
+  );
+  const unitConversions = rawUnitConversions.filter((u) =>
+    visibleProductIds.has(u.product_id),
+  );
 
   let mainBranchId: string | null = branches[0]?.id ?? null;
   for (const log of branchMainLogs) {

@@ -151,7 +151,10 @@ export async function uploadExpenseAttachment(
     });
   }
 
-  const normalizedMime = input.mimeType.toLowerCase();
+  let normalizedMime = input.mimeType.trim().toLowerCase();
+  if (normalizedMime === 'image/jpg') {
+    normalizedMime = 'image/jpeg';
+  }
   if (
     !ALLOWED_EXPENSE_MIMES.includes(
       normalizedMime as (typeof ALLOWED_EXPENSE_MIMES)[number],

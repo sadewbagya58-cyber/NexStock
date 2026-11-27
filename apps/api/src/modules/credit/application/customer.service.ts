@@ -28,14 +28,15 @@ export async function createCustomer(
   }
   await assertSubscriptionEntitlement(trx, { requireWriteAccess: true });
 
+  const addrLine1 = input.addressLine1?.trim() || null;
+  const addrCity = (input.addressCity ?? input.city)?.trim() || null;
+  const addrPostal = (input.addressPostalCode ?? input.postalCode)?.trim() || null;
+  const compName = input.companyName?.trim() || null;
+
   // Canonical address resolution
   let resolvedAddress = input.address?.trim() || null;
   if (!resolvedAddress) {
-    const parts = [
-      input.addressLine1?.trim(),
-      input.addressCity?.trim(),
-      input.addressPostalCode?.trim(),
-    ].filter(Boolean);
+    const parts = [addrLine1, addrCity, addrPostal].filter(Boolean);
     if (parts.length > 0) {
       resolvedAddress = parts.join(', ');
     }
@@ -43,7 +44,7 @@ export async function createCustomer(
 
   // Canonical notes / company name resolution
   const noteParts = [
-    input.companyName?.trim() ? `Company: ${input.companyName.trim()}` : null,
+    compName ? `Company: ${compName}` : null,
     input.notes?.trim() || null,
   ].filter(Boolean);
   const resolvedNotes = noteParts.length > 0 ? noteParts.join('\n') : null;
@@ -76,6 +77,10 @@ export async function createCustomer(
       email: input.email?.trim() || null,
       phone: input.phone?.trim() || null,
       address: resolvedAddress,
+      address_line1: addrLine1 ?? resolvedAddress,
+      city: addrCity,
+      postal_code: addrPostal,
+      company_name: compName,
       tax_id: input.taxId?.trim() || null,
       notes: resolvedNotes,
       status: resolvedStatus,
@@ -97,6 +102,12 @@ export async function createCustomer(
     email: row.email,
     phone: row.phone,
     address: row.address,
+    addressLine1: row.address_line1 ?? row.address,
+    addressCity: row.city ?? null,
+    addressPostalCode: row.postal_code ?? null,
+    city: row.city ?? null,
+    postalCode: row.postal_code ?? null,
+    companyName: row.company_name ?? null,
     taxId: row.tax_id,
     notes: row.notes,
     status: row.status,
@@ -125,6 +136,10 @@ export async function getCustomerById(
       'customers.email',
       'customers.phone',
       'customers.address',
+      'customers.address_line1',
+      'customers.city',
+      'customers.postal_code',
+      'customers.company_name',
       'customers.tax_id',
       'customers.notes',
       'customers.status',
@@ -157,6 +172,12 @@ export async function getCustomerById(
     email: customer.email,
     phone: customer.phone,
     address: customer.address,
+    addressLine1: customer.address_line1 ?? customer.address,
+    addressCity: customer.city ?? null,
+    addressPostalCode: customer.postal_code ?? null,
+    city: customer.city ?? null,
+    postalCode: customer.postal_code ?? null,
+    companyName: customer.company_name ?? null,
     taxId: customer.tax_id,
     notes: customer.notes,
     status: customer.status,
@@ -218,6 +239,10 @@ export async function listCustomers(
       'customers.email',
       'customers.phone',
       'customers.address',
+      'customers.address_line1',
+      'customers.city',
+      'customers.postal_code',
+      'customers.company_name',
       'customers.tax_id',
       'customers.notes',
       'customers.status',
@@ -242,6 +267,12 @@ export async function listCustomers(
     email: r.email,
     phone: r.phone,
     address: r.address,
+    addressLine1: r.address_line1 ?? r.address,
+    addressCity: r.city ?? null,
+    addressPostalCode: r.postal_code ?? null,
+    city: r.city ?? null,
+    postalCode: r.postal_code ?? null,
+    companyName: r.company_name ?? null,
     taxId: r.tax_id,
     notes: r.notes,
     status: r.status,
@@ -268,7 +299,7 @@ export async function updateCustomer(
 
   const existing = await trx.db
     .selectFrom('customers')
-    .select(['id', 'status'])
+    .select(['id', 'status', 'address', 'address_line1', 'city', 'postal_code', 'company_name'])
     .where('tenant_id', '=', trx.tenantId)
     .where('id', '=', id)
     .executeTakeFirst();
@@ -289,23 +320,45 @@ export async function updateCustomer(
   if (input.name !== undefined) updateValues['name'] = input.name.trim();
   if (input.email !== undefined) updateValues['email'] = input.email?.trim() || null;
   if (input.phone !== undefined) updateValues['phone'] = input.phone?.trim() || null;
-  
+
+  const hasCityUpdate = input.addressCity !== undefined || input.city !== undefined;
+  const hasPostalUpdate = input.addressPostalCode !== undefined || input.postalCode !== undefined;
+  const nextLine1 =
+    input.addressLine1 !== undefined
+      ? input.addressLine1?.trim() || null
+      : existing.address_line1 ?? null;
+  const nextCity = hasCityUpdate
+    ? (input.addressCity ?? input.city)?.trim() || null
+    : existing.city ?? null;
+  const nextPostal = hasPostalUpdate
+    ? (input.addressPostalCode ?? input.postalCode)?.trim() || null
+    : existing.postal_code ?? null;
+
+  if (input.addressLine1 !== undefined) updateValues['address_line1'] = nextLine1;
+  if (hasCityUpdate) updateValues['city'] = nextCity;
+  if (hasPostalUpdate) updateValues['postal_code'] = nextPostal;
+
   if (input.address !== undefined) {
-    updateValues['address'] = input.address?.trim() || null;
-  } else if (input.addressLine1 !== undefined || input.addressCity !== undefined || input.addressPostalCode !== undefined) {
-    const parts = [
-      input.addressLine1?.trim(),
-      input.addressCity?.trim(),
-      input.addressPostalCode?.trim(),
-    ].filter(Boolean);
+    const trimmedAddr = input.address?.trim() || null;
+    updateValues['address'] = trimmedAddr;
+    if (input.addressLine1 === undefined && !hasCityUpdate && !hasPostalUpdate) {
+      updateValues['address_line1'] = trimmedAddr;
+    }
+  } else if (input.addressLine1 !== undefined || hasCityUpdate || hasPostalUpdate) {
+    const parts = [nextLine1, nextCity, nextPostal].filter(Boolean);
     updateValues['address'] = parts.length > 0 ? parts.join(', ') : null;
+  }
+
+  if (input.companyName !== undefined) {
+    updateValues['company_name'] = input.companyName?.trim() || null;
   }
 
   if (input.taxId !== undefined) updateValues['tax_id'] = input.taxId?.trim() || null;
   
   if (input.notes !== undefined) {
+    const effCompany = input.companyName !== undefined ? input.companyName?.trim() : existing.company_name;
     const noteParts = [
-      input.companyName?.trim() ? `Company: ${input.companyName.trim()}` : null,
+      effCompany ? `Company: ${effCompany}` : null,
       input.notes?.trim() || null,
     ].filter(Boolean);
     updateValues['notes'] = noteParts.length > 0 ? noteParts.join('\n') : null;

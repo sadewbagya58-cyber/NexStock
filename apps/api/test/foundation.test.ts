@@ -395,6 +395,11 @@ describe('@nexstock/api — Milestone 0 Foundation, RLS, Idempotency & Sync Inva
           name: '0032_smart_stock_intake_and_barcodes',
           filename: '0032_smart_stock_intake_and_barcodes.sql',
         },
+        {
+          version: 33,
+          name: '0033_branch_catalog_isolation_and_customer_address',
+          filename: '0033_branch_catalog_isolation_and_customer_address.sql',
+        },
       ]);
     });
 
@@ -485,6 +490,7 @@ describe('@nexstock/api — Milestone 0 Foundation, RLS, Idempotency & Sync Inva
         '0030_phase10_5_9_enforcement_admin_analytics_security.sql',
         '0031_qa_master_enhancements.sql',
         '0032_smart_stock_intake_and_barcodes.sql',
+        '0033_branch_catalog_isolation_and_customer_address.sql',
       ]);
 
       await expect(

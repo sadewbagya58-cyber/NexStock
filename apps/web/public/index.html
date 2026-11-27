@@ -526,6 +526,243 @@
       background: var(--bg-primary);
     }
 
+    /* Unified Custom Dialog Overlay (Confirm / Prompt / Alert above Modals) */
+    .nex-dialog-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.58);
+      backdrop-filter: blur(3px);
+      z-index: 12000;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+    .nex-dialog-backdrop.active {
+      display: flex;
+    }
+    .nex-dialog-box {
+      background: var(--surface-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.28);
+      width: 100%;
+      max-width: 430px;
+      overflow: hidden;
+      animation: nexFadeScaleIn 0.14s ease-out;
+    }
+    @keyframes nexFadeScaleIn {
+      from { opacity: 0; transform: scale(0.96) translateY(4px); }
+      to { opacity: 1; transform: scale(1) translateY(0); }
+    }
+    .nex-dialog-header {
+      padding: 15px 18px 12px;
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .nex-dialog-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text-primary);
+      margin: 0;
+    }
+    .nex-dialog-body {
+      padding: 16px 18px;
+      font-size: 14px;
+      line-height: 1.5;
+      color: var(--text-secondary);
+    }
+    .nex-dialog-message {
+      color: var(--text-primary);
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .nex-dialog-footer {
+      padding: 12px 18px;
+      border-top: 1px solid var(--border-subtle);
+      background: var(--bg-primary);
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    /* Global Custom Dropdown (NexSelect) */
+    .nex-select-wrap {
+      position: relative;
+      display: inline-flex;
+      width: 100%;
+      min-width: 0;
+      vertical-align: middle;
+    }
+    .nex-select-hidden-native {
+      position: absolute !important;
+      width: 1px !important;
+      height: 1px !important;
+      opacity: 0 !important;
+      pointer-events: none !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      border: 0 !important;
+      overflow: hidden !important;
+      clip: rect(0, 0, 0, 0) !important;
+    }
+    .nex-select-trigger {
+      width: 100%;
+      min-height: 37px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 7px 11px;
+      border-radius: var(--radius);
+      border: 1px solid var(--border-subtle);
+      background: var(--surface-card);
+      color: var(--text-primary);
+      font-size: 14px;
+      font-family: inherit;
+      font-weight: 400;
+      line-height: 1.35;
+      text-align: left;
+      cursor: pointer;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+    }
+    .nex-select-wrap.nex-select-sm .nex-select-trigger {
+      min-height: 31px;
+      padding: 5px 9px;
+      font-size: 13px;
+    }
+    .nex-select-trigger:hover:not(:disabled) {
+      border-color: var(--accent-primary);
+    }
+    .nex-select-trigger:focus,
+    .nex-select-wrap.open .nex-select-trigger {
+      outline: none;
+      border-color: var(--accent-primary);
+      box-shadow: 0 0 0 3px var(--accent-light);
+    }
+    .nex-select-trigger:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      background: var(--bg-primary);
+    }
+    .nex-select-value {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .nex-select-chevron {
+      flex-shrink: 0;
+      width: 14px;
+      height: 14px;
+      color: var(--text-secondary);
+      transition: transform 0.16s ease;
+    }
+    .nex-select-wrap.open .nex-select-chevron {
+      transform: rotate(180deg);
+      color: var(--accent-primary);
+    }
+    .nex-select-menu {
+      position: fixed;
+      z-index: 12500;
+      background: var(--surface-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px;
+      box-shadow: 0 12px 32px rgba(15, 23, 42, 0.18), 0 2px 8px rgba(15, 23, 42, 0.08);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      min-width: 180px;
+      max-height: 290px;
+    }
+    .nex-select-search-wrap {
+      padding: 8px;
+      border-bottom: 1px solid var(--border-subtle);
+      background: var(--bg-primary);
+    }
+    .nex-select-search {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 6px 10px;
+      font-size: 13px;
+      border: 1px solid var(--border-subtle);
+      border-radius: 6px;
+      background: var(--surface-card);
+      color: var(--text-primary);
+      font-family: inherit;
+    }
+    .nex-select-search:focus {
+      outline: none;
+      border-color: var(--accent-primary);
+      box-shadow: 0 0 0 2px var(--accent-light);
+    }
+    .nex-select-options {
+      overflow-y: auto;
+      padding: 4px;
+      flex: 1;
+      -webkit-overflow-scrolling: touch;
+    }
+    .nex-select-group-label {
+      padding: 6px 10px 4px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--text-secondary);
+    }
+    .nex-select-option {
+      width: 100%;
+      border: none;
+      background: transparent;
+      color: var(--text-primary);
+      font-family: inherit;
+      font-size: 13px;
+      line-height: 1.35;
+      text-align: left;
+      padding: 8px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .nex-select-option:hover:not(:disabled),
+    .nex-select-option.highlighted:not(:disabled) {
+      background: var(--accent-light);
+      color: var(--accent-primary);
+    }
+    .nex-select-option.selected {
+      background: var(--accent-light);
+      color: var(--accent-primary);
+      font-weight: 600;
+    }
+    .nex-select-option:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+    .nex-select-empty {
+      padding: 14px 10px;
+      text-align: center;
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+    @media (max-width: 640px) {
+      .nex-select-menu {
+        max-height: 48vh;
+      }
+      .nex-select-option {
+        padding: 10px 12px;
+        font-size: 14px;
+      }
+    }
+
     /* POS Grid & Cart Styles */
     .pos-layout {
       display: grid;
@@ -997,6 +1234,25 @@
       display: flex;
       flex-direction: column;
       gap: 10px;
+      max-width: 100%;
+      box-sizing: border-box;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+    .intake-lot-ref-card {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      padding: 8px 10px;
+      background: var(--bg-primary);
+      border: 1px solid var(--border-subtle);
+      border-radius: 6px;
+      font-size: 12px;
+      max-width: 100%;
+      box-sizing: border-box;
+      overflow-wrap: anywhere;
     }
     @media (max-width: 1024px) {
       .uom-conv-row {
@@ -3454,6 +3710,27 @@
     </div>
   </div>
 
+  <!-- Unified Confirmation / Prompt / Alert Dialog Overlay -->
+  <div class="nex-dialog-backdrop" id="nexDialogOverlay" role="dialog" aria-modal="true" aria-labelledby="nexDialogTitle" style="display: none;">
+    <div class="nex-dialog-box" id="nexDialogBox">
+      <div class="nex-dialog-header">
+        <h3 class="nex-dialog-title" id="nexDialogTitle">Confirm Action</h3>
+        <button type="button" class="btn-icon btn-sm" id="nexDialogCloseBtn" aria-label="Close">&times;</button>
+      </div>
+      <div class="nex-dialog-body">
+        <div class="nex-dialog-message" id="nexDialogMessage"></div>
+        <div id="nexDialogInputWrap" style="display: none; margin-top: 12px;">
+          <input type="text" class="form-input" id="nexDialogInput" autocomplete="off">
+          <div id="nexDialogError" style="display: none; font-size: 12px; color: var(--status-danger); margin-top: 6px;"></div>
+        </div>
+      </div>
+      <div class="nex-dialog-footer" id="nexDialogFooter">
+        <button type="button" class="btn btn-secondary" id="nexDialogCancelBtn">Cancel</button>
+        <button type="button" class="btn btn-primary" id="nexDialogOkBtn">Confirm</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Toast Notification Container -->
   <div class="toast-container" id="toastContainer"></div>
 
@@ -4063,9 +4340,9 @@
         normalizedEndpoint.startsWith('/v1/auth/recover') ||
         normalizedEndpoint.startsWith('/v1/auth/refresh');
 
-      // Deduplicate identical concurrent GET requests within the same session and tenant scope
+      // Deduplicate identical concurrent GET requests within the same session, tenant, and active branch scope
       const dedupeKey = (method === 'GET' && !options._retried)
-        ? `${requestEpoch}:${state.tenantId || ''}:${state.token || ''}:${url}`
+        ? `${requestEpoch}:${state.tenantId || ''}:${state.branchId || ''}:${state.token || ''}:${url}`
         : null;
 
       if (dedupeKey && inFlightGetRequests.has(dedupeKey)) {
@@ -4107,6 +4384,7 @@
         const headers = {
           ...(options.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
           ...(state.tenantId ? { 'x-tenant-id': state.tenantId } : {}),
+          ...(!isAuthBypass && state.branchId && !options.omitBranchHeader ? { 'x-branch-id': state.branchId } : {}),
           ...(state.token ? { 'Authorization': `Bearer ${state.token}` } : {}),
           ...(options.headers || {})
         };
@@ -4234,11 +4512,13 @@
         containerEl.classList.add('active');
         containerEl.style.display = 'flex';
       }
+      if (typeof scheduleEnhanceNexSelects === 'function') scheduleEnhanceNexSelects();
     }
 
     function closeModal() {
       if (state.isSubmittingCheckout) return;
       state.activeCheckoutKey = null;
+      if (typeof closeAllNexSelects === 'function') closeAllNexSelects();
       const modalBox = document.querySelector('.modal-box');
       if (modalBox) modalBox.style.maxWidth = '540px';
       const containerEl = document.getElementById('modalContainer');
@@ -4247,6 +4527,495 @@
         containerEl.style.display = 'none';
       }
     }
+
+    // Unified In-App Custom Dialogs (#nexDialogOverlay) replacing native alert/confirm/prompt
+    let _activeNexDialogCleanup = null;
+    function openNexDialog({
+      mode = 'confirm',
+      title = 'Confirm Action',
+      message = '',
+      defaultValue = '',
+      placeholder = '',
+      confirmText = 'Confirm',
+      cancelText = 'Cancel',
+      danger = false,
+      minLength = 0,
+      required = false
+    }) {
+      return new Promise((resolve) => {
+        const overlay = document.getElementById('nexDialogOverlay');
+        const titleEl = document.getElementById('nexDialogTitle');
+        const msgEl = document.getElementById('nexDialogMessage');
+        const inputWrap = document.getElementById('nexDialogInputWrap');
+        const inputEl = document.getElementById('nexDialogInput');
+        const errEl = document.getElementById('nexDialogError');
+        const cancelBtn = document.getElementById('nexDialogCancelBtn');
+        const okBtn = document.getElementById('nexDialogOkBtn');
+        const closeBtn = document.getElementById('nexDialogCloseBtn');
+
+        if (!overlay || !titleEl || !msgEl || !cancelBtn || !okBtn) {
+          resolve(mode === 'prompt' ? defaultValue : true);
+          return;
+        }
+        if (typeof _activeNexDialogCleanup === 'function') {
+          _activeNexDialogCleanup(mode === 'prompt' ? null : false);
+        }
+        if (typeof closeAllNexSelects === 'function') closeAllNexSelects();
+
+        const prevFocused = document.activeElement;
+        titleEl.textContent = title;
+        msgEl.textContent = message;
+        if (errEl) {
+          errEl.textContent = '';
+          errEl.style.display = 'none';
+        }
+
+        if (mode === 'prompt' && inputWrap && inputEl) {
+          inputWrap.style.display = 'block';
+          inputEl.value = defaultValue !== undefined && defaultValue !== null ? String(defaultValue) : '';
+          inputEl.placeholder = placeholder || '';
+        } else if (inputWrap) {
+          inputWrap.style.display = 'none';
+        }
+
+        cancelBtn.style.display = mode === 'alert' ? 'none' : '';
+        cancelBtn.textContent = cancelText || 'Cancel';
+        okBtn.textContent = confirmText || (mode === 'alert' ? 'OK' : 'Confirm');
+        okBtn.className = `btn ${danger ? 'btn-danger' : 'btn-primary'}`;
+
+        overlay.classList.add('active');
+        overlay.style.display = 'flex';
+
+        let settled = false;
+        const finish = (val) => {
+          if (settled) return;
+          settled = true;
+          document.removeEventListener('keydown', onKeyDown, true);
+          overlay.removeEventListener('click', onBackdropClick);
+          okBtn.removeEventListener('click', onOk);
+          cancelBtn.removeEventListener('click', onCancel);
+          if (closeBtn) closeBtn.removeEventListener('click', onCancel);
+          overlay.classList.remove('active');
+          overlay.style.display = 'none';
+          _activeNexDialogCleanup = null;
+          if (prevFocused && typeof prevFocused.focus === 'function') {
+            try { prevFocused.focus(); } catch {}
+          }
+          resolve(val);
+        };
+        _activeNexDialogCleanup = finish;
+
+        const onCancel = () => finish(mode === 'prompt' ? null : (mode === 'alert' ? undefined : false));
+        const onOk = () => {
+          if (mode === 'prompt') {
+            const rawVal = inputEl ? inputEl.value : '';
+            const trimmedLen = rawVal.trim().length;
+            if ((required && trimmedLen === 0) || (minLength > 0 && trimmedLen < minLength)) {
+              if (errEl) {
+                errEl.textContent = minLength > 0
+                  ? `Please enter at least ${minLength} characters.`
+                  : 'This field is required.';
+                errEl.style.display = 'block';
+              }
+              if (inputEl) inputEl.focus();
+              return;
+            }
+            finish(rawVal);
+            return;
+          }
+          finish(mode === 'alert' ? undefined : true);
+        };
+        const onBackdropClick = (e) => {
+          if (e.target === overlay) onCancel();
+        };
+        const onKeyDown = (e) => {
+          if (e.key === 'Escape') {
+            e.preventDefault();
+            e.stopPropagation();
+            onCancel();
+          } else if (e.key === 'Enter' && (mode !== 'prompt' || document.activeElement === inputEl)) {
+            e.preventDefault();
+            e.stopPropagation();
+            onOk();
+          }
+        };
+
+        okBtn.addEventListener('click', onOk);
+        cancelBtn.addEventListener('click', onCancel);
+        if (closeBtn) closeBtn.addEventListener('click', onCancel);
+        overlay.addEventListener('click', onBackdropClick);
+        document.addEventListener('keydown', onKeyDown, true);
+
+        setTimeout(() => {
+          if (mode === 'prompt' && inputEl) {
+            inputEl.focus();
+            inputEl.select();
+          } else {
+            okBtn.focus();
+          }
+        }, 15);
+      });
+    }
+
+    function nexAlert(message, optionsOrTitle = 'Notice') {
+      const opts = typeof optionsOrTitle === 'string' ? { title: optionsOrTitle } : (optionsOrTitle || {});
+      return openNexDialog({ mode: 'alert', message, title: opts.title || 'Notice', confirmText: opts.confirmText || 'OK', danger: Boolean(opts.danger) });
+    }
+
+    function nexConfirm(message, optionsOrTitle = {}) {
+      const opts = typeof optionsOrTitle === 'string' ? { title: optionsOrTitle } : (optionsOrTitle || {});
+      return openNexDialog({
+        mode: 'confirm',
+        message,
+        title: opts.title || 'Confirm Action',
+        confirmText: opts.confirmText || 'Confirm',
+        cancelText: opts.cancelText || 'Cancel',
+        danger: Boolean(opts.danger)
+      });
+    }
+
+    function nexPrompt(message, defaultValue = '', options = {}) {
+      return openNexDialog({
+        mode: 'prompt',
+        message,
+        defaultValue,
+        title: options.title || 'Enter Details',
+        placeholder: options.placeholder || '',
+        confirmText: options.confirmText || 'Submit',
+        cancelText: options.cancelText || 'Cancel',
+        danger: Boolean(options.danger),
+        minLength: options.minLength || 0,
+        required: Boolean(options.required)
+      });
+    }
+    window.nexAlert = nexAlert;
+    window.nexConfirm = nexConfirm;
+    window.nexPrompt = nexPrompt;
+
+    // Global Searchable Custom Dropdown Controller (NexSelect)
+    let _activeNexSelectState = null;
+    let _nexSelectEnhanceQueued = false;
+
+    function closeAllNexSelects() {
+      if (_activeNexSelectState) {
+        const { menuEl, wrapEl, onReposition, onOutsideClick } = _activeNexSelectState;
+        if (wrapEl) wrapEl.classList.remove('open');
+        if (menuEl && menuEl.parentNode) menuEl.parentNode.removeChild(menuEl);
+        if (onReposition) {
+          window.removeEventListener('scroll', onReposition, true);
+          window.removeEventListener('resize', onReposition);
+        }
+        if (onOutsideClick) {
+          document.removeEventListener('pointerdown', onOutsideClick, true);
+          document.removeEventListener('keydown', onOutsideClick, true);
+        }
+        _activeNexSelectState = null;
+      }
+    }
+
+    function syncNexSelectUI(selectEl) {
+      if (!selectEl || !selectEl._nexSelectRefs) return;
+      const { wrapEl, triggerBtn, valueSpan } = selectEl._nexSelectRefs;
+      const isSmall = selectEl.classList.contains('form-select-sm');
+      wrapEl.classList.toggle('nex-select-sm', isSmall);
+      wrapEl.style.display = selectEl.style.display === 'none' ? 'none' : '';
+      triggerBtn.disabled = Boolean(selectEl.disabled);
+      const selectedOpt = (selectEl.selectedOptions && selectEl.selectedOptions[0])
+        || (selectEl.options && selectEl.selectedIndex >= 0 ? selectEl.options[selectEl.selectedIndex] : null);
+      valueSpan.textContent = selectedOpt ? selectedOpt.textContent : 'Select...';
+      if (_activeNexSelectState && _activeNexSelectState.selectEl === selectEl && typeof _activeNexSelectState.renderList === 'function') {
+        _activeNexSelectState.renderList();
+      }
+    }
+
+    function openNexSelectMenu(selectEl) {
+      if (!selectEl || selectEl.disabled || !selectEl._nexSelectRefs) return;
+      if (_activeNexSelectState && _activeNexSelectState.selectEl === selectEl) {
+        closeAllNexSelects();
+        return;
+      }
+      closeAllNexSelects();
+
+      const { wrapEl, triggerBtn } = selectEl._nexSelectRefs;
+      wrapEl.classList.add('open');
+
+      const menuEl = document.createElement('div');
+      menuEl.className = 'nex-select-menu';
+      const allOptions = Array.from(selectEl.options || []);
+      const showSearch = allOptions.length >= 6;
+
+      let searchQuery = '';
+      let highlightedIdx = -1;
+      const optionsContainer = document.createElement('div');
+      optionsContainer.className = 'nex-select-options';
+
+      let searchInput = null;
+      if (showSearch) {
+        const searchWrap = document.createElement('div');
+        searchWrap.className = 'nex-select-search-wrap';
+        searchInput = document.createElement('input');
+        searchInput.type = 'text';
+        searchInput.className = 'nex-select-search';
+        searchInput.placeholder = 'Search...';
+        searchInput.autocomplete = 'off';
+        searchWrap.appendChild(searchInput);
+        menuEl.appendChild(searchWrap);
+      }
+      menuEl.appendChild(optionsContainer);
+
+      const renderList = () => {
+        const q = searchQuery.trim().toLowerCase();
+        optionsContainer.innerHTML = '';
+        const visibleButtons = [];
+        let lastGroup = null;
+
+        Array.from(selectEl.options || []).forEach((opt) => {
+          const text = (opt.textContent || '').trim();
+          if (q && !text.toLowerCase().includes(q)) return;
+
+          if (opt.parentElement && opt.parentElement.tagName === 'OPTGROUP') {
+            const grpLabel = opt.parentElement.getAttribute('label') || '';
+            if (grpLabel && grpLabel !== lastGroup) {
+              lastGroup = grpLabel;
+              const grpEl = document.createElement('div');
+              grpEl.className = 'nex-select-group-label';
+              grpEl.textContent = grpLabel;
+              optionsContainer.appendChild(grpEl);
+            }
+          }
+
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'nex-select-option' + (opt.value === selectEl.value && opt.selected ? ' selected' : '');
+          btn.disabled = Boolean(opt.disabled);
+          const lblSpan = document.createElement('span');
+          lblSpan.textContent = text;
+          btn.appendChild(lblSpan);
+          if (opt.selected) {
+            const chk = document.createElement('span');
+            chk.textContent = '✓';
+            chk.style.fontSize = '12px';
+            btn.appendChild(chk);
+          }
+          btn.addEventListener('click', () => {
+            if (opt.disabled) return;
+            const changed = selectEl.value !== opt.value;
+            selectEl.value = opt.value;
+            closeAllNexSelects();
+            syncNexSelectUI(selectEl);
+            if (changed) {
+              selectEl.dispatchEvent(new Event('change', { bubbles: true }));
+              selectEl.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+            triggerBtn.focus();
+          });
+          optionsContainer.appendChild(btn);
+          if (!opt.disabled) visibleButtons.push(btn);
+        });
+
+        if (optionsContainer.children.length === 0) {
+          const emptyEl = document.createElement('div');
+          emptyEl.className = 'nex-select-empty';
+          emptyEl.textContent = 'No matching options';
+          optionsContainer.appendChild(emptyEl);
+        }
+
+        if (highlightedIdx >= visibleButtons.length) highlightedIdx = visibleButtons.length - 1;
+        visibleButtons.forEach((b, i) => b.classList.toggle('highlighted', i === highlightedIdx));
+        return visibleButtons;
+      };
+
+      const positionMenu = () => {
+        const rect = triggerBtn.getBoundingClientRect();
+        const vh = window.innerHeight || document.documentElement.clientHeight || 720;
+        const vw = window.innerWidth || document.documentElement.clientWidth || 1024;
+        const desiredW = Math.min(Math.max(rect.width, 190), vw - 16);
+        let left = rect.left;
+        if (left + desiredW > vw - 8) left = Math.max(8, vw - desiredW - 8);
+        menuEl.style.width = `${desiredW}px`;
+        menuEl.style.left = `${left}px`;
+
+        const spaceBelow = vh - rect.bottom - 10;
+        const spaceAbove = rect.top - 10;
+        if (spaceBelow < 180 && spaceAbove > spaceBelow) {
+          menuEl.style.top = 'auto';
+          menuEl.style.bottom = `${Math.max(8, vh - rect.top + 4)}px`;
+          menuEl.style.maxHeight = `${Math.min(290, Math.max(120, spaceAbove))}px`;
+        } else {
+          menuEl.style.bottom = 'auto';
+          menuEl.style.top = `${Math.min(vh - 80, rect.bottom + 4)}px`;
+          menuEl.style.maxHeight = `${Math.min(290, Math.max(140, spaceBelow))}px`;
+        }
+      };
+
+      const onReposition = (e) => {
+        if (e && e.target && menuEl.contains(e.target)) return;
+        positionMenu();
+      };
+      const onOutsideClick = (e) => {
+        if (e.type === 'keydown') {
+          if (e.key === 'Escape') {
+            e.preventDefault();
+            e.stopPropagation();
+            closeAllNexSelects();
+            triggerBtn.focus();
+            return;
+          }
+          const btns = Array.from(optionsContainer.querySelectorAll('.nex-select-option:not(:disabled)'));
+          if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            highlightedIdx = Math.min(btns.length - 1, highlightedIdx + 1);
+            btns.forEach((b, i) => b.classList.toggle('highlighted', i === highlightedIdx));
+            if (btns[highlightedIdx]) btns[highlightedIdx].scrollIntoView({ block: 'nearest' });
+          } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            highlightedIdx = Math.max(0, highlightedIdx - 1);
+            btns.forEach((b, i) => b.classList.toggle('highlighted', i === highlightedIdx));
+            if (btns[highlightedIdx]) btns[highlightedIdx].scrollIntoView({ block: 'nearest' });
+          } else if (e.key === 'Enter' && highlightedIdx >= 0 && btns[highlightedIdx]) {
+            e.preventDefault();
+            btns[highlightedIdx].click();
+          }
+          return;
+        }
+        if (!menuEl.contains(e.target) && !wrapEl.contains(e.target)) {
+          closeAllNexSelects();
+        }
+      };
+
+      document.body.appendChild(menuEl);
+      renderList();
+      positionMenu();
+
+      if (searchInput) {
+        searchInput.addEventListener('input', () => {
+          searchQuery = searchInput.value;
+          highlightedIdx = 0;
+          renderList();
+        });
+        setTimeout(() => searchInput.focus(), 10);
+      }
+
+      window.addEventListener('scroll', onReposition, true);
+      window.addEventListener('resize', onReposition);
+      document.addEventListener('pointerdown', onOutsideClick, true);
+      document.addEventListener('keydown', onOutsideClick, true);
+
+      _activeNexSelectState = { selectEl, menuEl, wrapEl, renderList, onReposition, onOutsideClick };
+    }
+
+    function enhanceNexSelect(selectEl) {
+      if (!selectEl || selectEl.tagName !== 'SELECT') return;
+      if (selectEl.multiple || selectEl.classList.contains('no-nex-select')) return;
+      if (selectEl.dataset.nexEnhanced === '1') {
+        syncNexSelectUI(selectEl);
+        return;
+      }
+      if (!selectEl.parentNode) return;
+
+      selectEl.dataset.nexEnhanced = '1';
+      const wrapEl = document.createElement('div');
+      wrapEl.className = 'nex-select-wrap' + (selectEl.classList.contains('form-select-sm') ? ' nex-select-sm' : '');
+      if (selectEl.style.width) wrapEl.style.width = selectEl.style.width;
+      if (selectEl.style.minWidth) wrapEl.style.minWidth = selectEl.style.minWidth;
+      if (selectEl.style.maxWidth) wrapEl.style.maxWidth = selectEl.style.maxWidth;
+      if (selectEl.style.flex) wrapEl.style.flex = selectEl.style.flex;
+      if (selectEl.style.marginBottom) {
+        wrapEl.style.marginBottom = selectEl.style.marginBottom;
+        selectEl.style.marginBottom = '0';
+      }
+
+      const parent = selectEl.parentNode;
+      parent.insertBefore(wrapEl, selectEl);
+      wrapEl.appendChild(selectEl);
+      selectEl.classList.add('nex-select-hidden-native');
+      selectEl.tabIndex = -1;
+      selectEl.setAttribute('aria-hidden', 'true');
+
+      const triggerBtn = document.createElement('button');
+      triggerBtn.type = 'button';
+      triggerBtn.className = 'nex-select-trigger';
+      triggerBtn.setAttribute('aria-haspopup', 'listbox');
+
+      const valueSpan = document.createElement('span');
+      valueSpan.className = 'nex-select-value';
+      const chevSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      chevSvg.setAttribute('viewBox', '0 0 24 24');
+      chevSvg.setAttribute('fill', 'none');
+      chevSvg.setAttribute('stroke', 'currentColor');
+      chevSvg.setAttribute('stroke-width', '2');
+      chevSvg.setAttribute('class', 'nex-select-chevron');
+      chevSvg.innerHTML = '<polyline points="6 9 12 15 18 9"></polyline>';
+
+      triggerBtn.appendChild(valueSpan);
+      triggerBtn.appendChild(chevSvg);
+      wrapEl.appendChild(triggerBtn);
+
+      selectEl._nexSelectRefs = { wrapEl, triggerBtn, valueSpan };
+      selectEl._nexSelectSync = () => syncNexSelectUI(selectEl);
+
+      triggerBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        openNexSelectMenu(selectEl);
+      });
+      selectEl.addEventListener('change', () => syncNexSelectUI(selectEl));
+
+      syncNexSelectUI(selectEl);
+    }
+
+    function enhanceNexSelects(root = document) {
+      if (typeof document === 'undefined') return;
+      const selects = (root || document).querySelectorAll('select.form-select, select.form-select-sm');
+      selects.forEach(enhanceNexSelect);
+    }
+
+    function scheduleEnhanceNexSelects() {
+      if (_nexSelectEnhanceQueued) return;
+      _nexSelectEnhanceQueued = true;
+      const run = () => {
+        _nexSelectEnhanceQueued = false;
+        enhanceNexSelects(document);
+      };
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
+      else setTimeout(run, 0);
+    }
+
+    (function initNexSelectSystem() {
+      if (typeof HTMLSelectElement !== 'undefined') {
+        const valDesc = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value');
+        if (valDesc && valDesc.set && valDesc.get) {
+          Object.defineProperty(HTMLSelectElement.prototype, 'value', {
+            configurable: true,
+            enumerable: valDesc.enumerable,
+            get() { return valDesc.get.call(this); },
+            set(v) {
+              valDesc.set.call(this, v);
+              if (this._nexSelectSync) this._nexSelectSync();
+            }
+          });
+        }
+      }
+      if (typeof MutationObserver !== 'undefined' && typeof document !== 'undefined' && document.body) {
+        const mo = new MutationObserver((mutations) => {
+          let needsEnhance = false;
+          for (const m of mutations) {
+            if (m.target && m.target.tagName === 'SELECT' && m.target._nexSelectSync) {
+              m.target._nexSelectSync();
+            }
+            if (m.addedNodes && m.addedNodes.length > 0) {
+              needsEnhance = true;
+            }
+          }
+          if (needsEnhance) scheduleEnhanceNexSelects();
+        });
+        mo.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['disabled', 'class'] });
+      }
+      if (typeof document !== 'undefined') {
+        scheduleEnhanceNexSelects();
+      }
+    })();
+    window.enhanceNexSelects = enhanceNexSelects;
+    window.closeAllNexSelects = closeAllNexSelects;
 
     function formatQty(val, maxDecimals = 6) {
       if (val === null || val === undefined || val === '') return '0';
@@ -4355,7 +5124,48 @@
       return valid.length > 0 ? valid : [baseUom];
     }
 
+    function roundHalfEvenBigInt(numerator, denominator) {
+      if (denominator === 0n) return 0n;
+      const neg = (numerator < 0n) !== (denominator < 0n);
+      const absNum = numerator < 0n ? -numerator : numerator;
+      const absDen = denominator < 0n ? -denominator : denominator;
+      const q = absNum / absDen;
+      const r = absNum % absDen;
+      const twiceR = r * 2n;
+      let rounded = q;
+      if (twiceR > absDen) {
+        rounded = q + 1n;
+      } else if (twiceR === absDen && (q & 1n) === 1n) {
+        rounded = q + 1n;
+      }
+      return neg ? -rounded : rounded;
+    }
+
+    function toFixedIntScaled(val, decimals) {
+      const s = String(val ?? '0').trim();
+      const match = /^([+-])?(\d+)(?:\.(\d+))?$/.exec(s);
+      if (!match) {
+        const n = Number(val);
+        if (!Number.isFinite(n)) return 0n;
+        return BigInt(Math.round(n * (10 ** decimals)));
+      }
+      const sign = match[1] === '-' ? -1n : 1n;
+      const intPart = match[2] || '0';
+      const fracRaw = match[3] || '';
+      const fracPadded = (fracRaw + '0'.repeat(decimals + 2)).slice(0, decimals);
+      const scaled = BigInt(intPart + fracPadded);
+      const nextDigit = Number((fracRaw + '0'.repeat(decimals + 2))[decimals] || '0');
+      const restNonZero = /[1-9]/.test((fracRaw + '0').slice(decimals + 1));
+      let adj = scaled;
+      if (nextDigit > 5 || (nextDigit === 5 && (restNonZero || (scaled & 1n) === 1n))) {
+        adj = scaled + 1n;
+      }
+      return sign * adj;
+    }
+
     function computeClientProportionateTotal(qty, sellingUom, pricePerPriceUom, product) {
+      const minorUnits = getCurrencyMinorUnits(getTenantCurrency());
+      const minorScale = 10n ** BigInt(minorUnits);
       const cleanSellUom = String(sellingUom || product?.baseUom || 'PCS').trim().toUpperCase();
       const baseUom = String(product?.baseUom || cleanSellUom || 'PCS').trim().toUpperCase();
       if (cleanSellUom !== baseUom && Array.isArray(product?.unitConversions)) {
@@ -4364,7 +5174,11 @@
         );
         const explicitPkgRate = pkgConv?.sellingPrice != null ? parseFloat(pkgConv.sellingPrice) : NaN;
         if (Number.isFinite(explicitPkgRate) && explicitPkgRate > 0) {
-          const lineTotal = Math.round(qty * explicitPkgRate * 100) / 100;
+          const qtyMicro = toFixedIntScaled(qty, 6);
+          const rateScaled = toFixedIntScaled(explicitPkgRate, 4);
+          const subScaled4 = roundHalfEvenBigInt(qtyMicro * rateScaled, 1000000n);
+          const minorInt = roundHalfEvenBigInt(subScaled4 * minorScale, 10000n);
+          const lineTotal = Number(minorInt) / Number(minorScale);
           return {
             qtyInPriceUom: qty,
             priceUom: cleanSellUom,
@@ -4376,9 +5190,14 @@
       }
       const priceUom = String(product?.priceUom || product?.baseUom || sellingUom || 'PCS').trim().toUpperCase();
       const qtyInPriceUom = convertClientUomQty(qty, sellingUom, priceUom, product);
-      const unitRate = parseFloat(pricePerPriceUom || product?.sellingPrice || '0');
+      const rawRate = pricePerPriceUom ?? product?.sellingPrice ?? '0';
+      const unitRate = parseFloat(rawRate);
       if (qtyInPriceUom === null || !Number.isFinite(unitRate)) return null;
-      const lineTotal = Math.round(qtyInPriceUom * unitRate * 100) / 100;
+      const qtyMicro = toFixedIntScaled(qtyInPriceUom, 6);
+      const rateScaled = toFixedIntScaled(rawRate, 4);
+      const subScaled4 = roundHalfEvenBigInt(qtyMicro * rateScaled, 1000000n);
+      const minorInt = roundHalfEvenBigInt(subScaled4 * minorScale, 10000n);
+      const lineTotal = Number(minorInt) / Number(minorScale);
       return { qtyInPriceUom, priceUom, unitRate, lineTotal, isPackageExplicit: false };
     }
 
@@ -4688,6 +5507,15 @@
       state.cachedBatches = [];
       state.cachedTransfers = [];
       state.cachedRegisters = [];
+      state.cachedProducts = [];
+      state.cachedCategories = [];
+      state.cachedSerialGroups = [];
+      state.cachedSerials = [];
+      state.cachedDashboard = null;
+      state.currentBusinessReport = null;
+      state.posCachedProducts = [];
+      state.posProductsMap = new Map();
+      state.cart = [];
       state.registerId = '';
       state.registerCode = '';
       state.activeShift = null;
@@ -7466,8 +8294,45 @@
       }
     }
 
+    function formatLocalIsoDate(dateObj = new Date()) {
+      const y = dateObj.getFullYear();
+      const m = String(dateObj.getMonth() + 1).padStart(2, '0');
+      const d = String(dateObj.getDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    }
+
+    function computeLocalDashboardPresetDates(preset) {
+      const now = new Date();
+      const todayLocal = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const todayStr = formatLocalIsoDate(todayLocal);
+      if (preset === 'YESTERDAY') {
+        const y = new Date(todayLocal.getTime());
+        y.setDate(y.getDate() - 1);
+        const yStr = formatLocalIsoDate(y);
+        return { startDate: yStr, endDate: yStr };
+      }
+      if (preset === 'THIS_WEEK') {
+        const dow = todayLocal.getDay();
+        const diffToMon = dow === 0 ? -6 : 1 - dow;
+        const mon = new Date(todayLocal.getTime());
+        mon.setDate(mon.getDate() + diffToMon);
+        return { startDate: formatLocalIsoDate(mon), endDate: todayStr };
+      }
+      if (preset === 'THIS_MONTH') {
+        const first = new Date(todayLocal.getFullYear(), todayLocal.getMonth(), 1);
+        return { startDate: formatLocalIsoDate(first), endDate: todayStr };
+      }
+      return { startDate: todayStr, endDate: todayStr };
+    }
+
     function setDashboardDatePreset(preset) {
-      state.dashboardDatePreset = preset || 'TODAY';
+      const nextPreset = preset || 'TODAY';
+      state.dashboardDatePreset = nextPreset;
+      if (nextPreset === 'CUSTOM') {
+        const fallback = computeLocalDashboardPresetDates('TODAY');
+        if (!state.dashboardCustomStart) state.dashboardCustomStart = fallback.startDate;
+        if (!state.dashboardCustomEnd) state.dashboardCustomEnd = fallback.endDate;
+      }
       renderDashboardView();
     }
 
@@ -7480,6 +8345,21 @@
         state.dashboardDatePreset = 'CUSTOM';
         renderDashboardView();
       }
+    }
+
+    function openReportsFromDashboard() {
+      const preset = state.dashboardDatePreset || 'TODAY';
+      const dates = preset === 'CUSTOM' && state.dashboardCustomStart && state.dashboardCustomEnd
+        ? { startDate: state.dashboardCustomStart, endDate: state.dashboardCustomEnd }
+        : computeLocalDashboardPresetDates(preset);
+      const branchId = state.dashboardBranchFilterId !== undefined ? state.dashboardBranchFilterId : (state.branchId || '');
+      if (state.reportFilters) {
+        state.reportFilters.startDate = dates.startDate;
+        state.reportFilters.endDate = dates.endDate;
+        state.reportFilters.branchId = branchId || '';
+        state.reportFilters.preset = preset === 'TODAY' ? 'TODAY' : 'CUSTOM';
+      }
+      renderView('reports');
     }
 
     function setDashboardBranchFilter(branchId) {
@@ -7540,7 +8420,7 @@
             </div>
 
             ${hasPermission('rep:report:view') ? `
-              <button type="button" class="btn btn-secondary btn-sm" onclick="renderView('reports')">Detailed Reports &rarr;</button>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="openReportsFromDashboard()">Detailed Reports &rarr;</button>
             ` : ''}
           </div>
         </div>
@@ -7780,6 +8660,9 @@
         return;
       }
 
+      state.dashboardFetchSeq = (state.dashboardFetchSeq || 0) + 1;
+      const dashSeq = state.dashboardFetchSeq;
+
       try {
         const preset = state.dashboardDatePreset || 'TODAY';
         const effectiveBranchId =
@@ -7787,8 +8670,15 @@
             ? state.dashboardBranchFilterId
             : (state.branchId || '');
 
-        const cacheKey = `dashboard::${preset}::${effectiveBranchId}::${state.dashboardCustomStart || ''}::${state.dashboardCustomEnd || ''}`;
-        const isDefaultDash = cacheKey === 'dashboard::TODAY::::';
+        const localDates = preset === 'CUSTOM'
+          ? {
+              startDate: state.dashboardCustomStart || computeLocalDashboardPresetDates('TODAY').startDate,
+              endDate: state.dashboardCustomEnd || state.dashboardCustomStart || computeLocalDashboardPresetDates('TODAY').endDate
+            }
+          : computeLocalDashboardPresetDates(preset);
+
+        const cacheKey = `dashboard::${preset}::${effectiveBranchId}::${localDates.startDate}::${localDates.endDate}`;
+        const isDefaultDash = cacheKey === `dashboard::TODAY::::${localDates.startDate}::${localDates.endDate}`;
         const cached = getViewCache('dashboard');
         const cachedScoped = isDefaultDash ? cached : getViewCache(cacheKey);
         if (cachedScoped && cachedScoped.data && container) {
@@ -7798,10 +8688,8 @@
         const qs = new URLSearchParams();
         qs.set('datePreset', preset);
         if (effectiveBranchId) qs.set('branchId', effectiveBranchId);
-        if (preset === 'CUSTOM') {
-          if (state.dashboardCustomStart) qs.set('startDate', state.dashboardCustomStart);
-          if (state.dashboardCustomEnd) qs.set('endDate', state.dashboardCustomEnd);
-        }
+        qs.set('startDate', localDates.startDate);
+        qs.set('endDate', localDates.endDate);
 
         const [summary, branchesRes] = await Promise.all([
           apiFetch(`/v1/dashboard/summary?${qs.toString()}`, { silent: true }),
@@ -7810,6 +8698,7 @@
             : Promise.resolve({ items: state.cachedBranches || [] })
         ]);
 
+        if (dashSeq !== state.dashboardFetchSeq) return;
         const branches = Array.isArray(branchesRes?.items) ? branchesRes.items : (Array.isArray(branchesRes) ? branchesRes : []);
         if (branches.length > 0) state.cachedBranches = branches;
         if (isDefaultDash) setViewCache('dashboard', { summary, branches });
@@ -7818,6 +8707,7 @@
         if (!isCurrentViewRender('dashboard', renderSeq) || !container) return;
         paintCentralizedDashboardHtml(container, summary, branches);
       } catch (err) {
+        if (dashSeq !== state.dashboardFetchSeq) return;
         if (!isCurrentViewRender('dashboard', renderSeq) || !container) return;
         container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load dashboard: ${escapeHtml(err.message)} <button class="btn btn-secondary btn-sm" style="margin-left: 8px;" onclick="renderDashboardView()">Retry</button></div>`;
       }
@@ -8609,7 +9499,7 @@
 
     async function archiveProduct(id, name, btnEl = null) {
       if (!id || activeProductLifecycleOps.has(id)) return;
-      if (typeof window.confirm === 'function' && !window.confirm(`Are you sure you want to archive "${name}"? It will no longer be available for sale until restored.`)) {
+      if (!(await nexConfirm(`Are you sure you want to archive "${name}"? It will no longer be available for sale until restored.`, { title: 'Archive Product', confirmText: 'Archive', danger: true }))) {
         return;
       }
 
@@ -10554,7 +11444,9 @@
       if (!pending) return;
       let overrideReason = null;
       if (policy === 'MANAGER_OVERRIDE') {
-        overrideReason = prompt('Enter manager override reason (min 5 chars):', 'Confirmed consolidated batch merge with price update') || '';
+        const enteredReason = await nexPrompt('Enter manager override reason (min 5 chars):', 'Confirmed consolidated batch merge with price update', { title: 'Manager Override Required', minLength: 5, required: true });
+        if (enteredReason === null) return;
+        overrideReason = enteredReason || '';
         if (overrideReason.trim().length < 5) return showToast('Reason of at least 5 characters required', 'warning');
       }
       const patchedLines = (pending.lines || []).map(l => ({
@@ -11854,7 +12746,7 @@
     }
 
     async function reverseStockMovement(movementId, sku) {
-      const reason = prompt(`Enter mandatory reversal audit reason for reversing movement of ${sku}:`);
+      const reason = await nexPrompt(`Enter mandatory reversal audit reason for reversing movement of ${sku}:`, '', { title: 'Reverse Stock Movement', danger: true, minLength: 3, required: true });
       if (!reason) return;
 
       try {
@@ -11963,13 +12855,13 @@
             <summary style="cursor: pointer; font-weight: 600; font-size: 13px; margin-bottom: 8px;">📦 Active Stock Intake References (${lotsList.length})</summary>
             <div style="display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow-y: auto;">
               ${lotsList.map(l => `
-                <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 10px; background: var(--bg-primary); border: 1px solid var(--border-subtle); border-radius: 6px; font-size: 12px;">
-                  <div>
+                <div class="intake-lot-ref-card">
+                  <div style="min-width: 0; max-width: 100%; overflow-wrap: anywhere;">
                     <code>${escapeHtml(l.intakeCode)}</code> &bull; <strong>${escapeHtml(l.productSku)}</strong> (${escapeHtml(l.productName)})
                     <span class="badge-pill badge-blue" style="font-size: 10px;">${escapeHtml(l.sourceMethod)}</span>
                     ${l.isLegacyAggregate ? `<span class="badge-pill badge-yellow" style="font-size: 10px;">Historical Backfill</span>` : ''}
                   </div>
-                  <div style="display: flex; gap: 10px; align-items: center;">
+                  <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
                     <span>Rem: <strong>${formatQty(l.baseQtyRemaining)} / ${formatQty(l.baseQtyReceived)} ${escapeHtml(l.receivedUom)}</strong></span>
                     <span>Cost: <strong>${formatTenantMoney(l.purchaseCostPerBaseUom)}</strong></span>
                     <span>Price: <strong>${l.sellingPrice ? formatTenantMoney(l.sellingPrice) : 'Global'}</strong> (${escapeHtml(l.pricingMode)})</span>
@@ -11987,11 +12879,13 @@
       }
     }
 
-    async function resolveStockConfigAlertAction(alertId, action, defaultPrice = '') {
+    const activeStockConfigAlertOps = new Set();
+    async function resolveStockConfigAlertAction(alertId, action, defaultPrice = '', triggerEl = null) {
+      if (activeStockConfigAlertOps.has(alertId)) return;
       let sellingPrice = undefined;
       let barcode = undefined;
       if (action === 'SET_INTAKE_SPECIFIC_PRICE' || action === 'UPDATE_GLOBAL_WITH_APPROVAL') {
-        const input = prompt(
+        const input = await nexPrompt(
           action === 'SET_INTAKE_SPECIFIC_PRICE'
             ? 'Enter selling price for this specific stock intake lot:'
             : 'Enter approved new global selling price for this product:',
@@ -12000,20 +12894,30 @@
         if (!input || !(parseFloat(input) > 0)) return;
         sellingPrice = parseFloat(input).toFixed(4);
       } else if (action === 'CREATE_INTAKE_BARCODE') {
-        const pricePrompt = prompt('Optional selling price for this stock intake barcode (leave blank to use intake/global price):', defaultPrice || '');
+        const pricePrompt = await nexPrompt('Optional selling price for this stock intake barcode (leave blank to use intake/global price):', defaultPrice || '');
         if (pricePrompt === null) return;
         if (pricePrompt.trim() !== '' && parseFloat(pricePrompt) > 0) {
           sellingPrice = parseFloat(pricePrompt).toFixed(4);
         }
-        const bcPrompt = prompt('Optional custom barcode value (leave blank to auto-generate unique intake barcode):', '');
+        const bcPrompt = await nexPrompt('Optional custom barcode value (leave blank to auto-generate unique intake barcode):', '');
         if (bcPrompt === null) return;
         if (bcPrompt.trim() !== '') {
           barcode = bcPrompt.trim();
         }
       }
 
+      const btn = (triggerEl && triggerEl.tagName === 'BUTTON') ? triggerEl : (typeof event !== 'undefined' && event?.currentTarget?.tagName === 'BUTTON' ? event.currentTarget : null);
+      const cardEl = btn?.closest?.('.stock-config-alert-card');
+      const cardBtns = cardEl ? Array.from(cardEl.querySelectorAll('button')) : (btn ? [btn] : []);
+      const origLabel = btn ? btn.innerHTML : '';
+      activeStockConfigAlertOps.add(alertId);
+      cardBtns.forEach(b => { b.disabled = true; });
+      if (btn) {
+        btn.innerHTML = `<span class="spinner-sm" style="width:12px;height:12px;border-width:2px;margin-right:4px;"></span> ${action === 'CREATE_INTAKE_BARCODE' ? 'Generating...' : 'Processing...'}`;
+      }
+
       try {
-        await apiFetch(`/v1/inventory/config-alerts/${encodeURIComponent(alertId)}/resolve`, {
+        const res = await apiFetch(`/v1/inventory/config-alerts/${encodeURIComponent(alertId)}/resolve`, {
           method: 'POST',
           body: JSON.stringify({
             action,
@@ -12022,16 +12926,27 @@
             notes: `Resolved via Smart Stock Config Alerts UI (${action})`
           })
         });
-        showToast(`Stock configuration alert resolved (${action})`, 'success');
+        const genBc = res?.createdBarcode?.barcode || res?.barcode || barcode;
+        if (action === 'CREATE_INTAKE_BARCODE' && genBc) {
+          showToast(`Generated & mapped intake barcode: ${genBc}`, 'success');
+        } else {
+          showToast(`Stock configuration alert resolved (${action})`, 'success');
+        }
         openStockConfigAlertsModal('PENDING');
       } catch (err) {
         showToast(`Failed to resolve alert: ${err.detail || err.message}`, 'error');
+        cardBtns.forEach(b => { b.disabled = false; });
+        if (btn) btn.innerHTML = origLabel;
+      } finally {
+        activeStockConfigAlertOps.delete(alertId);
       }
     }
 
     async function renderBalancesView() {
       const container = document.getElementById('mainContainer');
       const renderSeq = state.viewRenderSeq;
+      if (!state.balanceFilters) state.balanceFilters = { search: '', stockState: 'ALL' };
+      const bf = state.balanceFilters;
 
       const scopeDesc = state.branchId
         ? `${escapeHtml(state.branchName || 'Active Branch')}`
@@ -12050,12 +12965,27 @@
             </div>
           </div>
 
+          <div class="card" style="margin-bottom: 14px; padding: 12px;">
+            <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+              <input type="text" class="form-input" id="balanceSearchInput" style="flex: 1; min-width: 210px;" placeholder="Search SKU, product name, or barcode..." value="${escapeHtml(bf.search || '')}" onkeydown="if(event.key==='Enter'){state.balanceFilters.search=this.value.trim(); renderBalancesView();}">
+              <select class="form-select" id="balanceStockStateFilter" style="width: auto; min-width: 150px;" onchange="state.balanceFilters.stockState=this.value; renderBalancesView();">
+                <option value="ALL" ${(bf.stockState || 'ALL') === 'ALL' ? 'selected' : ''}>All Stock States</option>
+                <option value="OK" ${bf.stockState === 'OK' ? 'selected' : ''}>In Stock</option>
+                <option value="LOW_STOCK" ${bf.stockState === 'LOW_STOCK' ? 'selected' : ''}>Low Stock</option>
+                <option value="ZERO_STOCK" ${bf.stockState === 'ZERO_STOCK' ? 'selected' : ''}>Out of Stock</option>
+                <option value="NEGATIVE_STOCK" ${bf.stockState === 'NEGATIVE_STOCK' ? 'selected' : ''}>Negative Stock</option>
+              </select>
+              <button type="button" class="btn btn-primary btn-sm" onclick="state.balanceFilters.search=(document.getElementById('balanceSearchInput')?.value || '').trim(); renderBalancesView();">Search</button>
+              ${(bf.search || (bf.stockState && bf.stockState !== 'ALL')) ? `<button type="button" class="btn btn-secondary btn-sm" onclick="state.balanceFilters={search:'',stockState:'ALL'}; renderBalancesView();">✕ Clear</button>` : ''}
+            </div>
+          </div>
+
           <div class="card">
             ${balances.length === 0 ? `
               <div class="empty-state-card">
                 <svg class="empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"></rect><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path></svg>
-                <div class="empty-state-title">No inventory balances on record</div>
-                <p class="empty-state-desc">No inventory balances on record for this warehouse.</p>
+                <div class="empty-state-title">No inventory balances found</div>
+                <p class="empty-state-desc">${bf.search ? `No items matched "${escapeHtml(bf.search)}". Try clearing or adjusting your filter.` : 'No inventory balances on record for this warehouse.'}</p>
               </div>
             ` : `
               <div class="desktop-table-container">
@@ -12092,7 +13022,7 @@
                               <div style="display: flex; align-items: center; gap: 10px;">
                                 ${imgUrl ? `<img src="${imgUrl}" alt="${sku}" style="width: 38px; height: 38px; border-radius: 6px; object-fit: cover; border: 1px solid var(--border-subtle); flex-shrink: 0; background: var(--bg-hover);" onerror="this.style.display='none'" />` : `<div style="width: 38px; height: 38px; border-radius: 6px; background: var(--bg-hover); display: flex; align-items: center; justify-content: center; font-size: 16px; border: 1px solid var(--border-subtle); flex-shrink: 0;">📦</div>`}
                                 <div>
-                                  <div><strong>${sku}</strong></div>
+                                  <div><strong>${sku}</strong>${b.primaryBarcode ? ` <code style="font-size: 11px; margin-left: 4px; color: var(--text-secondary);">${escapeHtml(b.primaryBarcode)}</code>` : ''}</div>
                                   <div style="font-size: 12px; color: var(--text-secondary);">${name}</div>
                                 </div>
                               </div>
@@ -12163,35 +13093,44 @@
           </div>
       `;
 
+      const balCacheKey = `balances::${state.branchId || ''}::${bf.search || ''}::${bf.stockState || 'ALL'}`;
       const cachedBalances = getViewCache('balances');
-      if (cachedBalances && Array.isArray(cachedBalances.data)) {
-        container.innerHTML = buildBalancesHtml(cachedBalances.data);
+      const activeCachedBalances = (bf.search || (bf.stockState && bf.stockState !== 'ALL')) ? getViewCache(balCacheKey) : cachedBalances;
+      if (activeCachedBalances && Array.isArray(activeCachedBalances.data)) {
+        container.innerHTML = buildBalancesHtml(activeCachedBalances.data);
       }
 
       try {
         let balances = [];
         if (isDeviceOffline() && window.NexStockOfflineClient && state.tenantId && state.branchId) {
           const off = await window.NexStockOfflineClient.getPosProductsOffline(state.tenantId, state.branchId, state.warehouseId || '');
-          balances = (off.products || []).map(p => ({
-            productId: p.id,
-            sku: p.sku,
-            productName: p.name,
-            baseUom: p.baseUom,
-            qtyOnHand: p.serverAvailableQuantity || p.availableQuantity || '0',
-            qtyReserved: '0',
-            availableQty: p.availableQuantity || '0',
-            reorderPoint: '0',
-            branchName: state.branchName || 'Branch',
-            warehouseName: state.warehouseName || 'Warehouse (Offline Projection)',
-          }));
+          const sLower = (bf.search || '').trim().toLowerCase();
+          balances = (off.products || [])
+            .filter(p => !sLower || String(p.sku || '').toLowerCase().includes(sLower) || String(p.name || '').toLowerCase().includes(sLower) || String(p.primaryBarcode || '').toLowerCase().includes(sLower) || (Array.isArray(p.barcodes) && p.barcodes.some(bc => String(bc || '').toLowerCase().includes(sLower))))
+            .map(p => ({
+              productId: p.id,
+              sku: p.sku,
+              productName: p.name,
+              primaryBarcode: p.primaryBarcode || null,
+              baseUom: p.baseUom,
+              qtyOnHand: p.serverAvailableQuantity || p.availableQuantity || '0',
+              qtyReserved: '0',
+              availableQty: p.availableQuantity || '0',
+              reorderPoint: '0',
+              branchName: state.branchName || 'Branch',
+              warehouseName: state.warehouseName || 'Warehouse (Offline Projection)',
+            }));
         } else {
           const scopeParam = state.branchId
             ? `branchId=${encodeURIComponent(state.branchId)}&`
             : (state.warehouseId ? `warehouseId=${encodeURIComponent(state.warehouseId)}&` : '');
-          const res = await apiFetch(`/v1/inventory/balances?${scopeParam}limit=100`).catch(() => ({ data: [] }));
+          const searchParam = bf.search ? `search=${encodeURIComponent(bf.search)}&` : '';
+          const stateParam = (bf.stockState && bf.stockState !== 'ALL') ? `stockState=${encodeURIComponent(bf.stockState)}&` : '';
+          const res = await apiFetch(`/v1/inventory/balances?${scopeParam}${searchParam}${stateParam}limit=100`).catch(() => ({ data: [] }));
           if (!isCurrentViewRender('balances', renderSeq)) return;
           balances = res?.data || (Array.isArray(res) ? res : []);
-          setViewCache('balances', balances);
+          if (!bf.search && (!bf.stockState || bf.stockState === 'ALL')) setViewCache('balances', balances);
+          setViewCache(balCacheKey, balances);
         }
         if (!isCurrentViewRender('balances', renderSeq)) return;
         container.innerHTML = buildBalancesHtml(balances);
@@ -12209,7 +13148,7 @@
             return;
           }
         }
-        if (!cachedBalances || !cachedBalances.data) {
+        if (!activeCachedBalances || !activeCachedBalances.data) {
           container.innerHTML = `<div class="card" style="color: var(--status-danger);">Failed to load balances: ${escapeHtml(err.message)}</div>`;
         }
       }
@@ -12386,7 +13325,9 @@
         showToast('Connect to the internet to resolve sync conflicts.', 'warning');
         return;
       }
-      const notes = prompt(`Optional supervisor notes for ${action}:`, '') || undefined;
+      const notesInput = await nexPrompt(`Optional supervisor notes for ${action}:`, '', { title: 'Resolve Sync Conflict', placeholder: 'Optional resolution notes...' });
+      if (notesInput === null) return;
+      const notes = notesInput.trim() || undefined;
       try {
         await window.NexStockOfflineClient.resolveLocalConflict({
           tenantId: state.tenantId,
@@ -12622,6 +13563,12 @@
         lines: (found.lines || []).map(l => ({
           name: l.productName || l.name || l.sku,
           quantity: l.quantity,
+          uomCode: l.uomCode || l.originalUomCode || 'PCS',
+          originalEnteredQty: l.originalEnteredQty ?? l.quantity,
+          originalUomCode: l.originalUomCode || l.uomCode || 'PCS',
+          priceUom: l.priceUom || l.uomCode || 'PCS',
+          pricePerPriceUom: l.pricePerPriceUom ?? l.unitPrice ?? '0.0000',
+          entrySource: l.entrySource,
           unitPrice: l.unitPrice || '0.0000',
           lineTotal: l.lineTotal || '0.0000',
         })),
@@ -13788,6 +14735,28 @@
         return;
       }
 
+      // 0. FAST-PATH: Instant in-memory index lookup (<5ms for cached STANDARD NONE-tracking items)
+      const looksLikeSpecialCode = cleanCode.startsWith('(01)') || /^nb-[bs]/i.test(cleanCode) || cleanCode.length > 20;
+      if (!looksLikeSpecialCode && state.posProductsMap && state.posProductsMap.has(lowerCode)) {
+        const fastProd = state.posProductsMap.get(lowerCode);
+        const isStandardFastEligible =
+          fastProd &&
+          fastProd.trackingMode === 'NONE' &&
+          fastProd.productQtyMode !== 'VARIABLE';
+        if (isStandardFastEligible && (!Array.isArray(fastProd.unitConversions) || fastProd.unitConversions.length === 0)) {
+          const fastPrice = fastProd.retailPrice || fastProd.sellingPrice || '0.0000';
+          playScanChime(true);
+          addToCart(fastProd.id, fastProd.sku, fastProd.name, fastPrice, fastProd.baseUom || 'PCS', fastProd.trackInventory !== false, fastProd.availableQuantity, {
+            baseUom: fastProd.baseUom || 'PCS',
+            scannedBarcode: scanOpts.fromTileProduct ? null : cleanCode,
+            priceSource: fastProd.priceSource || 'GLOBAL',
+            entrySource: scanOpts.fromTileProduct ? 'MANUAL' : 'BARCODE_SCAN'
+          });
+          showToast(`${fastProd.name} — ${formatTenantMoney(fastPrice)}`, 'success');
+          return;
+        }
+      }
+
       // 1. Authoritative Hybrid Barcode / GS1 / Batch-Price Resolution (Phase 2/3)
       try {
         const resolved = await apiFetch('/v1/barcodes/resolve', {
@@ -14147,15 +15116,16 @@
     }
 
     // Barcode Generator helper for modals (BUG-017)
-    async function generateBarcodeForInput(inputId, symbologySelectId) {
+    async function generateBarcodeForInput(inputId, symbologySelectId, triggerEl = null) {
       const input = document.getElementById(inputId);
       const symbologySelect = symbologySelectId ? document.getElementById(symbologySelectId) : null;
       const symbology = symbologySelect ? symbologySelect.value : 'CODE128';
 
-      const btn = (event && event.currentTarget) || document.activeElement;
+      const btn = (triggerEl && triggerEl.tagName === 'BUTTON') ? triggerEl : ((typeof event !== 'undefined' && event?.currentTarget?.tagName === 'BUTTON') ? event.currentTarget : document.activeElement);
+      const prevBtnHtml = btn && btn.tagName === 'BUTTON' ? btn.innerHTML : '⚡ Generate';
       if (btn && btn.tagName === 'BUTTON') {
         btn.disabled = true;
-        btn.textContent = '⏳';
+        btn.innerHTML = '<span class="spinner-sm" style="width:12px;height:12px;border-width:2px;"></span>';
       }
 
       try {
@@ -14175,7 +15145,7 @@
       } finally {
         if (btn && btn.tagName === 'BUTTON') {
           btn.disabled = false;
-          btn.textContent = '⚡ Generate';
+          btn.innerHTML = prevBtnHtml;
         }
       }
     }
@@ -14585,7 +15555,7 @@
         pageStyles = `
           @page { size: ${spec.w} ${spec.h}; margin: 0mm; }
           html, body { width: ${spec.w}; margin: 0; padding: 0; }
-          .print-label-item { width: ${spec.w}; height: ${spec.h}; max-height: ${spec.h}; padding: ${spec.pad}; box-sizing: border-box; overflow: hidden; display: flex; flex-direction: column; justify-content: space-between; align-items: center; text-align: center; page-break-inside: avoid; break-inside: avoid; page-break-after: avoid; break-after: avoid; }
+          .print-label-item { width: ${spec.w}; height: ${spec.h}; max-height: ${spec.h}; padding: ${spec.pad}; box-sizing: border-box; overflow: hidden; display: flex; flex-direction: column; justify-content: space-between; align-items: center; text-align: center; page-break-inside: avoid; break-inside: avoid; }
           .print-label-item:not(:last-child) { page-break-after: always; break-after: page; }
           .print-sku { font-size: ${spec.metaPt}; font-weight: 700; text-transform: uppercase; line-height: 1.05; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
           .print-name { font-size: ${spec.prodPt}; font-weight: 700; line-height: 1.1; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -14629,19 +15599,48 @@
       });
 
       try {
-        const [barcodes, intakeLots, prodBatches] = await Promise.all([
+        const isSerialTracked = p.trackingMode === 'SERIAL';
+        const [barcodesRes, intakeLots, prodBatches, prodSerialsRes] = await Promise.all([
           apiFetch(`/v1/products/${productId}/barcodes`).catch(() => []),
           apiFetch(`/v1/inventory/intake-lots?productId=${encodeURIComponent(productId)}&includeDepleted=false`).catch(() => []),
-          apiFetch(`/v1/inventory/batches?productId=${encodeURIComponent(productId)}`).catch(() => [])
+          apiFetch(`/v1/inventory/batches?productId=${encodeURIComponent(productId)}`).catch(() => []),
+          isSerialTracked
+            ? apiFetch(`/v1/inventory/serials?productId=${encodeURIComponent(productId)}&limit=100`, { silent: true }).catch(() => ({ data: [] }))
+            : Promise.resolve({ data: [] })
         ]);
+        const prodBarcodes = Array.isArray(barcodesRes) ? barcodesRes : [];
+        const prodSerials = Array.isArray(prodSerialsRes?.data) ? prodSerialsRes.data : (Array.isArray(prodSerialsRes) ? prodSerialsRes : []);
+        const serialEntries = prodSerials
+          .filter(s => s && s.internalBarcode)
+          .map(s => ({
+            id: `serial:${s.id}`,
+            serialId: s.id,
+            serialNumber: s.serialNumber,
+            serialGroupId: s.serialGroupId || null,
+            groupCode: s.groupCode || null,
+            barcode: s.internalBarcode,
+            barcodeType: 'CODE128',
+            uomCode: p.baseUom || 'PCS',
+            isPrimary: false,
+            isActive: s.status === 'IN_STOCK',
+            effectiveSellingPrice: s.sellingPrice ?? p.sellingPrice,
+            isSerialBarcode: true,
+            serialStatus: s.status
+          }));
+        const existingCodeSet = new Set(prodBarcodes.map(b => b.barcode));
+        const barcodes = [
+          ...prodBarcodes,
+          ...serialEntries.filter(se => !existingCodeSet.has(se.barcode))
+        ];
         state.activeBarcodeModalContext = {
           productId,
           product: p,
-          barcodes: Array.isArray(barcodes) ? barcodes : [],
+          barcodes,
           intakeLots: Array.isArray(intakeLots) ? intakeLots : [],
-          batches: Array.isArray(prodBatches?.data) ? prodBatches.data : (Array.isArray(prodBatches) ? prodBatches : [])
+          batches: Array.isArray(prodBatches?.data) ? prodBatches.data : (Array.isArray(prodBatches) ? prodBatches : []),
+          serials: prodSerials
         };
-        const primaryBarcodeObj = barcodes.find(b => b.isPrimary);
+        const primaryBarcodeObj = barcodes.find(b => b.isPrimary) || barcodes[0];
         const primaryBarcode = primaryBarcodeObj?.barcode || p.primaryBarcode || '';
         if (p && primaryBarcodeObj?.barcode) {
           p.primaryBarcode = primaryBarcodeObj.barcode;
@@ -14730,8 +15729,10 @@
               const effPrice = b.effectiveSellingPrice || b.sellingPriceOverride || p.sellingPrice;
               const uomCode = b.uomCode || p.baseUom || 'PCS';
               const convFactor = parseFloat(b.conversionFactorToBase || '1') || 1;
-              const stockRefKey = b.stockIntakeLotId ? `LOT:${b.stockIntakeLotId}` : (b.batchId ? `BATCH:${b.batchId}` : 'GLOBAL');
-              const stockRefBadge = b.intakeCode
+              const stockRefKey = b.isSerialBarcode ? `SERIAL:${b.serialId}` : (b.stockIntakeLotId ? `LOT:${b.stockIntakeLotId}` : (b.batchId ? `BATCH:${b.batchId}` : 'GLOBAL'));
+              const stockRefBadge = b.isSerialBarcode
+                ? `<span class="badge-pill badge-purple" style="font-size: 10px;" title="Mapped to Serial Unit ${escapeHtml(b.serialNumber || '')}">SN: ${escapeHtml(b.serialNumber || 'Serial')}</span>`
+                : b.intakeCode
                 ? `<span class="badge-pill badge-green" style="font-size: 10px;" title="Mapped to Stock Intake Layer ${escapeHtml(b.intakeCode)}">Lot: ${escapeHtml(b.intakeCode)}</span>`
                 : b.batchNumber
                   ? `<span class="badge-pill badge-yellow" style="font-size: 10px;" title="Mapped to Batch ${escapeHtml(b.batchNumber)}">Batch: ${escapeHtml(b.batchNumber)}</span>`
@@ -14741,7 +15742,7 @@
                 <div class="barcode-mapping-card" style="padding: 0; background: transparent;">
                   <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
                     <input type="checkbox" class="barcode-select-cb" value="${escapeHtml(b.id)}" ${b.isActive ? 'checked' : ''} style="width: auto;">
-                    <code style="font-size: 14px; font-weight: 700; color: var(--text-primary);">${escapeHtml(b.barcode)}</code>
+                    <code style="font-size: 14px; font-weight: 700; color: var(--text-primary); word-break: break-all;">${escapeHtml(b.barcode)}</code>
                     <span class="badge-pill badge-blue" style="font-size: 10px;">${escapeHtml(b.barcodeType || b.symbology || 'CODE128')}</span>
                     <span class="badge-pill badge-blue" style="font-size: 10px;">${escapeHtml(uomCode)}${convFactor > 1 ? ` (=${formatQty(convFactor)} ${escapeHtml(p.baseUom || 'PCS')})` : ''}</span>
                     ${stockRefBadge}
@@ -14749,18 +15750,20 @@
                   </div>
                   <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
                     ${b.isPrimary ? '<span class="badge-pill badge-green" style="font-size: 10px;">PRIMARY</span>' : ''}
-                    <span class="badge-pill ${b.isActive ? 'badge-green' : 'badge-red'}" style="font-size: 10px;">${b.isActive ? 'ACTIVE' : 'INACTIVE'}</span>
+                    <span class="badge-pill ${b.isActive ? 'badge-green' : 'badge-red'}" style="font-size: 10px;">${escapeHtml(b.isSerialBarcode ? (b.serialStatus || 'SERIAL') : (b.isActive ? 'ACTIVE' : 'INACTIVE'))}</span>
                   </div>
                 </div>
                 <div style="display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; margin-top: 8px;">
                   <button class="btn btn-secondary btn-sm" style="padding: 3px 8px; font-size: 11px;" onclick="previewAndPrintSingleBarcode('${productId}', '${b.id}')">🖨️ Print</button>
-                  ${!b.isPrimary && b.isActive ? `
+                  ${!b.isSerialBarcode && !b.isPrimary && b.isActive ? `
                     <button class="btn btn-secondary btn-sm" id="btnMakePrimary-${b.id}" style="padding: 3px 8px; font-size: 11px;" onclick="setBarcodePrimary('${productId}', '${b.id}', this)">Make Primary</button>
                   ` : ''}
-                  <button class="btn btn-secondary btn-sm" id="btnToggleActive-${b.id}" style="padding: 3px 8px; font-size: 11px;" onclick="toggleBarcodeActive('${productId}', '${b.id}', ${!b.isActive}, this)">
-                    ${b.isActive ? 'Deactivate' : 'Activate'}
-                  </button>
-                  ${!b.isPrimary ? `
+                  ${!b.isSerialBarcode ? `
+                    <button class="btn btn-secondary btn-sm" id="btnToggleActive-${b.id}" style="padding: 3px 8px; font-size: 11px;" onclick="toggleBarcodeActive('${productId}', '${b.id}', ${!b.isActive}, this)">
+                      ${b.isActive ? 'Deactivate' : 'Activate'}
+                    </button>
+                  ` : ''}
+                  ${!b.isSerialBarcode && !b.isPrimary ? `
                     <button class="btn btn-secondary btn-sm" id="btnDeleteBc-${b.id}" style="padding: 3px 8px; font-size: 11px; color: var(--status-danger);" onclick="deleteBarcode('${productId}', '${b.id}', this)">Delete</button>
                   ` : ''}
                 </div>
@@ -14878,14 +15881,16 @@
 
       const format = document.getElementById('labelPrintFormat')?.value || 'THERMAL_50X30';
       const copies = Math.max(1, parseInt(document.getElementById('labelPrintQty')?.value || '1', 10));
-      const spec = getThermalLabelFormatSpec(format);
+      const spec = getLabelFormatSpec(format);
       const cardsHtml = [];
       for (const b of chosen) {
         const uom = b.uomCode || p.baseUom || 'PCS';
         const effPrice = formatTenantMoney(b.effectiveSellingPrice || b.sellingPriceOverride || p.sellingPrice);
-        const refTag = b.intakeCode ? ` • ${b.intakeCode}` : (b.batchNumber ? ` • ${b.batchNumber}` : '');
+        const refTag = b.serialNumber
+          ? ` • SN ${b.serialNumber}`
+          : (b.intakeCode ? ` • ${b.intakeCode}` : (b.batchNumber ? ` • ${b.batchNumber}` : ''));
         const svg = renderBarcodeSvg(b.barcode, b.barcodeType || 'CODE128', {
-          height: spec.bcH,
+          height: spec.bcHeight,
           barWidth: spec.bcBarW,
           fontSize: spec.bcFont,
           quietZone: 8,
@@ -14908,7 +15913,7 @@
         const pageStyles = `
           @page { size: ${spec.w} ${spec.h}; margin: 0mm; }
           html, body { width: ${spec.w}; margin: 0; padding: 0; }
-          .print-label-item { width: ${spec.w}; height: ${spec.h}; max-height: ${spec.h}; padding: ${spec.pad}; box-sizing: border-box; overflow: hidden; display: flex; flex-direction: column; justify-content: space-between; align-items: center; text-align: center; page-break-inside: avoid; break-inside: avoid; page-break-after: avoid; break-after: avoid; }
+          .print-label-item { width: ${spec.w}; height: ${spec.h}; max-height: ${spec.h}; padding: ${spec.pad}; box-sizing: border-box; overflow: hidden; display: flex; flex-direction: column; justify-content: space-between; align-items: center; text-align: center; page-break-inside: avoid; break-inside: avoid; }
           .print-label-item:not(:last-child) { page-break-after: always; break-after: page; }
           .print-sku { font-size: ${spec.metaPt}; font-weight: 700; text-transform: uppercase; line-height: 1.05; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
           .print-name { font-size: ${spec.prodPt}; font-weight: 700; line-height: 1.1; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -15049,7 +16054,7 @@
               return;
             }
             const replacement = otherActive[0];
-            const proceed = confirm(`Deactivating this primary barcode will automatically promote "${replacement.barcode}" as the new primary barcode. Do you want to proceed?`);
+            const proceed = await nexConfirm(`Deactivating this primary barcode will automatically promote "${replacement.barcode}" as the new primary barcode. Do you want to proceed?`, { title: 'Promote Primary Barcode', confirmText: 'Proceed', danger: true });
             if (!proceed) return;
           }
         } catch {}
@@ -15081,7 +16086,7 @@
 
     async function deleteBarcode(productId, barcodeId, btn) {
       if (activeBarcodeOps.has(barcodeId)) return;
-      if (!confirm('Are you sure you want to delete this barcode?')) return;
+      if (!(await nexConfirm('Are you sure you want to delete this barcode?', { title: 'Delete Barcode', confirmText: 'Delete', danger: true }))) return;
 
       activeBarcodeOps.add(barcodeId);
       const originalText = btn ? btn.textContent : '';
@@ -15099,7 +16104,7 @@
       } catch (err) {
         if (err && (err.errorCode === 'CAT_BARCODE_IN_USE_DEACTIVATE_ONLY' || err.status === 409)) {
           showToast(err.detail || err.message || 'Barcode is referenced in historical sales and can only be deactivated.', 'warning');
-          if (confirm('This barcode has historical sales transactions and cannot be permanently deleted. Would you like to DEACTIVATE it instead?')) {
+          if (await nexConfirm('This barcode has historical sales transactions and cannot be permanently deleted. Would you like to DEACTIVATE it instead?', { title: 'Deactivate Barcode Instead?', confirmText: 'Deactivate', danger: true })) {
             activeBarcodeOps.delete(barcodeId);
             await toggleBarcodeActive(productId, barcodeId, false, btn);
             return;
@@ -15625,12 +16630,15 @@
       }
       const baseRate = parseFloat(item.baseUnitRate || prod?.retailPrice || prod?.sellingPrice || item.unitPrice || '0');
       const calc = computeClientProportionateTotal(1, cleanUom, baseRate, prod || item);
-      const newUnitPrice = calc ? calc.lineTotal.toFixed(4) : baseRate.toFixed(4);
+      const isPkgExplicit = Boolean(calc?.isPackageExplicit);
+      const newUnitPrice = isPkgExplicit
+        ? Number(calc.unitRate).toFixed(4)
+        : (Number.isFinite(baseRate) ? baseRate.toFixed(4) : '0.0000');
       item.uomCode = cleanUom;
       item.unitPrice = newUnitPrice;
       item.pricePerPriceUom = newUnitPrice;
-      item.priceUom = cleanUom;
-      item.isPricePerSellingUom = true;
+      item.priceUom = isPkgExplicit ? cleanUom : (prod?.priceUom || item.baseUom || cleanUom);
+      item.isPricePerSellingUom = isPkgExplicit;
       item.normalizedBaseQty = baseNeeded;
       state.activeCheckoutKey = null;
       renderPosCartPanel();
@@ -15638,7 +16646,12 @@
 
     function computeCartLineTotal(item) {
       if (item.isPricePerSellingUom) {
-        return Math.round(item.qty * (parseFloat(item.unitPrice) || 0) * 100) / 100;
+        const qtyMicro = toFixedIntScaled(item.qty, 6);
+        const rateScaled = toFixedIntScaled(item.unitPrice || '0', 4);
+        const minorScale = 10n ** BigInt(getCurrencyMinorUnits(getTenantCurrency()));
+        const subScaled4 = roundHalfEvenBigInt(qtyMicro * rateScaled, 1000000n);
+        const minorInt = roundHalfEvenBigInt(subScaled4 * minorScale, 10000n);
+        return Number(minorInt) / Number(minorScale);
       }
       const prod = (state.posCachedProducts || []).find(p => p.id === item.productId);
       const pricePer = item.pricePerPriceUom !== undefined ? item.pricePerPriceUom : item.unitPrice;
@@ -15902,18 +16915,19 @@
       if (normBase === null) return;
 
       const calc = computeClientProportionateTotal(qtyVal, uomCode, pricePerPriceUom, p);
-      const effectiveUnitPrice = qtyVal > 0 && calc ? (calc.lineTotal / qtyVal).toFixed(4) : pricePerPriceUom;
+      const isPkgExplicit = Boolean(calc?.isPackageExplicit);
+      const authoritativeRate = isPkgExplicit ? Number(calc.unitRate).toFixed(4) : pricePerPriceUom;
       const entryObj = {
         productId: p.id,
         sku: p.sku,
         name: p.name,
-        unitPrice: effectiveUnitPrice,
+        unitPrice: authoritativeRate,
         baseUnitRate: pricePerPriceUom,
-        pricePerPriceUom: calc?.isPackageExplicit ? effectiveUnitPrice : pricePerPriceUom,
-        priceUom: calc?.isPackageExplicit ? uomCode : (p.priceUom || p.baseUom || uomCode),
+        pricePerPriceUom: authoritativeRate,
+        priceUom: isPkgExplicit ? uomCode : (p.priceUom || p.baseUom || uomCode),
         baseUom: p.baseUom || uomCode,
         productQtyMode: p.productQtyMode || 'STANDARD',
-        isPricePerSellingUom: true,
+        isPricePerSellingUom: isPkgExplicit,
         uomCode,
         qty: parseFloat(qtyVal.toFixed(6)),
         normalizedBaseQty: normBase,
@@ -16914,8 +17928,12 @@
           productName: c.name || '',
           batchId: c.batchId || null,
           quantity: Number(c.qty).toFixed(6),
-          normalizedBaseQty: Number(c.qty).toFixed(6),
+          normalizedBaseQty: Number(c.normalizedBaseQty || c.qty).toFixed(6),
           uomCode: c.uomCode || 'PCS',
+          originalEnteredQty: Number(c.qty).toFixed(6),
+          originalUomCode: c.uomCode || 'PCS',
+          priceUom: c.priceUom || c.baseUom || c.uomCode || 'PCS',
+          pricePerPriceUom: Number(c.pricePerPriceUom || c.unitPrice || c.overrideSellingPrice || 0).toFixed(4),
           unitPrice: Number(c.unitPrice || c.overrideSellingPrice || 0).toFixed(4),
           lineTotal: computeCartLineTotal(c).toFixed(4),
           entrySource: c.entrySource || (c.productQtyMode === 'VARIABLE' ? 'MANUAL_WEIGHT' : 'MANUAL'),
@@ -16977,6 +17995,12 @@
           lines: enrichedLines.map(l => ({
             name: l.productName,
             quantity: l.quantity,
+            uomCode: l.uomCode || 'PCS',
+            originalEnteredQty: l.originalEnteredQty ?? l.quantity,
+            originalUomCode: l.originalUomCode || l.uomCode || 'PCS',
+            priceUom: l.priceUom || l.uomCode || 'PCS',
+            pricePerPriceUom: l.pricePerPriceUom ?? l.unitPrice,
+            entrySource: l.entrySource,
             unitPrice: l.unitPrice,
             lineTotal: l.lineTotal,
           })),
@@ -17108,6 +18132,14 @@
           lines: (sale.lines || []).map(l => ({
             name: l.productName,
             quantity: l.quantity,
+            uomCode: l.uomCode || l.originalUomCode || 'PCS',
+            originalEnteredQty: l.originalEnteredQty ?? l.quantity,
+            originalUomCode: l.originalUomCode || l.uomCode || 'PCS',
+            priceUom: l.priceUom || l.uomCode || 'PCS',
+            pricePerPriceUom: l.pricePerPriceUom ?? l.unitPrice,
+            entrySource: l.entrySource,
+            batchNumber: l.batchNumber || null,
+            internalBarcode: l.internalBarcode || null,
             unitPrice: l.unitPrice,
             lineTotal: l.lineTotal
           })),
@@ -17155,39 +18187,66 @@
     const activeVoidOps = new Set();
     const cachedReceipts = new Map();
 
-    // Isolated Receipt Printer (BUG-028)
+    // Isolated Receipt Printer (BUG-028 / Android Concrete Thermal Dimensions)
+    const activeReceiptPrintOps = new Set();
     function printReceiptInvoice(saleId) {
+      if (activeReceiptPrintOps.has(saleId)) return;
       const receipt = cachedReceipts.get(saleId);
       if (!receipt) {
         showToast('Receipt details not loaded', 'error');
         return;
       }
+      const printBtn = document.getElementById('btnPrintReceiptModal');
+      const prevBtnHtml = printBtn ? printBtn.innerHTML : 'Print Receipt';
+      activeReceiptPrintOps.add(saleId);
+      if (printBtn) {
+        printBtn.disabled = true;
+        printBtn.innerHTML = '<span class="spinner-sm" style="width:12px;height:12px;border-width:2px;margin-right:5px;"></span> Printing...';
+      }
+      setTimeout(() => {
+        activeReceiptPrintOps.delete(saleId);
+        if (printBtn) {
+          printBtn.disabled = false;
+          printBtn.innerHTML = prevBtnHtml;
+        }
+      }, 900);
+
       const formatSelect = document.getElementById('receiptPrintFormat');
       const format = formatSelect ? formatSelect.value : 'THERMAL_80';
       const receiptCurr = receipt.currencyCode || receipt.currency || getTenantCurrency();
+      const lineCount = (receipt.lines || []).length;
+      const payCount = (receipt.payments || []).length;
+      const estThermalHeightMm = Math.max(110, 74 + lineCount * 10 + payCount * 7);
 
       let pageStyles = '';
       let printableHtml = '';
+      let pageDims = undefined;
 
       if (format === 'THERMAL_80') {
+        const pageH = `${estThermalHeightMm}mm`;
+        pageDims = { w: '80mm', h: pageH };
         pageStyles = `
-          @page { size: 80mm auto; margin: 0; }
-          body { width: 80mm; margin: 0; padding: 4mm 3mm; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace, sans-serif; font-size: 12px; line-height: 1.35; color: #000; }
+          @page { size: 80mm ${pageH}; margin: 0mm; }
+          html, body { width: 80mm; max-width: 80mm; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace, sans-serif; font-size: 12px; line-height: 1.35; color: #000; background: #fff; }
+          .thermal-receipt-sheet { width: 74mm; margin: 0 auto; padding: 4mm 3mm; box-sizing: border-box; }
           .receipt-center { text-align: center; }
           .receipt-bold { font-weight: 700; }
           .receipt-divider { border-top: 1px dashed #000; margin: 6px 0; }
-          .receipt-row { display: flex; justify-content: space-between; margin-bottom: 3px; }
+          .receipt-row { display: flex; justify-content: space-between; gap: 6px; margin-bottom: 3px; }
           .receipt-footer { text-align: center; font-size: 11px; margin-top: 10px; }
           * { page-break-inside: avoid; }
         `;
       } else if (format === 'THERMAL_58') {
+        const pageH = `${estThermalHeightMm}mm`;
+        pageDims = { w: '58mm', h: pageH };
         pageStyles = `
-          @page { size: 58mm auto; margin: 0; }
-          body { width: 58mm; margin: 0; padding: 3mm 2mm; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace, sans-serif; font-size: 10px; line-height: 1.3; color: #000; }
+          @page { size: 58mm ${pageH}; margin: 0mm; }
+          html, body { width: 58mm; max-width: 58mm; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace, sans-serif; font-size: 10px; line-height: 1.3; color: #000; background: #fff; }
+          .thermal-receipt-sheet { width: 54mm; margin: 0 auto; padding: 3mm 2mm; box-sizing: border-box; }
           .receipt-center { text-align: center; }
           .receipt-bold { font-weight: 700; }
           .receipt-divider { border-top: 1px dashed #000; margin: 4px 0; }
-          .receipt-row { display: flex; justify-content: space-between; margin-bottom: 2px; }
+          .receipt-row { display: flex; justify-content: space-between; gap: 4px; margin-bottom: 2px; }
           .receipt-footer { text-align: center; font-size: 9px; margin-top: 8px; }
           * { page-break-inside: avoid; }
         `;
@@ -17279,51 +18338,53 @@
           </div>
         `;
       } else {
-        // Thermal POS format (58mm or 80mm)
+        // Thermal POS format (58mm or 80mm) wrapped inside explicit .thermal-receipt-sheet container
         printableHtml = `
-          <div class="receipt-center">
-            <div class="receipt-bold" style="font-size: 14px;">${escapeHtml(receipt.businessName || state.tenantName || 'NexStock Retail')}</div>
-            <div>${escapeHtml(receipt.branchName || state.branchName || 'Main Store')}</div>
-            <div style="font-size: 10px;">Reg: ${escapeHtml(receipt.registerCode || state.registerCode || 'REG-01')} | Cashier: ${escapeHtml(receipt.cashierName || state.fullName || 'Cashier')}</div>
-          </div>
-          <div class="receipt-divider"></div>
-          <div class="receipt-row"><span>Inv:</span><strong>${escapeHtml(receipt.invoiceNumber)}</strong></div>
-          <div class="receipt-row"><span>Date:</span><span>${escapeHtml(receipt.formattedTimestamp || new Date().toLocaleString())}</span></div>
-          ${receipt.customerName ? `<div class="receipt-row"><span>Cust:</span><span>${escapeHtml(receipt.customerName)}</span></div>` : ''}
-          <div class="receipt-divider"></div>
-          <div>
-            ${receipt.lines.map(l => `
+          <div class="thermal-receipt-sheet">
+            <div class="receipt-center">
+              <div class="receipt-bold" style="font-size: 14px;">${escapeHtml(receipt.businessName || state.tenantName || 'NexStock Retail')}</div>
+              <div>${escapeHtml(receipt.branchName || state.branchName || 'Main Store')}</div>
+              <div style="font-size: 10px;">Reg: ${escapeHtml(receipt.registerCode || state.registerCode || 'REG-01')} | Cashier: ${escapeHtml(receipt.cashierName || state.fullName || 'Cashier')}</div>
+            </div>
+            <div class="receipt-divider"></div>
+            <div class="receipt-row"><span>Inv:</span><strong>${escapeHtml(receipt.invoiceNumber)}</strong></div>
+            <div class="receipt-row"><span>Date:</span><span>${escapeHtml(receipt.formattedTimestamp || new Date().toLocaleString())}</span></div>
+            ${receipt.customerName ? `<div class="receipt-row"><span>Cust:</span><span>${escapeHtml(receipt.customerName)}</span></div>` : ''}
+            <div class="receipt-divider"></div>
+            <div>
+              ${receipt.lines.map(l => `
+                <div class="receipt-row">
+                  <span>${formatReceiptLineSummary(l, receiptCurr)}</span>
+                  <span>${formatTenantMoney(l.lineTotal, receiptCurr)}</span>
+                </div>
+              `).join('')}
+            </div>
+            <div class="receipt-divider"></div>
+            <div class="receipt-row"><span>Subtotal:</span><span>${formatTenantMoney(receipt.subtotalAmount, receiptCurr)}</span></div>
+            <div class="receipt-row"><span>Tax:</span><span>${formatTenantMoney(receipt.taxAmount, receiptCurr)}</span></div>
+            <div class="receipt-row receipt-bold" style="font-size: 13px; margin-top: 3px;">
+              <span>TOTAL:</span><span>${formatTenantMoney(receipt.grandTotal, receiptCurr)}</span>
+            </div>
+            <div class="receipt-divider"></div>
+            ${receipt.payments.map(p => `
               <div class="receipt-row">
-                <span>${formatReceiptLineSummary(l, receiptCurr)}</span>
-                <span>${formatTenantMoney(l.lineTotal, receiptCurr)}</span>
+                <span>Paid (${escapeHtml(p.method || p.paymentMethod)}):</span><span>${formatTenantMoney(p.amount, receiptCurr)}</span>
               </div>
             `).join('')}
-          </div>
-          <div class="receipt-divider"></div>
-          <div class="receipt-row"><span>Subtotal:</span><span>${formatTenantMoney(receipt.subtotalAmount, receiptCurr)}</span></div>
-          <div class="receipt-row"><span>Tax:</span><span>${formatTenantMoney(receipt.taxAmount, receiptCurr)}</span></div>
-          <div class="receipt-row receipt-bold" style="font-size: 13px; margin-top: 3px;">
-            <span>TOTAL:</span><span>${formatTenantMoney(receipt.grandTotal, receiptCurr)}</span>
-          </div>
-          <div class="receipt-divider"></div>
-          ${receipt.payments.map(p => `
-            <div class="receipt-row">
-              <span>Paid (${escapeHtml(p.method || p.paymentMethod)}):</span><span>${formatTenantMoney(p.amount, receiptCurr)}</span>
+            ${parseFloat(receipt.changeGiven || '0') > 0 ? `
+              <div class="receipt-row" style="font-weight: 700;">
+                <span>Change:</span><span>${formatTenantMoney(receipt.changeGiven, receiptCurr)}</span>
+              </div>
+            ` : ''}
+            <div class="receipt-divider"></div>
+            <div class="receipt-footer">
+              ${escapeHtml(receipt.notes || 'Thank you for shopping with NexStock!')}
             </div>
-          `).join('')}
-          ${parseFloat(receipt.changeGiven || '0') > 0 ? `
-            <div class="receipt-row" style="font-weight: 700;">
-              <span>Change:</span><span>${formatTenantMoney(receipt.changeGiven, receiptCurr)}</span>
-            </div>
-          ` : ''}
-          <div class="receipt-divider"></div>
-          <div class="receipt-footer">
-            ${escapeHtml(receipt.notes || 'Thank you for shopping with NexStock!')}
           </div>
         `;
       }
 
-      printHtmlDocument(printableHtml, pageStyles);
+      printHtmlDocument(printableHtml, pageStyles, pageDims);
     }
 
     function formatReceiptLineSummary(l, receiptCurr) {
@@ -22494,7 +23555,7 @@
     }
 
     async function quarantineBatchAction(batchId, batchNum) {
-      const reason = prompt(`Enter quarantine reason for batch "${batchNum}":`, 'Quality inspection required');
+      const reason = await nexPrompt(`Enter quarantine reason for batch "${batchNum}":`, 'Quality inspection required', { title: 'Quarantine Batch', danger: true, minLength: 3, required: true });
       if (!reason || reason.trim().length < 3) return;
 
       try {
@@ -22510,7 +23571,7 @@
     }
 
     async function releaseBatchAction(batchId, batchNum) {
-      if (!confirm(`Release batch "${batchNum}" from quarantine?`)) return;
+      if (!(await nexConfirm(`Release batch "${batchNum}" from quarantine?`, { title: 'Release Batch', confirmText: 'Release' }))) return;
 
       try {
         await apiFetch(`/v1/inventory/batches/${batchId}/release`, {
@@ -23108,7 +24169,16 @@
       };
     }
 
-    async function generateSingleSerialBarcode(serialId) {
+    const activeSerialBarcodeOps = new Set();
+    async function generateSingleSerialBarcode(serialId, triggerBtn = null) {
+      if (activeSerialBarcodeOps.has(serialId)) return;
+      const btn = (triggerBtn && triggerBtn.tagName === 'BUTTON') ? triggerBtn : ((typeof event !== 'undefined' && event?.currentTarget?.tagName === 'BUTTON') ? event.currentTarget : null);
+      const prevHtml = btn ? btn.innerHTML : 'Gen Barcode';
+      activeSerialBarcodeOps.add(serialId);
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-sm" style="width:12px;height:12px;border-width:2px;margin-right:4px;"></span> Generating...';
+      }
       try {
         const res = await apiFetch(`/v1/inventory/serials/${serialId}/barcode/generate`, {
           method: 'POST',
@@ -23116,7 +24186,15 @@
         });
         showToast(`Barcode ready: ${res?.internalBarcode || 'Generated'}`, 'success');
         await renderSerialsView();
-      } catch {}
+      } catch (err) {
+        showToast(err?.message || 'Failed to generate serial barcode', 'error');
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = prevHtml;
+        }
+      } finally {
+        activeSerialBarcodeOps.delete(serialId);
+      }
     }
 
     // =========================================================================
@@ -23190,23 +24268,36 @@
                 ${groups.map(g => {
                   const prod = prodMap.get(g.productId);
                   const prodLabel = g.productName ? `${g.productSku || ''} - ${g.productName}` : (prod ? `${prod.sku} - ${prod.name}` : g.productId);
+                  const groupSerials = Array.isArray(g.serials) && g.serials.length > 0
+                    ? g.serials
+                    : serials.filter(s => s.serialGroupId === g.id);
+                  const withBarcodes = groupSerials.filter(s => Boolean(s.internalBarcode));
                   return `
-                    <div style="border: 1px solid var(--border-subtle); border-radius: 10px; padding: 12px; background: var(--bg-hover);">
+                    <div style="border: 1px solid var(--border-subtle); border-radius: 10px; padding: 12px; background: var(--bg-hover); max-width: 100%; overflow: hidden;">
                       <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 6px;">
-                        <div>
-                          <strong style="font-family: monospace; color: var(--accent-primary);">${escapeHtml(g.groupCode)}</strong>
+                        <div style="min-width: 0; max-width: 100%; word-break: break-word;">
+                          <strong style="font-family: monospace; color: var(--accent-primary); word-break: break-all;">${escapeHtml(g.groupCode)}</strong>
                           <span style="margin-left: 8px; font-weight: 600;">${escapeHtml(prodLabel)}</span>
                         </div>
                         <div style="display: flex; gap: 6px; flex-wrap: wrap;">
                           <span class="badge-pill ${g.remainingQuantity > 0 ? 'badge-green' : 'badge-yellow'}">${g.remainingQuantity} / ${g.initialQuantity} In Stock</span>
+                          <span class="badge-pill badge-blue">${withBarcodes.length} / ${groupSerials.length || g.initialQuantity} Barcodes</span>
                           <button class="btn btn-primary btn-sm" onclick="openSerialGroupLabelPrintModal('${escapeHtml(g.id)}')">Print Group Labels</button>
                         </div>
                       </div>
-                      <div style="font-size: 12px; color: var(--text-secondary); display: flex; gap: 16px; flex-wrap: wrap;">
+                      <div style="font-size: 12px; color: var(--text-secondary); display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: ${groupSerials.length > 0 ? '8px' : '0'};">
                         <span>Purchase Cost: <strong style="color: var(--text-primary);">${formatTenantMoney(g.purchaseCost)}</strong></span>
                         <span>Selling Price: <strong style="color: var(--accent-primary);">${formatTenantMoney(g.sellingPrice)}</strong></span>
                         <span>Received: ${escapeHtml(new Date(g.receivedAt).toLocaleDateString())}</span>
                       </div>
+                      ${groupSerials.length > 0 ? `
+                        <div style="display: flex; flex-wrap: wrap; gap: 5px; padding-top: 6px; border-top: 1px dashed var(--border-subtle);">
+                          ${groupSerials.map(gs => gs.internalBarcode
+                            ? `<span class="badge-pill" style="font-family: monospace; font-size: 10px; background: var(--bg-primary); border: 1px solid var(--border-subtle); color: var(--text-primary); word-break: break-all;">${escapeHtml(gs.serialNumber)}: <strong>${escapeHtml(gs.internalBarcode)}</strong></span>`
+                            : `<span class="badge-pill badge-yellow" style="font-family: monospace; font-size: 10px;">${escapeHtml(gs.serialNumber)} (No barcode)</span>`
+                          ).join('')}
+                        </div>
+                      ` : ''}
                     </div>
                   `;
                 }).join('')}
@@ -23215,9 +24306,9 @@
           ` : ''}
 
           <div class="card">
-            <div class="card-title">
+            <div class="card-title" style="display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap;">
               <span>Tracked Serials (${serials.length})</span>
-              <input type="text" id="serialSearchInput" class="form-input" placeholder="Search serial # or NB-S barcode..." style="width: 240px; padding: 4px 8px; font-size: 13px;">
+              <input type="text" id="serialSearchInput" class="form-input" placeholder="Search serial # or NB-S barcode..." style="width: 100%; max-width: 260px; padding: 6px 10px; font-size: 13px;">
             </div>
             ${serials.length === 0 ? `
               <div class="empty-state-card">
@@ -23287,15 +24378,15 @@
 
                   return `
                     <div class="entity-card serial-row" data-sn="${escapeHtml(searchHay)}">
-                      <div class="entity-card-header">
-                        <span class="entity-card-code"><strong style="font-family: monospace;">${escapeHtml(s.serialNumber)}</strong></span>
+                      <div class="entity-card-header" style="gap: 8px; flex-wrap: wrap;">
+                        <span class="entity-card-code" style="min-width: 0; max-width: 100%; word-break: break-all;"><strong style="font-family: monospace; word-break: break-all;">${escapeHtml(s.serialNumber)}</strong></span>
                         <span class="badge-pill ${badgeClass}">${escapeHtml(s.status)}</span>
                       </div>
-                      <div class="entity-card-title">${prodTitle}</div>
+                      <div class="entity-card-title" style="word-break: break-word;">${prodTitle}</div>
                       <div class="entity-card-details">
                         <div class="detail-row">
                           <span class="detail-label">Internal Barcode</span>
-                          <span class="detail-value" style="font-family: monospace;">${escapeHtml(s.internalBarcode || 'Not generated')}</span>
+                          <span class="detail-value" style="font-family: monospace; word-break: break-all; max-width: 65%; text-align: right;">${escapeHtml(s.internalBarcode || 'Not generated')}</span>
                         </div>
                         <div class="detail-row">
                           <span class="detail-label">Cost / Selling</span>
@@ -23303,12 +24394,13 @@
                         </div>
                         <div class="detail-row">
                           <span class="detail-label">Stock Group</span>
-                          <span class="detail-value">${escapeHtml(s.groupCode || '—')}</span>
+                          <span class="detail-value" style="word-break: break-all;">${escapeHtml(s.groupCode || '—')}</span>
                         </div>
                       </div>
                       <div class="entity-card-footer" style="display: flex; gap: 6px; flex-wrap: wrap;">
-                        ${s.serialGroupId ? `<button class="btn btn-primary btn-sm" style="flex: 1;" onclick="openSerialGroupLabelPrintModal('${escapeHtml(s.serialGroupId)}')">Print Labels</button>` : ''}
-                        <button class="btn btn-secondary btn-sm" style="flex: 1;" onclick="openSerialTransitionModal('${escapeHtml(s.id)}', '${escapeHtml(s.serialNumber)}', '${escapeHtml(s.status)}')">Status</button>
+                        ${!s.internalBarcode ? `<button class="btn btn-secondary btn-sm" style="flex: 1 1 110px;" onclick="generateSingleSerialBarcode('${escapeHtml(s.id)}', this)">Gen Barcode</button>` : ''}
+                        ${s.serialGroupId ? `<button class="btn btn-primary btn-sm" style="flex: 1 1 110px;" onclick="openSerialGroupLabelPrintModal('${escapeHtml(s.serialGroupId)}')">Print Labels</button>` : ''}
+                        <button class="btn btn-secondary btn-sm" style="flex: 1 1 90px;" onclick="openSerialTransitionModal('${escapeHtml(s.id)}', '${escapeHtml(s.serialNumber)}', '${escapeHtml(s.status)}')">Status</button>
                       </div>
                     </div>
                   `;
@@ -24113,7 +25205,7 @@
     }
 
     async function submitStocktakeAction(sessionId) {
-      if (!confirm('Submit entered stock counts for supervisor review?')) return;
+      if (!(await nexConfirm('Submit entered stock counts for supervisor review?', { title: 'Submit Stocktake', confirmText: 'Submit' }))) return;
       try {
         await apiFetch(`/v1/inventory/stocktakes/${sessionId}/submit`, { method: 'POST' });
         showToast('Stocktake submitted for supervisor review', 'success');
@@ -24218,7 +25310,7 @@
     async function reviewAction(sessionId, action) {
       let rejectionReason;
       if (action === 'REJECT') {
-        rejectionReason = prompt('Enter reason for count rejection:', 'Recount requested due to high discrepancy');
+        rejectionReason = await nexPrompt('Enter reason for count rejection:', 'Recount requested due to high discrepancy', { title: 'Reject Stocktake Count', danger: true, minLength: 3, required: true });
         if (!rejectionReason || rejectionReason.trim().length < 3) return;
       }
 
@@ -24236,7 +25328,7 @@
     }
 
     async function postStocktakeAdjustmentsAction(sessionId) {
-      if (!confirm('Post approved variance adjustments to the immutable stock ledger? This action cannot be undone.')) return;
+      if (!(await nexConfirm('Post approved variance adjustments to the immutable stock ledger? This action cannot be undone.', { title: 'Post Adjustments', confirmText: 'Post Adjustments', danger: true }))) return;
       try {
         await apiFetch(`/v1/inventory/stocktakes/${sessionId}/post-adjustments`, { method: 'POST' });
         showToast('Stocktake adjustments posted to stock ledger', 'success');
@@ -25694,7 +26786,7 @@
     }
 
     async function unlinkEmployeeUser(employeeId) {
-      if (!confirm('Are you sure you want to unlink the system user from this employee?')) return;
+      if (!(await nexConfirm('Are you sure you want to unlink the system user from this employee?', { title: 'Unlink User', confirmText: 'Unlink', danger: true }))) return;
 
       try {
         await apiFetch(`/v1/employees/${employeeId}/link-user`, {
@@ -26306,7 +27398,7 @@
     }
 
     async function deleteEmployeeDocumentConfirm(employeeId, documentId) {
-      if (!confirm('Are you sure you want to delete this document? This action cannot be undone.')) return;
+      if (!(await nexConfirm('Are you sure you want to delete this document? This action cannot be undone.', { title: 'Delete Document', confirmText: 'Delete', danger: true }))) return;
 
       try {
         await apiFetch(`/v1/employees/${employeeId}/documents/${documentId}`, {
@@ -27128,7 +28220,7 @@
 
     async function reviewLeaveAction(requestId, status) {
       const actionVerb = status === 'APPROVED' ? 'Approve' : 'Reject';
-      const reason = prompt(`Enter notes for ${actionVerb} (optional):`, '');
+      const reason = await nexPrompt(`Enter notes for ${actionVerb} (optional):`, '', { title: `${actionVerb} Leave Request`, placeholder: 'Optional reviewer notes...' });
       if (reason === null) return;
 
       try {
@@ -27243,7 +28335,7 @@
     }
 
     async function deleteHolidayAction(id) {
-      if (!confirm('Are you sure you want to remove this holiday?')) return;
+      if (!(await nexConfirm('Are you sure you want to remove this holiday?', { title: 'Remove Holiday', confirmText: 'Remove', danger: true }))) return;
       try {
         await apiFetch(`/v1/org/holidays/${id}`, { method: 'DELETE' });
         showToast('Holiday removed', 'info');
@@ -28142,7 +29234,7 @@
     }
 
     async function approvePayrollRunAction(runId, btnElement = null) {
-      if (!confirm('Are you sure you want to approve this payroll run? Once approved, line items are locked and immutable.')) return;
+      if (!(await nexConfirm('Are you sure you want to approve this payroll run? Once approved, line items are locked and immutable.', { title: 'Approve Payroll Run', confirmText: 'Approve' }))) return;
 
       const actionKey = `approve_${runId}`;
       if (_payrollActionInFlight.has(actionKey)) return;
@@ -28179,7 +29271,7 @@
     }
 
     async function cancelPayrollRunAction(runId, btnElement = null) {
-      const reason = prompt('Please enter a cancellation reason:');
+      const reason = await nexPrompt('Please enter a cancellation reason:', '', { title: 'Cancel Payroll Run', danger: true, required: true });
       if (reason === null) return;
 
       const actionKey = `cancel_${runId}`;
@@ -29253,23 +30345,39 @@
       renderExpensesView();
     }
 
-    // --- Create / Edit Expense Modal ---
+    // --- Create / Edit Expense Modal (0ms Instant Open + Optional Receipt Upload) ---
+    function inferExpenseAttachmentMimeType(file) {
+      const rawType = String(file?.type || '').trim().toLowerCase();
+      if (rawType === 'image/jpg') return 'image/jpeg';
+      if (['application/pdf', 'image/jpeg', 'image/png', 'image/webp'].includes(rawType)) {
+        return rawType;
+      }
+      const name = String(file?.name || '').toLowerCase();
+      if (name.endsWith('.pdf')) return 'application/pdf';
+      if (name.endsWith('.jpg') || name.endsWith('.jpeg')) return 'image/jpeg';
+      if (name.endsWith('.png')) return 'image/png';
+      if (name.endsWith('.webp')) return 'image/webp';
+      return rawType || 'application/pdf';
+    }
+
+    function fileToBase64Payload(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || '').split(',')[1] || '');
+        reader.onerror = () => reject(new Error('Failed to read selected file'));
+        reader.readAsDataURL(file);
+      });
+    }
+
     async function openCreateExpenseModal(expenseId = null) {
-      const existing = expenseId ? state.cachedExpenses.find(e => e.id === expenseId) : null;
+      const existing = expenseId ? (state.cachedExpenses || []).find(e => e.id === expenseId) : null;
       const isEditing = Boolean(existing);
       const currency = getTenantCurrency();
+      const categories = Array.isArray(state.cachedExpenseCategories) ? state.cachedExpenseCategories : [];
+      const branches = Array.isArray(state.cachedBranches) ? state.cachedBranches : [];
 
-      // Ensure categories are loaded
-      if (!state.cachedExpenseCategories || state.cachedExpenseCategories.length === 0) {
-        const catRes = await apiFetch('/v1/expenses/categories').catch(() => ({ items: [] }));
-        state.cachedExpenseCategories = catRes?.items || [];
-      }
-
-      // Fetch branches
-      const branchesRes = await apiFetch('/v1/org/branches').catch(() => ({ items: [] }));
-      const branches = branchesRes?.items || [];
-
-      const today = new Date().toISOString().substring(0, 10);
+      const d = new Date();
+      const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
       const defaultDate = existing ? existing.expenseDate : today;
 
       const bodyHtml = `
@@ -29285,7 +30393,7 @@
                 <label class="form-label" style="font-weight: 600;">Category *</label>
                 <select id="expCategory" class="form-select" required>
                   <option value="">Select Category...</option>
-                  ${state.cachedExpenseCategories.filter(c => c.isActive || (existing && existing.categoryId === c.id)).map(c => `
+                  ${categories.filter(c => c.isActive || (existing && existing.categoryId === c.id)).map(c => `
                     <option value="${c.id}" ${existing?.categoryId === c.id ? 'selected' : ''}>${escapeHtml(c.name)}</option>
                   `).join('')}
                 </select>
@@ -29339,6 +30447,11 @@
               <label class="form-label" style="font-weight: 600;">Description &bull; Notes</label>
               <textarea id="expDescription" class="form-textarea" rows="2" placeholder="Optional purpose, bill invoice numbers, or notes">${escapeHtml(existing?.description || existing?.notes || '')}</textarea>
             </div>
+
+            <div class="form-group">
+              <label class="form-label" style="font-weight: 600;">Attach Receipt / Invoice (Optional: PDF, JPG, PNG, WebP &le; 10 MB)</label>
+              <input type="file" id="expModalAttachmentInput" class="form-input" accept=".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp" />
+            </div>
           </div>
         </form>
       `;
@@ -29358,9 +30471,53 @@
         footerHtml,
         maxWidth: '560px',
       });
+
+      // Background hydrate categories or branches if cache was cold when modal opened
+      if (categories.length === 0) {
+        apiFetch('/v1/expenses/categories', { silent: true }).then(catRes => {
+          const cats = catRes?.items || [];
+          state.cachedExpenseCategories = cats;
+          const catEl = document.getElementById('expCategory');
+          if (catEl && cats.length > 0) {
+            const curVal = catEl.value || existing?.categoryId || '';
+            catEl.innerHTML = `<option value="">Select Category...</option>` +
+              cats.filter(c => c.isActive || (existing && existing.categoryId === c.id)).map(c =>
+                `<option value="${c.id}" ${curVal === c.id ? 'selected' : ''}>${escapeHtml(c.name)}</option>`
+              ).join('');
+            if (typeof refreshNexSelect === 'function') refreshNexSelect(catEl);
+          }
+        }).catch(() => {});
+      }
+      if (branches.length === 0) {
+        apiFetch('/v1/org/branches', { silent: true }).then(bRes => {
+          const list = bRes?.items || [];
+          state.cachedBranches = list;
+          const brEl = document.getElementById('expBranch');
+          if (brEl && list.length > 0) {
+            const curVal = brEl.value || existing?.branchId || '';
+            brEl.innerHTML = `<option value="">All Branches / HQ</option>` +
+              list.map(b => `<option value="${b.id}" ${curVal === b.id ? 'selected' : ''}>${escapeHtml(b.name)}</option>`).join('');
+            if (typeof refreshNexSelect === 'function') refreshNexSelect(brEl);
+          }
+        }).catch(() => {});
+      }
+    }
+
+    const activeExpenseOps = new Set();
+
+    function applyOptimisticExpensePatch(savedExpense, isNew = false) {
+      if (!savedExpense || !savedExpense.id) return;
+      if (!Array.isArray(state.cachedExpenses)) state.cachedExpenses = [];
+      if (isNew) {
+        state.cachedExpenses = [savedExpense, ...state.cachedExpenses.filter(e => e.id !== savedExpense.id)];
+      } else {
+        state.cachedExpenses = state.cachedExpenses.map(e => e.id === savedExpense.id ? { ...e, ...savedExpense } : e);
+      }
     }
 
     async function saveExpense(isEditing, expenseId) {
+      const opKey = expenseId || '__new_expense__';
+      if (activeExpenseOps.has(opKey)) return;
       const title = document.getElementById('expTitle')?.value?.trim();
       const categoryId = document.getElementById('expCategory')?.value;
       const branchId = document.getElementById('expBranch')?.value || null;
@@ -29370,16 +30527,22 @@
       const paymentMethod = document.getElementById('expPaymentMethod')?.value || 'CASH';
       const vendorPayee = document.getElementById('expPayee')?.value?.trim() || null;
       const description = document.getElementById('expDescription')?.value?.trim() || null;
+      const attachFile = document.getElementById('expModalAttachmentInput')?.files?.[0] || null;
 
       if (!title || !categoryId || !expenseDate || isNaN(amountVal) || amountVal <= 0) {
         showToast('Please fill all required fields with a positive expense amount', 'error');
         return;
       }
+      if (attachFile && attachFile.size > 10 * 1024 * 1024) {
+        showToast('Receipt file exceeds maximum size of 10 MB', 'error');
+        return;
+      }
 
       const saveBtn = document.getElementById('btnSaveExpense');
+      activeExpenseOps.add(opKey);
       if (saveBtn) {
         saveBtn.disabled = true;
-        saveBtn.innerText = 'Saving...';
+        saveBtn.innerHTML = '<span class="spinner-sm" style="width:12px;height:12px;border-width:2px;margin-right:5px;"></span> Saving...';
       }
 
       try {
@@ -29395,18 +30558,40 @@
           description,
         };
 
+        let saved = null;
         if (isEditing) {
-          await apiFetch(`/v1/expenses/${expenseId}`, {
+          saved = await apiFetch(`/v1/expenses/${expenseId}`, {
             method: 'PATCH',
             body: JSON.stringify(payload),
           });
-          showToast('Expense updated successfully', 'success');
+          applyOptimisticExpensePatch(saved, false);
         } else {
-          await apiFetch('/v1/expenses', {
+          saved = await apiFetch('/v1/expenses', {
             method: 'POST',
             body: JSON.stringify(payload),
           });
-          showToast('Expense created in DRAFT status', 'success');
+          applyOptimisticExpensePatch(saved, true);
+        }
+
+        const targetExpId = saved?.id || expenseId;
+        if (attachFile && targetExpId) {
+          if (saveBtn) saveBtn.innerHTML = '<span class="spinner-sm" style="width:12px;height:12px;border-width:2px;margin-right:5px;"></span> Uploading receipt...';
+          try {
+            const base64Data = await fileToBase64Payload(attachFile);
+            await apiFetch(`/v1/expenses/${targetExpId}/attachments`, {
+              method: 'POST',
+              body: JSON.stringify({
+                fileName: attachFile.name,
+                mimeType: inferExpenseAttachmentMimeType(attachFile),
+                dataBase64: base64Data,
+              }),
+            });
+            showToast(isEditing ? 'Expense & receipt updated' : 'Draft expense & receipt saved', 'success');
+          } catch (attErr) {
+            showToast(`Expense saved, but receipt upload failed: ${attErr.message}`, 'warning');
+          }
+        } else {
+          showToast(isEditing ? 'Expense updated successfully' : 'Expense created in DRAFT status', 'success');
         }
 
         closeModal();
@@ -29417,6 +30602,8 @@
           saveBtn.disabled = false;
           saveBtn.innerText = isEditing ? 'Save Changes' : 'Create Draft Expense';
         }
+      } finally {
+        activeExpenseOps.delete(opKey);
       }
     }
 
@@ -29569,29 +30756,47 @@
     }
 
     // --- Action Handlers: Submit, Approve, Reject, Pay, Delete ---
-    async function submitExpenseFromUi(expenseId) {
+    async function submitExpenseFromUi(expenseId, triggerEl = null) {
+      if (activeExpenseOps.has(expenseId)) return;
+      const btn = (triggerEl && triggerEl.tagName === 'BUTTON') ? triggerEl : ((typeof event !== 'undefined' && event?.currentTarget?.tagName === 'BUTTON') ? event.currentTarget : null);
+      const prevHtml = btn ? btn.innerHTML : 'Submit';
+      activeExpenseOps.add(expenseId);
+      if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-sm" style="width:12px;height:12px;border-width:2px;margin-right:4px;"></span> Submitting...'; }
       try {
-        await apiFetch(`/v1/expenses/${expenseId}/submit`, {
+        const res = await apiFetch(`/v1/expenses/${expenseId}/submit`, {
           method: 'POST',
         });
+        applyOptimisticExpensePatch(res || { id: expenseId, status: 'PENDING_APPROVAL' }, false);
         showToast('Expense submitted for manager approval', 'success');
         closeModal();
         renderExpensesView();
       } catch (err) {
         showToast(err.message, 'error');
+        if (btn) { btn.disabled = false; btn.innerHTML = prevHtml; }
+      } finally {
+        activeExpenseOps.delete(expenseId);
       }
     }
 
-    async function approveExpenseFromUi(expenseId) {
+    async function approveExpenseFromUi(expenseId, triggerEl = null) {
+      if (activeExpenseOps.has(expenseId)) return;
+      const btn = (triggerEl && triggerEl.tagName === 'BUTTON') ? triggerEl : ((typeof event !== 'undefined' && event?.currentTarget?.tagName === 'BUTTON') ? event.currentTarget : null);
+      const prevHtml = btn ? btn.innerHTML : 'Approve';
+      activeExpenseOps.add(expenseId);
+      if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-sm" style="width:12px;height:12px;border-width:2px;margin-right:4px;"></span> Approving...'; }
       try {
-        await apiFetch(`/v1/expenses/${expenseId}/approve`, {
+        const res = await apiFetch(`/v1/expenses/${expenseId}/approve`, {
           method: 'POST',
         });
+        applyOptimisticExpensePatch(res || { id: expenseId, status: 'APPROVED' }, false);
         showToast('Expense approved successfully', 'success');
         closeModal();
         renderExpensesView();
       } catch (err) {
         showToast(err.message, 'error');
+        if (btn) { btn.disabled = false; btn.innerHTML = prevHtml; }
+      } finally {
+        activeExpenseOps.delete(expenseId);
       }
     }
 
@@ -29605,7 +30810,7 @@
 
       const footerHtml = `
         <button class="btn btn-secondary" onclick="openExpenseDetailsModal('${expenseId}')">Back</button>
-        <button class="btn btn-primary" style="background: var(--status-danger); border-color: var(--status-danger);" onclick="confirmRejectExpense('${expenseId}')">Reject Expense</button>
+        <button class="btn btn-primary" id="btnConfirmRejectExpense" style="background: var(--status-danger); border-color: var(--status-danger);" onclick="confirmRejectExpense('${expenseId}')">Reject Expense</button>
       `;
 
       openModal({
@@ -29617,22 +30822,30 @@
     }
 
     async function confirmRejectExpense(expenseId) {
+      if (activeExpenseOps.has(expenseId)) return;
       const reason = document.getElementById('rejectionReasonInput')?.value?.trim();
       if (!reason || reason.length < 3) {
         showToast('Please provide a rejection reason of at least 3 characters', 'error');
         return;
       }
 
+      const btn = document.getElementById('btnConfirmRejectExpense');
+      activeExpenseOps.add(expenseId);
+      if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-sm" style="width:12px;height:12px;border-width:2px;margin-right:4px;"></span> Rejecting...'; }
       try {
-        await apiFetch(`/v1/expenses/${expenseId}/reject`, {
+        const res = await apiFetch(`/v1/expenses/${expenseId}/reject`, {
           method: 'POST',
           body: JSON.stringify({ rejectionReason: reason }),
         });
+        applyOptimisticExpensePatch(res || { id: expenseId, status: 'REJECTED' }, false);
         showToast('Expense marked as rejected', 'success');
         closeModal();
         renderExpensesView();
       } catch (err) {
         showToast(err.message, 'error');
+        if (btn) { btn.disabled = false; btn.textContent = 'Reject Expense'; }
+      } finally {
+        activeExpenseOps.delete(expenseId);
       }
     }
 
@@ -29680,7 +30893,7 @@
 
       const footerHtml = `
         <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-        <button class="btn btn-primary" onclick="confirmRecordPayment('${expenseId}')">Confirm Payment</button>
+        <button class="btn btn-primary" id="btnConfirmExpPayment" onclick="confirmRecordPayment('${expenseId}')">Confirm Payment</button>
       `;
 
       openModal({
@@ -29692,6 +30905,7 @@
     }
 
     async function confirmRecordPayment(expenseId) {
+      if (activeExpenseOps.has(expenseId)) return;
       const paymentDate = document.getElementById('expPayDate')?.value;
       const paymentMethod = document.getElementById('expPayMethod')?.value;
       const paymentReference = document.getElementById('expPayRef')?.value?.trim() || null;
@@ -29702,8 +30916,11 @@
         return;
       }
 
+      const btn = document.getElementById('btnConfirmExpPayment');
+      activeExpenseOps.add(expenseId);
+      if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-sm" style="width:12px;height:12px;border-width:2px;margin-right:4px;"></span> Processing...'; }
       try {
-        await apiFetch(`/v1/expenses/${expenseId}/pay`, {
+        const res = await apiFetch(`/v1/expenses/${expenseId}/pay`, {
           method: 'POST',
           body: JSON.stringify({
             paymentDate,
@@ -29712,16 +30929,20 @@
             notes,
           }),
         });
+        applyOptimisticExpensePatch(res || { id: expenseId, status: 'PAID' }, false);
         showToast('Expense payment recorded successfully', 'success');
         closeModal();
         renderExpensesView();
       } catch (err) {
         showToast(err.message, 'error');
+        if (btn) { btn.disabled = false; btn.textContent = 'Confirm Payment'; }
+      } finally {
+        activeExpenseOps.delete(expenseId);
       }
     }
 
     async function deleteExpenseFromUi(expenseId) {
-      if (!confirm('Are you sure you want to delete this draft expense record? This action cannot be undone.')) {
+      if (!(await nexConfirm('Are you sure you want to delete this draft expense record? This action cannot be undone.', { title: 'Delete Expense', confirmText: 'Delete', danger: true }))) {
         return;
       }
 
@@ -29748,25 +30969,21 @@
         return;
       }
 
-      const reader = new FileReader();
-      reader.onload = async () => {
-        try {
-          const base64Data = String(reader.result).split(',')[1];
-          await apiFetch(`/v1/expenses/${expenseId}/attachments`, {
-            method: 'POST',
-            body: JSON.stringify({
-              fileName: file.name,
-              mimeType: file.type || 'application/pdf',
-              dataBase64: base64Data,
-            }),
-          });
-          showToast('Receipt attachment uploaded successfully', 'success');
-          openExpenseDetailsModal(expenseId);
-        } catch (err) {
-          showToast(err.message, 'error');
-        }
-      };
-      reader.readAsDataURL(file);
+      try {
+        const base64Data = await fileToBase64Payload(file);
+        await apiFetch(`/v1/expenses/${expenseId}/attachments`, {
+          method: 'POST',
+          body: JSON.stringify({
+            fileName: file.name,
+            mimeType: inferExpenseAttachmentMimeType(file),
+            dataBase64: base64Data,
+          }),
+        });
+        showToast('Receipt attachment uploaded successfully', 'success');
+        openExpenseDetailsModal(expenseId);
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
     }
 
     async function downloadExpenseAttachment(expenseId, attachmentId, fileName, mimeType) {
@@ -29794,7 +31011,7 @@
     }
 
     async function deleteExpenseAttachmentFromUi(expenseId, attachmentId) {
-      if (!confirm('Are you sure you want to delete this attached document?')) return;
+      if (!(await nexConfirm('Are you sure you want to delete this attached document?', { title: 'Delete Attachment', confirmText: 'Delete', danger: true }))) return;
       try {
         await apiFetch(`/v1/expenses/${expenseId}/attachments/${attachmentId}`, {
           method: 'DELETE',
@@ -29964,7 +31181,7 @@
     }
 
     async function deleteExpenseCategoryFromUi(categoryId) {
-      if (!confirm('Are you sure you want to delete this custom category? Deletion is blocked if any expenses reference it.')) return;
+      if (!(await nexConfirm('Are you sure you want to delete this custom category? Deletion is blocked if any expenses reference it.', { title: 'Delete Category', confirmText: 'Delete', danger: true }))) return;
       try {
         await apiFetch(`/v1/expenses/categories/${categoryId}`, {
           method: 'DELETE',
@@ -30801,20 +32018,12 @@
     }
 
     async function openCustomerModal(customerId = null) {
-      let cust = null;
-      if (customerId) {
-        try {
-          cust = await apiFetch(`/v1/customers/${customerId}`);
-        } catch (err) {
-          showToast(err.message, 'error');
-          return;
-        }
-      }
-
+      const cachedList = Array.isArray(state.cachedCustomers) ? state.cachedCustomers : [];
+      const cust = customerId ? (cachedList.find(c => c.id === customerId) || null) : null;
       const isCustActive = cust ? (cust.status ? cust.status === 'ACTIVE' : cust.isActive !== false) : true;
 
       openModal({
-        title: cust ? 'Edit Customer Details' : 'Register New Customer',
+        title: cust || customerId ? 'Edit Customer Details' : 'Register New Customer',
         bodyHtml: `
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
             <div class="form-group" style="grid-column: span 2;">
@@ -30854,11 +32063,11 @@
             </div>
             <div class="form-group">
               <label class="form-label">City</label>
-              <input type="text" class="form-input" id="custCityInput" value="${escapeHtml(cust?.addressCity || '')}" placeholder="Colombo">
+              <input type="text" class="form-input" id="custCityInput" value="${escapeHtml(cust?.addressCity || cust?.city || '')}" placeholder="Colombo">
             </div>
             <div class="form-group">
               <label class="form-label">Postal Code</label>
-              <input type="text" class="form-input" id="custPostalInput" value="${escapeHtml(cust?.addressPostalCode || '')}" placeholder="00300">
+              <input type="text" class="form-input" id="custPostalInput" value="${escapeHtml(cust?.addressPostalCode || cust?.postalCode || '')}" placeholder="00300">
             </div>
             <div class="form-group" style="grid-column: span 2;">
               <label class="form-label">Notes</label>
@@ -30868,10 +32077,30 @@
         `,
         footerHtml: `
           <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-          <button class="btn btn-primary" id="btnSaveCustomer" onclick="submitSaveCustomer('${customerId || ''}')">${cust ? 'Save Changes' : 'Create Customer'}</button>
+          <button class="btn btn-primary" id="btnSaveCustomer" onclick="submitSaveCustomer('${customerId || ''}')">${cust || customerId ? 'Save Changes' : 'Create Customer'}</button>
         `,
         maxWidth: '640px'
       });
+
+      if (customerId) {
+        apiFetch(`/v1/customers/${customerId}`, { silent: true }).then(fresh => {
+          if (!fresh || !document.getElementById('custNameInput')) return;
+          const idx = (state.cachedCustomers || []).findIndex(c => c.id === customerId);
+          if (idx >= 0) state.cachedCustomers[idx] = fresh;
+          if (!cust) {
+            document.getElementById('custNameInput').value = fresh.name || '';
+            document.getElementById('custNumberInput').value = fresh.customerNumber || '';
+            document.getElementById('custCompanyInput').value = fresh.companyName || '';
+            document.getElementById('custEmailInput').value = fresh.email || '';
+            document.getElementById('custPhoneInput').value = fresh.phone || '';
+            document.getElementById('custTaxIdInput').value = fresh.taxId || '';
+            document.getElementById('custAddress1Input').value = fresh.addressLine1 || fresh.address || '';
+            document.getElementById('custCityInput').value = fresh.addressCity || fresh.city || '';
+            document.getElementById('custPostalInput').value = fresh.addressPostalCode || fresh.postalCode || '';
+            document.getElementById('custNotesInput').value = fresh.notes || '';
+          }
+        }).catch(() => {});
+      }
     }
 
     async function submitSaveCustomer(customerId) {
@@ -31918,7 +33147,7 @@
     }
 
     async function reverseCreditPayment(paymentId, accountId) {
-      const reason = prompt('Please enter an audit reason for reversing this payment:');
+      const reason = await nexPrompt('Please enter an audit reason for reversing this payment:', '', { title: 'Reverse Credit Payment', danger: true, required: true });
       if (!reason || !reason.trim()) {
         showToast('Payment reversal cancelled: Reason is mandatory', 'warning');
         return;
@@ -32077,7 +33306,7 @@
         return;
       }
 
-      if (!confirm(`Are you sure you want to approve writing off ${formatTenantMoney(amountVal, 'LKR')} as bad debt?`)) {
+      if (!(await nexConfirm(`Are you sure you want to approve writing off ${formatTenantMoney(amountVal, 'LKR')} as bad debt?`, { title: 'Approve Bad Debt Write-Off', confirmText: 'Write Off', danger: true }))) {
         return;
       }
 
@@ -32996,7 +34225,7 @@
     }
 
     async function cancelStaffInvitationAction(invitationId) {
-      if (!confirm('Are you sure you want to cancel this pending invitation?')) return;
+      if (!(await nexConfirm('Are you sure you want to cancel this pending invitation?', { title: 'Cancel Invitation', confirmText: 'Cancel Invite', danger: true }))) return;
       try {
         await apiFetch(`/v1/iam/invitations/${invitationId}/cancel`, { method: 'POST' });
         showToast('Invitation cancelled', 'info');
@@ -33008,7 +34237,7 @@
 
     async function toggleMemberStatus(membershipId, status) {
       const actionText = (status === 'DEACTIVATED' || status === 'DISABLED') ? 'deactivate' : (status === 'SUSPENDED' ? 'suspend' : 'reactivate');
-      if (!confirm(`Are you sure you want to ${actionText} this staff member account?`)) return;
+      if (!(await nexConfirm(`Are you sure you want to ${actionText} this staff member account?`, { title: 'Update Member Status', confirmText: actionText.charAt(0).toUpperCase() + actionText.slice(1), danger: status !== 'ACTIVE' }))) return;
 
       try {
         await apiFetch(`/v1/iam/members/${membershipId}/status`, {
@@ -33069,7 +34298,7 @@
     }
 
     async function confirmRevokeMember(membershipId, memberName) {
-      if (!confirm(`Are you sure you want to revoke access for ${memberName}? This will delete their membership and unlink any associated employee profile.`)) return;
+      if (!(await nexConfirm(`Are you sure you want to revoke access for ${memberName}? This will delete their membership and unlink any associated employee profile.`, { title: 'Revoke Access', confirmText: 'Revoke', danger: true }))) return;
 
       try {
         await apiFetch(`/v1/iam/members/${membershipId}`, { method: 'DELETE' });
@@ -35083,8 +36312,8 @@
                         </td>
                         <td>
                           ${canResolveThis ? `
-                            <div style="display: flex; gap: 6px; flex-wrap: wrap;">
-                              <button class="btn btn-primary btn-sm" onclick="approvePriceSuggestionQuick('${s.id}')">Approve</button>
+                            <div style="display: flex; gap: 6px; flex-wrap: wrap;" data-sugg-actions="${s.id}">
+                              <button class="btn btn-primary btn-sm" onclick="approvePriceSuggestionQuick('${s.id}', this)">Approve</button>
                               <button class="btn btn-secondary btn-sm" onclick="openEditApproveSuggestionModal('${s.id}', '${escapeHtml(s.suggestedSellingPrice)}', '${escapeHtml(s.productName)}')">Edit</button>
                               <button class="btn btn-secondary btn-sm" onclick="openRejectDeferSuggestionModal('${s.id}', '${escapeHtml(s.productName)}')">Reject / Defer</button>
                             </div>
@@ -35122,7 +36351,7 @@
                   </div>
                   ${canResolveThis ? `
                     <div class="entity-card-footer" style="display: flex; gap: 6px; flex-wrap: wrap;">
-                      <button class="btn btn-primary btn-sm" style="flex: 1 1 90px;" onclick="approvePriceSuggestionQuick('${s.id}')">Approve</button>
+                      <button class="btn btn-primary btn-sm" style="flex: 1 1 90px;" onclick="approvePriceSuggestionQuick('${s.id}', this)">Approve</button>
                       <button class="btn btn-secondary btn-sm" style="flex: 1 1 70px;" onclick="openEditApproveSuggestionModal('${s.id}', '${escapeHtml(s.suggestedSellingPrice)}', '${escapeHtml(s.productName)}')">Edit</button>
                       <button class="btn btn-secondary btn-sm" style="flex: 1 1 100%;" onclick="openRejectDeferSuggestionModal('${s.id}', '${escapeHtml(s.productName)}')">Reject / Defer</button>
                     </div>
@@ -35474,16 +36703,54 @@
       }
     }
 
-    async function approvePriceSuggestionQuick(suggestionId) {
+    const activeSuggestionOps = new Set();
+
+    function applyOptimisticSuggestionResolution(suggestionId, nextStatus) {
+      if (!state.cachedPricingData || !Array.isArray(state.cachedPricingData.suggestions)) return;
+      const curStatusFilter = state.smartPricingFilters?.status || 'PENDING';
+      const list = state.cachedPricingData.suggestions;
+      if (curStatusFilter !== 'ALL' && curStatusFilter !== nextStatus) {
+        state.cachedPricingData.suggestions = list.filter(s => s.id !== suggestionId);
+      } else {
+        state.cachedPricingData.suggestions = list.map(s => s.id === suggestionId ? { ...s, status: nextStatus } : s);
+      }
+      const tabBody = document.getElementById('smartPricingTabBody');
+      if (tabBody && (state.smartPricingTab || 'suggestions') === 'suggestions') {
+        const curr = state.cachedPricingData.dashboard?.currencyCode || getTenantCurrency();
+        const f = state.smartPricingFilters || { status: 'PENDING', scope: 'ALL' };
+        tabBody.innerHTML = renderSmartPricingSuggestionsTab(
+          state.cachedPricingData.suggestions,
+          f,
+          curr,
+          hasPermission('cat:pricing:approve_global'),
+          hasPermission('cat:pricing:approve_branch')
+        );
+      }
+    }
+
+    async function approvePriceSuggestionQuick(suggestionId, triggerEl = null) {
+      if (activeSuggestionOps.has(suggestionId)) return;
+      const btn = (triggerEl && triggerEl.tagName === 'BUTTON') ? triggerEl : ((typeof event !== 'undefined' && event?.currentTarget?.tagName === 'BUTTON') ? event.currentTarget : null);
+      const wrap = btn?.closest?.('[data-sugg-actions], .entity-card-footer');
+      const groupBtns = wrap ? Array.from(wrap.querySelectorAll('button')) : (btn ? [btn] : []);
+      const prevHtml = btn ? btn.innerHTML : 'Approve';
+      activeSuggestionOps.add(suggestionId);
+      groupBtns.forEach(b => { b.disabled = true; });
+      if (btn) btn.innerHTML = '<span class="spinner-sm" style="width:12px;height:12px;border-width:2px;margin-right:4px;"></span> Approving...';
       try {
         await apiFetch(`/v1/pricing/suggestions/${suggestionId}/approve`, {
           method: 'POST',
           body: JSON.stringify({})
         });
+        applyOptimisticSuggestionResolution(suggestionId, 'APPROVED');
         showToast('Price suggestion approved and published', 'success');
         renderSmartPricingView('suggestions');
       } catch (err) {
         showToast(err.message, 'error');
+        groupBtns.forEach(b => { b.disabled = false; });
+        if (btn) btn.innerHTML = prevHtml;
+      } finally {
+        activeSuggestionOps.delete(suggestionId);
       }
     }
 
@@ -35510,16 +36777,23 @@
         `,
         footerHtml: `
           <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-          <button class="btn btn-primary" onclick="submitEditApproveSuggestion('${suggestionId}')">Approve &amp; Publish</button>
+          <button class="btn btn-primary" id="btnEditApproveSuggConfirm" onclick="submitEditApproveSuggestion('${suggestionId}')">Approve &amp; Publish</button>
         `
       });
     }
 
     async function submitEditApproveSuggestion(suggestionId) {
+      if (activeSuggestionOps.has(suggestionId)) return;
       const overridePrice = parseFloat(document.getElementById('editApprovePriceInput')?.value || '0').toFixed(4);
       const effectiveDate = document.getElementById('editApproveEffDate')?.value;
       const reviewNotes = document.getElementById('editApproveNotesInput')?.value?.trim();
       const bypassFloorWithReason = document.getElementById('editApproveBypassInput')?.value?.trim();
+      const btn = document.getElementById('btnEditApproveSuggConfirm');
+      activeSuggestionOps.add(suggestionId);
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-sm" style="width:12px;height:12px;border-width:2px;margin-right:5px;"></span> Saving...';
+      }
       try {
         await apiFetch(`/v1/pricing/suggestions/${suggestionId}/approve`, {
           method: 'POST',
@@ -35531,10 +36805,17 @@
           })
         });
         closeModal();
+        applyOptimisticSuggestionResolution(suggestionId, 'MODIFIED_APPROVED');
         showToast('Modified selling price approved', 'success');
         renderSmartPricingView('suggestions');
       } catch (err) {
         showToast(err.message, 'error');
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = 'Approve & Publish';
+        }
+      } finally {
+        activeSuggestionOps.delete(suggestionId);
       }
     }
 
@@ -35560,18 +36841,25 @@
         `,
         footerHtml: `
           <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-          <button class="btn btn-primary" onclick="submitRejectDeferSuggestion('${suggestionId}')">Submit Decision</button>
+          <button class="btn btn-primary" id="btnRejDefSuggConfirm" onclick="submitRejectDeferSuggestion('${suggestionId}')">Submit Decision</button>
         `
       });
     }
 
     async function submitRejectDeferSuggestion(suggestionId) {
+      if (activeSuggestionOps.has(suggestionId)) return;
       const action = document.getElementById('rejDefAction')?.value || 'REJECT';
       const reviewNotes = document.getElementById('rejDefNotes')?.value?.trim();
       const deferredUntil = document.getElementById('rejDefUntilDate')?.value;
       if (!reviewNotes || reviewNotes.length < 2) {
         showToast('Please enter a review reason', 'warning');
         return;
+      }
+      const btn = document.getElementById('btnRejDefSuggConfirm');
+      activeSuggestionOps.add(suggestionId);
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-sm" style="width:12px;height:12px;border-width:2px;margin-right:5px;"></span> Submitting...';
       }
       try {
         await apiFetch(`/v1/pricing/suggestions/${suggestionId}/reject-or-defer`, {
@@ -35583,10 +36871,17 @@
           })
         });
         closeModal();
+        applyOptimisticSuggestionResolution(suggestionId, action === 'DEFER' ? 'DEFERRED' : 'REJECTED');
         showToast(action === 'DEFER' ? 'Suggestion deferred' : 'Suggestion rejected', 'info');
         renderSmartPricingView('suggestions');
       } catch (err) {
         showToast(err.message, 'error');
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = 'Submit Decision';
+        }
+      } finally {
+        activeSuggestionOps.delete(suggestionId);
       }
     }
 
@@ -36001,27 +37296,35 @@
     }
 
     function applyReportDatePreset(preset) {
+      const dates = computeLocalDashboardPresetDates(preset === 'TODAY' ? 'TODAY' : (preset === 'THIS_MONTH' ? 'THIS_MONTH' : 'TODAY'));
       const now = new Date();
-      const endStr = now.toISOString().slice(0, 10);
-      let startStr = endStr;
-      if (preset === 'TODAY') {
-        startStr = endStr;
-      } else if (preset === '7D') {
-        startStr = new Date(now.getTime() - 6 * 86400000).toISOString().slice(0, 10);
+      const endLocal = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const endStr = formatLocalIsoDate(endLocal);
+      let startStr = dates.startDate;
+      if (preset === '7D') {
+        const s = new Date(endLocal.getTime());
+        s.setDate(s.getDate() - 6);
+        startStr = formatLocalIsoDate(s);
       } else if (preset === '30D') {
-        startStr = new Date(now.getTime() - 29 * 86400000).toISOString().slice(0, 10);
-      } else if (preset === 'THIS_MONTH') {
-        startStr = `${endStr.slice(0, 8)}01`;
+        const s = new Date(endLocal.getTime());
+        s.setDate(s.getDate() - 29);
+        startStr = formatLocalIsoDate(s);
       }
       state.reportFilters.preset = preset;
       state.reportFilters.startDate = startStr;
       state.reportFilters.endDate = endStr;
+      state.currentBusinessReport = null;
+      state.reportError = null;
       loadAndRenderBusinessReports();
     }
 
     function selectBusinessReportCategory(category) {
       if (!category) return;
+      const tabsEl = document.querySelector('.rep-cat-tabs');
+      if (tabsEl) state._reportTabsScrollLeft = tabsEl.scrollLeft;
       state.reportFilters.category = category;
+      state.currentBusinessReport = null;
+      state.reportError = null;
       loadAndRenderBusinessReports();
     }
 
@@ -36080,7 +37383,18 @@
       const container = document.getElementById('mainContainer');
       if (!container) return;
 
+      const tabsEl = document.querySelector('.rep-cat-tabs');
+      if (tabsEl) state._reportTabsScrollLeft = tabsEl.scrollLeft;
+
       const f = state.reportFilters;
+      state.reportFetchSeq = (state.reportFetchSeq || 0) + 1;
+      const repSeq = state.reportFetchSeq;
+
+      // Clear stale report from a different category or mismatched period immediately
+      if (state.currentBusinessReport && state.currentBusinessReport.category !== (f.category || 'SALES')) {
+        state.currentBusinessReport = null;
+      }
+      state.reportError = null;
       state.reportLoading = true;
       paintBusinessReportsShell(container);
 
@@ -36108,14 +37422,25 @@
         qs.set('comparePrevious', f.comparePrevious ? 'true' : 'false');
 
         const data = await apiFetch(`/v1/reports/business?${qs.toString()}`, { silent: true });
+        if (repSeq !== state.reportFetchSeq) return;
         if (data && (Array.isArray(data.kpis) || data.category)) {
           state.currentBusinessReport = data;
+          state.reportError = null;
         } else {
-          state.currentBusinessReport = buildOfflineFallbackBusinessReport(f);
+          state.currentBusinessReport = null;
+          state.reportError = 'Unexpected empty response from reports server.';
         }
-      } catch (_err) {
-        state.currentBusinessReport = buildOfflineFallbackBusinessReport(f);
+      } catch (err) {
+        if (repSeq !== state.reportFetchSeq) return;
+        if (isDeviceOffline()) {
+          state.currentBusinessReport = buildOfflineFallbackBusinessReport(f);
+          state.reportError = null;
+        } else {
+          state.currentBusinessReport = null;
+          state.reportError = err?.detail || err?.message || 'Failed to load business report.';
+        }
       } finally {
+        if (repSeq !== state.reportFetchSeq) return;
         state.reportLoading = false;
         if (state.activeView === 'reports' || state.currentView === 'reports') {
           paintBusinessReportsShell(container);
@@ -36157,7 +37482,11 @@
               `;
             }).join('')}
           </div>`
-        : (state.reportLoading ? `<div class="card p-4" style="text-align: center; color: var(--text-muted);">⏳ Loading ${escapeHtml(activeCatMeta.label)}...</div>` : '');
+        : (state.reportLoading
+            ? `<div class="card p-4" style="text-align: center; color: var(--text-muted);">⏳ Loading ${escapeHtml(activeCatMeta.label)}...</div>`
+            : (state.reportError
+                ? `<div class="card" style="border-color: var(--status-danger); color: var(--status-danger); display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;"><span>⚠️ ${escapeHtml(state.reportError)}</span><button type="button" class="btn btn-primary btn-sm" onclick="loadAndRenderBusinessReports()">↻ Retry</button></div>`
+                : ''));
 
       const showCostBanner = rep && (f.category === 'PROFITABILITY' || f.category === 'INVENTORY' || f.category === 'SALES');
       const costBannerHtml = showCostBanner ? `
@@ -36353,6 +37682,10 @@
           ${tablesHtml}
         </div>
       `;
+      const restoredTabs = document.querySelector('.rep-cat-tabs');
+      if (restoredTabs && typeof state._reportTabsScrollLeft === 'number') {
+        restoredTabs.scrollLeft = state._reportTabsScrollLeft;
+      }
     }
 
     function renderBusinessReportsView() {

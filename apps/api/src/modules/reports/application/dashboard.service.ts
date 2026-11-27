@@ -53,18 +53,7 @@ function resolveDashboardWindow(query: DashboardSummaryQuery): {
   let startDay: Date;
   let endDay: Date;
 
-  if (datePreset === 'YESTERDAY') {
-    startDay = addUtcDays(todayUtc, -1);
-    endDay = addUtcDays(todayUtc, -1);
-  } else if (datePreset === 'THIS_WEEK') {
-    const dow = todayUtc.getUTCDay(); // 0=Sun..6=Sat
-    const diffToMon = dow === 0 ? -6 : 1 - dow;
-    startDay = addUtcDays(todayUtc, diffToMon);
-    endDay = todayUtc;
-  } else if (datePreset === 'THIS_MONTH') {
-    startDay = new Date(Date.UTC(todayUtc.getUTCFullYear(), todayUtc.getUTCMonth(), 1));
-    endDay = todayUtc;
-  } else if (datePreset === 'CUSTOM' && (query.startDate || query.endDate)) {
+  if (query.startDate || query.endDate) {
     const sStr = query.startDate ?? query.endDate ?? formatIsoDayUtc(todayUtc);
     const eStr = query.endDate ?? query.startDate ?? sStr;
     const [sY, sM, sD] = sStr.split('-').map(Number);
@@ -76,6 +65,17 @@ function resolveDashboardWindow(query: DashboardSummaryQuery): {
       startDay = endDay;
       endDay = tmp;
     }
+  } else if (datePreset === 'YESTERDAY') {
+    startDay = addUtcDays(todayUtc, -1);
+    endDay = addUtcDays(todayUtc, -1);
+  } else if (datePreset === 'THIS_WEEK') {
+    const dow = todayUtc.getUTCDay(); // 0=Sun..6=Sat
+    const diffToMon = dow === 0 ? -6 : 1 - dow;
+    startDay = addUtcDays(todayUtc, diffToMon);
+    endDay = todayUtc;
+  } else if (datePreset === 'THIS_MONTH') {
+    startDay = new Date(Date.UTC(todayUtc.getUTCFullYear(), todayUtc.getUTCMonth(), 1));
+    endDay = todayUtc;
   } else {
     startDay = todayUtc;
     endDay = todayUtc;

@@ -655,6 +655,13 @@ export function loadSmartStockIntakeAndBarcodesMigrationSql(): string {
   return sqlText;
 }
 
+export function loadBranchCatalogIsolationAndCustomerAddressMigrationSql(): string {
+  const filename = '0033_branch_catalog_isolation_and_customer_address.sql';
+  const sqlText = readFileSync(resolve(migrationsDir, filename), 'utf-8');
+  assertPostgresMigrationSqlCompatible(sqlText, filename);
+  return sqlText;
+}
+
 export function getOrderedPostgresMigrations(): readonly PostgresMigrationSpec[] {
   return [
     {
@@ -880,6 +887,13 @@ export function getOrderedPostgresMigrations(): readonly PostgresMigrationSpec[]
       name: '0032_smart_stock_intake_and_barcodes',
       filename: '0032_smart_stock_intake_and_barcodes.sql',
       sql: loadSmartStockIntakeAndBarcodesMigrationSql(),
+    },
+    {
+      dialect: 'postgres',
+      version: 33,
+      name: '0033_branch_catalog_isolation_and_customer_address',
+      filename: '0033_branch_catalog_isolation_and_customer_address.sql',
+      sql: loadBranchCatalogIsolationAndCustomerAddressMigrationSql(),
     },
   ];
 }

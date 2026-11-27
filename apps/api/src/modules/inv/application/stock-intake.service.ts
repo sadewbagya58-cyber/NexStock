@@ -269,6 +269,8 @@ export async function createInboundStockIntakeAndEvaluate(
           'base_uom',
           'purchase_uom',
           'price_uom',
+          'product_qty_mode',
+          'measurement_category',
           'allowed_selling_uoms',
           'purchase_cost',
           'selling_price',
@@ -549,7 +551,15 @@ export async function createInboundStockIntakeAndEvaluate(
     changeTypes.push('BARCODE_MAPPING_CONFLICT');
   }
 
-  if (changeTypes.length === 0) {
+  const isWeighedOrMeasured =
+    productRow.product_qty_mode === 'VARIABLE' ||
+    ['WEIGHT', 'VOLUME', 'LENGTH'].includes(
+      String(productRow.measurement_category ?? '').toUpperCase(),
+    );
+
+  // Weighed/measured items route cost/price changes exclusively through the Smart Pricing Suggestions Queue
+  // instead of creating Stock Intake Configuration Alerts (Section 3.1).
+  if (isWeighedOrMeasured || changeTypes.length === 0) {
     return { intakeLot: mappedLot, configAlert: null };
   }
 

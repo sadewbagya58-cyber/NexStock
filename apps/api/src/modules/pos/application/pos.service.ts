@@ -35,7 +35,6 @@ import {
   resolveEffectiveBatchPrice,
   validateDiscountAgainstPolicy,
 } from '@nexstock/domain-core';
-import { resolveBranchEffectivePriceConfig } from '../../cat/index.js';
 import {
   assertAuthorized,
   resolveMemberAuthorizationContext,
@@ -1332,6 +1331,17 @@ export async function searchPosProducts(
 
   const limit = Math.min(Math.max(Number(query.limit ?? 25), 1), 100);
 
+  let targetBranchId = query.branchId ?? null;
+  if (!targetBranchId) {
+    const wh = await trx.db
+      .selectFrom('warehouses')
+      .select(['branch_id'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('id', '=', query.warehouseId)
+      .executeTakeFirst();
+    targetBranchId = wh?.branch_id ?? null;
+  }
+
   let dbQuery = trx.db
     .selectFrom('products')
     .leftJoin('categories', (join) =>
@@ -1347,6 +1357,8 @@ export async function searchPosProducts(
     )
     .select([
       'products.id as product_id',
+      'products.origin_branch_id as origin_branch_id',
+      'products.created_at as product_created_at',
       'products.sku as sku',
       'products.name as name',
       'products.product_type as product_type',
@@ -1389,14 +1401,14 @@ export async function searchPosProducts(
     const [barcodeMatches, serialMatches] = await Promise.all([
       trx.db
         .selectFrom('product_barcodes')
-        .select(['product_id'])
+        .select(['product_id', 'branch_id'])
         .where('tenant_id', '=', trx.tenantId)
         .where('barcode', '=', trimmedBarcode)
         .where('is_active', '=', true)
         .execute(),
       trx.db
         .selectFrom('inventory_serials')
-        .select(['product_id'])
+        .select(['product_id', 'branch_id'])
         .where('tenant_id', '=', trx.tenantId)
         .where((eb) =>
           eb.or([
@@ -1408,14 +1420,23 @@ export async function searchPosProducts(
         .execute(),
     ]);
 
-    if (barcodeMatches.length > 0) {
-      const productIds = barcodeMatches.map((b) => b.product_id);
+    const scopedBarcodeMatches = targetBranchId
+      ? barcodeMatches.filter(
+          (b) => b.branch_id === null || b.branch_id === targetBranchId,
+        )
+      : barcodeMatches;
+    const scopedSerialMatches = targetBranchId
+      ? serialMatches.filter((s) => s.branch_id === targetBranchId)
+      : serialMatches;
+
+    if (scopedBarcodeMatches.length > 0) {
+      const productIds = scopedBarcodeMatches.map((b) => b.product_id);
       dbQuery = dbQuery.where('products.id', 'in', productIds);
-    } else if (serialMatches.length > 0) {
+    } else if (scopedSerialMatches.length > 0) {
       dbQuery = dbQuery.where(
         'products.id',
         'in',
-        serialMatches.map((s) => s.product_id),
+        scopedSerialMatches.map((s) => s.product_id),
       );
     } else {
       // Also check if scanned code matches products.sku exactly
@@ -1425,13 +1446,15 @@ export async function searchPosProducts(
     const trimmedQ = query.q.trim();
     const matchedBarcodeProductIds = await trx.db
       .selectFrom('product_barcodes')
-      .select(['product_id'])
+      .select(['product_id', 'branch_id'])
       .where('tenant_id', '=', trx.tenantId)
       .where('barcode', 'ilike', `%${trimmedQ}%`)
       .where('is_active', '=', true)
       .execute();
 
-    const matchedIds = matchedBarcodeProductIds.map((b) => b.product_id);
+    const matchedIds = matchedBarcodeProductIds
+      .filter((b) => !targetBranchId || b.branch_id === null || b.branch_id === targetBranchId)
+      .map((b) => b.product_id);
 
     dbQuery = dbQuery.where((eb) => {
       const conditions = [
@@ -1445,7 +1468,51 @@ export async function searchPosProducts(
     });
   }
 
-  const rows = await dbQuery.orderBy('products.name', 'asc').limit(limit).execute();
+  let rows = await dbQuery
+    .orderBy('products.name', 'asc')
+    .$if(!targetBranchId, (qb) => qb.limit(limit))
+    .execute();
+
+  if (targetBranchId && rows.length > 0) {
+    const [branchRow, pbaRows] = await Promise.all([
+      trx.db
+        .selectFrom('branches')
+        .select(['id', 'created_at'])
+        .where('tenant_id', '=', trx.tenantId)
+        .where('id', '=', targetBranchId)
+        .executeTakeFirst(),
+      trx.db
+        .selectFrom('product_branch_assignments')
+        .select(['product_id', 'branch_id', 'status'])
+        .where('tenant_id', '=', trx.tenantId)
+        .where(
+          'product_id',
+          'in',
+          rows.map((r) => r.product_id),
+        )
+        .execute(),
+    ]);
+    if (!branchRow) {
+      return [];
+    }
+    const branchCreatedAtMs = new Date(branchRow.created_at).getTime();
+    const pbaByProduct = new Map<string, Array<{ branch_id: string; status: string }>>();
+    for (const a of pbaRows) {
+      const list = pbaByProduct.get(a.product_id) ?? [];
+      list.push(a);
+      pbaByProduct.set(a.product_id, list);
+    }
+
+    rows = rows
+      .filter((r) => {
+        const assigns = pbaByProduct.get(r.product_id) ?? [];
+        const match = assigns.find((a) => a.branch_id === targetBranchId);
+        if (match) return match.status === 'ACTIVE';
+        if (r.origin_branch_id !== null || assigns.length > 0) return false;
+        return new Date(r.product_created_at).getTime() >= branchCreatedAtMs;
+      })
+      .slice(0, limit);
+  }
 
   if (rows.length === 0) {
     return [];
@@ -1459,22 +1526,12 @@ export async function searchPosProducts(
   const baseCurrency = tenant?.base_currency || 'USD';
 
   const productIds = rows.map((r) => r.product_id);
-  let targetBranchId = query.branchId ?? null;
-  if (!targetBranchId) {
-    const wh = await trx.db
-      .selectFrom('warehouses')
-      .select(['branch_id'])
-      .where('tenant_id', '=', trx.tenantId)
-      .where('id', '=', query.warehouseId)
-      .executeTakeFirst();
-    targetBranchId = wh?.branch_id ?? null;
-  }
 
   const todayStr = new Date().toISOString().slice(0, 10);
   const [barcodes, unitConvRows, branchPriceRows] = await Promise.all([
     trx.db
       .selectFrom('product_barcodes')
-      .select(['product_id', 'barcode'])
+      .select(['product_id', 'barcode', 'branch_id'])
       .where('tenant_id', '=', trx.tenantId)
       .where('product_id', 'in', productIds)
       .where('is_active', '=', true)
@@ -1515,6 +1572,9 @@ export async function searchPosProducts(
 
   const barcodesByProduct = new Map<string, string[]>();
   for (const b of barcodes) {
+    if (targetBranchId && b.branch_id !== null && b.branch_id !== targetBranchId) {
+      continue;
+    }
     const list = barcodesByProduct.get(b.product_id) ?? [];
     list.push(b.barcode);
     barcodesByProduct.set(b.product_id, list);
@@ -1696,8 +1756,21 @@ export async function checkoutSale(
     }
   }
 
-  // Tenant base currency & pricing policy
-  const [tenant, warehouseRow, pricingSettingsRow] = await Promise.all([
+  // Tenant base currency, warehouse, pricing policy & prefetched catalog context for all cart lines
+  const cartProductIds = [...new Set(input.lines.map((l) => l.productId))];
+  const [
+    tenant,
+    warehouseRow,
+    pricingSettingsRow,
+    cartProducts,
+    cartUnitConvs,
+    cartBarcodes,
+    cartBranchPrices,
+    cartPricingRules,
+    tenantTaxRates,
+    branchRow,
+    cartProductAssignments,
+  ] = await Promise.all([
     trx.db
       .selectFrom('tenants')
       .select(['base_currency', 'legal_name'])
@@ -1710,12 +1783,148 @@ export async function checkoutSale(
       .executeTakeFirst(),
     trx.db
       .selectFrom('pricing_settings')
-      .select(['batch_pricing_fallback_policy', 'default_batch_allocation_policy'])
+      .select([
+        'batch_pricing_fallback_policy',
+        'default_batch_allocation_policy',
+        'default_max_discount_pct',
+      ])
       .where('tenant_id', '=', trx.tenantId)
       .executeTakeFirst(),
+    trx.db
+      .selectFrom('products')
+      .selectAll()
+      .where('tenant_id', '=', trx.tenantId)
+      .where('id', 'in', cartProductIds)
+      .execute(),
+    trx.db
+      .selectFrom('product_unit_conversions')
+      .select(['product_id', 'uom_code', 'conversion_factor_to_base', 'selling_price'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('product_id', 'in', cartProductIds)
+      .where('is_active', '=', true)
+      .execute(),
+    trx.db
+      .selectFrom('product_barcodes')
+      .select([
+        'id',
+        'product_id',
+        'branch_id',
+        'barcode',
+        'uom_code',
+        'is_active',
+        'stock_intake_lot_id',
+        'batch_id',
+        'price_source_mode',
+        'selling_price_override',
+      ])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('product_id', 'in', cartProductIds)
+      .execute(),
+    trx.db
+      .selectFrom('product_branch_prices')
+      .select([
+        'product_id',
+        'selling_price',
+        'min_selling_price',
+        'max_discount_pct',
+        'effective_date',
+      ])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('branch_id', '=', register.branch_id)
+      .where('product_id', 'in', cartProductIds)
+      .where('is_active', '=', true)
+      .execute(),
+    trx.db
+      .selectFrom('product_pricing_rules')
+      .select(['product_id', 'min_selling_price', 'max_discount_pct'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('product_id', 'in', cartProductIds)
+      .execute(),
+    trx.db
+      .selectFrom('tax_rates')
+      .select(['id', 'tax_group_id', 'name', 'rate_percentage', 'is_compound', 'priority'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('is_active', '=', true)
+      .orderBy('priority', 'asc')
+      .execute(),
+    trx.db
+      .selectFrom('branches')
+      .select(['id', 'created_at'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('id', '=', register.branch_id)
+      .executeTakeFirst(),
+    trx.db
+      .selectFrom('product_branch_assignments')
+      .select(['product_id', 'branch_id', 'status'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('product_id', 'in', cartProductIds)
+      .execute(),
   ]);
 
   const currencyCode = tenant.base_currency;
+  const productById = new Map(cartProducts.map((p) => [p.id, p]));
+  const unitConvsByProductId = new Map<
+    string,
+    Array<{ uom_code: string; conversion_factor_to_base: string; selling_price: string | null }>
+  >();
+  for (const c of cartUnitConvs) {
+    const list = unitConvsByProductId.get(c.product_id) ?? [];
+    list.push({
+      uom_code: c.uom_code,
+      conversion_factor_to_base: String(c.conversion_factor_to_base),
+      selling_price: c.selling_price != null ? String(c.selling_price) : null,
+    });
+    unitConvsByProductId.set(c.product_id, list);
+  }
+  const barcodesByProductId = new Map<string, typeof cartBarcodes>();
+  for (const bc of cartBarcodes) {
+    if (bc.branch_id !== null && bc.branch_id !== register.branch_id) continue;
+    const list = barcodesByProductId.get(bc.product_id) ?? [];
+    list.push(bc);
+    barcodesByProductId.set(bc.product_id, list);
+  }
+  const branchPriceByProductId = new Map(cartBranchPrices.map((bp) => [bp.product_id, bp]));
+  const pricingRuleByProductId = new Map(cartPricingRules.map((pr) => [pr.product_id, pr]));
+  const taxRatesByGroupId = new Map<
+    string,
+    Array<{ taxRateId: string; name: string; ratePercentage: string; isCompound: boolean }>
+  >();
+  for (const tr of tenantTaxRates) {
+    const list = taxRatesByGroupId.get(tr.tax_group_id) ?? [];
+    list.push({
+      taxRateId: tr.id,
+      name: tr.name,
+      ratePercentage: String(tr.rate_percentage),
+      isCompound: Boolean(tr.is_compound),
+    });
+    taxRatesByGroupId.set(tr.tax_group_id, list);
+  }
+  const assignmentsByProductId = new Map<string, typeof cartProductAssignments>();
+  for (const a of cartProductAssignments) {
+    const list = assignmentsByProductId.get(a.product_id) ?? [];
+    list.push(a);
+    assignmentsByProductId.set(a.product_id, list);
+  }
+  const branchCreatedAtMs = branchRow ? new Date(branchRow.created_at).getTime() : 0;
+
+  // Enforce strict DI-001 branch visibility across every cart item
+  for (const p of cartProducts) {
+    const assigns = assignmentsByProductId.get(p.id) ?? [];
+    const currentAssign = assigns.find((a) => a.branch_id === register.branch_id);
+    const visibleInBranch = currentAssign
+      ? currentAssign.status === 'ACTIVE'
+      : p.origin_branch_id === null &&
+        assigns.length === 0 &&
+        new Date(p.created_at).getTime() >= branchCreatedAtMs;
+    if (!visibleInBranch) {
+      throw new AppError({
+        statusCode: 404,
+        errorCode: 'ERR_NOT_FOUND',
+        title: 'Product Not Available In Branch',
+        detail: `Product "${p.sku}" is not assigned or active in the selected branch.`,
+      });
+    }
+  }
   const allowNegative = Boolean(
     warehouseRow?.allow_negative_stock || input.allowNegativeStockOverride,
   );
@@ -1824,12 +2033,7 @@ export async function checkoutSale(
       });
     }
 
-    const product = await trx.db
-      .selectFrom('products')
-      .selectAll()
-      .where('tenant_id', '=', trx.tenantId)
-      .where('id', '=', lineItem.productId)
-      .executeTakeFirst();
+    const product = productById.get(lineItem.productId);
 
     if (!product) {
       throw new AppError({
@@ -1864,22 +2068,8 @@ export async function checkoutSale(
 
     if (lineItem.scannedBarcode && product.tracking_mode === 'NONE') {
       const cleanScanned = lineItem.scannedBarcode.trim();
-      matchedProductBarcodeRow = await trx.db
-        .selectFrom('product_barcodes')
-        .select([
-          'id',
-          'barcode',
-          'uom_code',
-          'is_active',
-          'stock_intake_lot_id',
-          'batch_id',
-          'price_source_mode',
-          'selling_price_override',
-        ])
-        .where('tenant_id', '=', trx.tenantId)
-        .where('product_id', '=', product.id)
-        .where('barcode', '=', cleanScanned)
-        .executeTakeFirst();
+      const prodBarcodes = barcodesByProductId.get(product.id) ?? [];
+      matchedProductBarcodeRow = prodBarcodes.find((b) => b.barcode === cleanScanned);
 
       if (matchedProductBarcodeRow && matchedProductBarcodeRow.is_active === false) {
         throw new AppError({
@@ -1898,13 +2088,7 @@ export async function checkoutSale(
     )
       .trim()
       .toUpperCase();
-    const convRows = await trx.db
-      .selectFrom('product_unit_conversions')
-      .select(['uom_code', 'conversion_factor_to_base', 'selling_price'])
-      .where('tenant_id', '=', trx.tenantId)
-      .where('product_id', '=', product.id)
-      .where('is_active', '=', true)
-      .execute();
+    const convRows = unitConvsByProductId.get(product.id) ?? [];
 
     const customConversions = convRows.map((c) => ({
       uomCode: c.uom_code,
@@ -1952,41 +2136,73 @@ export async function checkoutSale(
       }
     }
 
-    // Load branch pricing config & tax rules once per cart line
+    // Resolve branch pricing config & tax rules from prefetched cart maps
     const effectivePriceUom = (product.price_uom ?? product.base_uom)
       .trim()
       .toUpperCase();
-    const branchPriceCfg = await resolveBranchEffectivePriceConfig(trx, {
-      productId: product.id,
-      branchId: register.branch_id,
-      globalSellingPrice: product.selling_price,
-      currencyCode,
-    });
+    const prefetchedBranchRow = branchPriceByProductId.get(product.id);
+    const prefetchedRuleRow = pricingRuleByProductId.get(product.id);
+    const branchEffDateStr = prefetchedBranchRow
+      ? prefetchedBranchRow.effective_date instanceof Date
+        ? prefetchedBranchRow.effective_date.toISOString().slice(0, 10)
+        : String(prefetchedBranchRow.effective_date).slice(0, 10)
+      : null;
+    const isBranchOverrideActive =
+      prefetchedBranchRow && branchEffDateStr && branchEffDateStr <= todayStr;
+    const formatPctStr = (val: unknown): string | null => {
+      if (val === null || val === undefined) return null;
+      const num = Number(val);
+      return Number.isFinite(num) ? num.toFixed(2) : null;
+    };
+    const branchPriceCfg = isBranchOverrideActive
+      ? {
+          effectivePrice: Money.fromDecimalString(
+            String(prefetchedBranchRow.selling_price),
+            currencyCode,
+          ).toDecimalString(),
+          priceSource: 'BRANCH_OVERRIDE' as const,
+          minSellingPrice: prefetchedBranchRow.min_selling_price
+            ? Money.fromDecimalString(
+                String(prefetchedBranchRow.min_selling_price),
+                currencyCode,
+              ).toDecimalString()
+            : prefetchedRuleRow?.min_selling_price
+              ? Money.fromDecimalString(
+                  String(prefetchedRuleRow.min_selling_price),
+                  currencyCode,
+                ).toDecimalString()
+              : null,
+          maxDiscountPct:
+            prefetchedBranchRow.max_discount_pct !== null &&
+            prefetchedBranchRow.max_discount_pct !== undefined
+              ? formatPctStr(prefetchedBranchRow.max_discount_pct)
+              : prefetchedRuleRow?.max_discount_pct !== null &&
+                  prefetchedRuleRow?.max_discount_pct !== undefined
+                ? formatPctStr(prefetchedRuleRow.max_discount_pct)
+                : formatPctStr(pricingSettingsRow?.default_max_discount_pct),
+        }
+      : {
+          effectivePrice: Money.fromDecimalString(
+            String(product.selling_price),
+            currencyCode,
+          ).toDecimalString(),
+          priceSource: 'GLOBAL' as const,
+          minSellingPrice: prefetchedRuleRow?.min_selling_price
+            ? Money.fromDecimalString(
+                String(prefetchedRuleRow.min_selling_price),
+                currencyCode,
+              ).toDecimalString()
+            : null,
+          maxDiscountPct:
+            prefetchedRuleRow?.max_discount_pct !== null &&
+            prefetchedRuleRow?.max_discount_pct !== undefined
+              ? formatPctStr(prefetchedRuleRow.max_discount_pct)
+              : formatPctStr(pricingSettingsRow?.default_max_discount_pct),
+        };
 
-    let lineTaxRules: Array<{
-      taxRateId: string;
-      name: string;
-      ratePercentage: string;
-      isCompound: boolean;
-    }> = [];
-
-    if (product.tax_group_id) {
-      const taxRates = await trx.db
-        .selectFrom('tax_rates')
-        .selectAll()
-        .where('tenant_id', '=', trx.tenantId)
-        .where('tax_group_id', '=', product.tax_group_id)
-        .where('is_active', '=', true)
-        .orderBy('priority', 'asc')
-        .execute();
-
-      lineTaxRules = taxRates.map((r) => ({
-        taxRateId: r.id,
-        name: r.name,
-        ratePercentage: r.rate_percentage,
-        isCompound: r.is_compound,
-      }));
-    }
+    const lineTaxRules = product.tax_group_id
+      ? (taxRatesByGroupId.get(product.tax_group_id) ?? [])
+      : [];
 
     let serialId: string | null = lineItem.serialId ?? null;
     let resolvedSerialGroupId: string | null = lineItem.serialGroupId ?? null;
@@ -2998,7 +3214,7 @@ export async function checkoutSale(
   const netSubtotalMoney = subtotalAccumulator.subtract(totalDiscountMoney);
   const grandTotalMoney = netSubtotalMoney.add(totalTaxes);
 
-  // 4b. Pre-validate available stock for all trackable items in the cart (BUG-020)
+  // 4b. Pre-validate available stock for all trackable items in the cart in a single query (BUG-020 / BUG-POS-PERF-001)
   if (!allowNegative) {
     const requiredQuantitiesByProduct = new Map<
       string,
@@ -3019,36 +3235,41 @@ export async function checkoutSale(
       }
     }
 
-    for (const [productId, req] of requiredQuantitiesByProduct.entries()) {
-      const balanceRow = await trx.db
+    const trackedProductIds = [...requiredQuantitiesByProduct.keys()];
+    if (trackedProductIds.length > 0) {
+      const balanceRows = await trx.db
         .selectFrom('inventory_balances')
-        .select(['qty_on_hand', 'qty_reserved'])
+        .select(['product_id', 'qty_on_hand', 'qty_reserved'])
         .where('tenant_id', '=', trx.tenantId)
         .where('warehouse_id', '=', register.warehouse_id)
-        .where('product_id', '=', productId)
+        .where('product_id', 'in', trackedProductIds)
         .forUpdate()
-        .executeTakeFirst();
+        .execute();
+      const balanceByProdId = new Map(balanceRows.map((b) => [b.product_id, b]));
 
-      const onHand = balanceRow
-        ? Quantity.fromDecimalString(String(balanceRow.qty_on_hand))
-        : Quantity.zero();
-      const reserved = balanceRow
-        ? Quantity.fromDecimalString(String(balanceRow.qty_reserved))
-        : Quantity.zero();
-      const available = onHand.subtract(reserved);
+      for (const [productId, req] of requiredQuantitiesByProduct.entries()) {
+        const balanceRow = balanceByProdId.get(productId);
+        const onHand = balanceRow
+          ? Quantity.fromDecimalString(String(balanceRow.qty_on_hand))
+          : Quantity.zero();
+        const reserved = balanceRow
+          ? Quantity.fromDecimalString(String(balanceRow.qty_reserved))
+          : Quantity.zero();
+        const available = onHand.subtract(reserved);
 
-      if (available.compare(req.qty) < 0) {
-        throw new AppError({
-          statusCode: 409,
-          errorCode: 'INV_INSUFFICIENT_AVAILABLE_STOCK',
-          title: 'Insufficient Available Stock',
-          detail: `Product "${req.name}" (${req.sku}) has only ${available.toDecimalString()} available in warehouse, but ${req.qty.toDecimalString()} was requested in cart.`,
-          extensions: {
-            productId,
-            available: available.toDecimalString(),
-            requested: req.qty.toDecimalString(),
-          },
-        });
+        if (available.compare(req.qty) < 0) {
+          throw new AppError({
+            statusCode: 409,
+            errorCode: 'INV_INSUFFICIENT_AVAILABLE_STOCK',
+            title: 'Insufficient Available Stock',
+            detail: `Product "${req.name}" (${req.sku}) has only ${available.toDecimalString()} available in warehouse, but ${req.qty.toDecimalString()} was requested in cart.`,
+            extensions: {
+              productId,
+              available: available.toDecimalString(),
+              requested: req.qty.toDecimalString(),
+            },
+          });
+        }
       }
     }
   }
@@ -3223,15 +3444,30 @@ export async function checkoutSale(
     });
   }
 
-  // 5. ATOMIC INVENTORY DEDUCTIONS
-  // For each trackable product, deduct stock via the established immutable ledger
+  // 5. ATOMIC INVENTORY DEDUCTIONS (with preloaded context to minimize DB round-trips)
   const balanceAfterByProduct = new Map<string, string>();
   const batchAvailableAfterByBatch = new Map<string, string>();
+  const missingIntakeLotIds = new Set<string>();
+  const batchIdsToRefresh = new Set<string>();
+  const soldSerialIds: string[] = [];
 
   for (const line of processedLines) {
     if (line.trackInventory) {
       const deductionQtyStr = `-${line.quantity.toDecimalString()}`;
       const lineMoveIdempotencyKey = generateUuidV7();
+      const pRow = productById.get(line.productId)!;
+      const convMap = new Map<string, string>();
+      convMap.set(pRow.base_uom, Quantity.fromInteger(1).toDecimalString());
+      for (const c of unitConvsByProductId.get(pRow.id) ?? []) {
+        convMap.set(
+          c.uom_code,
+          Quantity.fromDecimalString(c.conversion_factor_to_base).toDecimalString(),
+        );
+      }
+      const rawAllowed = pRow.allowed_selling_uoms;
+      const allowedSellingUoms = Array.isArray(rawAllowed)
+        ? rawAllowed.map((u) => String(u).trim().toUpperCase()).filter(Boolean)
+        : [pRow.base_uom];
 
       const moveResult = await postStockMovement(
         trx,
@@ -3257,45 +3493,100 @@ export async function checkoutSale(
           allowNegativeStockOverride: input.allowNegativeStockOverride ?? false,
           overrideReason: input.overrideReason ?? null,
         },
-        { skipPermissionCheck: true, skipRealtimePublish: true },
+        {
+          skipPermissionCheck: true,
+          skipRealtimePublish: true,
+          preloadedContext: {
+            subscriptionVerified: true,
+            baseCurrency: currencyCode,
+            warehouseMeta: {
+              warehouseId: register.warehouse_id,
+              branchId: register.branch_id,
+              allowNegativeStock: Boolean(warehouseRow?.allow_negative_stock ?? false),
+            },
+            product: {
+              id: pRow.id,
+              sku: pRow.sku,
+              name: pRow.name,
+              status: pRow.status,
+              productType: pRow.product_type,
+              trackInventory: pRow.track_inventory,
+              trackingMode: (pRow.tracking_mode ?? 'NONE') as TrackingMode,
+              valuationMethod: (pRow.valuation_method ?? 'MOVING_AVG') as ValuationMethod,
+              baseUom: pRow.base_uom,
+              productQtyMode: (pRow.product_qty_mode ?? 'STANDARD') as ProductQtyMode,
+              measurementCategory: (pRow.measurement_category ?? null) as MeasurementCategory | null,
+              purchaseUom: pRow.purchase_uom ?? pRow.base_uom,
+              priceUom: pRow.price_uom ?? pRow.base_uom,
+              allowedSellingUoms,
+              qtyDecimalPrecision: pRow.qty_decimal_precision ?? 0,
+              densityGPerMl: pRow.density_g_per_ml ? String(pRow.density_g_per_ml) : null,
+              purchaseCost: String(pRow.purchase_cost),
+              reorderPoint: String(pRow.reorder_point),
+              reorderQty: String(pRow.reorder_qty),
+              unitConversions: convMap,
+            },
+          },
+        },
       );
 
       if (!line.stockIntakeLotId && moveResult.stockIntakeLotId) {
         line.stockIntakeLotId = moveResult.stockIntakeLotId;
-        const allocatedLot = await trx.db
-          .selectFrom('stock_intake_lots')
-          .select(['intake_code'])
-          .where('tenant_id', '=', trx.tenantId)
-          .where('id', '=', moveResult.stockIntakeLotId)
-          .executeTakeFirst();
-        if (allocatedLot) {
-          line.intakeCode = allocatedLot.intake_code;
+        if (moveResult.intakeCode) {
+          line.intakeCode = moveResult.intakeCode;
+        } else {
+          missingIntakeLotIds.add(moveResult.stockIntakeLotId);
         }
       }
 
       balanceAfterByProduct.set(line.productId, moveResult.balanceAfter);
       if (line.batchId) {
-        const bSnap = await trx.db
-          .selectFrom('inventory_batches')
-          .select(['current_quantity'])
-          .where('tenant_id', '=', trx.tenantId)
-          .where('id', '=', line.batchId)
-          .executeTakeFirst();
-        if (bSnap) {
-          batchAvailableAfterByBatch.set(
-            line.batchId,
-            Quantity.fromDecimalString(String(bSnap.current_quantity)).toDecimalString(),
-          );
-        }
+        batchIdsToRefresh.add(line.batchId);
       }
       if (line.serialId) {
-        await trx.db
-          .updateTable('inventory_serials')
-          .set({ last_sale_invoice_id: saleId })
-          .where('tenant_id', '=', trx.tenantId)
-          .where('id', '=', line.serialId)
-          .execute();
+        soldSerialIds.push(line.serialId);
       }
+    }
+  }
+
+  if (missingIntakeLotIds.size > 0 || batchIdsToRefresh.size > 0 || soldSerialIds.length > 0) {
+    const [lotSnaps, batchSnaps] = await Promise.all([
+      missingIntakeLotIds.size > 0
+        ? trx.db
+            .selectFrom('stock_intake_lots')
+            .select(['id', 'intake_code'])
+            .where('tenant_id', '=', trx.tenantId)
+            .where('id', 'in', [...missingIntakeLotIds])
+            .execute()
+        : Promise.resolve([]),
+      batchIdsToRefresh.size > 0
+        ? trx.db
+            .selectFrom('inventory_batches')
+            .select(['id', 'current_quantity'])
+            .where('tenant_id', '=', trx.tenantId)
+            .where('id', 'in', [...batchIdsToRefresh])
+            .execute()
+        : Promise.resolve([]),
+      soldSerialIds.length > 0
+        ? trx.db
+            .updateTable('inventory_serials')
+            .set({ last_sale_invoice_id: saleId })
+            .where('tenant_id', '=', trx.tenantId)
+            .where('id', 'in', soldSerialIds)
+            .execute()
+        : Promise.resolve(undefined),
+    ]);
+    const lotCodeById = new Map(lotSnaps.map((l) => [l.id, l.intake_code]));
+    for (const line of processedLines) {
+      if (line.stockIntakeLotId && !line.intakeCode) {
+        line.intakeCode = lotCodeById.get(line.stockIntakeLotId) ?? null;
+      }
+    }
+    for (const bSnap of batchSnaps) {
+      batchAvailableAfterByBatch.set(
+        bSnap.id,
+        Quantity.fromDecimalString(String(bSnap.current_quantity)).toDecimalString(),
+      );
     }
   }
 
@@ -3391,44 +3682,8 @@ export async function checkoutSale(
     entrySource?: string;
   }> = [];
 
-  for (const line of processedLines) {
+  const lineInsertRows = processedLines.map((line) => {
     const lineId = generateUuidV7();
-    await trx.db
-      .insertInto('sales_invoice_lines')
-      .values({
-        id: lineId,
-        tenant_id: trx.tenantId,
-        invoice_id: saleId,
-        line_number: line.lineNumber,
-        product_id: line.productId,
-        sku: line.sku,
-        product_name: line.productName,
-        uom_code: line.uomCode,
-        quantity: line.quantity.toDecimalString(),
-        unit_price: line.unitPrice.toDecimalString(),
-        discount_amount: line.discountAmount.toDecimalString(),
-        tax_amount: line.taxAmount.toDecimalString(),
-        line_total: line.lineTotal.toDecimalString(),
-        tax_rate_snapshot: JSON.stringify({}),
-        unit_cost_snapshot: line.unitCostSnapshot,
-        batch_id: line.batchId ?? null,
-        serial_id: line.serialId ?? null,
-        serial_group_id: line.serialGroupId ?? null,
-        serial_number: line.serialNumber ?? null,
-        serial_internal_barcode: line.serialInternalBarcode ?? null,
-        original_entered_qty: line.quantity.toDecimalString(),
-        original_uom_code: line.uomCode,
-        conversion_factor_to_base: line.conversionFactorToBase,
-        normalized_base_qty: line.normalizedBaseQty.toDecimalString(),
-        price_uom: line.priceUom,
-        price_per_price_uom: line.pricePerPriceUom.toDecimalString(),
-        entry_source: line.entrySource,
-        stock_intake_lot_id: line.stockIntakeLotId ?? null,
-        intake_code_snapshot: line.intakeCode ?? null,
-        scanned_barcode: line.scannedBarcode ?? null,
-      })
-      .execute();
-
     lineResponses.push({
       id: lineId,
       lineNumber: line.lineNumber,
@@ -3462,6 +3717,42 @@ export async function checkoutSale(
       pricePerPriceUom: line.pricePerPriceUom.toDecimalString(),
       entrySource: line.entrySource,
     });
+    return {
+      id: lineId,
+      tenant_id: trx.tenantId,
+      invoice_id: saleId,
+      line_number: line.lineNumber,
+      product_id: line.productId,
+      sku: line.sku,
+      product_name: line.productName,
+      uom_code: line.uomCode,
+      quantity: line.quantity.toDecimalString(),
+      unit_price: line.unitPrice.toDecimalString(),
+      discount_amount: line.discountAmount.toDecimalString(),
+      tax_amount: line.taxAmount.toDecimalString(),
+      line_total: line.lineTotal.toDecimalString(),
+      tax_rate_snapshot: JSON.stringify({}),
+      unit_cost_snapshot: line.unitCostSnapshot,
+      batch_id: line.batchId ?? null,
+      serial_id: line.serialId ?? null,
+      serial_group_id: line.serialGroupId ?? null,
+      serial_number: line.serialNumber ?? null,
+      serial_internal_barcode: line.serialInternalBarcode ?? null,
+      original_entered_qty: line.quantity.toDecimalString(),
+      original_uom_code: line.uomCode,
+      conversion_factor_to_base: line.conversionFactorToBase,
+      normalized_base_qty: line.normalizedBaseQty.toDecimalString(),
+      price_uom: line.priceUom,
+      price_per_price_uom: line.pricePerPriceUom.toDecimalString(),
+      entry_source: line.entrySource,
+      stock_intake_lot_id: line.stockIntakeLotId ?? null,
+      intake_code_snapshot: line.intakeCode ?? null,
+      scanned_barcode: line.scannedBarcode ?? null,
+    };
+  });
+
+  if (lineInsertRows.length > 0) {
+    await trx.db.insertInto('sales_invoice_lines').values(lineInsertRows).execute();
   }
 
   // 8. INSERT PAYMENT RECORDS
@@ -3478,7 +3769,7 @@ export async function checkoutSale(
     createdAt: string;
   }> = [];
 
-  for (const pay of input.payments) {
+  const paymentInsertRows = input.payments.map((pay) => {
     const paymentId = generateUuidV7();
     const payAmountMoney = Money.fromDecimalString(pay.amount, currencyCode);
     const payTenderedMoney = Money.fromDecimalString(pay.tenderedAmount, currencyCode);
@@ -3486,26 +3777,39 @@ export async function checkoutSale(
       pay.paymentMethod === 'CASH'
         ? payTenderedMoney.subtract(payAmountMoney)
         : Money.zero(currencyCode);
-
-    const payRow = await trx.db
-      .insertInto('sales_payments')
-      .values({
+    return {
+      pay,
+      payAmountMoney,
+      values: {
         id: paymentId,
         tenant_id: trx.tenantId,
         invoice_id: saleId,
         payment_method: pay.paymentMethod,
         amount: payAmountMoney.toDecimalString(),
         currency_code: currencyCode,
-        status: 'COMPLETED',
+        status: 'COMPLETED' as const,
         tendered_amount: payTenderedMoney.toDecimalString(),
         change_amount: changeDueMoney.toDecimalString(),
         card_reference: pay.cardReference?.trim() || null,
         card_last_four: pay.cardLastFour?.trim() || null,
         notes: pay.notes?.trim() || null,
         recorded_by_user_id: trx.userId,
-      })
-      .returningAll()
-      .executeTakeFirstOrThrow();
+      },
+    };
+  });
+
+  const insertedPayRows =
+    paymentInsertRows.length > 0
+      ? await trx.db
+          .insertInto('sales_payments')
+          .values(paymentInsertRows.map((p) => p.values))
+          .returningAll()
+          .execute()
+      : [];
+
+  for (let i = 0; i < paymentInsertRows.length; i++) {
+    const { pay, payAmountMoney } = paymentInsertRows[i]!;
+    const payRow = insertedPayRows[i]!;
 
     if (customerCreditAccount && pay.paymentMethod === 'CREDIT') {
       let daysToAdd = 30;
@@ -3537,7 +3841,7 @@ export async function checkoutSale(
         transaction_type: 'CREDIT_SALE',
         entry_direction: 'DEBIT',
         amount: payAmountMoney.toDecimalString(),
-        currency_code: 'LKR',
+        currency_code: currencyCode,
         balance_after: newBalMoney.toDecimalString(),
         unpaid_amount: payAmountMoney.toDecimalString(),
         transaction_date: sql<string>`CURRENT_DATE`,

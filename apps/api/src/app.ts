@@ -4683,7 +4683,14 @@ export async function buildApp(
       const category = await withTenantTransaction(
         options.db,
         { tenantId, userId: principal.userId, traceId },
-        (trx) => createCategory(trx, request.body),
+        (trx) => {
+          const headerBranchId = request.headers['x-branch-id'] as string | undefined;
+          const branchId = request.body.branchId ?? headerBranchId;
+          return createCategory(trx, {
+            ...request.body,
+            ...(branchId ? { branchId } : {}),
+          });
+        },
       );
 
       return reply.status(201).send(category);
@@ -4715,7 +4722,14 @@ export async function buildApp(
       return withTenantTransaction(
         options.db,
         { tenantId, userId: principal.userId, traceId },
-        (trx) => listCategories(trx, request.query),
+        (trx) => {
+          const headerBranchId = request.headers['x-branch-id'] as string | undefined;
+          const branchId = request.query.branchId ?? headerBranchId;
+          return listCategories(trx, {
+            ...request.query,
+            ...(branchId ? { branchId } : {}),
+          });
+        },
       );
     },
   );
@@ -4890,7 +4904,12 @@ export async function buildApp(
               endpoint: 'POST /v1/products',
               requestPayload: request.body,
               execute: async (innerTrx) => {
-                const body = await createProduct(innerTrx, request.body);
+                const headerBranchId = request.headers['x-branch-id'] as string | undefined;
+                const branchId = request.body.branchId ?? headerBranchId;
+                const body = await createProduct(innerTrx, {
+                  ...request.body,
+                  ...(branchId ? { branchId } : {}),
+                });
                 return { statusCode: 201, body };
               },
             }),
@@ -4905,7 +4924,14 @@ export async function buildApp(
       const product = await withTenantTransaction(
         options.db,
         { tenantId, userId: principal.userId, traceId },
-        (trx) => createProduct(trx, request.body),
+        (trx) => {
+          const headerBranchId = request.headers['x-branch-id'] as string | undefined;
+          const branchId = request.body.branchId ?? headerBranchId;
+          return createProduct(trx, {
+            ...request.body,
+            ...(branchId ? { branchId } : {}),
+          });
+        },
       );
 
       return reply.status(201).send(product);
@@ -4937,7 +4963,14 @@ export async function buildApp(
       return withTenantTransaction(
         options.db,
         { tenantId, userId: principal.userId, traceId },
-        (trx) => listProducts(trx, request.query),
+        (trx) => {
+          const headerBranchId = request.headers['x-branch-id'] as string | undefined;
+          const branchId = request.query.branchId ?? headerBranchId;
+          return listProducts(trx, {
+            ...request.query,
+            ...(branchId ? { branchId } : {}),
+          });
+        },
       );
     },
   );
@@ -4968,7 +5001,12 @@ export async function buildApp(
       return withTenantTransaction(
         options.db,
         { tenantId, userId: principal.userId, traceId },
-        (trx) => getProductById(trx, request.params.productId),
+        (trx) =>
+          getProductById(
+            trx,
+            request.params.productId,
+            request.headers['x-branch-id'] as string | undefined,
+          ),
       );
     },
   );
@@ -5002,7 +5040,15 @@ export async function buildApp(
       return withTenantTransaction(
         options.db,
         { tenantId, userId: principal.userId, traceId },
-        (trx) => updateProduct(trx, request.params.productId, request.body),
+        (trx) => {
+          const headerBranchId = request.headers['x-branch-id'] as string | undefined;
+          const branchId =
+            request.body.branchId !== undefined ? request.body.branchId : headerBranchId;
+          return updateProduct(trx, request.params.productId, {
+            ...request.body,
+            ...(branchId !== undefined ? { branchId } : {}),
+          });
+        },
       );
     },
   );
@@ -5033,7 +5079,12 @@ export async function buildApp(
       return withTenantTransaction(
         options.db,
         { tenantId, userId: principal.userId, traceId },
-        (trx) => archiveProduct(trx, request.params.productId),
+        (trx) =>
+          archiveProduct(
+            trx,
+            request.params.productId,
+            request.headers['x-branch-id'] as string | undefined,
+          ),
       );
     },
   );
@@ -5064,7 +5115,12 @@ export async function buildApp(
       return withTenantTransaction(
         options.db,
         { tenantId, userId: principal.userId, traceId },
-        (trx) => restoreProduct(trx, request.params.productId),
+        (trx) =>
+          restoreProduct(
+            trx,
+            request.params.productId,
+            request.headers['x-branch-id'] as string | undefined,
+          ),
       );
     },
   );
@@ -10999,6 +11055,7 @@ export async function buildApp(
   app.post(
     '/v1/expenses/:expenseId/attachments',
     {
+      bodyLimit: 16 * 1024 * 1024,
       schema: {
         headers: AuthenticatedTenantHeadersSchema,
         params: Type.Object({

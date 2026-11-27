@@ -817,6 +817,11 @@ export async function postGoodsReceipt(
         .execute();
     }
 
+    const isWeighedOrMeasured =
+      product.productQtyMode === 'VARIABLE' ||
+      ['WEIGHT', 'VOLUME', 'LENGTH'].includes(
+        String(product.measurementCategory ?? '').toUpperCase(),
+      );
     let createdSuggestion = null;
     if (!isBatchTracked) {
       createdSuggestion = await triggerCostChangeSuggestionIfApplicable(trx, {
@@ -824,6 +829,9 @@ export async function postGoodsReceipt(
         oldCost: product.purchaseCost,
         newCost: unitCostPerBase.toDecimalString(),
         movingAvgCost: updatedMovingAvgCostStr,
+        explicitProposedPrice: line.sellingPrice ?? null,
+        explicitProposedSellingUom: line.sellingPrice != null ? (product.priceUom || product.baseUom) : null,
+        forceOnCostOrPriceChange: isWeighedOrMeasured,
         marketPrice: line.marketPrice ?? null,
         marketPriceSource: line.marketPriceSource ?? null,
         sourceEventType: 'GRN_POSTED',

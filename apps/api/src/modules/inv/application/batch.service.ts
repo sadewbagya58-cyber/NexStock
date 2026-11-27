@@ -33,6 +33,7 @@ import { type Selectable, sql } from 'kysely';
 import {
   type CursorPaginatedResult,
   assertBarcodeGloballyUniqueAcrossEntities,
+  isProductVisibleInBranch,
 } from '../../cat/index.js';
 import { assertAuthorized } from '../../iam/index.js';
 import {
@@ -2192,31 +2193,73 @@ export async function resolveHybridBarcode(
         candidates.flatMap((c) => [c, c.toUpperCase(), c.toLowerCase()]),
       ),
     ];
-    const pbMatch = await trx.db
+
+    let effectiveBranchId = input.branchId ?? null;
+    if (!effectiveBranchId && input.warehouseId) {
+      const wh = await trx.db
+        .selectFrom('warehouses')
+        .select(['branch_id'])
+        .where('tenant_id', '=', trx.tenantId)
+        .where('id', '=', input.warehouseId)
+        .executeTakeFirst();
+      effectiveBranchId = wh?.branch_id ?? null;
+    }
+
+    let pbQuery = trx.db
       .selectFrom('product_barcodes')
       .selectAll()
       .where('tenant_id', '=', trx.tenantId)
-      .where('barcode', 'in', expanded)
-      .orderBy('is_active', 'desc')
-      .executeTakeFirst();
-    if (pbMatch) {
+      .where('barcode', 'in', expanded);
+    if (effectiveBranchId) {
+      pbQuery = pbQuery.where((eb) =>
+        eb.or([eb('branch_id', '=', effectiveBranchId), eb('branch_id', 'is', null)]),
+      );
+    }
+    const pbMatches = await pbQuery.orderBy('is_active', 'desc').execute();
+    if (effectiveBranchId) {
+      pbMatches.sort((a, b) => {
+        const aOwn = a.branch_id === effectiveBranchId ? 0 : 1;
+        const bOwn = b.branch_id === effectiveBranchId ? 0 : 1;
+        return aOwn - bOwn;
+      });
+    }
+
+    for (const pbMatch of pbMatches) {
       const prodRow = await trx.db
         .selectFrom('products')
         .selectAll()
         .where('tenant_id', '=', trx.tenantId)
         .where('id', '=', pbMatch.product_id)
         .executeTakeFirst();
-      if (prodRow) {
-        return { productRow: prodRow, barcodeRow: pbMatch };
+      if (!prodRow) continue;
+      if (effectiveBranchId) {
+        const visible = await isProductVisibleInBranch(
+          trx,
+          prodRow.id,
+          effectiveBranchId,
+          false,
+        );
+        if (!visible) continue;
       }
+      return { productRow: prodRow, barcodeRow: pbMatch };
     }
-    const primaryMatch = await trx.db
+
+    const primaryMatches = await trx.db
       .selectFrom('products')
       .selectAll()
       .where('tenant_id', '=', trx.tenantId)
       .where('primary_barcode', 'in', expanded)
-      .executeTakeFirst();
-    if (primaryMatch) {
+      .execute();
+    for (const primaryMatch of primaryMatches) {
+      if (effectiveBranchId) {
+        const visible = await isProductVisibleInBranch(
+          trx,
+          primaryMatch.id,
+          effectiveBranchId,
+          false,
+        );
+        if (!visible) continue;
+      }
       return { productRow: primaryMatch, barcodeRow: null };
     }
     return undefined;
@@ -2665,7 +2708,18 @@ export async function resolveHybridBarcode(
     return buildSerialMatchResponse('SERIAL_NUMBER', serialMatch);
   }
 
-  const skuMatch = await trx.db
+  let effectiveBranchForSku = input.branchId ?? null;
+  if (!effectiveBranchForSku && input.warehouseId) {
+    const wh = await trx.db
+      .selectFrom('warehouses')
+      .select(['branch_id'])
+      .where('tenant_id', '=', trx.tenantId)
+      .where('id', '=', input.warehouseId)
+      .executeTakeFirst();
+    effectiveBranchForSku = wh?.branch_id ?? null;
+  }
+
+  const skuMatches = await trx.db
     .selectFrom('products')
     .selectAll()
     .where('tenant_id', '=', trx.tenantId)
@@ -2675,9 +2729,18 @@ export async function resolveHybridBarcode(
         eb('sku', '=', upperNormalized),
       ]),
     )
-    .executeTakeFirst();
+    .execute();
 
-  if (skuMatch) {
+  for (const skuMatch of skuMatches) {
+    if (effectiveBranchForSku) {
+      const visible = await isProductVisibleInBranch(
+        trx,
+        skuMatch.id,
+        effectiveBranchForSku,
+        false,
+      );
+      if (!visible) continue;
+    }
     return buildProductMatchResponse('SKU', skuMatch, skuMatch.sku);
   }
 
