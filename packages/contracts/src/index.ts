@@ -280,6 +280,19 @@ export const ErrorCodeSchema = Type.Union([
   Type.Literal('CAT_BARCODE_IN_USE_DEACTIVATE_ONLY'),
   Type.Literal('CAT_BARCODE_INACTIVE'),
   Type.Literal('INV_CONFIG_ALERT_NOT_FOUND'),
+  Type.Literal('INV_WASTE_REASON_EXISTS'),
+  Type.Literal('INV_WASTE_INVALID_REASON'),
+  Type.Literal('INV_WASTE_DESCRIPTION_REQUIRED'),
+  Type.Literal('CAT_PRODUCT_NOT_IN_BRANCH'),
+  Type.Literal('INV_WASTE_INVALID_QUANTITY'),
+  Type.Literal('INV_WASTE_NOT_FOUND'),
+  Type.Literal('INV_WASTE_INVALID_STATUS'),
+  Type.Literal('INV_WASTE_IMMUTABLE'),
+  Type.Literal('INV_WASTE_NOT_CONFIRMED'),
+  Type.Literal('POS_RETURN_NOT_FOUND'),
+  Type.Literal('POS_RETURN_DISPOSITION_EXCEEDS_QTY'),
+  Type.Literal('POS_RETURN_DISPOSITION_EXCEEDS_PENDING'),
+  Type.Literal('POS_SALE_HAS_RETURNS'),
 ]);
 export type ErrorCode = Static<typeof ErrorCodeSchema>;
 
@@ -341,6 +354,7 @@ export const SyncCommandTypeSchema = Type.Union([
   Type.Literal('INV_RECORD_MOVEMENT'),
   Type.Literal('INV_REQUEST_TRANSFER'),
   Type.Literal('INV_SERIAL_OPERATION'),
+  Type.Literal('INV_CREATE_WASTE_DRAFT'),
 ]);
 export type SyncCommandType = Static<typeof SyncCommandTypeSchema>;
 
@@ -1333,6 +1347,7 @@ export const StockMovementTypeSchema = Type.Union([
   Type.Literal('STOCK_OUT'),
   Type.Literal('ADJUSTMENT_POSITIVE'),
   Type.Literal('ADJUSTMENT_NEGATIVE'),
+  Type.Literal('WASTE_OUT'),
   Type.Literal('CORRECTION_REVERSAL'),
   Type.Literal('CUSTOMER_RETURN_RESTOCK'),
   Type.Literal('SUPPLIER_RETURN'),
@@ -1355,6 +1370,7 @@ export const PostStockMovementRequestSchema = Type.Object(
       Type.Literal('STOCK_OUT'),
       Type.Literal('ADJUSTMENT_POSITIVE'),
       Type.Literal('ADJUSTMENT_NEGATIVE'),
+      Type.Literal('WASTE_OUT'),
       Type.Literal('CUSTOMER_RETURN_RESTOCK'),
       Type.Literal('SUPPLIER_RETURN'),
       Type.Literal('TRANSFER_OUT'),
@@ -1392,6 +1408,8 @@ export const PostStockMovementRequestSchema = Type.Object(
         Type.Literal('CUSTOMER_RETURN'),
         Type.Literal('SUPPLIER_RETURN'),
         Type.Literal('STOCKTAKE'),
+        Type.Literal('UOM_CORRECTION'),
+        Type.Literal('WASTE'),
         Type.Literal('MANUAL'),
         Type.Literal('MANUAL_WEIGHT'),
         Type.Literal('SCALE_WEIGHT'),
@@ -1422,6 +1440,8 @@ export const ReverseStockMovementRequestSchema = Type.Object(
         Type.Literal('CUSTOMER_RETURN'),
         Type.Literal('SUPPLIER_RETURN'),
         Type.Literal('STOCKTAKE'),
+        Type.Literal('UOM_CORRECTION'),
+        Type.Literal('WASTE'),
         Type.Literal('MANUAL'),
         Type.Literal('MANUAL_WEIGHT'),
         Type.Literal('SCALE_WEIGHT'),
@@ -4982,12 +5002,40 @@ export const SupplierReturnResponseSchema = Type.Object({
 });
 export type SupplierReturnResponse = Static<typeof SupplierReturnResponseSchema>;
 
+export const PosReturnDispositionStatusSchema = Type.Union([
+  Type.Literal('PENDING_INSPECTION'),
+  Type.Literal('PARTIAL'),
+  Type.Literal('RESTOCKED'),
+  Type.Literal('WASTED'),
+  Type.Literal('MIXED'),
+  Type.Literal('DAMAGED_UNPOSTED'),
+]);
+export type PosReturnDispositionStatus = Static<typeof PosReturnDispositionStatusSchema>;
+
 export const CreatePosReturnLineInputSchema = Type.Object(
   {
     invoiceLineId: UuidSchema,
     returnQty: DecimalQuantityStringSchema,
     returnUom: Type.Optional(Type.String({ minLength: 1, maxLength: 16 })),
-    restockCondition: Type.Optional(Type.Union([Type.Literal('RESELLABLE'), Type.Literal('DAMAGED')])),
+    restockCondition: Type.Optional(
+      Type.Union([
+        Type.Literal('RESELLABLE'),
+        Type.Literal('DAMAGED'),
+        Type.Literal('PENDING_INSPECTION'),
+      ]),
+    ),
+    dispositionMode: Type.Optional(
+      Type.Union([
+        Type.Literal('RESTOCK'),
+        Type.Literal('WASTE'),
+        Type.Literal('PENDING_INSPECTION'),
+        Type.Literal('SPLIT'),
+      ]),
+    ),
+    restockQty: Type.Optional(DecimalQuantityStringSchema),
+    wasteQty: Type.Optional(DecimalQuantityStringSchema),
+    wasteReasonCode: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
+    wasteDescription: Type.Optional(Type.String({ maxLength: 500 })),
   },
   { additionalProperties: false },
 );
@@ -5011,11 +5059,19 @@ export const PosReturnLineResponseSchema = Type.Object({
   id: UuidSchema,
   invoiceLineId: UuidSchema,
   productId: UuidSchema,
+  productName: Type.Optional(Type.String()),
+  productSku: Type.Optional(Type.String()),
+  baseUom: Type.Optional(Type.String()),
   returnUom: Type.String(),
   returnQty: DecimalQuantityStringSchema,
   conversionFactorToBase: DecimalQuantityStringSchema,
   normalizedBaseQty: DecimalQuantityStringSchema,
   restockCondition: Type.Union([Type.Literal('RESELLABLE'), Type.Literal('DAMAGED')]),
+  dispositionStatus: Type.Optional(PosReturnDispositionStatusSchema),
+  restockedBaseQty: Type.Optional(DecimalQuantityStringSchema),
+  wastedBaseQty: Type.Optional(DecimalQuantityStringSchema),
+  pendingBaseQty: Type.Optional(DecimalQuantityStringSchema),
+  wasteLogId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
   unitPrice: DecimalMoneyStringSchema,
   refundAmount: DecimalMoneyStringSchema,
   batchId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
@@ -5038,6 +5094,7 @@ export const PosReturnResponseSchema = Type.Object({
   currencyCode: CurrencyCodeSchema,
   createdAt: IsoTimestampSchema,
   lines: Type.Array(PosReturnLineResponseSchema),
+  wasteLogIds: Type.Optional(Type.Array(UuidSchema)),
 });
 export type PosReturnResponse = Static<typeof PosReturnResponseSchema>;
 
@@ -6285,6 +6342,8 @@ export const OfflineOperationKeySchema = Type.Union([
   Type.Literal('INV_OFFLINE_TRANSFER_REQUEST'),
   Type.Literal('INV_OFFLINE_BATCH_INSPECT'),
   Type.Literal('INV_OFFLINE_SERIAL_OPS'),
+  Type.Literal('INV_OFFLINE_WASTE_DRAFT'),
+  Type.Literal('INV_WASTE_CONFIRM'),
   Type.Literal('SYNC_RESOLVE_CONFLICT'),
 ]);
 export type OfflineOperationKey = Static<typeof OfflineOperationKeySchema>;
@@ -7196,6 +7255,264 @@ export const ResolveStockConfigAlertRequestSchema = Type.Object(
 export type ResolveStockConfigAlertRequest = Static<
   typeof ResolveStockConfigAlertRequestSchema
 >;
+
+// ============================================================================
+// WASTE LOG & INVENTORY LOSS MANAGEMENT + RETURN DISPOSITION CONTRACTS
+// ============================================================================
+
+export const WasteLogStatusSchema = Type.Union([
+  Type.Literal('DRAFT'),
+  Type.Literal('CONFIRMED'),
+  Type.Literal('CANCELLED'),
+  Type.Literal('REVERSED'),
+]);
+export type WasteLogStatus = Static<typeof WasteLogStatusSchema>;
+
+export const WasteLogSourceTypeSchema = Type.Union([
+  Type.Literal('MANUAL'),
+  Type.Literal('CUSTOMER_RETURN'),
+]);
+export type WasteLogSourceType = Static<typeof WasteLogSourceTypeSchema>;
+
+export const WasteReasonResponseSchema = Type.Object({
+  id: UuidSchema,
+  tenantId: UuidSchema,
+  code: Type.String(),
+  name: Type.String(),
+  description: Type.Union([Type.String(), Type.Null()]),
+  isSystemDefault: Type.Boolean(),
+  requiresDescription: Type.Boolean(),
+  isActive: Type.Boolean(),
+  sortOrder: Type.Integer(),
+  createdAt: IsoTimestampSchema,
+  updatedAt: IsoTimestampSchema,
+});
+export type WasteReasonResponse = Static<typeof WasteReasonResponseSchema>;
+
+export const CreateWasteReasonRequestSchema = Type.Object(
+  {
+    code: Type.String({ minLength: 2, maxLength: 64 }),
+    name: Type.String({ minLength: 2, maxLength: 120 }),
+    description: Type.Optional(Type.Union([Type.String({ maxLength: 500 }), Type.Null()])),
+    requiresDescription: Type.Optional(Type.Boolean()),
+    isActive: Type.Optional(Type.Boolean()),
+    sortOrder: Type.Optional(Type.Integer({ minimum: 0, maximum: 9999 })),
+  },
+  { additionalProperties: false },
+);
+export type CreateWasteReasonRequest = Static<typeof CreateWasteReasonRequestSchema>;
+
+export const UpdateWasteReasonRequestSchema = Type.Object(
+  {
+    name: Type.Optional(Type.String({ minLength: 2, maxLength: 120 })),
+    description: Type.Optional(Type.Union([Type.String({ maxLength: 500 }), Type.Null()])),
+    requiresDescription: Type.Optional(Type.Boolean()),
+    isActive: Type.Optional(Type.Boolean()),
+    sortOrder: Type.Optional(Type.Integer({ minimum: 0, maximum: 9999 })),
+  },
+  { additionalProperties: false },
+);
+export type UpdateWasteReasonRequest = Static<typeof UpdateWasteReasonRequestSchema>;
+
+export const WasteLogLineInputSchema = Type.Object(
+  {
+    productId: UuidSchema,
+    batchId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
+    serialId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
+    stockIntakeLotId: Type.Optional(Type.Union([UuidSchema, Type.Null()])),
+    uomCode: Type.Optional(Type.String({ minLength: 1, maxLength: 16 })),
+    wasteQty: DecimalQuantityStringSchema,
+    notes: Type.Optional(Type.Union([Type.String({ maxLength: 500 }), Type.Null()])),
+  },
+  { additionalProperties: false },
+);
+export type WasteLogLineInput = Static<typeof WasteLogLineInputSchema>;
+
+export const CreateWasteLogRequestSchema = Type.Object(
+  {
+    branchId: UuidSchema,
+    warehouseId: UuidSchema,
+    reasonCode: Type.String({ minLength: 2, maxLength: 64 }),
+    description: Type.Optional(Type.Union([Type.String({ maxLength: 1000 }), Type.Null()])),
+    confirmImmediately: Type.Optional(Type.Boolean()),
+    syncCommandId: Type.Optional(UuidSchema),
+    lines: Type.Array(WasteLogLineInputSchema, { minItems: 1, maxItems: 50 }),
+  },
+  { additionalProperties: false },
+);
+export type CreateWasteLogRequest = Static<typeof CreateWasteLogRequestSchema>;
+
+export const WasteCostPreviewRequestSchema = Type.Object(
+  {
+    branchId: UuidSchema,
+    warehouseId: UuidSchema,
+    lines: Type.Array(WasteLogLineInputSchema, { minItems: 1, maxItems: 50 }),
+  },
+  { additionalProperties: false },
+);
+export type WasteCostPreviewRequest = Static<typeof WasteCostPreviewRequestSchema>;
+
+export const WasteCostPreviewLineResponseSchema = Type.Object({
+  productId: UuidSchema,
+  sku: Type.String(),
+  productName: Type.String(),
+  wasteUom: Type.String(),
+  wasteQty: DecimalQuantityStringSchema,
+  baseUom: Type.String(),
+  normalizedBaseQty: DecimalQuantityStringSchema,
+  valuationMethod: ValuationMethodSchema,
+  estimatedUnitCostPerBase: DecimalMoneyStringSchema,
+  estimatedTotalCost: DecimalMoneyStringSchema,
+  availableBaseQty: DecimalQuantityStringSchema,
+  sufficientStock: Type.Boolean(),
+  costBreakdownNote: Type.String(),
+});
+
+export const WasteCostPreviewResponseSchema = Type.Object({
+  currencyCode: CurrencyCodeSchema,
+  totalEstimatedBaseQty: DecimalQuantityStringSchema,
+  totalEstimatedCost: DecimalMoneyStringSchema,
+  lines: Type.Array(WasteCostPreviewLineResponseSchema),
+});
+export type WasteCostPreviewResponse = Static<typeof WasteCostPreviewResponseSchema>;
+
+export const ReverseWasteLogRequestSchema = Type.Object(
+  {
+    reason: Type.String({ minLength: 5, maxLength: 500 }),
+  },
+  { additionalProperties: false },
+);
+export type ReverseWasteLogRequest = Static<typeof ReverseWasteLogRequestSchema>;
+
+export const WasteLogLineResponseSchema = Type.Object({
+  id: UuidSchema,
+  lineNumber: Type.Integer(),
+  productId: UuidSchema,
+  productSku: Type.String(),
+  productName: Type.String(),
+  categoryId: Type.Union([UuidSchema, Type.Null()]),
+  categoryName: Type.Union([Type.String(), Type.Null()]),
+  baseUom: Type.String(),
+  batchId: Type.Union([UuidSchema, Type.Null()]),
+  batchNumber: Type.Union([Type.String(), Type.Null()]),
+  expiryDate: Type.Union([DateOnlyStringSchema, Type.Null()]),
+  serialId: Type.Union([UuidSchema, Type.Null()]),
+  serialNumber: Type.Union([Type.String(), Type.Null()]),
+  stockIntakeLotId: Type.Union([UuidSchema, Type.Null()]),
+  posReturnLineId: Type.Union([UuidSchema, Type.Null()]),
+  salesInvoiceId: Type.Union([UuidSchema, Type.Null()]),
+  salesInvoiceLineId: Type.Union([UuidSchema, Type.Null()]),
+  wasteUom: Type.String(),
+  wasteQty: DecimalQuantityStringSchema,
+  conversionFactorToBase: DecimalQuantityStringSchema,
+  normalizedBaseQty: DecimalQuantityStringSchema,
+  deductedFromOnHand: Type.Boolean(),
+  valuationMethodSnapshot: ValuationMethodSchema,
+  unitCostSnapshot: DecimalMoneyStringSchema,
+  totalCostSnapshot: DecimalMoneyStringSchema,
+  consumedCostLayersJson: Type.Union([Type.Record(Type.String(), Type.Unknown()), Type.Array(Type.Unknown()), Type.Null()]),
+  ledgerEntryId: Type.Union([UuidSchema, Type.Null()]),
+  reversalLedgerEntryId: Type.Union([UuidSchema, Type.Null()]),
+  notes: Type.Union([Type.String(), Type.Null()]),
+});
+export type WasteLogLineResponse = Static<typeof WasteLogLineResponseSchema>;
+
+export const WasteLogResponseSchema = Type.Object({
+  id: UuidSchema,
+  tenantId: UuidSchema,
+  wasteNumber: Type.String(),
+  branchId: UuidSchema,
+  branchName: Type.String(),
+  warehouseId: UuidSchema,
+  warehouseName: Type.String(),
+  sourceType: WasteLogSourceTypeSchema,
+  sourceReferenceId: Type.Union([UuidSchema, Type.Null()]),
+  sourceReturnNumber: Type.Union([Type.String(), Type.Null()]),
+  status: WasteLogStatusSchema,
+  reasonId: UuidSchema,
+  reasonCode: Type.String(),
+  reasonName: Type.String(),
+  description: Type.Union([Type.String(), Type.Null()]),
+  currencyCode: CurrencyCodeSchema,
+  totalBaseQty: DecimalQuantityStringSchema,
+  totalCost: DecimalMoneyStringSchema,
+  syncCommandId: Type.Union([UuidSchema, Type.Null()]),
+  createdByUserId: UuidSchema,
+  createdByName: Type.Union([Type.String(), Type.Null()]),
+  confirmedByUserId: Type.Union([UuidSchema, Type.Null()]),
+  confirmedByName: Type.Union([Type.String(), Type.Null()]),
+  confirmedAt: Type.Union([IsoTimestampSchema, Type.Null()]),
+  cancelledByUserId: Type.Union([UuidSchema, Type.Null()]),
+  cancelledAt: Type.Union([IsoTimestampSchema, Type.Null()]),
+  reversedByUserId: Type.Union([UuidSchema, Type.Null()]),
+  reversedByName: Type.Union([Type.String(), Type.Null()]),
+  reversedAt: Type.Union([IsoTimestampSchema, Type.Null()]),
+  reversalReason: Type.Union([Type.String(), Type.Null()]),
+  createdAt: IsoTimestampSchema,
+  updatedAt: IsoTimestampSchema,
+  lines: Type.Array(WasteLogLineResponseSchema),
+});
+export type WasteLogResponse = Static<typeof WasteLogResponseSchema>;
+
+export const ListWasteLogsQuerySchema = Type.Object(
+  {
+    branchId: Type.Optional(UuidSchema),
+    warehouseId: Type.Optional(UuidSchema),
+    status: Type.Optional(WasteLogStatusSchema),
+    sourceType: Type.Optional(WasteLogSourceTypeSchema),
+    reasonCode: Type.Optional(Type.String({ maxLength: 64 })),
+    search: Type.Optional(Type.String({ maxLength: 120 })),
+    startDate: Type.Optional(DateOnlyStringSchema),
+    endDate: Type.Optional(DateOnlyStringSchema),
+    limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
+    offset: Type.Optional(Type.Integer({ minimum: 0 })),
+  },
+  { additionalProperties: false },
+);
+export type ListWasteLogsQuery = Static<typeof ListWasteLogsQuerySchema>;
+
+export const WasteReportQuerySchema = Type.Object(
+  {
+    branchId: Type.Optional(UuidSchema),
+    warehouseId: Type.Optional(UuidSchema),
+    reasonCode: Type.Optional(Type.String({ maxLength: 64 })),
+    sourceType: Type.Optional(WasteLogSourceTypeSchema),
+    granularity: Type.Optional(
+      Type.Union([
+        Type.Literal('DAILY'),
+        Type.Literal('WEEKLY'),
+        Type.Literal('MONTHLY'),
+        Type.Literal('YEARLY'),
+      ]),
+    ),
+    startDate: Type.Optional(DateOnlyStringSchema),
+    endDate: Type.Optional(DateOnlyStringSchema),
+  },
+  { additionalProperties: false },
+);
+export type WasteReportQuery = Static<typeof WasteReportQuerySchema>;
+
+export const PosReturnDispositionItemInputSchema = Type.Object(
+  {
+    posReturnLineId: UuidSchema,
+    restockQty: Type.Optional(DecimalQuantityStringSchema),
+    wasteQty: Type.Optional(DecimalQuantityStringSchema),
+    uomCode: Type.Optional(Type.String({ minLength: 1, maxLength: 16 })),
+    wasteReasonCode: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
+    wasteDescription: Type.Optional(Type.String({ maxLength: 500 })),
+    notes: Type.Optional(Type.String({ maxLength: 500 })),
+  },
+  { additionalProperties: false },
+);
+
+export const ApplyPosReturnDispositionsRequestSchema = Type.Object(
+  {
+    dispositions: Type.Array(PosReturnDispositionItemInputSchema, { minItems: 1, maxItems: 50 }),
+  },
+  { additionalProperties: false },
+);
+export type ApplyPosReturnDispositionsRequest = Static<typeof ApplyPosReturnDispositionsRequestSchema>;
+
 
 
 

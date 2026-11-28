@@ -662,6 +662,13 @@ export function loadBranchCatalogIsolationAndCustomerAddressMigrationSql(): stri
   return sqlText;
 }
 
+export function loadWasteLogManagementMigrationSql(): string {
+  const filename = '0034_waste_log_management.sql';
+  const sqlText = readFileSync(resolve(migrationsDir, filename), 'utf-8');
+  assertPostgresMigrationSqlCompatible(sqlText, filename);
+  return sqlText;
+}
+
 export function getOrderedPostgresMigrations(): readonly PostgresMigrationSpec[] {
   return [
     {
@@ -894,6 +901,13 @@ export function getOrderedPostgresMigrations(): readonly PostgresMigrationSpec[]
       name: '0033_branch_catalog_isolation_and_customer_address',
       filename: '0033_branch_catalog_isolation_and_customer_address.sql',
       sql: loadBranchCatalogIsolationAndCustomerAddressMigrationSql(),
+    },
+    {
+      dialect: 'postgres',
+      version: 34,
+      name: '0034_waste_log_management',
+      filename: '0034_waste_log_management.sql',
+      sql: loadWasteLogManagementMigrationSql(),
     },
   ];
 }

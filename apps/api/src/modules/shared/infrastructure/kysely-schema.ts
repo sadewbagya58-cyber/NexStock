@@ -788,6 +788,7 @@ export type StockMovementTypeDb =
   | 'STOCK_OUT'
   | 'ADJUSTMENT_POSITIVE'
   | 'ADJUSTMENT_NEGATIVE'
+  | 'WASTE_OUT'
   | 'CORRECTION_REVERSAL'
   | 'CUSTOMER_RETURN_RESTOCK'
   | 'SUPPLIER_RETURN'
@@ -832,6 +833,7 @@ export interface StockLedgerEntriesTable {
     | 'STOCKTAKE'
     | 'STOCK_TRANSFER'
     | 'UOM_CORRECTION'
+    | 'WASTE'
     | 'MANUAL'
     | 'MANUAL_WEIGHT'
     | 'SCALE_WEIGHT'
@@ -1946,7 +1948,106 @@ export interface PosReturnLinesTable {
   serial_id: ColumnType<string | null, string | null | undefined, string | null | undefined>;
   stock_intake_lot_id?: ColumnType<string | null, string | null | undefined, string | null | undefined>;
   ledger_entry_id: string | null;
+  disposition_status?: Generated<'PENDING_INSPECTION' | 'PARTIAL' | 'RESTOCKED' | 'WASTED' | 'MIXED' | 'DAMAGED_UNPOSTED'>;
+  restocked_base_qty?: Generated<string>;
+  wasted_base_qty?: Generated<string>;
+  pending_base_qty?: Generated<string>;
+  waste_log_id?: ColumnType<string | null, string | null | undefined, string | null | undefined>;
   created_at: Generated<Date>;
+}
+
+export interface PosReturnDispositionsTable {
+  id: string;
+  tenant_id: string;
+  pos_return_id: string;
+  pos_return_line_id: string;
+  disposition_type: 'RESTOCK' | 'WASTE';
+  quantity: string;
+  uom_code: string;
+  normalized_base_qty: string;
+  from_restocked_stock: Generated<boolean>;
+  waste_log_id: string | null;
+  ledger_entry_id: string | null;
+  reason_code: string | null;
+  notes: string | null;
+  actor_user_id: string;
+  idempotency_key: string | null;
+  created_at: Generated<Date>;
+}
+
+export interface WasteReasonsTable {
+  id: string;
+  tenant_id: string;
+  code: string;
+  name: string;
+  description: string | null;
+  is_system_default: Generated<boolean>;
+  requires_description: Generated<boolean>;
+  is_active: Generated<boolean>;
+  sort_order: Generated<number>;
+  created_by_user_id: string | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface WasteLogsTable {
+  id: string;
+  tenant_id: string;
+  waste_number: string;
+  branch_id: string;
+  warehouse_id: string;
+  source_type: Generated<'MANUAL' | 'CUSTOMER_RETURN'>;
+  source_reference_id: string | null;
+  status: Generated<'DRAFT' | 'CONFIRMED' | 'CANCELLED' | 'REVERSED'>;
+  reason_id: string;
+  reason_code: string;
+  reason_name: string;
+  description: string | null;
+  currency_code: string;
+  total_base_qty: Generated<string>;
+  total_cost: Generated<string>;
+  sync_command_id: string | null;
+  created_by_user_id: string;
+  confirmed_by_user_id: string | null;
+  confirmed_at: ColumnType<Date | null, Date | string | null | undefined, Date | string | null | undefined>;
+  cancelled_by_user_id: string | null;
+  cancelled_at: ColumnType<Date | null, Date | string | null | undefined, Date | string | null | undefined>;
+  reversed_by_user_id: string | null;
+  reversed_at: ColumnType<Date | null, Date | string | null | undefined, Date | string | null | undefined>;
+  reversal_reason: string | null;
+  idempotency_key: string | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface WasteLogLinesTable {
+  id: string;
+  tenant_id: string;
+  waste_log_id: string;
+  line_number: number;
+  product_id: string;
+  batch_id: string | null;
+  serial_id: string | null;
+  stock_intake_lot_id: string | null;
+  pos_return_line_id: string | null;
+  sales_invoice_id: string | null;
+  sales_invoice_line_id: string | null;
+  waste_uom: string;
+  waste_qty: string;
+  conversion_factor_to_base: string;
+  normalized_base_qty: string;
+  deducted_from_on_hand: Generated<boolean>;
+  valuation_method_snapshot: Generated<'MOVING_AVG' | 'FIFO'>;
+  unit_cost_snapshot: Generated<string>;
+  total_cost_snapshot: Generated<string>;
+  consumed_cost_layers_json: ColumnType<unknown, unknown, unknown>;
+  prior_batch_status: string | null;
+  prior_serial_status: string | null;
+  ledger_entry_id: string | null;
+  reversal_ledger_entry_id: string | null;
+  notes: string | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
 }
 
 export interface PricingSettingsTable {
@@ -2374,6 +2475,10 @@ export interface NexStockDatabase {
   stock_config_alerts: StockConfigAlertsTable;
   product_branch_assignments: ProductBranchAssignmentsTable;
   category_branch_assignments: CategoryBranchAssignmentsTable;
+  waste_reasons: WasteReasonsTable;
+  waste_logs: WasteLogsTable;
+  waste_log_lines: WasteLogLinesTable;
+  pos_return_dispositions: PosReturnDispositionsTable;
 }
 
 export interface ProductBranchAssignmentsTable {

@@ -3466,6 +3466,101 @@
         flex: 1 1 100%;
       }
     }
+
+    /* Waste Log & Inventory Loss Management Responsive Styles */
+    .waste-tabs {
+      display: flex;
+      gap: 6px;
+      border-bottom: 1px solid var(--border-subtle);
+      margin-bottom: 16px;
+      overflow-x: auto;
+      padding-bottom: 2px;
+      scrollbar-width: thin;
+    }
+    .waste-tab {
+      padding: 8px 14px;
+      border: none;
+      background: transparent;
+      color: var(--text-secondary);
+      font-weight: 600;
+      font-size: 13px;
+      border-bottom: 2px solid transparent;
+      cursor: pointer;
+      white-space: nowrap;
+      border-radius: 6px 6px 0 0;
+    }
+    .waste-tab:hover {
+      color: var(--text-primary);
+      background: var(--bg-hover);
+    }
+    .waste-tab.active {
+      color: var(--accent-primary);
+      border-bottom-color: var(--accent-primary);
+      background: var(--bg-hover);
+    }
+    .waste-filter-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 10px;
+      align-items: end;
+    }
+    .waste-charts-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+    .waste-bar-row {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin-bottom: 10px;
+    }
+    .waste-bar-track {
+      height: 8px;
+      border-radius: 999px;
+      background: var(--bg-hover);
+      overflow: hidden;
+    }
+    .waste-bar-fill {
+      height: 100%;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--status-warning), var(--status-danger));
+    }
+    .waste-line-card {
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px;
+      padding: 12px;
+      margin-bottom: 10px;
+      background: var(--bg-hover);
+    }
+    .waste-line-grid {
+      display: grid;
+      grid-template-columns: 2fr 1fr 1fr 1fr;
+      gap: 8px;
+      align-items: end;
+    }
+    .waste-offline-banner {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 10px 14px;
+      border-radius: 8px;
+      border: 1px solid var(--status-warning);
+      background: rgba(245, 158, 11, 0.12);
+      margin-bottom: 14px;
+      font-size: 13px;
+    }
+    @media (max-width: 768px) {
+      .waste-line-grid {
+        grid-template-columns: 1fr;
+      }
+      .waste-charts-grid {
+        grid-template-columns: 1fr;
+      }
+    }
   </style>
 </head>
 <body data-theme="light">
@@ -3931,6 +4026,7 @@
       'serials',
       'valuation',
       'stocktakes',
+      'waste-log',
       'pos-checkout',
       'pos-registers',
       'pos-shifts',
@@ -6196,6 +6292,7 @@
       'serials': ['inv:serial:read', 'inv:serial:manage'],
       'valuation': 'inv:costing:read',
       'stocktakes': ['inv:count:read', 'inv:count:create', 'inv:count:submit', 'inv:count:approve', 'inv:count:post'],
+      'waste-log': ['inv:waste:read', 'inv:waste:create', 'inv:waste:confirm', 'inv:waste:reverse', 'inv:waste:report', 'inv:waste:export'],
       'attendance': ['hrm:attendance:read', 'hrm:attendance:manage', 'hrm:attendance:self'],
       'leaves': ['hrm:leave:read', 'hrm:leave:manage', 'hrm:leave:approve', 'hrm:leave:self'],
       'employees': ['hrm:employee:read', 'hrm:employee:manage'],
@@ -6244,6 +6341,7 @@
         'balances',
         'movements',
         'stocktakes',
+        'waste-log',
         'batches',
         'serials',
         'pos-checkout',
@@ -6288,6 +6386,7 @@
         'serials': 'Serial Registry',
         'valuation': 'Costing & Valuation',
         'stocktakes': 'Stock Counts & Stocktake',
+        'waste-log': 'Waste & Loss Log',
         'pos-checkout': 'POS Checkout',
         'pos-registers': 'Registers',
         'pos-shifts': 'Cashier Shifts',
@@ -6517,6 +6616,12 @@
             label: 'Stock Counts & Stocktake',
             icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>`,
             permission: ['inv:count:read', 'inv:count:create', 'inv:count:submit', 'inv:count:approve', 'inv:count:post']
+          },
+          {
+            view: 'waste-log',
+            label: 'Waste & Loss Log',
+            icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path></svg>`,
+            permission: ['inv:waste:read', 'inv:waste:create', 'inv:waste:confirm', 'inv:waste:report']
           }
         ]
       },
@@ -6838,6 +6943,7 @@
         case 'serials': renderSerialsView(); break;
         case 'valuation': renderValuationView(); break;
         case 'stocktakes': renderStocktakesView(); break;
+        case 'waste-log': renderWasteLogView(); break;
         case 'pos-checkout': renderPosCheckoutView(); break;
         case 'pos-registers': renderPosRegistersView(); break;
         case 'pos-shifts': renderPosShiftsView(); break;
@@ -18548,22 +18654,95 @@
         footerHtml: `
           <button class="btn btn-secondary" onclick="closeModal()">Close</button>
           <button class="btn btn-secondary" onclick="openPosReturnModal('${saleId}')">Customer Return</button>
+          <button class="btn btn-secondary" onclick="openSaleReturnInspectionList('${saleId}')">Inspect Returns</button>
           <button class="btn btn-primary" id="btnPrintReceiptModal" onclick="printReceiptInvoice('${saleId}')">Print Receipt</button>
         `
       });
     }
 
+    async function loadCachedWasteReasons() {
+      if (!state.token || !state.tenantId) return getDefaultFallbackWasteReasons();
+      try {
+        const res = await apiFetch('/v1/inventory/waste-reasons?activeOnly=true', { silent: true });
+        if (Array.isArray(res) && res.length > 0) {
+          state.cachedWasteReasons = res;
+          return res;
+        }
+      } catch {}
+      return (Array.isArray(state.cachedWasteReasons) && state.cachedWasteReasons.length > 0)
+        ? state.cachedWasteReasons
+        : getDefaultFallbackWasteReasons();
+    }
+
+    function getDefaultFallbackWasteReasons() {
+      return [
+        { code: 'DAMAGED', name: 'Damaged', requiresDescription: false, isActive: true },
+        { code: 'EXPIRED', name: 'Expired', requiresDescription: false, isActive: true },
+        { code: 'SPOILED', name: 'Spoiled', requiresDescription: false, isActive: true },
+        { code: 'LOST_MISSING', name: 'Lost/Missing', requiresDescription: false, isActive: true },
+        { code: 'CONTAMINATED', name: 'Contaminated', requiresDescription: false, isActive: true },
+        { code: 'PRODUCTION_WASTE', name: 'Production Waste', requiresDescription: false, isActive: true },
+        { code: 'INTERNAL_CONSUMPTION', name: 'Internal Consumption', requiresDescription: false, isActive: true },
+        { code: 'THEFT_SUSPECTED_LOSS', name: 'Theft/Suspected Loss', requiresDescription: false, isActive: true },
+        { code: 'OTHER', name: 'Other', requiresDescription: true, isActive: true }
+      ];
+    }
+
+    function handlePosReturnConditionChange(rowEl) {
+      if (!rowEl) return;
+      const cond = rowEl.querySelector('.pos-ret-cond')?.value || 'RESELLABLE';
+      const splitBox = rowEl.querySelector('.pos-ret-split-box');
+      const totalQty = parseFloat(rowEl.querySelector('.pos-ret-qty')?.value || '0') || 0;
+      if (splitBox) {
+        splitBox.style.display = cond === 'SPLIT' ? 'grid' : 'none';
+        if (cond === 'SPLIT') {
+          const restockEl = rowEl.querySelector('.pos-ret-restock-qty');
+          const wasteEl = rowEl.querySelector('.pos-ret-waste-qty');
+          if (restockEl && wasteEl && (parseFloat(restockEl.value || '0') + parseFloat(wasteEl.value || '0')) === 0 && totalQty > 0) {
+            const halfWaste = Math.min(totalQty, 1);
+            restockEl.value = formatQty(Math.max(0, totalQty - halfWaste));
+            wasteEl.value = formatQty(halfWaste);
+          }
+        }
+      }
+      refreshPosReturnWasteReasonPanel();
+    }
+
+    function refreshPosReturnWasteReasonPanel() {
+      const panel = document.getElementById('posReturnWasteReasonPanel');
+      if (!panel) return;
+      let needsWasteReason = false;
+      document.querySelectorAll('#posReturnLinesContainer .pos-return-row').forEach(row => {
+        const chk = row.querySelector('.pos-ret-check');
+        if (!chk || !chk.checked) return;
+        const cond = row.querySelector('.pos-ret-cond')?.value || 'RESELLABLE';
+        const wasteVal = parseFloat(row.querySelector('.pos-ret-waste-qty')?.value || '0') || 0;
+        if (cond === 'DAMAGED' || (cond === 'SPLIT' && wasteVal > 0)) {
+          needsWasteReason = true;
+        }
+      });
+      panel.style.display = needsWasteReason ? 'block' : 'none';
+      const sel = document.getElementById('posReturnWasteReasonCode');
+      const descReq = document.getElementById('posReturnWasteDescRequired');
+      if (sel && descReq) {
+        const selectedOpt = sel.options[sel.selectedIndex];
+        const req = selectedOpt?.getAttribute('data-req-desc') === 'true' || sel.value === 'OTHER';
+        descReq.style.display = req ? 'inline' : 'none';
+      }
+    }
+
     async function openPosReturnModal(saleId) {
       openModal({
         title: 'Process Customer Return',
-        maxWidth: '680px',
-        bodyHtml: `<div style="padding: 30px; text-align: center; color: var(--text-secondary);">Loading invoice lines &amp; prior returns...</div>`
+        maxWidth: '720px',
+        bodyHtml: `<div style="padding: 30px; text-align: center; color: var(--text-secondary);">Loading invoice lines, prior returns &amp; waste reasons...</div>`
       });
 
       try {
-        const [sale, existingReturns] = await Promise.all([
+        const [sale, existingReturns, wasteReasons] = await Promise.all([
           apiFetch(`/v1/pos/sales/${saleId}`),
-          apiFetch(`/v1/pos/sales/${saleId}/returns`, { silent: true }).catch(() => ({ data: [] }))
+          apiFetch(`/v1/pos/sales/${saleId}/returns`, { silent: true }).catch(() => ({ data: [] })),
+          loadCachedWasteReasons()
         ]);
         const returnsList = Array.isArray(existingReturns) ? existingReturns : (existingReturns?.data || []);
         const priorByLine = new Map();
@@ -18580,14 +18759,23 @@
 
         const prods = window._productsCache || state.posCachedProducts || [];
         const prodMap = new Map(prods.map(p => [p.id, p]));
+        const hasPendingReturns = returnsList.some(r =>
+          (r.lines || []).some(rl => parseFloat(rl.pendingBaseQty || '0') > 0 || parseFloat(rl.restockedBaseQty || '0') > 0)
+        );
 
         openModal({
           title: `Customer Return — ${escapeHtml(sale.invoiceNumber)}`,
-          maxWidth: '720px',
+          maxWidth: '780px',
           bodyHtml: `
             <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 10px;">
-              Select lines to return. Supports partial UoM returns (e.g., 500 G returned from 2 KG sold). Resellable returns restock the immutable warehouse ledger automatically.
+              Select lines to return. Choose <strong>RESTOCK</strong> (resellable), <strong>DAMAGED</strong> (auto-log Customer Return Waste without double deduction), <strong>PENDING_INSPECTION</strong> (inspect later), or <strong>SPLIT</strong> (e.g. 7 Restock + 3 Waste).
             </div>
+            ${returnsList.length > 0 ? `
+              <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:8px 12px; border-radius:8px; border:1px solid var(--border-subtle); background:var(--bg-primary); margin-bottom:10px; font-size:12px;">
+                <span><strong>${returnsList.length} prior return(s)</strong> recorded on this invoice.${hasPendingReturns ? ' You can inspect or reclassify returned items.' : ''}</span>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="openSaleReturnInspectionList('${saleId}')">Inspect / Dispose Prior Returns</button>
+              </div>
+            ` : ''}
             <div id="posReturnLinesContainer">
               ${saleLines.map((l, idx) => {
                 const prod = prodMap.get(l.productId);
@@ -18600,19 +18788,19 @@
                 const remainingBase = Math.max(0, normSold - alreadyReturnedBase);
                 return `
                   <div class="pos-return-row" data-line-id="${l.id}" style="border: 1px solid var(--border-subtle); border-radius: 8px; padding: 10px; margin-bottom: 8px; background: var(--bg-hover); ${remainingBase <= 0 ? 'opacity: 0.55;' : ''}">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; flex-wrap: wrap; gap: 6px;">
                       <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; cursor: pointer;">
-                        <input type="checkbox" class="pos-ret-check" ${idx === 0 && remainingBase > 0 ? 'checked' : ''} ${remainingBase <= 0 ? 'disabled' : ''}>
+                        <input type="checkbox" class="pos-ret-check" onchange="refreshPosReturnWasteReasonPanel()" ${idx === 0 && remainingBase > 0 ? 'checked' : ''} ${remainingBase <= 0 ? 'disabled' : ''}>
                         <span>${escapeHtml(l.productName || l.sku || 'Item')}</span>
                       </label>
                       <span style="font-size: 12px; color: var(--text-secondary);">
                         Sold: <strong>${formatQty(origQty)} ${escapeHtml(origUom)}</strong> | Remaining: <strong>${formatQty(remainingBase)} ${escapeHtml(baseUom)}</strong>
                       </span>
                     </div>
-                    <div style="display: grid; grid-template-columns: 1fr 100px 1fr; gap: 8px;">
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px;">
                       <div>
                         <label class="form-label" style="font-size: 11px;">Return Qty</label>
-                        <input type="number" step="0.000001" min="0.000001" class="form-input pos-ret-qty" value="${remainingBase > 0 ? formatQty(remainingBase) : '0'}" ${remainingBase <= 0 ? 'disabled' : ''}>
+                        <input type="number" step="0.000001" min="0.000001" class="form-input pos-ret-qty" value="${remainingBase > 0 ? formatQty(remainingBase) : '0'}" oninput="handlePosReturnConditionChange(this.closest('.pos-return-row'))" ${remainingBase <= 0 ? 'disabled' : ''}>
                       </div>
                       <div>
                         <label class="form-label" style="font-size: 11px;">UoM</label>
@@ -18621,17 +18809,46 @@
                         </select>
                       </div>
                       <div>
-                        <label class="form-label" style="font-size: 11px;">Condition</label>
-                        <select class="form-select pos-ret-cond" ${remainingBase <= 0 ? 'disabled' : ''}>
-                          <option value="RESELLABLE" selected>RESELLABLE (Restock Stock)</option>
-                          <option value="DAMAGED">DAMAGED (Write-off / No Restock)</option>
+                        <label class="form-label" style="font-size: 11px;">Disposition / Condition</label>
+                        <select class="form-select pos-ret-cond" onchange="handlePosReturnConditionChange(this.closest('.pos-return-row'))" ${remainingBase <= 0 ? 'disabled' : ''}>
+                          <option value="RESELLABLE" selected>RESTOCK (Resellable Inventory)</option>
+                          <option value="DAMAGED">DAMAGED / WASTE (Do Not Restock)</option>
+                          <option value="PENDING_INSPECTION">HOLD (Pending Inspection)</option>
+                          <option value="SPLIT">SPLIT (Restock + Waste)</option>
                         </select>
+                      </div>
+                    </div>
+                    <div class="pos-ret-split-box" style="display: none; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border-subtle);">
+                      <div>
+                        <label class="form-label" style="font-size: 11px;">Restock Qty (Sellable)</label>
+                        <input type="number" step="0.000001" min="0" class="form-input pos-ret-restock-qty" value="0" oninput="refreshPosReturnWasteReasonPanel()">
+                      </div>
+                      <div>
+                        <label class="form-label" style="font-size: 11px;">Waste Qty (Write-off Loss)</label>
+                        <input type="number" step="0.000001" min="0" class="form-input pos-ret-waste-qty" value="0" oninput="refreshPosReturnWasteReasonPanel()">
                       </div>
                     </div>
                   </div>
                 `;
               }).join('')}
             </div>
+
+            <div id="posReturnWasteReasonPanel" style="display: none; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--status-warning); background: rgba(245, 158, 11, 0.08); margin-top: 10px;">
+              <div style="font-weight: 600; font-size: 12px; margin-bottom: 8px;">Customer Return Waste Classification (No Double Stock Deduction)</div>
+              <div style="display: grid; grid-template-columns: 1fr 1.6fr; gap: 10px;">
+                <div>
+                  <label class="form-label" style="font-size: 11px;">Waste Reason *</label>
+                  <select class="form-select" id="posReturnWasteReasonCode" onchange="refreshPosReturnWasteReasonPanel()">
+                    ${wasteReasons.map(r => `<option value="${escapeHtml(r.code)}" data-req-desc="${r.requiresDescription ? 'true' : 'false'}" ${r.code === 'DAMAGED' ? 'selected' : ''}>${escapeHtml(r.name)} (${escapeHtml(r.code)})</option>`).join('')}
+                  </select>
+                </div>
+                <div>
+                  <label class="form-label" style="font-size: 11px;">Waste Details <span id="posReturnWasteDescRequired" style="display:none; color: var(--status-danger);">* (Required for OTHER)</span></label>
+                  <input type="text" class="form-input" id="posReturnWasteDesc" placeholder="Condition notes / customer damage explanation">
+                </div>
+              </div>
+            </div>
+
             <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 10px; margin-top: 10px;">
               <div class="form-group">
                 <label class="form-label">Refund Method *</label>
@@ -18662,37 +18879,232 @@
     async function submitPosReturn(saleId) {
       const reason = document.getElementById('posReturnReason')?.value.trim() || '';
       const refundMethod = document.getElementById('posReturnMethod')?.value || 'CASH';
+      const wasteReasonCode = document.getElementById('posReturnWasteReasonCode')?.value || 'DAMAGED';
+      const wasteDescription = document.getElementById('posReturnWasteDesc')?.value.trim() || '';
+      const reasonSel = document.getElementById('posReturnWasteReasonCode');
+      const requiresWasteDesc = reasonSel?.options[reasonSel.selectedIndex]?.getAttribute('data-req-desc') === 'true' || wasteReasonCode === 'OTHER';
       if (reason.length < 3) return showToast('Audit reason must be at least 3 characters', 'error');
 
       const lines = [];
+      let anyWaste = false;
+      let splitErr = null;
       document.querySelectorAll('#posReturnLinesContainer .pos-return-row').forEach(row => {
         const chk = row.querySelector('.pos-ret-check');
         if (!chk || !chk.checked) return;
         const invoiceLineId = row.getAttribute('data-line-id');
         const qty = parseFloat(row.querySelector('.pos-ret-qty')?.value || '0');
         const returnUom = row.querySelector('.pos-ret-uom')?.value || 'PCS';
-        const restockCondition = row.querySelector('.pos-ret-cond')?.value || 'RESELLABLE';
-        if (invoiceLineId && Number.isFinite(qty) && qty > 0) {
-          lines.push({ invoiceLineId, returnQty: qty.toFixed(6), returnUom, restockCondition });
+        const cond = row.querySelector('.pos-ret-cond')?.value || 'RESELLABLE';
+        if (!(invoiceLineId && Number.isFinite(qty) && qty > 0)) return;
+
+        if (cond === 'SPLIT') {
+          const restockVal = parseFloat(row.querySelector('.pos-ret-restock-qty')?.value || '0') || 0;
+          const wasteVal = parseFloat(row.querySelector('.pos-ret-waste-qty')?.value || '0') || 0;
+          if (restockVal < 0 || wasteVal < 0 || restockVal + wasteVal > qty + 0.000001 || (restockVal === 0 && wasteVal === 0)) {
+            splitErr = `Split quantities (Restock + Waste) must be valid and not exceed return qty (${formatQty(qty)}).`;
+            return;
+          }
+          if (wasteVal > 0) anyWaste = true;
+          lines.push({
+            invoiceLineId,
+            returnQty: qty.toFixed(6),
+            returnUom,
+            restockCondition: wasteVal > 0 && restockVal === 0 ? 'DAMAGED' : 'RESELLABLE',
+            restockQty: restockVal.toFixed(6),
+            wasteQty: wasteVal.toFixed(6),
+            ...(wasteVal > 0 ? { wasteReasonCode, ...(wasteDescription ? { wasteDescription } : {}) } : {})
+          });
+        } else if (cond === 'PENDING_INSPECTION') {
+          lines.push({
+            invoiceLineId,
+            returnQty: qty.toFixed(6),
+            returnUom,
+            restockCondition: 'PENDING_INSPECTION',
+            restockQty: '0.000000',
+            wasteQty: '0.000000'
+          });
+        } else {
+          if (cond === 'DAMAGED') anyWaste = true;
+          lines.push({
+            invoiceLineId,
+            returnQty: qty.toFixed(6),
+            returnUom,
+            restockCondition: cond,
+            ...(cond === 'DAMAGED' ? { wasteReasonCode, ...(wasteDescription ? { wasteDescription } : {}) } : {})
+          });
         }
       });
+      if (splitErr) return showToast(splitErr, 'error');
       if (!lines.length) return showToast('Select at least one line with positive return quantity', 'error');
+      if (anyWaste && requiresWasteDesc && !wasteDescription) {
+        return showToast('Waste description is required when reason is OTHER', 'error');
+      }
 
       const btn = document.getElementById('btnSubmitPosReturn');
-      if (btn) { btn.disabled = true; btn.textContent = 'Processing...'; }
+      if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-sm"></span> Processing...'; }
       try {
         const ret = await apiFetch(`/v1/pos/sales/${saleId}/returns`, {
           method: 'POST',
           headers: { 'idempotency-key': crypto.randomUUID() },
           body: JSON.stringify({ reason, refundMethod, lines })
         });
-        showToast(`Customer Return ${ret?.returnNumber || ''} processed (${formatTenantMoney(ret?.totalRefundAmount || 0)} refunded)`, 'success');
+        const wasteNote = Array.isArray(ret?.wasteLogIds) && ret.wasteLogIds.length > 0
+          ? ` • Waste Log(s) recorded`
+          : '';
+        showToast(`Customer Return ${ret?.returnNumber || ''} processed (${formatTenantMoney(ret?.totalRefundAmount || 0)} refunded)${wasteNote}`, 'success');
         cachedReceipts.delete(saleId);
         closeModal();
         if (state.currentView === 'pos-sales') renderPosSalesView();
+        if (state.currentView === 'waste-log') renderWasteLogView();
       } catch (err) {
       } finally {
         if (btn) { btn.disabled = false; btn.textContent = 'Process Customer Return'; }
+      }
+    }
+
+    async function openSaleReturnInspectionList(saleId) {
+      openModal({
+        title: 'Inspect / Dispose Returned Items',
+        maxWidth: '760px',
+        bodyHtml: `<div style="padding: 28px; text-align: center; color: var(--text-secondary);">Loading returns for inspection...</div>`
+      });
+      try {
+        const [returnsRes, wasteReasons] = await Promise.all([
+          apiFetch(`/v1/pos/sales/${saleId}/returns`),
+          loadCachedWasteReasons()
+        ]);
+        const returnsList = Array.isArray(returnsRes) ? returnsRes : (returnsRes?.data || []);
+        if (!returnsList.length) {
+          return openModal({
+            title: 'Inspect / Dispose Returned Items',
+            maxWidth: '520px',
+            bodyHtml: `<div class="empty-state-card" style="padding:24px;"><div class="empty-state-title">No Customer Returns Found</div><p class="empty-state-desc">This invoice has no recorded customer returns yet.</p></div>`,
+            footerHtml: `<button class="btn btn-secondary" onclick="closeModal()">Close</button><button class="btn btn-primary" onclick="openPosReturnModal('${saleId}')">Create Return</button>`
+          });
+        }
+
+        const pendingItems = [];
+        for (const r of returnsList) {
+          for (const rl of (r.lines || [])) {
+            const pendingQty = parseFloat(rl.pendingBaseQty || '0') || 0;
+            const restockedQty = parseFloat(rl.restockedBaseQty || '0') || 0;
+            const wastedQty = parseFloat(rl.wastedBaseQty || '0') || 0;
+            pendingItems.push({ returnObj: r, line: rl, pendingQty, restockedQty, wastedQty });
+          }
+        }
+
+        openModal({
+          title: `Return Disposition & Waste Inspection (${returnsList.length} return(s))`,
+          maxWidth: '800px',
+          bodyHtml: `
+            <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 12px;">
+              Assign quantities held in <strong>PENDING_INSPECTION</strong> into <strong>Restock</strong> or <strong>Waste</strong>, or move previously <strong>Restocked</strong> items to Waste (posts <code>WASTE_OUT</code> without double-counting).
+            </div>
+            <div id="returnDispositionRows">
+              ${pendingItems.map(({ returnObj, line, pendingQty, restockedQty, wastedQty }) => {
+                const maxActionable = pendingQty + restockedQty;
+                return `
+                  <div class="ret-disp-row" data-return-id="${escapeHtml(returnObj.id)}" data-line-id="${escapeHtml(line.id)}" style="border:1px solid var(--border-subtle); border-radius:8px; padding:10px; margin-bottom:10px; background:var(--bg-hover);">
+                    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px; margin-bottom:6px;">
+                      <div>
+                        <strong>${escapeHtml(returnObj.returnNumber)}</strong> &mdash; ${escapeHtml(line.productName || line.productSku || line.productId)}
+                        <span class="badge-pill badge-blue">${escapeHtml(line.dispositionStatus || line.restockCondition || 'COMPLETED')}</span>
+                      </div>
+                      <div style="font-size:12px; color:var(--text-secondary);">
+                        Returned: <strong>${formatQty(line.normalizedBaseQty || line.returnQty)}</strong> |
+                        Pending: <strong>${formatQty(pendingQty)}</strong> |
+                        Restocked: <strong>${formatQty(restockedQty)}</strong> |
+                        Wasted: <strong>${formatQty(wastedQty)}</strong>
+                      </div>
+                    </div>
+                    ${maxActionable > 0 ? `
+                      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
+                        <div>
+                          <label class="form-label" style="font-size:11px;">Restock From Pending (max ${formatQty(pendingQty)})</label>
+                          <input type="number" step="0.000001" min="0" max="${formatQty(pendingQty)}" class="form-input ret-disp-restock" value="0" ${pendingQty <= 0 ? 'disabled' : ''}>
+                        </div>
+                        <div>
+                          <label class="form-label" style="font-size:11px;">Write Off to Waste (max ${formatQty(maxActionable)})</label>
+                          <input type="number" step="0.000001" min="0" max="${formatQty(maxActionable)}" class="form-input ret-disp-waste" value="0">
+                        </div>
+                      </div>
+                    ` : `<div style="font-size:12px; color:var(--text-muted);">All returned units already wasted or closed.</div>`}
+                  </div>
+                `;
+              }).join('')}
+            </div>
+            <div style="display:grid; grid-template-columns: 1fr 1.6fr; gap:10px; margin-top:10px;">
+              <div>
+                <label class="form-label" style="font-size:12px;">Waste Reason (if wasting any units)</label>
+                <select class="form-select" id="retDispWasteReason">
+                  ${wasteReasons.map(r => `<option value="${escapeHtml(r.code)}" ${r.code === 'DAMAGED' ? 'selected' : ''}>${escapeHtml(r.name)} (${escapeHtml(r.code)})</option>`).join('')}
+                </select>
+              </div>
+              <div>
+                <label class="form-label" style="font-size:12px;">Inspection Notes / Description</label>
+                <input type="text" class="form-input" id="retDispNotes" placeholder="Inspection outcome (required for OTHER waste reason)">
+              </div>
+            </div>
+          `,
+          footerHtml: `
+            <button class="btn btn-secondary" onclick="closeModal()">Close</button>
+            <button id="btnSubmitReturnDisp" class="btn btn-primary" onclick="submitSaleReturnDispositions('${saleId}')">Apply Dispositions</button>
+          `
+        });
+      } catch (err) {
+        closeModal();
+        showToast(`Failed to inspect returns: ${err.message}`, 'error');
+      }
+    }
+
+    async function submitSaleReturnDispositions(saleId) {
+      const wasteReasonCode = document.getElementById('retDispWasteReason')?.value || 'DAMAGED';
+      const notes = document.getElementById('retDispNotes')?.value.trim() || '';
+      const grouped = new Map();
+      let totalActions = 0;
+
+      document.querySelectorAll('#returnDispositionRows .ret-disp-row').forEach(row => {
+        const returnId = row.getAttribute('data-return-id');
+        const lineId = row.getAttribute('data-line-id');
+        const restockQty = parseFloat(row.querySelector('.ret-disp-restock')?.value || '0') || 0;
+        const wasteQty = parseFloat(row.querySelector('.ret-disp-waste')?.value || '0') || 0;
+        if (restockQty <= 0 && wasteQty <= 0) return;
+        totalActions++;
+        if (wasteQty > 0 && wasteReasonCode === 'OTHER' && !notes) {
+          totalActions = -1;
+          return;
+        }
+        const list = grouped.get(returnId) || [];
+        list.push({
+          posReturnLineId: lineId,
+          ...(restockQty > 0 ? { restockQty: restockQty.toFixed(6) } : {}),
+          ...(wasteQty > 0 ? { wasteQty: wasteQty.toFixed(6), wasteReasonCode, ...(notes ? { wasteDescription: notes } : {}) } : {}),
+          ...(notes ? { notes } : {})
+        });
+        grouped.set(returnId, list);
+      });
+
+      if (totalActions === -1) return showToast('Inspection description is mandatory when Waste Reason is OTHER', 'error');
+      if (grouped.size === 0) return showToast('Enter a positive Restock or Waste quantity on at least one return line', 'error');
+
+      const btn = document.getElementById('btnSubmitReturnDisp');
+      if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-sm"></span> Applying...'; }
+      try {
+        for (const [returnId, dispositions] of grouped.entries()) {
+          await apiFetch(`/v1/pos/returns/${returnId}/dispositions`, {
+            method: 'POST',
+            headers: { 'idempotency-key': crypto.randomUUID() },
+            body: JSON.stringify({ dispositions })
+          });
+        }
+        showToast('Return dispositions updated successfully', 'success');
+        cachedReceipts.delete(saleId);
+        closeModal();
+        if (state.currentView === 'waste-log') renderWasteLogView();
+        else if (state.currentView === 'pos-sales') renderPosSalesView();
+      } catch (err) {
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Apply Dispositions'; }
       }
     }
 
@@ -37910,6 +38322,1337 @@
       }
       return window._lastReportExport;
     }
+
+    // =========================================================================
+    // WASTE LOG & INVENTORY LOSS MANAGEMENT MODULE (Phases 3–8)
+    // =========================================================================
+    function getDefaultWasteLogState() {
+      const today = new Date().toISOString().slice(0, 10);
+      const d30 = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+      return {
+        activeTab: 'dashboard',
+        reportBreakdown: 'byReason',
+        branchId: state.branchId || '',
+        warehouseId: '',
+        status: '',
+        sourceType: '',
+        reasonCode: '',
+        search: '',
+        granularity: 'DAILY',
+        startDate: d30,
+        endDate: today,
+        limit: 20,
+        offset: 0,
+        dashboard: null,
+        records: [],
+        totalRecords: 0,
+        reasons: [],
+        branches: [],
+        warehouses: [],
+        offlineDrafts: [],
+        loading: false,
+      };
+    }
+
+    function getWasteLogState() {
+      if (!state.wasteLogState) state.wasteLogState = getDefaultWasteLogState();
+      return state.wasteLogState;
+    }
+
+    function getWasteStatusBadgeClass(status) {
+      if (status === 'CONFIRMED') return 'badge-green';
+      if (status === 'DRAFT' || status === 'OFFLINE_DRAFT') return 'badge-yellow';
+      if (status === 'REVERSED') return 'badge-red';
+      return 'badge-gray';
+    }
+
+    let _wasteSearchDebounce = null;
+    function onWasteSearchInput(val) {
+      const st = getWasteLogState();
+      st.search = String(val || '');
+      st.offset = 0;
+      clearTimeout(_wasteSearchDebounce);
+      _wasteSearchDebounce = setTimeout(() => {
+        loadAndRenderWasteLog();
+      }, 260);
+    }
+
+    function setWasteLogTab(tab) {
+      const st = getWasteLogState();
+      st.activeTab = tab;
+      renderWasteLogContent();
+    }
+
+    function setWasteReportBreakdown(key) {
+      const st = getWasteLogState();
+      st.reportBreakdown = key;
+      renderWasteLogContent();
+    }
+
+    function setWastePaginationOffset(nextOffset) {
+      const st = getWasteLogState();
+      st.offset = Math.max(0, Number(nextOffset || 0));
+      loadAndRenderWasteLog();
+    }
+
+    function resetWasteFilters() {
+      const fresh = getDefaultWasteLogState();
+      const prev = getWasteLogState();
+      fresh.activeTab = prev.activeTab;
+      fresh.reportBreakdown = prev.reportBreakdown;
+      state.wasteLogState = fresh;
+      loadAndRenderWasteLog();
+    }
+
+    function applyWasteFiltersFromDom() {
+      const st = getWasteLogState();
+      const br = document.getElementById('wasteFilterBranch');
+      const wh = document.getElementById('wasteFilterWarehouse');
+      const status = document.getElementById('wasteFilterStatus');
+      const src = document.getElementById('wasteFilterSource');
+      const reason = document.getElementById('wasteFilterReason');
+      const gran = document.getElementById('wasteFilterGranularity');
+      const start = document.getElementById('wasteFilterStartDate');
+      const end = document.getElementById('wasteFilterEndDate');
+      if (br) {
+        if (st.branchId !== br.value) st.warehouseId = '';
+        st.branchId = br.value;
+      }
+      if (wh && st.branchId === (br ? br.value : st.branchId)) st.warehouseId = wh.value;
+      if (status) st.status = status.value;
+      if (src) st.sourceType = src.value;
+      if (reason) st.reasonCode = reason.value;
+      if (gran) st.granularity = gran.value;
+      if (start) st.startDate = start.value;
+      if (end) st.endDate = end.value;
+      st.offset = 0;
+      loadAndRenderWasteLog();
+    }
+
+    async function renderWasteLogView() {
+      await loadAndRenderWasteLog();
+    }
+
+    async function loadAndRenderWasteLog() {
+      const st = getWasteLogState();
+      st.loading = true;
+      const seq = ++state.viewRenderSeq;
+
+      const isOfflineMode = (typeof navigator !== 'undefined' && navigator.onLine === false);
+      const repQs = new URLSearchParams();
+      if (st.branchId) repQs.set('branchId', st.branchId);
+      if (st.warehouseId) repQs.set('warehouseId', st.warehouseId);
+      if (st.reasonCode) repQs.set('reasonCode', st.reasonCode);
+      if (st.sourceType) repQs.set('sourceType', st.sourceType);
+      if (st.granularity) repQs.set('granularity', st.granularity);
+      if (st.startDate) repQs.set('startDate', st.startDate);
+      if (st.endDate) repQs.set('endDate', st.endDate);
+
+      const listQs = new URLSearchParams();
+      if (st.branchId) listQs.set('branchId', st.branchId);
+      if (st.warehouseId) listQs.set('warehouseId', st.warehouseId);
+      if (st.status) listQs.set('status', st.status);
+      if (st.sourceType) listQs.set('sourceType', st.sourceType);
+      if (st.reasonCode) listQs.set('reasonCode', st.reasonCode);
+      if (st.search && st.search.trim()) listQs.set('search', st.search.trim());
+      if (st.startDate) listQs.set('startDate', st.startDate);
+      if (st.endDate) listQs.set('endDate', st.endDate);
+      listQs.set('limit', String(st.limit));
+      listQs.set('offset', String(st.offset));
+
+      const offlinePromise = (window.NexStockOfflineClient && state.tenantId && (st.branchId || state.branchId))
+        ? window.NexStockOfflineClient.listOfflineWasteDrafts(state.tenantId, st.branchId || state.branchId).catch(() => [])
+        : Promise.resolve([]);
+
+      try {
+        const [dashRes, listRes, reasonsRes, branchesRes, warehousesRes, offlineDrafts] = await Promise.all([
+          !isOfflineMode ? apiFetch(`/v1/inventory/waste-logs/dashboard?${repQs.toString()}`, { silent: true }).catch(() => null) : Promise.resolve(null),
+          !isOfflineMode ? apiFetch(`/v1/inventory/waste-logs?${listQs.toString()}`, { silent: true }).catch(() => null) : Promise.resolve(null),
+          !isOfflineMode ? loadCachedWasteReasons() : Promise.resolve(state.cachedWasteReasons || getDefaultFallbackWasteReasons()),
+          !isOfflineMode && hasPermission('org:branch:read') ? apiFetch('/v1/org/branches?status=ACTIVE', { silent: true }).catch(() => ({ items: [] })) : Promise.resolve({ items: state.cachedBranches || [] }),
+          !isOfflineMode && hasPermission('org:warehouse:read') ? apiFetch('/v1/org/warehouses', { silent: true }).catch(() => ({ items: [] })) : Promise.resolve({ items: state.cachedWarehouses || [] }),
+          offlinePromise,
+        ]);
+
+        if (seq !== state.viewRenderSeq || state.currentView !== 'waste-log') return;
+
+        if (dashRes) st.dashboard = dashRes;
+        if (listRes) {
+          st.records = Array.isArray(listRes.items) ? listRes.items : [];
+          st.totalRecords = Number(listRes.total || st.records.length || 0);
+        }
+        st.reasons = Array.isArray(reasonsRes) ? reasonsRes : getDefaultFallbackWasteReasons();
+        const bList = Array.isArray(branchesRes?.items) ? branchesRes.items : (Array.isArray(branchesRes) ? branchesRes : []);
+        if (bList.length > 0) {
+          st.branches = bList.filter(b => b.isActive !== false);
+          state.cachedBranches = st.branches;
+        } else if (Array.isArray(state.cachedBranches)) {
+          st.branches = state.cachedBranches;
+        }
+        const wList = Array.isArray(warehousesRes?.items) ? warehousesRes.items : (Array.isArray(warehousesRes) ? warehousesRes : []);
+        if (wList.length > 0) {
+          st.warehouses = wList.filter(w => w.isActive !== false);
+          state.cachedWarehouses = st.warehouses;
+        } else if (Array.isArray(state.cachedWarehouses)) {
+          st.warehouses = state.cachedWarehouses;
+        }
+        st.offlineDrafts = Array.isArray(offlineDrafts) ? offlineDrafts : [];
+      } finally {
+        st.loading = false;
+      }
+
+      renderWasteLogContent();
+    }
+
+    function renderWasteLogContent() {
+      const container = document.getElementById('mainContainer');
+      if (!container) return;
+      const st = getWasteLogState();
+      const curr = st.dashboard?.currencyCode || getTenantCurrency();
+      const canCreate = hasPermission('inv:waste:create');
+      const canExport = hasPermission('inv:waste:export');
+      const canManageReasons = hasPermission('inv:waste:reason:manage');
+      const kpis = st.dashboard?.kpis || {
+        totalWasteCost: '0.0000',
+        totalWasteRecords: 0,
+        totalWasteQuantity: '0.000000',
+        topWasteReason: null,
+        customerReturnWasteCost: '0.0000',
+        customerReturnWasteCount: 0,
+      };
+      const pendingOffline = (st.offlineDrafts || []).filter(d => d.syncState !== 'SERVER_CONFIRMED');
+      const visibleWarehouses = st.branchId
+        ? (st.warehouses || []).filter(w => w.branchId === st.branchId)
+        : (st.warehouses || []);
+
+      container.innerHTML = `
+        <div class="view-header" style="flex-wrap: wrap; gap: 12px;">
+          <div>
+            <h1 class="view-title">Waste Log &amp; Inventory Loss Management</h1>
+            <div class="view-subtitle">Track manual stock spoilage/damage, customer return write-offs, MAC/FIFO cost losses, and immutable audit trails</div>
+          </div>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            ${canManageReasons ? `<button class="btn btn-secondary" onclick="openWasteReasonsModal()">Configure Reasons</button>` : ''}
+            ${canCreate ? `<button class="btn btn-primary" onclick="openRecordWasteModal()">+ Record Waste</button>` : ''}
+          </div>
+        </div>
+
+        ${pendingOffline.length > 0 ? `
+          <div class="waste-offline-banner">
+            <div>
+              <strong>⏳ ${pendingOffline.length} Offline Waste Draft(s)</strong> stored locally (${pendingOffline.filter(x => x.syncState === 'QUARANTINED' || x.syncState === 'CONFLICT_FLAGGED').length} conflict / ${pendingOffline.filter(x => x.syncState === 'PENDING_SYNC').length} pending sync).
+              <span style="color: var(--text-secondary);">Stock is NOT deducted on server until synced &amp; confirmed online.</span>
+            </div>
+            <button class="btn btn-secondary btn-sm" onclick="syncOfflineWasteDraftsNow(this)">Sync Offline Drafts</button>
+          </div>
+        ` : ''}
+
+        <div class="waste-tabs" role="tablist">
+          <button type="button" class="waste-tab ${st.activeTab === 'dashboard' ? 'active' : ''}" onclick="setWasteLogTab('dashboard')">Dashboard &amp; Trends</button>
+          <button type="button" class="waste-tab ${st.activeTab === 'records' ? 'active' : ''}" onclick="setWasteLogTab('records')">Waste Records (${st.totalRecords || 0})</button>
+          <button type="button" class="waste-tab ${st.activeTab === 'reports' ? 'active' : ''}" onclick="setWasteLogTab('reports')">Analytical Reports &amp; Exports</button>
+        </div>
+
+        <div class="card" style="margin-bottom: 16px; padding: 14px;">
+          <div class="waste-filter-grid">
+            <div>
+              <label class="form-label" style="font-size: 11px;">Branch</label>
+              <select class="form-select" id="wasteFilterBranch" onchange="applyWasteFiltersFromDom()">
+                <option value="">All Authorized Branches</option>
+                ${(st.branches || []).map(b => `<option value="${escapeHtml(b.id)}" ${st.branchId === b.id ? 'selected' : ''}>${escapeHtml(b.name)} (${escapeHtml(b.code)})</option>`).join('')}
+              </select>
+            </div>
+            <div>
+              <label class="form-label" style="font-size: 11px;">Warehouse</label>
+              <select class="form-select" id="wasteFilterWarehouse" onchange="applyWasteFiltersFromDom()">
+                <option value="">All Warehouses</option>
+                ${visibleWarehouses.map(w => `<option value="${escapeHtml(w.id)}" ${st.warehouseId === w.id ? 'selected' : ''}>${escapeHtml(w.name)} (${escapeHtml(w.code)})</option>`).join('')}
+              </select>
+            </div>
+            <div>
+              <label class="form-label" style="font-size: 11px;">Source Type</label>
+              <select class="form-select" id="wasteFilterSource" onchange="applyWasteFiltersFromDom()">
+                <option value="">All Sources</option>
+                <option value="MANUAL" ${st.sourceType === 'MANUAL' ? 'selected' : ''}>Manual Waste</option>
+                <option value="CUSTOMER_RETURN" ${st.sourceType === 'CUSTOMER_RETURN' ? 'selected' : ''}>Customer Return</option>
+              </select>
+            </div>
+            <div>
+              <label class="form-label" style="font-size: 11px;">Reason</label>
+              <select class="form-select" id="wasteFilterReason" onchange="applyWasteFiltersFromDom()">
+                <option value="">All Reasons</option>
+                ${(st.reasons || []).map(r => `<option value="${escapeHtml(r.code)}" ${st.reasonCode === r.code ? 'selected' : ''}>${escapeHtml(r.name)}</option>`).join('')}
+              </select>
+            </div>
+            ${st.activeTab === 'records' ? `
+              <div>
+                <label class="form-label" style="font-size: 11px;">Status</label>
+                <select class="form-select" id="wasteFilterStatus" onchange="applyWasteFiltersFromDom()">
+                  <option value="">All Statuses</option>
+                  <option value="CONFIRMED" ${st.status === 'CONFIRMED' ? 'selected' : ''}>Confirmed</option>
+                  <option value="DRAFT" ${st.status === 'DRAFT' ? 'selected' : ''}>Draft</option>
+                  <option value="REVERSED" ${st.status === 'REVERSED' ? 'selected' : ''}>Reversed</option>
+                  <option value="CANCELLED" ${st.status === 'CANCELLED' ? 'selected' : ''}>Cancelled</option>
+                </select>
+              </div>
+            ` : `
+              <div>
+                <label class="form-label" style="font-size: 11px;">Trend Granularity</label>
+                <select class="form-select" id="wasteFilterGranularity" onchange="applyWasteFiltersFromDom()">
+                  <option value="DAILY" ${st.granularity === 'DAILY' ? 'selected' : ''}>Daily</option>
+                  <option value="WEEKLY" ${st.granularity === 'WEEKLY' ? 'selected' : ''}>Weekly</option>
+                  <option value="MONTHLY" ${st.granularity === 'MONTHLY' ? 'selected' : ''}>Monthly</option>
+                  <option value="YEARLY" ${st.granularity === 'YEARLY' ? 'selected' : ''}>Yearly</option>
+                </select>
+              </div>
+            `}
+            <div>
+              <label class="form-label" style="font-size: 11px;">From</label>
+              <input type="date" class="form-input" id="wasteFilterStartDate" value="${escapeHtml(st.startDate)}" onchange="applyWasteFiltersFromDom()">
+            </div>
+            <div>
+              <label class="form-label" style="font-size: 11px;">To</label>
+              <input type="date" class="form-input" id="wasteFilterEndDate" value="${escapeHtml(st.endDate)}" onchange="applyWasteFiltersFromDom()">
+            </div>
+            <div style="display: flex; gap: 6px;">
+              <button type="button" class="btn btn-secondary btn-sm" onclick="resetWasteFilters()" style="width: 100%;">Reset</button>
+            </div>
+          </div>
+          ${st.activeTab === 'records' ? `
+            <div style="margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap;">
+              <input type="search" class="form-input" id="wasteSearchInput" value="${escapeHtml(st.search)}" oninput="onWasteSearchInput(this.value)" placeholder="Search by Waste #, SKU, product name, reason or description..." style="flex: 1; min-width: 220px;">
+            </div>
+          ` : ''}
+        </div>
+
+        ${st.activeTab === 'dashboard' ? renderWasteDashboardTabHtml(st, kpis, curr) : ''}
+        ${st.activeTab === 'records' ? renderWasteRecordsTabHtml(st, curr, pendingOffline) : ''}
+        ${st.activeTab === 'reports' ? renderWasteReportsTabHtml(st, curr, canExport) : ''}
+      `;
+    }
+
+    function renderWasteDashboardTabHtml(st, kpis, curr) {
+      const dash = st.dashboard;
+      const trends = dash?.trends || [];
+      const byReason = dash?.byReason || [];
+      const byProduct = dash?.byProduct || [];
+      const recent = dash?.recentRecords || [];
+      const maxTrendCost = Math.max(1, ...trends.map(t => parseFloat(t.totalCost || '0') || 0));
+      const maxReasonCost = Math.max(1, ...byReason.map(r => parseFloat(r.totalCost || '0') || 0));
+
+      return `
+        <div class="kpi-grid" style="margin-bottom: 18px;">
+          <div class="kpi-card">
+            <div class="kpi-label">Total Confirmed Waste Cost</div>
+            <div class="kpi-value" style="color: var(--status-danger);">${formatTenantMoney(kpis.totalWasteCost, curr)}</div>
+            <div style="font-size: 12px; color: var(--text-secondary);">Authoritative MAC / FIFO cost</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Confirmed Waste Records</div>
+            <div class="kpi-value">${Number(kpis.totalWasteRecords || 0)}</div>
+            <div style="font-size: 12px; color: var(--text-secondary);">Customer return waste: ${Number(kpis.customerReturnWasteCount || 0)} (${formatTenantMoney(kpis.customerReturnWasteCost || 0, curr)})</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Total Base Quantity Lost</div>
+            <div class="kpi-value">${formatQty(kpis.totalWasteQuantity || 0)}</div>
+            <div style="font-size: 12px; color: var(--text-secondary);">Normalized to each SKU base UoM</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Top Waste Reason</div>
+            <div class="kpi-value" style="font-size: 18px;">${kpis.topWasteReason ? escapeHtml(kpis.topWasteReason.name) : '—'}</div>
+            <div style="font-size: 12px; color: var(--text-secondary);">${kpis.topWasteReason ? formatTenantMoney(kpis.topWasteReason.cost, curr) : 'No confirmed waste in period'}</div>
+          </div>
+        </div>
+
+        <div class="waste-charts-grid">
+          <div class="card">
+            <h3 style="margin: 0 0 12px; font-size: 15px;">Waste Trend (${escapeHtml(st.granularity)})</h3>
+            ${trends.length === 0 ? `<div style="color: var(--text-secondary); font-size: 13px;">No confirmed waste activity in this date window.</div>` : `
+              <div>
+                ${trends.map(t => {
+                  const pct = Math.min(100, Math.round(((parseFloat(t.totalCost || '0') || 0) / maxTrendCost) * 100));
+                  return `
+                    <div class="waste-bar-row">
+                      <div style="display:flex; justify-content:space-between; font-size:12px;">
+                        <strong>${escapeHtml(t.bucket)}</strong>
+                        <span>${formatTenantMoney(t.totalCost, curr)} (${t.recordCount} rec)</span>
+                      </div>
+                      <div class="waste-bar-track"><div class="waste-bar-fill" style="width: ${Math.max(4, pct)}%;"></div></div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            `}
+          </div>
+
+          <div class="card">
+            <h3 style="margin: 0 0 12px; font-size: 15px;">Waste Breakdown by Reason</h3>
+            ${byReason.length === 0 ? `<div style="color: var(--text-secondary); font-size: 13px;">No reason breakdown available yet.</div>` : `
+              <div>
+                ${byReason.map(r => {
+                  const pct = Math.min(100, Math.round(((parseFloat(r.totalCost || '0') || 0) / maxReasonCost) * 100));
+                  return `
+                    <div class="waste-bar-row">
+                      <div style="display:flex; justify-content:space-between; font-size:12px;">
+                        <span><strong>${escapeHtml(r.reasonName)}</strong> <code>${escapeHtml(r.reasonCode)}</code></span>
+                        <span>${formatTenantMoney(r.totalCost, curr)} (${formatQty(r.totalQty)} units)</span>
+                      </div>
+                      <div class="waste-bar-track"><div class="waste-bar-fill" style="width: ${Math.max(4, pct)}%;"></div></div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            `}
+          </div>
+        </div>
+
+        <div class="waste-charts-grid">
+          <div class="card">
+            <h3 style="margin: 0 0 12px; font-size: 15px;">Top Wasted Products</h3>
+            ${byProduct.length === 0 ? `<div style="color: var(--text-secondary); font-size: 13px;">No confirmed wasted products in period.</div>` : `
+              <div class="table-responsive">
+                <table class="data-table">
+                  <thead><tr><th>Product</th><th>Qty (${escapeHtml('Base')})</th><th>Total Cost</th></tr></thead>
+                  <tbody>
+                    ${byProduct.slice(0, 8).map(p => `
+                      <tr>
+                        <td><strong>${escapeHtml(p.name)}</strong><div style="font-size:11px; color:var(--text-secondary);">${escapeHtml(p.sku)}</div></td>
+                        <td>${formatQty(p.totalQty)} ${escapeHtml(p.baseUom)}</td>
+                        <td style="font-weight:700; color:var(--status-danger);">${formatTenantMoney(p.totalCost, curr)}</td>
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+              </div>
+            `}
+          </div>
+
+          <div class="card">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+              <h3 style="margin: 0; font-size: 15px;">Recent Confirmed Waste Logs</h3>
+              <button class="btn btn-secondary btn-sm" onclick="setWasteLogTab('records')">View All</button>
+            </div>
+            ${recent.length === 0 ? `<div style="color: var(--text-secondary); font-size: 13px;">No recent confirmed waste records found.</div>` : `
+              <div class="table-responsive">
+                <table class="data-table">
+                  <thead><tr><th>Waste #</th><th>Reason</th><th>Source</th><th>Total Cost</th></tr></thead>
+                  <tbody>
+                    ${recent.slice(0, 8).map(w => `
+                      <tr style="cursor:pointer;" onclick="openWasteLogDetailModal('${escapeHtml(w.id)}')">
+                        <td><strong>${escapeHtml(w.wasteNumber)}</strong></td>
+                        <td>${escapeHtml(w.reasonName)}</td>
+                        <td><span class="badge-pill ${w.sourceType === 'CUSTOMER_RETURN' ? 'badge-blue' : 'badge-gray'}">${escapeHtml(w.sourceType)}</span></td>
+                        <td style="font-weight:700;">${formatTenantMoney(w.totalCost, w.currencyCode || curr)}</td>
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+              </div>
+            `}
+          </div>
+        </div>
+      `;
+    }
+
+    function renderWasteRecordsTabHtml(st, curr, pendingOffline) {
+      const records = st.records || [];
+      const total = Number(st.totalRecords || 0);
+      const startNum = total === 0 ? 0 : st.offset + 1;
+      const endNum = Math.min(total, st.offset + records.length);
+      const canConfirm = hasPermission('inv:waste:confirm');
+      const canReverse = hasPermission('inv:waste:reverse');
+
+      return `
+        ${pendingOffline.length > 0 ? `
+          <div class="card" style="margin-bottom: 14px;">
+            <h3 style="margin: 0 0 10px; font-size: 14px;">Queued Offline Waste Drafts (Local Device)</h3>
+            <div class="desktop-table-container">
+              <div class="table-responsive">
+                <table class="data-table">
+                  <thead><tr><th>Created</th><th>Reason</th><th>Lines</th><th>Sync Status</th><th>Notes / Conflict</th></tr></thead>
+                  <tbody>
+                    ${pendingOffline.map(d => `
+                      <tr>
+                        <td>${new Date(d.createdAt).toLocaleString()}</td>
+                        <td><strong>${escapeHtml(d.reasonName || d.reasonCode)}</strong></td>
+                        <td>${(d.lines || []).map(l => `${escapeHtml(l.productName || l.productSku || l.productId)} × ${formatQty(l.quantity)} ${escapeHtml(l.uomCode || '')}`).join(', ')}</td>
+                        <td><span class="badge-pill ${d.syncState === 'QUARANTINED' ? 'badge-red' : 'badge-yellow'}">${escapeHtml(d.syncState)}</span></td>
+                        <td>${escapeHtml(d.conflictReason || d.description || 'Pending online sync')}</td>
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div class="mobile-cards-container">
+              ${pendingOffline.map(d => `
+                <div class="entity-card">
+                  <div class="entity-card-header">
+                    <span class="entity-card-code">${escapeHtml(d.reasonCode)}</span>
+                    <span class="badge-pill ${d.syncState === 'QUARANTINED' ? 'badge-red' : 'badge-yellow'}">${escapeHtml(d.syncState)}</span>
+                  </div>
+                  <div class="entity-card-details">
+                    <div class="detail-row"><span class="detail-label">Created</span><span class="detail-value">${new Date(d.createdAt).toLocaleString()}</span></div>
+                    <div class="detail-row"><span class="detail-label">Items</span><span class="detail-value">${(d.lines || []).length} line(s)</span></div>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        ` : ''}
+
+        <div class="card">
+          ${records.length === 0 ? `
+            <div class="empty-state-card">
+              <div class="empty-state-title">No waste records match current filters</div>
+              <p class="empty-state-desc">Record damaged, expired, or spoiled stock manually or from customer return inspections.</p>
+            </div>
+          ` : `
+            <div class="desktop-table-container">
+              <div class="table-responsive">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>Waste #</th>
+                      <th>Date / Created</th>
+                      <th>Branch / Warehouse</th>
+                      <th>Source</th>
+                      <th>Reason</th>
+                      <th>Items / Qty</th>
+                      <th>Total Cost</th>
+                      <th>Status</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${records.map(w => {
+                      const itemsText = (w.lines || []).map(l => `${escapeHtml(l.productName)} (${formatQty(l.wasteQty)} ${escapeHtml(l.wasteUom)})`).join(', ');
+                      return `
+                        <tr>
+                          <td><strong>${escapeHtml(w.wasteNumber)}</strong></td>
+                          <td style="font-size:12px;">${new Date(w.confirmedAt || w.createdAt).toLocaleString()}</td>
+                          <td style="font-size:12px;">${escapeHtml(w.branchName || w.branchId)}<div style="color:var(--text-secondary);">${escapeHtml(w.warehouseName || w.warehouseId)}</div></td>
+                          <td><span class="badge-pill ${w.sourceType === 'CUSTOMER_RETURN' ? 'badge-blue' : 'badge-gray'}">${escapeHtml(w.sourceType)}</span></td>
+                          <td><strong>${escapeHtml(w.reasonName)}</strong></td>
+                          <td style="max-width:220px; font-size:12px;">${itemsText}</td>
+                          <td style="font-weight:700;">${formatTenantMoney(w.totalCost, w.currencyCode || curr)}</td>
+                          <td><span class="badge-pill ${getWasteStatusBadgeClass(w.status)}">${escapeHtml(w.status)}</span></td>
+                          <td>
+                            <div style="display:flex; gap:4px; flex-wrap:wrap;">
+                              <button class="btn btn-secondary btn-sm" onclick="openWasteLogDetailModal('${escapeHtml(w.id)}')">View</button>
+                              ${w.status === 'DRAFT' && canConfirm ? `<button class="btn btn-primary btn-sm" onclick="confirmWasteLogAction('${escapeHtml(w.id)}', '${escapeHtml(w.wasteNumber)}', this)">Confirm</button>` : ''}
+                              ${w.status === 'CONFIRMED' && canReverse ? `<button class="btn btn-danger btn-sm" onclick="reverseWasteLogAction('${escapeHtml(w.id)}', '${escapeHtml(w.wasteNumber)}', this)">Reverse</button>` : ''}
+                            </div>
+                          </td>
+                        </tr>
+                      `;
+                    }).join('')}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="mobile-cards-container">
+              ${records.map(w => `
+                <div class="entity-card">
+                  <div class="entity-card-header">
+                    <span class="entity-card-code"><strong>${escapeHtml(w.wasteNumber)}</strong></span>
+                    <span class="badge-pill ${getWasteStatusBadgeClass(w.status)}">${escapeHtml(w.status)}</span>
+                  </div>
+                  <div class="entity-card-title">${escapeHtml(w.reasonName)} &bull; ${formatTenantMoney(w.totalCost, w.currencyCode || curr)}</div>
+                  <div class="entity-card-details">
+                    <div class="detail-row"><span class="detail-label">Location</span><span class="detail-value">${escapeHtml(w.branchName || '')} / ${escapeHtml(w.warehouseName || '')}</span></div>
+                    <div class="detail-row"><span class="detail-label">Source</span><span class="detail-value">${escapeHtml(w.sourceType)}</span></div>
+                    <div class="detail-row"><span class="detail-label">Total Qty</span><span class="detail-value">${formatQty(w.totalQty)} base units (${(w.lines || []).length} lines)</span></div>
+                    <div class="detail-row"><span class="detail-label">Date</span><span class="detail-value">${new Date(w.confirmedAt || w.createdAt).toLocaleString()}</span></div>
+                  </div>
+                  <div class="entity-card-footer">
+                    <button class="btn btn-secondary btn-sm" onclick="openWasteLogDetailModal('${escapeHtml(w.id)}')">Details / Print</button>
+                    ${w.status === 'DRAFT' && canConfirm ? `<button class="btn btn-primary btn-sm" onclick="confirmWasteLogAction('${escapeHtml(w.id)}', '${escapeHtml(w.wasteNumber)}', this)">Confirm</button>` : ''}
+                    ${w.status === 'CONFIRMED' && canReverse ? `<button class="btn btn-danger btn-sm" onclick="reverseWasteLogAction('${escapeHtml(w.id)}', '${escapeHtml(w.wasteNumber)}', this)">Reverse</button>` : ''}
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+
+            <div style="display:flex; justify-content:space-between; align-items:center; padding-top:12px; margin-top:12px; border-top:1px solid var(--border-subtle); flex-wrap:wrap; gap:8px;">
+              <span style="font-size:12px; color:var(--text-secondary);">Showing ${startNum}–${endNum} of ${total} record(s)</span>
+              <div style="display:flex; gap:6px;">
+                <button class="btn btn-secondary btn-sm" ${st.offset <= 0 ? 'disabled' : ''} onclick="setWastePaginationOffset(${st.offset - st.limit})">Previous</button>
+                <button class="btn btn-secondary btn-sm" ${st.offset + st.limit >= total ? 'disabled' : ''} onclick="setWastePaginationOffset(${st.offset + st.limit})">Next</button>
+              </div>
+            </div>
+          `}
+        </div>
+      `;
+    }
+
+    function renderWasteReportsTabHtml(st, curr, canExport) {
+      const dash = st.dashboard || {};
+      const breakdowns = [
+        { key: 'byReason', label: 'By Waste Reason' },
+        { key: 'byProduct', label: 'By Product' },
+        { key: 'byCategory', label: 'By Category' },
+        { key: 'byBranch', label: 'By Branch' },
+        { key: 'byWarehouse', label: 'By Warehouse' },
+        { key: 'byEmployee', label: 'By Employee / User' },
+        { key: 'customerReturnWaste', label: 'Customer Return Waste' },
+      ];
+      const rows = Array.isArray(dash[st.reportBreakdown]) ? dash[st.reportBreakdown] : [];
+
+      return `
+        <div class="card">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:14px;">
+            <div>
+              <h3 style="margin:0; font-size:16px;">Confirmed Waste Analytical Report</h3>
+              <div style="font-size:12px; color:var(--text-secondary);">Excludes Draft, Cancelled, and Reversed logs &mdash; matches ledger &amp; P&amp;L confirmed waste cost</div>
+            </div>
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+              ${canExport ? `
+                <button class="btn btn-secondary btn-sm" onclick="exportWasteReportCsv()">Export CSV</button>
+                <button class="btn btn-secondary btn-sm" onclick="exportWasteReportExcel()">Export Excel</button>
+              ` : ''}
+              <button class="btn btn-secondary btn-sm" onclick="window.print && !window.__NEXSTOCK_SUPPRESS_PRINT_DIALOG__ && window.print()">Print / Save PDF</button>
+            </div>
+          </div>
+
+          <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:14px;">
+            ${breakdowns.map(b => `
+              <button type="button" class="btn btn-sm ${st.reportBreakdown === b.key ? 'btn-primary' : 'btn-secondary'}" onclick="setWasteReportBreakdown('${b.key}')">${escapeHtml(b.label)}</button>
+            `).join('')}
+          </div>
+
+          ${rows.length === 0 ? `
+            <div class="empty-state-card" style="padding:26px;">
+              <div class="empty-state-title">No confirmed waste records in this breakdown</div>
+              <p class="empty-state-desc">Adjust your date range or filters to inspect confirmed waste loss data.</p>
+            </div>
+          ` : `
+            <div class="table-responsive">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    ${st.reportBreakdown === 'customerReturnWaste'
+                      ? '<th>Waste #</th><th>Product</th><th>Reason</th><th>Qty</th><th>Cost</th><th>Date</th>'
+                      : '<th>Dimension</th><th>Code / Detail</th><th>Records</th><th>Base Qty</th><th>Confirmed Waste Cost</th>'}
+                  </tr>
+                </thead>
+                <tbody>
+                  ${st.reportBreakdown === 'customerReturnWaste'
+                    ? rows.map(r => `
+                        <tr>
+                          <td><strong>${escapeHtml(r.wasteNumber)}</strong></td>
+                          <td>${escapeHtml(r.productName)} <span style="font-size:11px; color:var(--text-secondary);">(${escapeHtml(r.productSku)})</span></td>
+                          <td>${escapeHtml(r.reasonName)}</td>
+                          <td>${formatQty(r.totalQty)}</td>
+                          <td style="font-weight:700; color:var(--status-danger);">${formatTenantMoney(r.totalCost, curr)}</td>
+                          <td>${new Date(r.confirmedAt).toLocaleDateString()}</td>
+                        </tr>
+                      `).join('')
+                    : rows.map(r => {
+                        const primaryLabel = r.reasonName || r.name || r.categoryName || r.branchName || r.warehouseName || r.employeeName || '—';
+                        const secondary = r.reasonCode || r.sku || (r.warehouseId ? r.branchName : '') || r.baseUom || '';
+                        return `
+                          <tr>
+                            <td><strong>${escapeHtml(primaryLabel)}</strong></td>
+                            <td>${escapeHtml(secondary || '—')}</td>
+                            <td>${Number(r.recordCount || 0)}</td>
+                            <td>${formatQty(r.totalQty)} ${escapeHtml(r.baseUom || '')}</td>
+                            <td style="font-weight:700; color:var(--status-danger);">${formatTenantMoney(r.totalCost, curr)}</td>
+                          </tr>
+                        `;
+                      }).join('')}
+                </tbody>
+              </table>
+            </div>
+          `}
+        </div>
+      `;
+    }
+
+    async function syncOfflineWasteDraftsNow(btnEl) {
+      if (!window.NexStockOfflineClient || !state.tenantId) return;
+      if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Syncing...'; }
+      try {
+        await window.NexStockOfflineClient.syncNow({
+          tenantId: state.tenantId,
+          branchId: getWasteLogState().branchId || state.branchId,
+          warehouseId: getWasteLogState().warehouseId || state.warehouseId || '',
+          apiFetchFn: apiFetch
+        });
+        showToast('Offline waste drafts synced to server', 'success');
+        await loadAndRenderWasteLog();
+      } catch (err) {
+        showToast(`Sync paused: ${err.message}`, 'error');
+      } finally {
+        if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Sync Offline Drafts'; }
+      }
+    }
+
+    async function exportWasteReportCsv(asExcel = false) {
+      const st = getWasteLogState();
+      const qs = new URLSearchParams();
+      if (st.branchId) qs.set('branchId', st.branchId);
+      if (st.warehouseId) qs.set('warehouseId', st.warehouseId);
+      if (st.reasonCode) qs.set('reasonCode', st.reasonCode);
+      if (st.sourceType) qs.set('sourceType', st.sourceType);
+      if (st.granularity) qs.set('granularity', st.granularity);
+      if (st.startDate) qs.set('startDate', st.startDate);
+      if (st.endDate) qs.set('endDate', st.endDate);
+
+      try {
+        const res = await fetch(`${state.apiBaseUrl}/v1/inventory/waste-logs/export?${qs.toString()}`, {
+          headers: {
+            'authorization': `Bearer ${state.token}`,
+            'x-tenant-id': state.tenantId
+          }
+        });
+        if (!res.ok) throw new Error(`Export failed (${res.status})`);
+        const text = await res.text();
+        const blob = new Blob([text], { type: asExcel ? 'application/vnd.ms-excel;charset=utf-8' : 'text/csv;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = asExcel ? 'nexstock-waste-report.xls' : 'nexstock-waste-report.csv';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        showToast(`Waste report exported (${asExcel ? 'Excel' : 'CSV'})`, 'success');
+      } catch (err) {
+        showToast(err.message || 'Export failed', 'error');
+      }
+    }
+
+    function exportWasteReportExcel() {
+      return exportWasteReportCsv(true);
+    }
+
+    async function openWasteReasonsModal() {
+      openModal({
+        title: 'Configure Waste Reasons',
+        maxWidth: '660px',
+        bodyHtml: `<div style="padding:24px; text-align:center;">Loading waste reasons...</div>`
+      });
+      try {
+        const reasons = await apiFetch('/v1/inventory/waste-reasons');
+        state.cachedWasteReasons = Array.isArray(reasons) ? reasons : [];
+        openModal({
+          title: 'Configure Waste Reasons',
+          maxWidth: '700px',
+          bodyHtml: `
+            <div style="font-size:12px; color:var(--text-secondary); margin-bottom:10px;">
+              System default reasons &amp; custom tenant waste classifications. Toggle active status or add new reasons.
+            </div>
+            <div class="table-responsive" style="margin-bottom:14px;">
+              <table class="data-table">
+                <thead><tr><th>Code</th><th>Name</th><th>Req Desc</th><th>Status</th><th>Action</th></tr></thead>
+                <tbody>
+                  ${state.cachedWasteReasons.map(r => `
+                    <tr>
+                      <td><code>${escapeHtml(r.code)}</code></td>
+                      <td><strong>${escapeHtml(r.name)}</strong><div style="font-size:11px; color:var(--text-secondary);">${escapeHtml(r.description || '')}</div></td>
+                      <td>${r.requiresDescription ? 'Yes' : 'No'}</td>
+                      <td><span class="badge-pill ${r.isActive ? 'badge-green' : 'badge-gray'}">${r.isActive ? 'ACTIVE' : 'INACTIVE'}</span></td>
+                      <td>
+                        <button class="btn btn-secondary btn-sm" onclick="toggleWasteReasonActive('${escapeHtml(r.id)}', ${r.isActive ? 'false' : 'true'})">${r.isActive ? 'Disable' : 'Enable'}</button>
+                      </td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+            <div style="border-top:1px solid var(--border-subtle); padding-top:12px;">
+              <h4 style="margin:0 0 8px; font-size:14px;">Add Custom Waste Reason</h4>
+              <div style="display:grid; grid-template-columns: 1fr 1.5fr; gap:8px; margin-bottom:8px;">
+                <input type="text" class="form-input" id="newWasteReasonCode" placeholder="CODE (e.g. QUALITY_FAIL)">
+                <input type="text" class="form-input" id="newWasteReasonName" placeholder="Display Name (e.g. QC Rejection)">
+              </div>
+              <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+                <input type="text" class="form-input" id="newWasteReasonDesc" placeholder="Description (optional)" style="flex:1;">
+                <label style="display:flex; align-items:center; gap:6px; font-size:12px;">
+                  <input type="checkbox" id="newWasteReasonReqDesc"> Require Description
+                </label>
+                <button class="btn btn-primary btn-sm" onclick="submitNewWasteReason(this)">Add Reason</button>
+              </div>
+            </div>
+          `,
+          footerHtml: `<button class="btn btn-secondary" onclick="closeModal()">Close</button>`
+        });
+      } catch (err) {
+        closeModal();
+        showToast(`Failed to load waste reasons: ${err.message}`, 'error');
+      }
+    }
+
+    async function toggleWasteReasonActive(reasonId, nextActive) {
+      try {
+        await apiFetch(`/v1/inventory/waste-reasons/${reasonId}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ isActive: Boolean(nextActive) })
+        });
+        showToast('Waste reason updated', 'success');
+        await openWasteReasonsModal();
+      } catch {}
+    }
+
+    async function submitNewWasteReason(btnEl) {
+      const code = (document.getElementById('newWasteReasonCode')?.value || '').trim().toUpperCase().replace(/[^A-Z0-9_]/g, '_');
+      const name = (document.getElementById('newWasteReasonName')?.value || '').trim();
+      const description = (document.getElementById('newWasteReasonDesc')?.value || '').trim() || null;
+      const requiresDescription = Boolean(document.getElementById('newWasteReasonReqDesc')?.checked);
+      if (code.length < 2 || name.length < 2) return showToast('Reason code and name are required', 'error');
+      if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Adding...'; }
+      try {
+        await apiFetch('/v1/inventory/waste-reasons', {
+          method: 'POST',
+          body: JSON.stringify({ code, name, description, requiresDescription })
+        });
+        showToast(`Reason ${name} created`, 'success');
+        await openWasteReasonsModal();
+      } catch {} finally {
+        if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Add Reason'; }
+      }
+    }
+
+    let _wasteDraftLines = [];
+    async function openRecordWasteModal() {
+      const st = getWasteLogState();
+      const reasons = (st.reasons && st.reasons.length > 0) ? st.reasons : await loadCachedWasteReasons();
+      const branches = (st.branches && st.branches.length > 0) ? st.branches : (state.cachedBranches || []);
+      const warehouses = (st.warehouses && st.warehouses.length > 0) ? st.warehouses : (state.cachedWarehouses || []);
+      const defaultBranchId = st.branchId || state.branchId || branches[0]?.id || '';
+      const defaultWhList = warehouses.filter(w => !defaultBranchId || w.branchId === defaultBranchId);
+      const defaultWarehouseId = st.warehouseId || state.warehouseId || defaultWhList[0]?.id || warehouses[0]?.id || '';
+      _wasteDraftLines = [];
+      const isOfflineMode = (typeof navigator !== 'undefined' && navigator.onLine === false);
+      const canConfirm = hasPermission('inv:waste:confirm');
+
+      openModal({
+        title: 'Record Stock Waste / Inventory Loss',
+        maxWidth: '820px',
+        bodyHtml: `
+          ${isOfflineMode ? `
+            <div class="waste-offline-banner" style="margin-bottom:10px;">
+              <strong>Offline Mode Active:</strong> Waste entries will be saved as local drafts and queued for sync. Authoritative MAC/FIFO cost &amp; stock deduction execute only on online confirmation.
+            </div>
+          ` : ''}
+          <div class="modal-grid-2">
+            <div class="form-group">
+              <label class="form-label">Branch *</label>
+              <select class="form-select" id="wasteModalBranch" onchange="onWasteModalLocationChange()">
+                ${branches.length > 0
+                  ? branches.map(b => `<option value="${escapeHtml(b.id)}" ${b.id === defaultBranchId ? 'selected' : ''}>${escapeHtml(b.name)} (${escapeHtml(b.code)})</option>`).join('')
+                  : `<option value="${escapeHtml(defaultBranchId)}">${escapeHtml(state.branchName || 'Current Branch')}</option>`}
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Warehouse *</label>
+              <select class="form-select" id="wasteModalWarehouse" onchange="onWasteModalWarehouseChange()">
+                ${(defaultWhList.length > 0 ? defaultWhList : warehouses).map(w => `<option value="${escapeHtml(w.id)}" ${w.id === defaultWarehouseId ? 'selected' : ''}>${escapeHtml(w.name)} (${escapeHtml(w.code)})</option>`).join('')}
+              </select>
+            </div>
+          </div>
+
+          <div class="modal-grid-2">
+            <div class="form-group">
+              <label class="form-label">Waste Reason *</label>
+              <select class="form-select" id="wasteModalReason" onchange="onWasteModalReasonChange()">
+                ${reasons.filter(r => r.isActive !== false).map(r => `<option value="${escapeHtml(r.code)}" data-req-desc="${r.requiresDescription ? 'true' : 'false'}">${escapeHtml(r.name)} (${escapeHtml(r.code)})</option>`).join('')}
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Description / Investigation Notes <span id="wasteModalDescReqBadge" style="display:none; color:var(--status-danger);">* Required</span></label>
+              <input type="text" class="form-input" id="wasteModalDesc" placeholder="Describe cause, incident details, or inspection notes">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Add Product by Search, SKU or Barcode Scanner</label>
+            ${createAsyncProductPickerHtml({
+              inputId: 'wasteProductPicker',
+              placeholder: 'Search name/SKU or scan barcode + Enter...',
+              initialProduct: null,
+              batchEligibleOnly: false
+            })}
+          </div>
+
+          <div id="wasteDraftLinesBox" style="margin-top:10px;">
+            <div style="padding:14px; border:1px dashed var(--border-subtle); border-radius:8px; text-align:center; font-size:12px; color:var(--text-secondary);">
+              Search or scan a product above to add waste lines. Batch, expiry, serial &amp; UoM options appear automatically per product.
+            </div>
+          </div>
+
+          <div id="wasteCostPreviewBox" style="margin-top:10px; padding:10px 12px; border-radius:8px; background:var(--bg-primary); border:1px solid var(--border-subtle); font-size:12px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+            <span>Estimated Total Loss Value (${escapeHtml(getTenantCurrency())}):</span>
+            <strong id="wastePreviewTotalVal" style="font-size:15px; color:var(--status-danger);">${isOfflineMode ? 'Pending Server Valuation' : formatTenantMoney(0)}</strong>
+          </div>
+        `,
+        footerHtml: `
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button type="button" id="btnSaveWasteDraft" class="btn btn-secondary" onclick="submitRecordWasteModal(false)">${isOfflineMode ? 'Save Offline Draft' : 'Save Draft'}</button>
+          ${!isOfflineMode && canConfirm ? `<button type="button" id="btnConfirmWasteSubmit" class="btn btn-primary" onclick="submitRecordWasteModal(true)">Confirm &amp; Deduct Stock</button>` : ''}
+        `
+      });
+
+      mountAsyncProductPicker({
+        inputId: 'wasteProductPicker',
+        batchEligibleOnly: false,
+        initialProducts: window._productsCache || [],
+        onSelect: (prod) => addWasteProductLine(prod)
+      });
+      onWasteModalReasonChange();
+    }
+
+    function onWasteModalReasonChange() {
+      const sel = document.getElementById('wasteModalReason');
+      const badge = document.getElementById('wasteModalDescReqBadge');
+      if (!sel || !badge) return;
+      const opt = sel.options[sel.selectedIndex];
+      const req = opt?.getAttribute('data-req-desc') === 'true' || sel.value === 'OTHER';
+      badge.style.display = req ? 'inline' : 'none';
+    }
+
+    function onWasteModalLocationChange() {
+      const st = getWasteLogState();
+      const brId = document.getElementById('wasteModalBranch')?.value || '';
+      const whSel = document.getElementById('wasteModalWarehouse');
+      if (!whSel) return;
+      const list = (st.warehouses || []).filter(w => !brId || w.branchId === brId);
+      whSel.innerHTML = list.map(w => `<option value="${escapeHtml(w.id)}">${escapeHtml(w.name)} (${escapeHtml(w.code)})</option>`).join('');
+      onWasteModalWarehouseChange();
+    }
+
+    function onWasteModalWarehouseChange() {
+      _wasteDraftLines = [];
+      renderWasteDraftLines();
+      refreshWasteCostPreview();
+    }
+
+    async function addWasteProductLine(product) {
+      if (!product || !product.id) return;
+      const warehouseId = document.getElementById('wasteModalWarehouse')?.value || state.warehouseId || '';
+      const uoms = getCompatibleUomsForProduct(product);
+      let batches = [];
+      let serials = [];
+      if (navigator.onLine !== false && warehouseId) {
+        if (product.trackingMode === 'BATCH' || product.trackingMode === 'BATCH_EXPIRY') {
+          const bRes = await apiFetch(`/v1/inventory/batches?warehouseId=${encodeURIComponent(warehouseId)}&productId=${encodeURIComponent(product.id)}&limit=50`, { silent: true }).catch(() => ({ data: [] }));
+          batches = Array.isArray(bRes?.data) ? bRes.data : (Array.isArray(bRes) ? bRes : []);
+        } else if (product.trackingMode === 'SERIAL') {
+          const sRes = await apiFetch(`/v1/inventory/serials?warehouseId=${encodeURIComponent(warehouseId)}&productId=${encodeURIComponent(product.id)}&limit=50`, { silent: true }).catch(() => ({ data: [] }));
+          const allSer = Array.isArray(sRes?.data) ? sRes.data : (Array.isArray(sRes) ? sRes : []);
+          serials = allSer.filter(s => ['IN_STOCK', 'QUARANTINED', 'DAMAGED'].includes(s.status));
+        }
+      }
+      _wasteDraftLines.push({
+        key: `${product.id}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        product,
+        uoms,
+        batches,
+        serials,
+        uomCode: product.baseUom || 'PCS',
+        wasteQty: '1',
+        batchId: batches[0]?.id || '',
+        serialId: serials[0]?.id || '',
+        notes: ''
+      });
+      renderWasteDraftLines();
+      refreshWasteCostPreview();
+    }
+
+    function removeWasteDraftLine(idx) {
+      _wasteDraftLines.splice(idx, 1);
+      renderWasteDraftLines();
+      refreshWasteCostPreview();
+    }
+
+    function updateWasteDraftLineField(idx, field, value) {
+      const row = _wasteDraftLines[idx];
+      if (!row) return;
+      row[field] = value;
+      refreshWasteCostPreview();
+    }
+
+    function renderWasteDraftLines() {
+      const box = document.getElementById('wasteDraftLinesBox');
+      if (!box) return;
+      if (_wasteDraftLines.length === 0) {
+        box.innerHTML = `<div style="padding:14px; border:1px dashed var(--border-subtle); border-radius:8px; text-align:center; font-size:12px; color:var(--text-secondary);">Search or scan a product above to add waste lines.</div>`;
+        return;
+      }
+      box.innerHTML = _wasteDraftLines.map((row, idx) => {
+        const p = row.product;
+        return `
+          <div class="waste-line-card" data-line-idx="${idx}">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:8px;">
+              <div>
+                <strong>${escapeHtml(p.sku)}</strong> &mdash; ${escapeHtml(p.name)}
+                <span class="badge-pill badge-gray">${escapeHtml(p.valuationMethod || 'MOVING_AVG')}</span>
+                ${p.trackingMode && p.trackingMode !== 'NONE' ? `<span class="badge-pill badge-yellow">${escapeHtml(p.trackingMode)}</span>` : ''}
+              </div>
+              <button type="button" class="btn btn-danger btn-sm" onclick="removeWasteDraftLine(${idx})">Remove</button>
+            </div>
+            <div class="waste-line-grid">
+              <div>
+                <label class="form-label" style="font-size:11px;">Quantity *</label>
+                <input type="number" step="0.000001" min="0.000001" class="form-input" value="${escapeHtml(row.wasteQty)}" ${p.trackingMode === 'SERIAL' ? 'readonly' : ''} oninput="updateWasteDraftLineField(${idx}, 'wasteQty', this.value)">
+              </div>
+              <div>
+                <label class="form-label" style="font-size:11px;">Unit *</label>
+                <select class="form-select" onchange="updateWasteDraftLineField(${idx}, 'uomCode', this.value)">
+                  ${row.uoms.map(u => `<option value="${escapeHtml(u)}" ${u === row.uomCode ? 'selected' : ''}>${escapeHtml(u)}</option>`).join('')}
+                </select>
+              </div>
+              ${(p.trackingMode === 'BATCH' || p.trackingMode === 'BATCH_EXPIRY') ? `
+                <div>
+                  <label class="form-label" style="font-size:11px;">Batch / Lot *</label>
+                  <select class="form-select" onchange="updateWasteDraftLineField(${idx}, 'batchId', this.value)">
+                    ${row.batches.length > 0
+                      ? row.batches.map(b => `<option value="${escapeHtml(b.id)}" ${b.id === row.batchId ? 'selected' : ''}>${escapeHtml(b.batchNumber)} (${formatQty(b.currentQuantity)} avail${b.expiryDate ? ` • Exp ${b.expiryDate}` : ''} • ${b.status})</option>`).join('')
+                      : '<option value="">No batches found in warehouse</option>'}
+                  </select>
+                </div>
+              ` : p.trackingMode === 'SERIAL' ? `
+                <div>
+                  <label class="form-label" style="font-size:11px;">Serial # *</label>
+                  <select class="form-select" onchange="updateWasteDraftLineField(${idx}, 'serialId', this.value)">
+                    ${row.serials.length > 0
+                      ? row.serials.map(s => `<option value="${escapeHtml(s.id)}" ${s.id === row.serialId ? 'selected' : ''}>${escapeHtml(s.serialNumber)} (${s.status})</option>`).join('')
+                      : '<option value="">No eligible serials in warehouse</option>'}
+                  </select>
+                </div>
+              ` : `
+                <div>
+                  <label class="form-label" style="font-size:11px;">Estimated Line Cost</label>
+                  <div id="wasteLineEst_${idx}" style="padding:8px 10px; font-weight:600; font-size:12px;">Pending preview...</div>
+                </div>
+              `}
+              <div>
+                <label class="form-label" style="font-size:11px;">Line Note</label>
+                <input type="text" class="form-input" value="${escapeHtml(row.notes || '')}" placeholder="Optional line note" oninput="updateWasteDraftLineField(${idx}, 'notes', this.value)">
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    let _wastePreviewSeq = 0;
+    async function refreshWasteCostPreview() {
+      const totalEl = document.getElementById('wastePreviewTotalVal');
+      if (!totalEl) return;
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        totalEl.textContent = 'Calculated on Sync';
+        return;
+      }
+      if (_wasteDraftLines.length === 0) {
+        totalEl.textContent = formatTenantMoney(0);
+        return;
+      }
+      const branchId = document.getElementById('wasteModalBranch')?.value || state.branchId;
+      const warehouseId = document.getElementById('wasteModalWarehouse')?.value || state.warehouseId;
+      if (!branchId || !warehouseId) return;
+
+      const validLines = _wasteDraftLines.filter(l => (parseFloat(l.wasteQty || '0') || 0) > 0);
+      if (!validLines.length) return;
+
+      const seq = ++_wastePreviewSeq;
+      try {
+        const prev = await apiFetch('/v1/inventory/waste-logs/preview-cost', {
+          method: 'POST',
+          silent: true,
+          body: JSON.stringify({
+            branchId,
+            warehouseId,
+            lines: validLines.map(l => ({
+              productId: l.product.id,
+              uomCode: l.uomCode,
+              wasteQty: parseFloat(l.wasteQty).toFixed(6),
+              ...(l.batchId ? { batchId: l.batchId } : {}),
+              ...(l.serialId ? { serialId: l.serialId } : {}),
+            }))
+          })
+        });
+        if (seq !== _wastePreviewSeq) return;
+        totalEl.textContent = `${formatTenantMoney(prev.totalEstimatedCost || 0, prev.currencyCode || getTenantCurrency())}`;
+        (prev.lines || []).forEach((pl, idx) => {
+          const lineEl = document.getElementById(`wasteLineEst_${idx}`);
+          if (lineEl) {
+            lineEl.textContent = `${formatTenantMoney(pl.estimatedTotalCost || 0, prev.currencyCode || getTenantCurrency())} (${pl.valuationMethod})`;
+          }
+        });
+      } catch {
+        if (seq === _wastePreviewSeq) totalEl.textContent = 'Preview unavailable (check qty/stock)';
+      }
+    }
+
+    async function submitRecordWasteModal(confirmImmediately) {
+      if (_wasteDraftLines.length === 0) return showToast('Add at least one product line before saving', 'error');
+      const branchId = document.getElementById('wasteModalBranch')?.value || state.branchId;
+      const warehouseId = document.getElementById('wasteModalWarehouse')?.value || state.warehouseId;
+      const reasonCode = document.getElementById('wasteModalReason')?.value || '';
+      const description = document.getElementById('wasteModalDesc')?.value.trim() || null;
+      const reasonSel = document.getElementById('wasteModalReason');
+      const requiresDesc = reasonSel?.options[reasonSel.selectedIndex]?.getAttribute('data-req-desc') === 'true' || reasonCode === 'OTHER';
+      if (!branchId || !warehouseId || !reasonCode) return showToast('Branch, warehouse, and reason are required', 'error');
+      if (requiresDesc && !description) return showToast('Description is mandatory for the selected waste reason', 'error');
+
+      for (const l of _wasteDraftLines) {
+        if (!(parseFloat(l.wasteQty || '0') > 0)) return showToast(`Quantity must be positive for ${l.product.name}`, 'error');
+        if ((l.product.trackingMode === 'BATCH' || l.product.trackingMode === 'BATCH_EXPIRY') && !l.batchId) {
+          return showToast(`Select a batch for ${l.product.name}`, 'error');
+        }
+        if (l.product.trackingMode === 'SERIAL' && !l.serialId) {
+          return showToast(`Select a serial number for ${l.product.name}`, 'error');
+        }
+      }
+
+      if (confirmImmediately && typeof navigator !== 'undefined' && navigator.onLine === false) {
+        return showToast('Confirming waste & deducting stock requires an online connection. Use Save Offline Draft instead.', 'error');
+      }
+
+      if (confirmImmediately) {
+        const ok = await nexConfirm(
+          'Confirming this waste log will immediately deduct inventory and post immutable WASTE_OUT ledger entries using MAC/FIFO costing.',
+          { title: 'Confirm Stock Write-Off?', confirmText: 'Confirm & Deduct', variant: 'danger' }
+        );
+        if (!ok) return;
+      }
+
+      const btnDraft = document.getElementById('btnSaveWasteDraft');
+      const btnConfirm = document.getElementById('btnConfirmWasteSubmit');
+      if (btnDraft) btnDraft.disabled = true;
+      if (btnConfirm) { btnConfirm.disabled = true; if (confirmImmediately) btnConfirm.innerHTML = '<span class="spinner-sm"></span> Confirming...'; }
+
+      try {
+        if (typeof navigator !== 'undefined' && navigator.onLine === false && window.NexStockOfflineClient) {
+          const reasonName = reasonSel?.options[reasonSel.selectedIndex]?.text || reasonCode;
+          await window.NexStockOfflineClient.recordOfflineWasteDraft({
+            tenantId: state.tenantId,
+            branchId,
+            warehouseId,
+            reasonCode,
+            reasonName,
+            description,
+            lines: _wasteDraftLines.map(l => ({
+              productId: l.product.id,
+              productName: l.product.name,
+              productSku: l.product.sku,
+              quantity: parseFloat(l.wasteQty).toFixed(6),
+              uomCode: l.uomCode,
+              ...(l.batchId ? { batchId: l.batchId } : {}),
+              ...(l.serialId ? { serialId: l.serialId } : {}),
+              ...(l.notes ? { notes: l.notes } : {}),
+            }))
+          });
+          showToast('Offline waste draft queued safely (pending sync)', 'success');
+          closeModal();
+          renderWasteLogView();
+          return;
+        }
+
+        const created = await apiFetch('/v1/inventory/waste-logs', {
+          method: 'POST',
+          headers: { 'idempotency-key': crypto.randomUUID() },
+          body: JSON.stringify({
+            branchId,
+            warehouseId,
+            reasonCode,
+            description,
+            confirmImmediately: Boolean(confirmImmediately),
+            lines: _wasteDraftLines.map(l => ({
+              productId: l.product.id,
+              uomCode: l.uomCode,
+              wasteQty: parseFloat(l.wasteQty).toFixed(6),
+              ...(l.batchId ? { batchId: l.batchId } : {}),
+              ...(l.serialId ? { serialId: l.serialId } : {}),
+              ...(l.notes ? { notes: l.notes } : {}),
+            }))
+          })
+        });
+        showToast(`Waste Log ${created.wasteNumber} ${created.status === 'CONFIRMED' ? 'confirmed & stock deducted' : 'saved as draft'}`, 'success');
+        closeModal();
+        await loadAndRenderWasteLog();
+      } catch {} finally {
+        if (btnDraft) btnDraft.disabled = false;
+        if (btnConfirm) { btnConfirm.disabled = false; btnConfirm.textContent = 'Confirm & Deduct Stock'; }
+      }
+    }
+
+    async function confirmWasteLogAction(wasteLogId, wasteNumber, btnEl) {
+      const ok = await nexConfirm(
+        `Confirm ${wasteNumber}? This will immediately post WASTE_OUT ledger deductions and lock historical cost snapshots.`,
+        { title: 'Confirm Waste Log', confirmText: 'Confirm Waste', variant: 'danger' }
+      );
+      if (!ok) return;
+      if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Confirming...'; }
+      try {
+        await apiFetch(`/v1/inventory/waste-logs/${wasteLogId}/confirm`, {
+          method: 'POST',
+          headers: { 'idempotency-key': crypto.randomUUID() },
+          body: JSON.stringify({})
+        });
+        showToast(`${wasteNumber} confirmed`, 'success');
+        closeModal();
+        await loadAndRenderWasteLog();
+      } catch {} finally {
+        if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Confirm'; }
+      }
+    }
+
+    async function cancelWasteLogAction(wasteLogId, wasteNumber, btnEl) {
+      const ok = await nexConfirm(`Cancel draft waste log ${wasteNumber}? No stock was deducted.`, { title: 'Cancel Waste Draft' });
+      if (!ok) return;
+      if (btnEl) btnEl.disabled = true;
+      try {
+        await apiFetch(`/v1/inventory/waste-logs/${wasteLogId}/cancel`, { method: 'POST', body: JSON.stringify({}) });
+        showToast(`${wasteNumber} cancelled`, 'success');
+        closeModal();
+        await loadAndRenderWasteLog();
+      } catch {} finally {
+        if (btnEl) btnEl.disabled = false;
+      }
+    }
+
+    async function reverseWasteLogAction(wasteLogId, wasteNumber, btnEl) {
+      const reason = await nexPrompt(`Provide audit reason to reverse confirmed waste log ${wasteNumber}:`, '', {
+        title: 'Reverse Confirmed Waste Log',
+        placeholder: 'e.g. Wrong quantity or product entered',
+        confirmText: 'Reverse Waste'
+      });
+      if (!reason || reason.trim().length < 3) {
+        if (reason !== null) showToast('Reversal reason must be at least 3 characters', 'error');
+        return;
+      }
+      if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Reversing...'; }
+      try {
+        await apiFetch(`/v1/inventory/waste-logs/${wasteLogId}/reverse`, {
+          method: 'POST',
+          body: JSON.stringify({ reason: reason.trim() })
+        });
+        showToast(`${wasteNumber} reversed via compensating CORRECTION_REVERSAL entry`, 'success');
+        closeModal();
+        await loadAndRenderWasteLog();
+      } catch {} finally {
+        if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Reverse'; }
+      }
+    }
+
+    async function openWasteLogDetailModal(wasteLogId) {
+      openModal({
+        title: 'Waste Record Details & Audit Trail',
+        maxWidth: '780px',
+        bodyHtml: `<div style="padding:28px; text-align:center;">Loading waste record...</div>`
+      });
+      try {
+        const w = await apiFetch(`/v1/inventory/waste-logs/${wasteLogId}`);
+        const canConfirm = hasPermission('inv:waste:confirm');
+        const canReverse = hasPermission('inv:waste:reverse');
+        const canCancel = hasPermission('inv:waste:create');
+
+        openModal({
+          title: `Waste Log ${escapeHtml(w.wasteNumber)}`,
+          maxWidth: '800px',
+          bodyHtml: `
+            <div id="wasteVoucherPrint">
+              <div style="display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px; padding-bottom:10px; border-bottom:1px solid var(--border-subtle); margin-bottom:12px;">
+                <div>
+                  <div style="font-size:18px; font-weight:700;">${escapeHtml(w.wasteNumber)}</div>
+                  <div style="font-size:12px; color:var(--text-secondary);">
+                    ${escapeHtml(w.branchName || w.branchId)} / ${escapeHtml(w.warehouseName || w.warehouseId)} &bull; Source: <strong>${escapeHtml(w.sourceType)}</strong>
+                  </div>
+                </div>
+                <div style="text-align:right;">
+                  <span class="badge-pill ${getWasteStatusBadgeClass(w.status)}">${escapeHtml(w.status)}</span>
+                  <div style="font-size:15px; font-weight:700; color:var(--status-danger); margin-top:4px;">${formatTenantMoney(w.totalCost, w.currencyCode)}</div>
+                </div>
+              </div>
+
+              <div class="modal-grid-2" style="margin-bottom:12px; font-size:12px;">
+                <div><strong>Reason:</strong> ${escapeHtml(w.reasonName)} (<code>${escapeHtml(w.reasonCode)}</code>)</div>
+                <div><strong>Created By:</strong> ${escapeHtml(w.createdByName || w.createdByUserId)} on ${new Date(w.createdAt).toLocaleString()}</div>
+                ${w.confirmedAt ? `<div><strong>Confirmed At:</strong> ${new Date(w.confirmedAt).toLocaleString()}</div>` : ''}
+                ${w.reversedAt ? `<div><strong>Reversed At:</strong> ${new Date(w.reversedAt).toLocaleString()} (${escapeHtml(w.reversalReason || '')})</div>` : ''}
+                ${w.description ? `<div style="grid-column: 1 / -1;"><strong>Description:</strong> ${escapeHtml(w.description)}</div>` : ''}
+                ${w.sourceReferenceId ? `<div style="grid-column: 1 / -1;"><strong>Source Reference ID:</strong> <code>${escapeHtml(w.sourceReferenceId)}</code></div>` : ''}
+              </div>
+
+              <div class="table-responsive">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>Product</th>
+                      <th>Batch / Serial</th>
+                      <th>Entered Qty</th>
+                      <th>Base Qty</th>
+                      <th>Method</th>
+                      <th>Unit Cost</th>
+                      <th>Total Cost</th>
+                      <th>Ledger Entry</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${(w.lines || []).map(l => `
+                      <tr>
+                        <td><strong>${escapeHtml(l.productName)}</strong><div style="font-size:11px; color:var(--text-secondary);">${escapeHtml(l.productSku)}</div></td>
+                        <td style="font-size:11px;">${l.batchNumber ? `Batch: ${escapeHtml(l.batchNumber)}` : ''}${l.serialNumber ? `Serial: ${escapeHtml(l.serialNumber)}` : (!l.batchNumber ? '—' : '')}</td>
+                        <td>${formatQty(l.wasteQty)} ${escapeHtml(l.wasteUom)}</td>
+                        <td>${formatQty(l.normalizedBaseQty)} ${escapeHtml(l.baseUom)}</td>
+                        <td><code>${escapeHtml(l.valuationMethodSnapshot)}</code></td>
+                        <td>${formatTenantMoney(l.unitCostSnapshot, w.currencyCode)}</td>
+                        <td style="font-weight:700;">${formatTenantMoney(l.totalCostSnapshot, w.currencyCode)}</td>
+                        <td style="font-size:11px;">${l.ledgerEntryId ? `<code>${escapeHtml(l.ledgerEntryId.slice(0, 8))}</code>` : (l.deductedFromOnHand === false ? 'No Ledger Deduction' : 'Draft')}</td>
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          `,
+          footerHtml: `
+            <button class="btn btn-secondary" onclick="closeModal()">Close</button>
+            <button class="btn btn-secondary" onclick="window.print && !window.__NEXSTOCK_SUPPRESS_PRINT_DIALOG__ && window.print()">Print Voucher</button>
+            ${w.status === 'DRAFT' && canCancel ? `<button class="btn btn-secondary" onclick="cancelWasteLogAction('${escapeHtml(w.id)}', '${escapeHtml(w.wasteNumber)}', this)">Cancel Draft</button>` : ''}
+            ${w.status === 'DRAFT' && canConfirm ? `<button class="btn btn-primary" onclick="confirmWasteLogAction('${escapeHtml(w.id)}', '${escapeHtml(w.wasteNumber)}', this)">Confirm &amp; Deduct Stock</button>` : ''}
+            ${w.status === 'CONFIRMED' && canReverse ? `<button class="btn btn-danger" onclick="reverseWasteLogAction('${escapeHtml(w.id)}', '${escapeHtml(w.wasteNumber)}', this)">Reverse Waste</button>` : ''}
+          `
+        });
+      } catch (err) {
+        closeModal();
+        showToast(`Failed to load waste details: ${err.message}`, 'error');
+      }
+    }
+
+    window.renderWasteLogView = renderWasteLogView;
+    window.setWasteLogTab = setWasteLogTab;
+    window.setWasteReportBreakdown = setWasteReportBreakdown;
+    window.setWastePaginationOffset = setWastePaginationOffset;
+    window.resetWasteFilters = resetWasteFilters;
+    window.applyWasteFiltersFromDom = applyWasteFiltersFromDom;
+    window.onWasteSearchInput = onWasteSearchInput;
+    window.openRecordWasteModal = openRecordWasteModal;
+    window.onWasteModalReasonChange = onWasteModalReasonChange;
+    window.onWasteModalLocationChange = onWasteModalLocationChange;
+    window.onWasteModalWarehouseChange = onWasteModalWarehouseChange;
+    window.addWasteProductLine = addWasteProductLine;
+    window.removeWasteDraftLine = removeWasteDraftLine;
+    window.updateWasteDraftLineField = updateWasteDraftLineField;
+    window.submitRecordWasteModal = submitRecordWasteModal;
+    window.confirmWasteLogAction = confirmWasteLogAction;
+    window.cancelWasteLogAction = cancelWasteLogAction;
+    window.reverseWasteLogAction = reverseWasteLogAction;
+    window.openWasteLogDetailModal = openWasteLogDetailModal;
+    window.openWasteReasonsModal = openWasteReasonsModal;
+    window.toggleWasteReasonActive = toggleWasteReasonActive;
+    window.submitNewWasteReason = submitNewWasteReason;
+    window.syncOfflineWasteDraftsNow = syncOfflineWasteDraftsNow;
+    window.exportWasteReportCsv = exportWasteReportCsv;
+    window.exportWasteReportExcel = exportWasteReportExcel;
+    window.openSaleReturnInspectionList = openSaleReturnInspectionList;
+    window.submitSaleReturnDispositions = submitSaleReturnDispositions;
+    window.handlePosReturnConditionChange = handlePosReturnConditionChange;
+    window.refreshPosReturnWasteReasonPanel = refreshPosReturnWasteReasonPanel;
 
     window.renderBusinessReportsView = renderBusinessReportsView;
     window.selectBusinessReportCategory = selectBusinessReportCategory;

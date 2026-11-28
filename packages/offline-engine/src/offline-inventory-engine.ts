@@ -15,6 +15,8 @@ import type {
   OfflineStoragePort,
   OfflineTransferRequestInput,
   OfflineTransferRequestRecord,
+  OfflineWasteDraftInput,
+  OfflineWasteDraftRecord,
 } from './types.js';
 
 const POSITIVE_MOVEMENT_TYPES = new Set([
@@ -47,7 +49,8 @@ export class OfflineInventoryEngine {
       | 'INV_OFFLINE_MOVEMENT'
       | 'INV_OFFLINE_TRANSFER_REQUEST'
       | 'INV_OFFLINE_BATCH_INSPECT'
-      | 'INV_OFFLINE_SERIAL_OPS';
+      | 'INV_OFFLINE_SERIAL_OPS'
+      | 'INV_OFFLINE_WASTE_DRAFT';
     readonly requiredPermission?: string;
   }) {
     const devCtx = await this.storage.getDeviceContext();
@@ -718,6 +721,136 @@ export class OfflineInventoryEngine {
     });
     return (
       this.storage.listOfflineInventoryHistory?.({
+        tenantId: params.tenantId,
+        branchId: params.branchId,
+        ...(params.limit ? { limit: params.limit } : {}),
+      }) ?? []
+    );
+  }
+
+  async recordOfflineWasteDraft(params: {
+    readonly tenantId: string;
+    readonly branchId: string;
+    readonly input: OfflineWasteDraftInput;
+  }): Promise<{ wasteDraftId: string; outboxCommandId: string; localSeq: number }> {
+    if (!this.storage.createOfflineWasteDraft) {
+      throw new OfflineEngineError(
+        'OFFLINE_STORAGE_UNSUPPORTED',
+        'Storage adapter does not support offline waste drafts.',
+        500,
+      );
+    }
+
+    const ctx = await this.ensureSecurity({
+      tenantId: params.tenantId,
+      branchId: params.branchId,
+      isOnline: params.input.isOnline,
+      operation: 'INV_OFFLINE_WASTE_DRAFT',
+      requiredPermission: 'inv:waste:create',
+    });
+
+    const reasonCode = params.input.reasonCode.trim().toUpperCase();
+    if (!reasonCode) {
+      throw new OfflineEngineError(
+        'ERR_VALIDATION_FAILED',
+        'Waste reason code is required.',
+        422,
+      );
+    }
+    if (reasonCode === 'OTHER' && (!params.input.description || !params.input.description.trim())) {
+      throw new OfflineEngineError(
+        'INV_WASTE_DESCRIPTION_REQUIRED',
+        'Description is mandatory when reason is OTHER.',
+        422,
+      );
+    }
+    if (params.input.lines.length === 0) {
+      throw new OfflineEngineError(
+        'ERR_VALIDATION_FAILED',
+        'Waste draft requires at least one product line.',
+        422,
+      );
+    }
+
+    for (const line of params.input.lines) {
+      const q = Quantity.fromDecimalString(line.quantity);
+      if (!q.isPositive()) {
+        throw new OfflineEngineError(
+          'INV_WASTE_INVALID_QUANTITY',
+          'Waste quantity must be positive.',
+          422,
+        );
+      }
+      const prod = await this.storage.getProductById({
+        tenantId: params.tenantId,
+        branchId: params.branchId,
+        warehouseId: params.input.warehouseId,
+        productId: line.productId,
+      });
+      if (!prod) {
+        throw new OfflineEngineError(
+          'ERR_NOT_FOUND',
+          `Product "${line.productId}" not found in branch offline snapshot.`,
+          404,
+        );
+      }
+    }
+
+    const wasteDraftId = randomUUID();
+    const outboxCommandId = randomUUID();
+    const occurredAt = new Date().toISOString();
+
+    const { localSeq } = await this.storage.createOfflineWasteDraft({
+      wasteDraftId,
+      tenantId: params.tenantId,
+      branchId: params.branchId,
+      warehouseId: params.input.warehouseId,
+      reasonCode,
+      description: params.input.description?.trim() || null,
+      lines: params.input.lines,
+      actorUserId: ctx.actorUserId,
+      deviceId: ctx.deviceId,
+      outboxCommandId,
+      occurredAt,
+      outboxPayload: {
+        branchId: params.branchId,
+        warehouseId: params.input.warehouseId,
+        reasonCode,
+        description: params.input.description?.trim() || null,
+        confirmImmediately: false,
+        syncCommandId: outboxCommandId,
+        lines: params.input.lines.map((l) => ({
+          productId: l.productId,
+          wasteQty: l.quantity,
+          uomCode: l.uomCode || undefined,
+          batchId: l.batchId ?? null,
+          serialId: l.serialId ?? null,
+          stockIntakeLotId: l.stockIntakeLotId ?? null,
+          notes: l.notes ?? null,
+        })),
+      },
+    });
+
+    return { wasteDraftId, outboxCommandId, localSeq };
+  }
+
+  async listWasteDrafts(params: {
+    readonly tenantId: string;
+    readonly branchId?: string;
+    readonly isOnline: boolean;
+    readonly limit?: number;
+  }): Promise<readonly OfflineWasteDraftRecord[]> {
+    if (!params.branchId) {
+      return [];
+    }
+    await this.ensureSecurity({
+      tenantId: params.tenantId,
+      branchId: params.branchId,
+      isOnline: params.isOnline,
+      operation: 'INV_OFFLINE_WASTE_DRAFT',
+    });
+    return (
+      this.storage.listOfflineWasteDrafts?.({
         tenantId: params.tenantId,
         branchId: params.branchId,
         ...(params.limit ? { limit: params.limit } : {}),

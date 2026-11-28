@@ -63,6 +63,7 @@ const INBOUND_MOVEMENT_TYPES = new Set<StockMovementType>([
 const OUTBOUND_MOVEMENT_TYPES = new Set<StockMovementType>([
   'STOCK_OUT',
   'ADJUSTMENT_NEGATIVE',
+  'WASTE_OUT',
   'SUPPLIER_RETURN',
   'TRANSFER_OUT',
 ]);
@@ -187,7 +188,7 @@ function mapStockMovementRow(
   };
 }
 
-async function verifyBranchAndWarehouseRelationship(
+export async function verifyBranchAndWarehouseRelationship(
   trx: TenantTransactionContext,
   branchId: string,
   warehouseId: string,
@@ -464,6 +465,8 @@ export async function postStockMovement(
     | 'CUSTOMER_RETURN'
     | 'SUPPLIER_RETURN'
     | 'STOCKTAKE'
+    | 'UOM_CORRECTION'
+    | 'WASTE'
     | 'MANUAL'
     | 'MANUAL_WEIGHT'
     | 'SCALE_WEIGHT'
@@ -475,7 +478,9 @@ export async function postStockMovement(
         ? 'CUSTOMER_RETURN'
         : input.movementType === 'SUPPLIER_RETURN'
           ? 'SUPPLIER_RETURN'
-          : 'MANUAL');
+          : input.movementType === 'WASTE_OUT'
+            ? 'WASTE'
+            : 'MANUAL');
 
   const baseCurrency =
     options?.preloadedContext?.baseCurrency ??
@@ -530,7 +535,9 @@ export async function postStockMovement(
       });
     }
 
-    if (batchRow.status === 'QUARANTINED') {
+    const allowQuarantinedWaste =
+      input.movementType === 'WASTE_OUT' && input.referenceType === 'WASTE_LOG';
+    if (batchRow.status === 'QUARANTINED' && !allowQuarantinedWaste) {
       throw new AppError({
         statusCode: 409,
         errorCode: 'INV_BATCH_QUARANTINED',
@@ -540,11 +547,14 @@ export async function postStockMovement(
     }
 
     if (qtyDelta.isNegative()) {
+      const allowExpiredOrDamagedWriteOff =
+        input.movementType === 'ADJUSTMENT_NEGATIVE' ||
+        input.movementType === 'WASTE_OUT';
       if (
         (batchRow.status === 'INACTIVE' ||
           batchRow.status === 'DAMAGED' ||
           batchRow.status === 'EXPIRED') &&
-        input.movementType !== 'ADJUSTMENT_NEGATIVE'
+        !allowExpiredOrDamagedWriteOff
       ) {
         throw new AppError({
           statusCode: 409,
@@ -560,7 +570,7 @@ export async function postStockMovement(
       if (product.trackingMode === 'BATCH_EXPIRY' && batchRow.expiry_date) {
         const expDateStr = new Date(batchRow.expiry_date).toISOString().slice(0, 10);
         const todayStr = new Date().toISOString().slice(0, 10);
-        if (expDateStr < todayStr && !negativeStockOverrideApplied && input.movementType !== 'ADJUSTMENT_NEGATIVE') {
+        if (expDateStr < todayStr && !negativeStockOverrideApplied && !allowExpiredOrDamagedWriteOff) {
           throw new AppError({
             statusCode: 409,
             errorCode: 'INV_BATCH_EXPIRED',
@@ -620,7 +630,16 @@ export async function postStockMovement(
           detail: `Serial "${serialRow.serial_number}" belongs to a different warehouse and cannot be issued from "${input.warehouseId}".`,
         });
       }
-      if (serialRow.status !== 'IN_STOCK' && !negativeStockOverrideApplied) {
+      const serialEligibleForWaste =
+        input.movementType === 'WASTE_OUT' &&
+        (serialRow.status === 'IN_STOCK' ||
+          serialRow.status === 'QUARANTINED' ||
+          serialRow.status === 'DAMAGED');
+      if (
+        serialRow.status !== 'IN_STOCK' &&
+        !serialEligibleForWaste &&
+        !negativeStockOverrideApplied
+      ) {
         throw new AppError({
           statusCode: 409,
           errorCode: 'INV_SERIAL_NOT_AVAILABLE',
@@ -898,6 +917,8 @@ export async function postStockMovement(
       metadata_json: {
         sku: product.sku,
         baseUom: product.baseUom,
+        ...(batchRow ? { priorBatchStatus: batchRow.status } : {}),
+        ...(serialRow ? { priorSerialStatus: serialRow.status } : {}),
         ...(consumedFifoSlices.length > 0 ? { consumedCostLayers: consumedFifoSlices } : {}),
         ...(consumedIntakeSlices.length > 0 ? { consumedIntakeLots: consumedIntakeSlices } : {}),
       },
@@ -1019,11 +1040,25 @@ export async function postStockMovement(
       const newBatchQty = currentBatchQty.subtract(qtyDelta.abs());
       const finalQty = newBatchQty.isNegative() ? Quantity.zero() : newBatchQty;
       batchQtyAfter = finalQty.toDecimalString();
+      const expStr = batchRow.expiry_date
+        ? new Date(batchRow.expiry_date).toISOString().slice(0, 10)
+        : null;
+      const isDateExpired = Boolean(expStr && expStr < new Date().toISOString().slice(0, 10));
+      const nextRemainingBatchStatus =
+        finalQty.isZero()
+          ? 'DEPLETED'
+          : batchRow.status === 'EXPIRED' || isDateExpired
+            ? 'EXPIRED'
+            : batchRow.status === 'DAMAGED' ||
+                batchRow.status === 'QUARANTINED' ||
+                batchRow.status === 'INACTIVE'
+              ? batchRow.status
+              : 'ACTIVE';
       await trx.db
         .updateTable('inventory_batches')
         .set({
           current_quantity: batchQtyAfter,
-          status: finalQty.isZero() ? 'DEPLETED' : 'ACTIVE',
+          status: nextRemainingBatchStatus,
           updated_at: now,
         })
         .where('tenant_id', '=', trx.tenantId)
@@ -1313,6 +1348,7 @@ export async function reverseStockMovement(
   movementIdToReverse: string,
   idempotencyKey: string,
   input: ReverseStockMovementRequest,
+  options?: { readonly skipPermissionCheck?: boolean },
 ): Promise<StockMovementResponse> {
   const original = await trx.db
     .selectFrom('stock_ledger_entries')
@@ -1329,11 +1365,13 @@ export async function reverseStockMovement(
     });
   }
 
-  await assertAuthorized(trx, {
-    permission: 'inv:movement:reverse',
-    branchId: original.branch_id,
-    warehouseId: original.warehouse_id,
-  });
+  if (!options?.skipPermissionCheck) {
+    await assertAuthorized(trx, {
+      permission: 'inv:movement:reverse',
+      branchId: original.branch_id,
+      warehouseId: original.warehouse_id,
+    });
+  }
 
   await assertSubscriptionEntitlement(trx, {
     requireWriteAccess: true,
@@ -1738,11 +1776,24 @@ export async function reverseStockMovement(
       const nextBatchQty = cur.add(reversalQtyDelta);
       const finalQty = nextBatchQty.isNegative() ? Quantity.zero() : nextBatchQty;
       reversalBatchQtyAfter = finalQty.toDecimalString();
+      const origMeta =
+        original.metadata_json && typeof original.metadata_json === 'object'
+          ? (original.metadata_json as {
+              priorBatchStatus?: 'ACTIVE' | 'QUARANTINED' | 'EXPIRED' | 'INACTIVE' | 'DAMAGED' | 'DEPLETED';
+              priorSerialStatus?: 'IN_STOCK' | 'RESERVED' | 'SOLD' | 'RETURNED' | 'QUARANTINED' | 'DAMAGED' | 'WRITTEN_OFF';
+            })
+          : {};
+      const nextBatchReversalStatus =
+        finalQty.isZero()
+          ? 'DEPLETED'
+          : origMeta.priorBatchStatus && origMeta.priorBatchStatus !== 'DEPLETED'
+            ? origMeta.priorBatchStatus
+            : 'ACTIVE';
       await trx.db
         .updateTable('inventory_batches')
         .set({
           current_quantity: reversalBatchQtyAfter,
-          status: finalQty.isZero() ? 'DEPLETED' : 'ACTIVE',
+          status: nextBatchReversalStatus,
           updated_at: now,
         })
         .where('tenant_id', '=', trx.tenantId)
@@ -1762,7 +1813,15 @@ export async function reverseStockMovement(
       .executeTakeFirst();
 
     if (sRow) {
-      const restoredStatus = reversalQtyDelta.isPositive() ? 'IN_STOCK' : 'SOLD';
+      const origSerialMeta =
+        original.metadata_json && typeof original.metadata_json === 'object'
+          ? (original.metadata_json as {
+              priorSerialStatus?: 'IN_STOCK' | 'RESERVED' | 'SOLD' | 'RETURNED' | 'QUARANTINED' | 'DAMAGED' | 'WRITTEN_OFF';
+            })
+          : {};
+      const restoredStatus =
+        origSerialMeta.priorSerialStatus ??
+        (reversalQtyDelta.isPositive() ? 'IN_STOCK' : 'SOLD');
       await trx.db
         .updateTable('inventory_serials')
         .set({

@@ -40,6 +40,8 @@ export function getCanonicalSqliteMigrations(): readonly SqliteMigrationSpec[] {
   const sql9 = readFileSync(resolve(migrationsDir, filename9), 'utf-8');
   const filename10 = '0010_local_smart_intake_and_barcodes.sql';
   const sql10 = readFileSync(resolve(migrationsDir, filename10), 'utf-8');
+  const filename11 = '0011_waste_drafts_queue.sql';
+  const sql11 = readFileSync(resolve(migrationsDir, filename11), 'utf-8');
   return [
     {
       dialect: 'sqlite',
@@ -110,6 +112,13 @@ export function getCanonicalSqliteMigrations(): readonly SqliteMigrationSpec[] {
       name: '0010_local_smart_intake_and_barcodes',
       filename: filename10,
       sql: sql10,
+    },
+    {
+      dialect: 'sqlite',
+      version: 11,
+      name: '0011_waste_drafts_queue',
+      filename: filename11,
+      sql: sql11,
     },
   ];
 }

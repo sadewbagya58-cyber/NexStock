@@ -4,7 +4,7 @@
   'use strict';
 
   const DB_NAME = 'nexstock_offline_v1';
-  const DB_VERSION = 2;
+  const DB_VERSION = 3;
   const STORES = {
     DEVICE: 'device_context',
     SNAPSHOTS: 'branch_snapshots',
@@ -14,6 +14,7 @@
     SHIFTS: 'local_shifts',
     MOVEMENTS: 'local_movements',
     TRANSFERS: 'local_transfers',
+    WASTE_DRAFTS: 'local_waste_drafts',
     CONFLICTS: 'local_conflicts',
     RECOVERY: 'recovery_meta',
   };
@@ -97,6 +98,10 @@
         if (!db.objectStoreNames.contains(STORES.TRANSFERS)) {
           const t = db.createObjectStore(STORES.TRANSFERS, { keyPath: 'id' });
           t.createIndex('byTenantBranch', ['tenantId', 'branchId'], { unique: false });
+        }
+        if (!db.objectStoreNames.contains(STORES.WASTE_DRAFTS)) {
+          const w = db.createObjectStore(STORES.WASTE_DRAFTS, { keyPath: 'id' });
+          w.createIndex('byTenantBranch', ['tenantId', 'branchId'], { unique: false });
         }
         if (!db.objectStoreNames.contains(STORES.CONFLICTS)) {
           const c = db.createObjectStore(STORES.CONFLICTS, { keyPath: 'id' });
@@ -1045,6 +1050,97 @@
     return record;
   }
 
+  async function recordOfflineWasteDraft(params) {
+    const { tenantId, branchId, warehouseId, reasonCode, description, lines } = params || {};
+    const { userId } = await assertAuthorizedOfflineScope(tenantId, branchId, 'inv:waste:create', true);
+    if (!warehouseId) throw new Error('Warehouse is required for waste draft.');
+    const normalizedReason = String(reasonCode || '').trim().toUpperCase();
+    if (!normalizedReason) throw new Error('Waste reason is required.');
+    if (normalizedReason === 'OTHER' && (!description || !String(description).trim())) {
+      throw new Error('Description is mandatory when reason is OTHER.');
+    }
+    if (!Array.isArray(lines) || lines.length === 0) {
+      throw new Error('At least one product line is required for waste draft.');
+    }
+
+    const now = new Date().toISOString();
+    const id = crypto.randomUUID ? crypto.randomUUID() : String(Date.now());
+    const commandId = crypto.randomUUID ? crypto.randomUUID() : `${id}-wst-cmd`;
+    const deviceId = getOrCreateDeviceId();
+    const existingOutbox = await listOutboxCommands(tenantId);
+    const nextSeq = existingOutbox.reduce((max, x) => Math.max(max, x.localSeq || 0), 0) + 1;
+
+    const cleanLines = lines.map((l) => ({
+      productId: l.productId,
+      productName: l.productName || null,
+      productSku: l.productSku || null,
+      quantity: Number(l.quantity).toFixed(6),
+      ...(l.uomCode ? { uomCode: String(l.uomCode).trim().toUpperCase() } : {}),
+      ...(l.batchId ? { batchId: l.batchId } : {}),
+      ...(l.batchNumber ? { batchNumber: l.batchNumber } : {}),
+      ...(l.serialId ? { serialId: l.serialId } : {}),
+      ...(l.serialNumber ? { serialNumber: l.serialNumber } : {}),
+      ...(l.stockIntakeLotId ? { stockIntakeLotId: l.stockIntakeLotId } : {}),
+      ...(l.notes ? { notes: l.notes } : {}),
+    }));
+
+    const record = {
+      id,
+      tenantId,
+      branchId,
+      warehouseId,
+      reasonCode: normalizedReason,
+      reasonName: params.reasonName || normalizedReason,
+      description: description ? String(description).trim() : null,
+      lines: cleanLines,
+      status: 'OFFLINE_DRAFT',
+      syncState: 'PENDING_SYNC',
+      outboxCommandId: commandId,
+      serverWasteLogId: null,
+      serverWasteNumber: null,
+      conflictReason: null,
+      actorUserId: userId,
+      createdAt: now,
+      syncedAt: null,
+    };
+
+    const outboxCmd = {
+      localSeq: nextSeq,
+      commandId,
+      tenantId,
+      branchId,
+      deviceId,
+      actorUserId: userId,
+      commandType: 'INV_CREATE_WASTE_DRAFT',
+      schemaVersion: 1,
+      occurredAt: now,
+      status: 'PENDING',
+      retryCount: 0,
+      payload: {
+        branchId,
+        warehouseId,
+        reasonCode: normalizedReason,
+        description: description ? String(description).trim() : null,
+        confirmImmediately: false,
+        syncCommandId: commandId,
+        lines: cleanLines.map((l) => ({
+          productId: l.productId,
+          wasteQty: l.quantity,
+          ...(l.uomCode ? { uomCode: l.uomCode } : {}),
+          ...(l.batchId ? { batchId: l.batchId } : {}),
+          ...(l.serialId ? { serialId: l.serialId } : {}),
+          ...(l.stockIntakeLotId ? { stockIntakeLotId: l.stockIntakeLotId } : {}),
+          ...(l.notes ? { notes: l.notes } : {}),
+        })),
+      },
+    };
+
+    // Offline waste draft does NOT confirm or post authoritative server stock deduction offline; it queues DRAFT for sync & confirmation.
+    await idbPut(STORES.WASTE_DRAFTS, record);
+    await idbPut(STORES.OUTBOX, outboxCmd);
+    return record;
+  }
+
   async function listOfflineMovements(tenantId, branchId) {
     const items = await idbGetAllByTenantBranch(STORES.MOVEMENTS, tenantId, branchId);
     return items.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
@@ -1052,6 +1148,11 @@
 
   async function listOfflineTransfers(tenantId, branchId) {
     const items = await idbGetAllByTenantBranch(STORES.TRANSFERS, tenantId, branchId);
+    return items.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+  }
+
+  async function listOfflineWasteDrafts(tenantId, branchId) {
+    const items = await idbGetAllByTenantBranch(STORES.WASTE_DRAFTS, tenantId, branchId);
     return items.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
   }
 
@@ -1180,9 +1281,11 @@
           const invoices = await listLocalInvoices(tenantId, branchId);
           const movements = await listOfflineMovements(tenantId, branchId);
           const transfers = await listOfflineTransfers(tenantId, branchId);
+          const wasteDrafts = await listOfflineWasteDrafts(tenantId, branchId);
           const invByCmd = new Map(invoices.map((i) => [i.outboxCommandId, i]));
           const movByCmd = new Map(movements.map((m) => [m.outboxCommandId, m]));
           const trfByCmd = new Map(transfers.map((t) => [t.outboxCommandId, t]));
+          const wstByCmd = new Map(wasteDrafts.map((w) => [w.outboxCommandId, w]));
           const batchByCmd = new Map(batch.map((b) => [b.commandId, b]));
 
           for (const rec of (pushRes.receipts || [])) {
@@ -1231,6 +1334,17 @@
               trf.serverTransferNumber = rec.serverReferenceNumber || trf.serverTransferNumber || null;
               trf.conflictReason = rec.errorMessage || rec.conflictCode || null;
               await idbPut(STORES.TRANSFERS, trf);
+            }
+
+            const wst = wstByCmd.get(rec.commandId);
+            if (wst) {
+              wst.syncState = nextState;
+              wst.status = isQuarantined ? 'QUARANTINED' : (isFlag ? 'CONFLICT_FLAGGED' : 'SERVER_DRAFT_SYNCED');
+              wst.serverWasteLogId = rec.serverReferenceId || wst.serverWasteLogId || null;
+              wst.serverWasteNumber = rec.serverReferenceNumber || wst.serverWasteNumber || null;
+              wst.conflictReason = rec.errorMessage || rec.conflictCode || null;
+              wst.syncedAt = isQuarantined ? null : nowIso;
+              await idbPut(STORES.WASTE_DRAFTS, wst);
             }
 
             if (isQuarantined || isFlag) {
@@ -1432,8 +1546,10 @@
     getExpiryAlertsOffline,
     recordOfflineStockAdjustment,
     createOfflineTransferRequest,
+    recordOfflineWasteDraft,
     listOfflineMovements,
     listOfflineTransfers,
+    listOfflineWasteDrafts,
     listLocalConflicts,
     recoverInFlightCommands,
     getSyncStatusSummary,

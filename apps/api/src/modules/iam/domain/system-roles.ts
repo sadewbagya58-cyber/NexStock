@@ -121,6 +121,13 @@ export type PermissionKey =
   | 'pur:grn:post'
   | 'pur:return:post'
   | 'pos:sale:return'
+  | 'inv:waste:read'
+  | 'inv:waste:create'
+  | 'inv:waste:confirm'
+  | 'inv:waste:reverse'
+  | 'inv:waste:report'
+  | 'inv:waste:export'
+  | 'inv:waste:reason:manage'
   | 'rep:report:view'
   | 'rep:report:export';
 
@@ -175,6 +182,15 @@ export const PERMISSIONS_CATALOG: readonly PermissionItem[] = [
   { key: 'inv:count:submit', module: 'Stock Counts', action: 'Edit', name: 'Submit Stock Counts', description: 'Record and submit tallied item counts for verification.' },
   { key: 'inv:count:approve', module: 'Stock Counts', action: 'Approve', name: 'Approve Stocktake Audits', description: 'Review and approve stocktake variance reconciliations.' },
   { key: 'inv:count:post', module: 'Stock Counts', action: 'Manage', name: 'Post Stocktake Adjustments', description: 'Finalize counts and atomically write variance adjustments to ledger.' },
+
+  // 10b. Waste Management
+  { key: 'inv:waste:read', module: 'Waste Management', action: 'View', name: 'View Waste Logs & Loss', description: 'Inspect waste log drafts, confirmed losses, and reason codes.' },
+  { key: 'inv:waste:create', module: 'Waste Management', action: 'Create', name: 'Create Waste Drafts', description: 'Record draft waste logs and customer return damage entries.' },
+  { key: 'inv:waste:confirm', module: 'Waste Management', action: 'Approve', name: 'Confirm Waste Logs', description: 'Approve and post waste inventory deductions and MAC/FIFO cost losses.' },
+  { key: 'inv:waste:reverse', module: 'Waste Management', action: 'Manage', name: 'Cancel or Reverse Waste', description: 'Cancel draft waste logs or post controlled compensating reversals for confirmed waste.' },
+  { key: 'inv:waste:report', module: 'Waste Management', action: 'View', name: 'View Waste Reports', description: 'Access waste dashboards, trends, and category/reason analytics.' },
+  { key: 'inv:waste:export', module: 'Waste Management', action: 'Export', name: 'Export Waste Reports', description: 'Export confirmed waste records and loss summaries to CSV, Excel, or PDF.' },
+  { key: 'inv:waste:reason:manage', module: 'Waste Management', action: 'Manage', name: 'Manage Waste Reasons', description: 'Create, configure, and toggle custom waste reason classifications.' },
 
   // 11. POS Checkout
   { key: 'pos:sale:create', module: 'POS Checkout', action: 'Create', name: 'Create POS Sales', description: 'Ring up retail orders and scan barcodes at checkout.' },
@@ -361,8 +377,17 @@ export const SYSTEM_ROLE_DEFINITIONS: Readonly<
       'inv:count:read',
       'inv:count:create',
       'inv:count:submit',
+      'inv:waste:read',
+      'inv:waste:create',
       'inv:count:approve',
       'inv:count:post',
+      'inv:waste:read',
+      'inv:waste:create',
+      'inv:waste:confirm',
+      'inv:waste:reverse',
+      'inv:waste:report',
+      'inv:waste:export',
+      'inv:waste:reason:manage',
       'hrm:employee:read',
       'hrm:attendance:self',
       'hrm:attendance:read',
@@ -414,6 +439,8 @@ export const SYSTEM_ROLE_DEFINITIONS: Readonly<
       'pos:payment:create',
       'inv:batch:read',
       'inv:serial:read',
+      'inv:waste:read',
+      'inv:waste:create',
       'crm:customer:read',
       'crm:credit:read',
       'crm:credit:create',
@@ -450,6 +477,8 @@ export const SYSTEM_ROLE_DEFINITIONS: Readonly<
       'inv:count:read',
       'inv:count:create',
       'inv:count:submit',
+      'inv:waste:read',
+      'inv:waste:create',
       'hrm:attendance:self',
       'hrm:leave:self',
     ],
@@ -558,6 +587,9 @@ export const SYSTEM_ROLE_DEFINITIONS: Readonly<
       'crm:settings:manage',
       'rep:report:view',
       'rep:report:export',
+      'inv:waste:read',
+      'inv:waste:report',
+      'inv:waste:export',
     ],
   },
   STAFF: {

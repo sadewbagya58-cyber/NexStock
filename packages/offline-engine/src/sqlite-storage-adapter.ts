@@ -27,6 +27,8 @@ import type {
   OfflineTransferRequestInput,
   OfflineTransferRequestRecord,
   OfflineUnitConversionRecord,
+  OfflineWasteDraftLineInput,
+  OfflineWasteDraftRecord,
   OfflineStoragePort,
 } from './types.js';
 
@@ -2142,6 +2144,128 @@ export class SqliteOfflineStorageAdapter implements OfflineStoragePort {
     }));
   }
 
+  createOfflineWasteDraft(params: {
+    readonly wasteDraftId: string;
+    readonly tenantId: string;
+    readonly branchId: string;
+    readonly warehouseId: string;
+    readonly reasonCode: string;
+    readonly description: string | null;
+    readonly lines: readonly OfflineWasteDraftLineInput[];
+    readonly actorUserId: string;
+    readonly deviceId: string;
+    readonly outboxCommandId: string;
+    readonly outboxPayload: Record<string, unknown>;
+    readonly occurredAt: string;
+  }): { localSeq: number } {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      this.db
+        .prepare(
+          `INSERT INTO local_waste_drafts_queue
+           (id, tenant_id, branch_id, warehouse_id, reason_code, description,
+            lines_json, actor_user_id, outbox_command_id, sync_state, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING_SYNC', ?)`,
+        )
+        .run(
+          params.wasteDraftId,
+          params.tenantId,
+          params.branchId,
+          params.warehouseId,
+          params.reasonCode,
+          params.description,
+          JSON.stringify(params.lines),
+          params.actorUserId,
+          params.outboxCommandId,
+          params.occurredAt,
+        );
+
+      this.db
+        .prepare(
+          `INSERT INTO local_sync_outbox
+           (command_id, tenant_id, branch_id, device_id, actor_user_id, command_type, schema_version, payload_json, occurred_at, status)
+           VALUES (?, ?, ?, ?, ?, 'INV_CREATE_WASTE_DRAFT', 1, ?, ?, 'PENDING')`,
+        )
+        .run(
+          params.outboxCommandId,
+          params.tenantId,
+          params.branchId,
+          params.deviceId,
+          params.actorUserId,
+          JSON.stringify(params.outboxPayload),
+          params.occurredAt,
+        );
+
+      const seqRow = this.db
+        .prepare('SELECT local_seq FROM local_sync_outbox WHERE command_id = ?')
+        .get(params.outboxCommandId) as { local_seq: number };
+
+      this.db.exec('COMMIT');
+      return { localSeq: seqRow.local_seq };
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
+  }
+
+  listOfflineWasteDrafts(params: {
+    readonly tenantId: string;
+    readonly branchId?: string;
+    readonly limit?: number;
+  }): readonly OfflineWasteDraftRecord[] {
+    const rows = (
+      params.branchId
+        ? this.db
+            .prepare(
+              `SELECT * FROM local_waste_drafts_queue
+               WHERE tenant_id = ? AND branch_id = ?
+               ORDER BY created_at DESC LIMIT ?`,
+            )
+            .all(params.tenantId, params.branchId, params.limit ?? 100)
+        : this.db
+            .prepare(
+              `SELECT * FROM local_waste_drafts_queue
+               WHERE tenant_id = ?
+               ORDER BY created_at DESC LIMIT ?`,
+            )
+            .all(params.tenantId, params.limit ?? 100)
+    ) as {
+      id: string;
+      tenant_id: string;
+      branch_id: string;
+      warehouse_id: string;
+      reason_code: string;
+      description: string | null;
+      lines_json: string;
+      sync_state: OfflineWasteDraftRecord['syncState'];
+      outbox_command_id: string;
+      server_waste_log_id: string | null;
+      server_waste_number: string | null;
+      conflict_reason: string | null;
+      actor_user_id: string;
+      created_at: string;
+      synced_at: string | null;
+    }[];
+
+    return rows.map((r) => ({
+      id: r.id,
+      tenantId: r.tenant_id,
+      branchId: r.branch_id,
+      warehouseId: r.warehouse_id,
+      reasonCode: r.reason_code,
+      description: r.description,
+      lines: JSON.parse(r.lines_json) as OfflineWasteDraftLineInput[],
+      syncState: r.sync_state,
+      outboxCommandId: r.outbox_command_id,
+      serverWasteLogId: r.server_waste_log_id,
+      serverWasteNumber: r.server_waste_number,
+      conflictReason: r.conflict_reason,
+      actorUserId: r.actor_user_id,
+      createdAt: r.created_at,
+      syncedAt: r.synced_at,
+    }));
+  }
+
   listOfflineInventoryHistory(params: {
     readonly tenantId: string;
     readonly branchId?: string;
@@ -2390,6 +2514,26 @@ export class SqliteOfflineStorageAdapter implements OfflineStoragePort {
               : isConflictFlag
                 ? 'CONFLICT_FLAGGED'
                 : 'SERVER_CONFIRMED',
+            rec.serverReferenceId ?? null,
+            rec.serverReferenceNumber ?? null,
+            rec.errorMessage ?? rec.conflictCode ?? null,
+            isQuarantined ? null : params.pushedAt,
+            params.tenantId,
+            rec.commandId,
+          );
+
+        this.db
+          .prepare(
+            `UPDATE local_waste_drafts_queue
+             SET sync_state = ?,
+                 server_waste_log_id = COALESCE(?, server_waste_log_id),
+                 server_waste_number = COALESCE(?, server_waste_number),
+                 conflict_reason = ?,
+                 synced_at = ?
+             WHERE tenant_id = ? AND outbox_command_id = ?`,
+          )
+          .run(
+            nextSyncState,
             rec.serverReferenceId ?? null,
             rec.serverReferenceNumber ?? null,
             rec.errorMessage ?? rec.conflictCode ?? null,

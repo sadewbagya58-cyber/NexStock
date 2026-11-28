@@ -451,6 +451,42 @@ export interface OfflineRecoveryBackupPayload {
   readonly conflicts: readonly OfflineLocalConflictRecord[];
 }
 
+export interface OfflineWasteDraftLineInput {
+  readonly productId: string;
+  readonly quantity: string;
+  readonly uomCode?: string | null;
+  readonly batchId?: string | null;
+  readonly serialId?: string | null;
+  readonly stockIntakeLotId?: string | null;
+  readonly notes?: string | null;
+}
+
+export interface OfflineWasteDraftInput {
+  readonly warehouseId: string;
+  readonly reasonCode: string;
+  readonly description?: string | null;
+  readonly isOnline: boolean;
+  readonly lines: readonly OfflineWasteDraftLineInput[];
+}
+
+export interface OfflineWasteDraftRecord {
+  readonly id: string;
+  readonly tenantId: string;
+  readonly branchId: string;
+  readonly warehouseId: string;
+  readonly reasonCode: string;
+  readonly description: string | null;
+  readonly lines: readonly OfflineWasteDraftLineInput[];
+  readonly syncState: LocalTransactionSyncState;
+  readonly outboxCommandId: string;
+  readonly serverWasteLogId: string | null;
+  readonly serverWasteNumber: string | null;
+  readonly conflictReason: string | null;
+  readonly actorUserId: string;
+  readonly createdAt: string;
+  readonly syncedAt: string | null;
+}
+
 export interface OfflineStoragePort {
   readonly platform: OfflineClientPlatform;
 
@@ -615,6 +651,27 @@ export interface OfflineStoragePort {
     readonly branchId?: string;
     readonly limit?: number;
   }): Promise<readonly OfflineTransferRequestRecord[]> | readonly OfflineTransferRequestRecord[];
+
+  createOfflineWasteDraft?(params: {
+    readonly wasteDraftId: string;
+    readonly tenantId: string;
+    readonly branchId: string;
+    readonly warehouseId: string;
+    readonly reasonCode: string;
+    readonly description: string | null;
+    readonly lines: readonly OfflineWasteDraftLineInput[];
+    readonly actorUserId: string;
+    readonly deviceId: string;
+    readonly outboxCommandId: string;
+    readonly outboxPayload: Record<string, unknown>;
+    readonly occurredAt: string;
+  }): Promise<{ localSeq: number }> | { localSeq: number };
+
+  listOfflineWasteDrafts?(params: {
+    readonly tenantId: string;
+    readonly branchId?: string;
+    readonly limit?: number;
+  }): Promise<readonly OfflineWasteDraftRecord[]> | readonly OfflineWasteDraftRecord[];
 
   listOfflineInventoryHistory?(params: {
     readonly tenantId: string;

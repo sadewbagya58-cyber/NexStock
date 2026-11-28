@@ -3288,10 +3288,13 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       const html = readFileSync(resolve(WEB_ROOT, 'public/index.html'), 'utf8');
       const clientJs = readFileSync(resolve(WEB_ROOT, 'public/nexstock-offline-client.js'), 'utf8');
 
-      // Offline Client IndexedDB v2 stores & Phase 9.5-9.9 APIs
-      expect(clientJs).toContain('const DB_VERSION = 2;');
+      // Offline Client IndexedDB v3 stores & Phase 9.5-9.9 + Waste Draft APIs
+      expect(clientJs).toContain('const DB_VERSION = 3;');
       expect(clientJs).toContain('local_movements');
       expect(clientJs).toContain('local_transfers');
+      expect(clientJs).toContain('local_waste_drafts');
+      expect(clientJs).toContain('async function recordOfflineWasteDraft(');
+      expect(clientJs).toContain('async function listOfflineWasteDrafts(');
       expect(clientJs).toContain('local_conflicts');
       expect(clientJs).toContain('async function recordOfflineStockAdjustment(');
       expect(clientJs).toContain('async function createOfflineTransferRequest(');
@@ -3568,6 +3571,41 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
         expect(allowedHeaderSet.has(reqHeader)).toBe(true);
       }
       expect(html).toContain('validBranchId');
+    });
+  });
+
+  describe('38. Waste Log & Inventory Loss Management + Return Disposition UI', () => {
+    it('renders waste-log navigation, tabs, KPIs, responsive mobile cards, offline draft queue, and customer return split disposition controls without native dialogs', () => {
+      const html = readFileSync(resolve(WEB_ROOT, 'public/index.html'), 'utf8');
+      const clientJs = readFileSync(resolve(WEB_ROOT, 'public/nexstock-offline-client.js'), 'utf8');
+
+      // 1. Navigation, permissions & view routing
+      expect(html).toContain("'waste-log'");
+      expect(html).toContain('inv:waste:read');
+      expect(html).toContain('inv:waste:confirm');
+      expect(html).toContain('inv:waste:reverse');
+      expect(html).toContain('async function renderWasteLogView(');
+
+      // 2. Manual waste recording, barcode/product search, cost preview, reasons modal, reversal & export
+      expect(html).toContain('async function openRecordWasteModal(');
+      expect(html).toContain('/v1/inventory/waste-logs/preview-cost');
+      expect(html).toContain('async function openWasteReasonsModal(');
+      expect(html).toContain('async function openWasteLogDetailModal(');
+      expect(html).toContain('async function confirmWasteLogAction(');
+      expect(html).toContain('async function reverseWasteLogAction(');
+      expect(html).toContain('/v1/inventory/waste-logs/export');
+
+      // 3. Customer Return Disposition (RESTOCK, DAMAGED, PENDING_INSPECTION, SPLIT + post-return inspect)
+      expect(html).toContain('PENDING_INSPECTION');
+      expect(html).toContain('SPLIT (Restock + Waste)');
+      expect(html).toContain('async function openSaleReturnInspectionList(');
+      expect(html).toContain('/dispositions');
+
+      // 4. Offline Waste Draft client + sync queue support (no local confirmation stock deduction)
+      expect(clientJs).toContain('INV_CREATE_WASTE_DRAFT');
+      expect(clientJs).toContain('recordOfflineWasteDraft');
+      expect(html).toContain('Queued Offline Waste Drafts');
+      expect(html).toContain('syncOfflineWasteDraftsNow');
     });
   });
 });

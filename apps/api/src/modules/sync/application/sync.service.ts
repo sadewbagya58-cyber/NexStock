@@ -2,6 +2,7 @@ import type {
   CreatePosReturnRequest,
   CreatePosSaleRequest,
   CreateStockTransferRequest,
+  CreateWasteLogRequest,
   EnrollOfflineDeviceRequest,
   OfflineDeviceRecord,
   PostStockMovementRequest,
@@ -17,6 +18,7 @@ import { getSyncCatalogPricingSnapshot } from '../../cat/index.js';
 import { assertAuthorized } from '../../iam/index.js';
 import {
   createStockTransfer,
+  createWasteLog,
   postStockMovement,
   transitionSerialStatus,
 } from '../../inv/index.js';
@@ -708,6 +710,78 @@ async function executeDomainSyncCommand(
         throw new SyncPoisonPillError(err.errorCode, err.message, {
           commandType: envelope.commandType,
           entityType: 'INV_SERIAL',
+          statusCode: err.statusCode,
+        });
+      }
+      throw err;
+    }
+  }
+
+  // 6. Offline Waste Log Draft -> Creates a DRAFT waste log without mutating server stock until online confirmation
+  if (
+    rawCmdType === 'INV_CREATE_WASTE_DRAFT' &&
+    typeof envelope.payload['warehouseId'] === 'string' &&
+    typeof envelope.payload['reasonCode'] === 'string' &&
+    Array.isArray(envelope.payload['lines'])
+  ) {
+    const rawLines = envelope.payload['lines'] as ReadonlyArray<Record<string, unknown>>;
+    const wasteInput: CreateWasteLogRequest = {
+      branchId:
+        typeof envelope.payload['branchId'] === 'string'
+          ? envelope.payload['branchId']
+          : envelope.branchId,
+      warehouseId: envelope.payload['warehouseId'],
+      reasonCode: envelope.payload['reasonCode'],
+      description:
+        typeof envelope.payload['description'] === 'string'
+          ? envelope.payload['description']
+          : null,
+      confirmImmediately: false,
+      syncCommandId: envelope.commandId,
+      lines: rawLines.map((l) => ({
+        productId: String(l['productId'] ?? ''),
+        wasteQty: String(l['wasteQty'] ?? l['quantity'] ?? '0'),
+        ...(typeof l['uomCode'] === 'string' && l['uomCode'] ? { uomCode: l['uomCode'] } : {}),
+        ...(typeof l['batchId'] === 'string' || l['batchId'] === null
+          ? { batchId: l['batchId'] as string | null }
+          : {}),
+        ...(typeof l['serialId'] === 'string' || l['serialId'] === null
+          ? { serialId: l['serialId'] as string | null }
+          : {}),
+        ...(typeof l['stockIntakeLotId'] === 'string' || l['stockIntakeLotId'] === null
+          ? { stockIntakeLotId: l['stockIntakeLotId'] as string | null }
+          : {}),
+        ...(typeof l['notes'] === 'string' || l['notes'] === null
+          ? { notes: l['notes'] as string | null }
+          : {}),
+      })),
+    };
+    const spName = `sp_sync_wst_${envelope.localSeq}_${Date.now() % 10000}`;
+    await sql`SAVEPOINT ${sql.raw(spName)}`.execute(cmdTrx);
+    try {
+      const waste = await createWasteLog(cmdTrx, envelope.commandId, wasteInput);
+      await sql`RELEASE SAVEPOINT ${sql.raw(spName)}`.execute(cmdTrx);
+      return {
+        status: 'APPLIED',
+        serverReferenceId: waste.id,
+        serverReferenceNumber: waste.wasteNumber,
+        responsePayload: {
+          wasteLogId: waste.id,
+          wasteNumber: waste.wasteNumber,
+          status: waste.status,
+          totalCost: waste.totalCost,
+        },
+      };
+    } catch (err) {
+      await sql`ROLLBACK TO SAVEPOINT ${sql.raw(spName)}`.execute(cmdTrx);
+      await sql`RELEASE SAVEPOINT ${sql.raw(spName)}`.execute(cmdTrx);
+      if (err instanceof AppError) {
+        throw new SyncPoisonPillError(err.errorCode, err.message, {
+          commandType: envelope.commandType,
+          entityType: 'INV_WASTE_DRAFT',
+          originalErrorCode: err.errorCode,
+          warehouseId: wasteInput.warehouseId,
+          reasonCode: wasteInput.reasonCode,
           statusCode: err.statusCode,
         });
       }

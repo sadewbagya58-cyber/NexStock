@@ -400,6 +400,11 @@ describe('@nexstock/api — Milestone 0 Foundation, RLS, Idempotency & Sync Inva
           name: '0033_branch_catalog_isolation_and_customer_address',
           filename: '0033_branch_catalog_isolation_and_customer_address.sql',
         },
+        {
+          version: 34,
+          name: '0034_waste_log_management',
+          filename: '0034_waste_log_management.sql',
+        },
       ]);
     });
 
@@ -491,6 +496,7 @@ describe('@nexstock/api — Milestone 0 Foundation, RLS, Idempotency & Sync Inva
         '0031_qa_master_enhancements.sql',
         '0032_smart_stock_intake_and_barcodes.sql',
         '0033_branch_catalog_isolation_and_customer_address.sql',
+        '0034_waste_log_management.sql',
       ]);
 
       await expect(

@@ -579,7 +579,7 @@ export async function getBusinessReport(
   const currentFin = computeWindowFinancials(range.startTs, range.endTs);
   const prevFin = computeWindowFinancials(range.prevStartTs, range.prevEndTs);
 
-  // Load expenses and payroll across [prevStartTs .. endTs] for Net Profit & Financial reports
+  // Load expenses, payroll, and confirmed waste across [prevStartTs .. endTs] for Net Profit & Financial reports
   let expensesQuery = trx.db
     .selectFrom('expenses')
     .selectAll()
@@ -598,19 +598,40 @@ export async function getBusinessReport(
     }
   }
 
-  const [allExpenses, expenseCategories, allPayrollRuns] = await Promise.all([
-    expensesQuery.execute(),
-    trx.db
-      .selectFrom('expense_categories')
-      .select(['id', 'code', 'name'])
-      .where('tenant_id', '=', trx.tenantId)
-      .execute(),
-    trx.db
-      .selectFrom('payroll_runs')
-      .selectAll()
-      .where('tenant_id', '=', trx.tenantId)
-      .execute(),
-  ]);
+  let confirmedWasteQuery = trx.db
+    .selectFrom('waste_logs')
+    .select(['id', 'branch_id', 'warehouse_id', 'total_cost', 'confirmed_at', 'created_at'])
+    .where('tenant_id', '=', trx.tenantId)
+    .where('status', '=', 'CONFIRMED');
+
+  if (allowedBranchIds !== null) {
+    confirmedWasteQuery =
+      allowedBranchIds.length === 0
+        ? confirmedWasteQuery.where('branch_id', '=', '__none__')
+        : confirmedWasteQuery.where('branch_id', 'in', allowedBranchIds);
+  }
+  if (allowedWarehouseIds !== null) {
+    confirmedWasteQuery =
+      allowedWarehouseIds.length === 0
+        ? confirmedWasteQuery.where('warehouse_id', '=', '__none__')
+        : confirmedWasteQuery.where('warehouse_id', 'in', allowedWarehouseIds);
+  }
+
+  const [allExpenses, expenseCategories, allPayrollRuns, allConfirmedWasteLogs] =
+    await Promise.all([
+      expensesQuery.execute(),
+      trx.db
+        .selectFrom('expense_categories')
+        .select(['id', 'code', 'name'])
+        .where('tenant_id', '=', trx.tenantId)
+        .execute(),
+      trx.db
+        .selectFrom('payroll_runs')
+        .selectAll()
+        .where('tenant_id', '=', trx.tenantId)
+        .execute(),
+      confirmedWasteQuery.execute(),
+    ]);
 
   const expCategoryMap = new Map(expenseCategories.map((c) => [c.id, c.name]));
 
@@ -626,10 +647,18 @@ export async function getBusinessReport(
       return d >= winStart.getTime() && d <= winEnd.getTime();
     });
 
+  const filterWasteInWindow = (winStart: Date, winEnd: Date) =>
+    allConfirmedWasteLogs.filter((wl) => {
+      const d = new Date(wl.confirmed_at || wl.created_at).getTime();
+      return d >= winStart.getTime() && d <= winEnd.getTime();
+    });
+
   const currentExpenses = filterExpensesInWindow(range.startTs, range.endTs);
   const prevExpenses = filterExpensesInWindow(range.prevStartTs, range.prevEndTs);
   const currentPayrolls = filterPayrollInWindow(range.startTs, range.endTs);
   const prevPayrolls = filterPayrollInWindow(range.prevStartTs, range.prevEndTs);
+  const currentWasteLogs = filterWasteInWindow(range.startTs, range.endTs);
+  const prevWasteLogs = filterWasteInWindow(range.prevStartTs, range.prevEndTs);
 
   const currentApprovedExpenses = currentExpenses
     .filter((e) => e.status === 'APPROVED' || e.status === 'PAID')
@@ -649,10 +678,25 @@ export async function getBusinessReport(
     )
     .reduce((acc, pr) => acc + Number(pr.total_gross_pay || 0), 0);
 
+  const currentConfirmedWasteCost = currentWasteLogs.reduce(
+    (acc, wl) => acc + Number(wl.total_cost || 0),
+    0,
+  );
+  const prevConfirmedWasteCost = prevWasteLogs.reduce(
+    (acc, wl) => acc + Number(wl.total_cost || 0),
+    0,
+  );
+
   const currentNetProfit =
-    currentFin.grossProfit - currentApprovedExpenses - currentPayrollExpense;
+    currentFin.grossProfit -
+    currentApprovedExpenses -
+    currentPayrollExpense -
+    currentConfirmedWasteCost;
   const prevNetProfit =
-    prevFin.grossProfit - prevApprovedExpenses - prevPayrollExpense;
+    prevFin.grossProfit -
+    prevApprovedExpenses -
+    prevPayrollExpense -
+    prevConfirmedWasteCost;
   const currentNetMarginPct =
     currentFin.netSales > 0 ? (currentNetProfit / currentFin.netSales) * 100 : 0;
 
@@ -1019,7 +1063,10 @@ export async function getBusinessReport(
             (e.status === 'APPROVED' || e.status === 'PAID'),
         )
         .reduce((acc, e) => acc + Number(e.amount || 0), 0);
-      const branchNetProfit = gp - branchExpenses;
+      const branchWasteCost = currentWasteLogs
+        .filter((wl) => wl.branch_id === b.branchId)
+        .reduce((acc, wl) => acc + Number(wl.total_cost || 0), 0);
+      const branchNetProfit = gp - branchExpenses - branchWasteCost;
       return {
         branchId: b.branchId,
         branchName: b.branchName,
@@ -1032,6 +1079,7 @@ export async function getBusinessReport(
         grossProfit: roundMoney(gp),
         grossMarginPct: roundPct(b.netSales > 0 ? (gp / b.netSales) * 100 : 0),
         branchExpenses: roundMoney(branchExpenses),
+        branchWasteCost: roundMoney(branchWasteCost),
         branchNetProfit: roundMoney(branchNetProfit),
         branchNetMarginPct: roundPct(
           b.netSales > 0 ? (branchNetProfit / b.netSales) * 100 : 0,
@@ -2121,6 +2169,15 @@ export async function getBusinessReport(
         value: roundPct(overallTurnoverRatio),
         formattedType: 'number',
       },
+      {
+        key: 'confirmed_waste_cost',
+        label: 'Confirmed Inventory Waste Cost',
+        value: Number(roundMoney(currentConfirmedWasteCost)),
+        previousValue: Number(roundMoney(prevConfirmedWasteCost)),
+        changePct: computeDeltaPct(currentConfirmedWasteCost, prevConfirmedWasteCost),
+        formattedType: 'currency',
+        subtitle: `${currentWasteLogs.length} confirmed record(s)`,
+      },
     ],
     PROFITABILITY: [
       {
@@ -2148,8 +2205,16 @@ export async function getBusinessReport(
         formattedType: 'currency',
       },
       {
+        key: 'confirmed_waste_cost',
+        label: 'Confirmed Waste Loss',
+        value: Number(roundMoney(currentConfirmedWasteCost)),
+        previousValue: Number(roundMoney(prevConfirmedWasteCost)),
+        changePct: computeDeltaPct(currentConfirmedWasteCost, prevConfirmedWasteCost),
+        formattedType: 'currency',
+      },
+      {
         key: 'net_profit',
-        label: 'Net Profit (After Expenses & Payroll)',
+        label: 'Net Profit (After Expenses, Payroll & Waste)',
         value: Number(roundMoney(currentNetProfit)),
         previousValue: Number(roundMoney(prevNetProfit)),
         changePct: computeDeltaPct(currentNetProfit, prevNetProfit),
@@ -2884,6 +2949,7 @@ export async function getBusinessReport(
         grossMarginPct: roundPct(currentFin.grossMarginPct),
         operatingExpenses: roundMoney(currentApprovedExpenses),
         payrollExpenses: roundMoney(currentPayrollExpense),
+        confirmedWasteCost: roundMoney(currentConfirmedWasteCost),
         netProfit: roundMoney(currentNetProfit),
         netMarginPct: roundPct(currentNetMarginPct),
         costConfirmationStatus:

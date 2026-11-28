@@ -21,7 +21,7 @@ describe('@nexstock/desktop — Tauri v2 Offline-First SQLite Runtime & Bridge',
     expect(existsSync(resolve(tauriRoot, 'src/lib.rs'))).toBe(true);
     expect(existsSync(resolve(tauriRoot, 'src/db.rs'))).toBe(true);
     expect(existsSync(resolve(tauriRoot, 'src/commands.rs'))).toBe(true);
-    expect(getCanonicalSqliteMigrations()).toHaveLength(10);
+    expect(getCanonicalSqliteMigrations()).toHaveLength(11);
 
     const banner = getDesktopConnectionBanner({
       isOnline: false,
@@ -36,7 +36,7 @@ describe('@nexstock/desktop — Tauri v2 Offline-First SQLite Runtime & Bridge',
     const store = new DesktopOfflineStore(db);
 
     const initialStatus = store.getStatus();
-    expect(initialStatus.schemaVersion).toBe(10);
+    expect(initialStatus.schemaVersion).toBe(11);
     expect(initialStatus.pendingOutboxCount).toBe(0);
 
     const tenantId = '0192b4d0-1111-7000-8000-000000000010';

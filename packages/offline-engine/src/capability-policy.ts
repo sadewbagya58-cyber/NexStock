@@ -105,6 +105,16 @@ export const OFFLINE_CAPABILITY_MATRIX: Readonly<
     capability: 'OFFLINE_CAPABLE',
     reason: 'Looks up and queues validated serial number status operations offline.',
   },
+  INV_OFFLINE_WASTE_DRAFT: {
+    operation: 'INV_OFFLINE_WASTE_DRAFT',
+    capability: 'OFFLINE_CAPABLE',
+    reason: 'Captures local waste log drafts offline and queues INV_CREATE_WASTE_DRAFT for authoritative server valuation.',
+  },
+  INV_WASTE_CONFIRM: {
+    operation: 'INV_WASTE_CONFIRM',
+    capability: 'ONLINE_ONLY',
+    reason: 'Waste confirmation posts immutable WASTE_OUT ledger deductions and authoritative MAC/FIFO costing on the server.',
+  },
   SYNC_RESOLVE_CONFLICT: {
     operation: 'SYNC_RESOLVE_CONFLICT',
     capability: 'ONLINE_ONLY',

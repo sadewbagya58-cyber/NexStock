@@ -298,6 +298,17 @@ import {
   PlatformSubscriptionOverrideRequestSchema,
   PlatformSuspendBusinessRequestSchema,
   PlatformUpdateAdminRequestSchema,
+  WasteReasonResponseSchema,
+  CreateWasteReasonRequestSchema,
+  UpdateWasteReasonRequestSchema,
+  CreateWasteLogRequestSchema,
+  WasteCostPreviewRequestSchema,
+  WasteCostPreviewResponseSchema,
+  ReverseWasteLogRequestSchema,
+  WasteLogResponseSchema,
+  ListWasteLogsQuerySchema,
+  WasteReportQuerySchema,
+  ApplyPosReturnDispositionsRequestSchema,
 } from '@nexstock/contracts';
 import { Type } from '@sinclair/typebox';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -445,6 +456,18 @@ import {
   updateStockIntakeLot,
   listStockConfigAlerts,
   resolveStockConfigAlert,
+  ensureDefaultWasteReasons,
+  listWasteReasons,
+  createWasteReason,
+  updateWasteReason,
+  previewWasteLogCost,
+  createWasteLog,
+  confirmWasteLog,
+  cancelWasteLog,
+  reverseWasteLog,
+  getWasteLogById,
+  listWasteLogs,
+  getWasteDashboardAndReport,
 } from './modules/inv/index.js';
 import {
   archiveBranch,
@@ -491,6 +514,7 @@ import {
   getSalesSummary,
   listAuthorizedRegisters,
   listPosReturnsForSale,
+  applyPosReturnDispositions,
   listPosShifts,
   listSales,
   openPosShift,
@@ -1342,6 +1366,11 @@ export async function buildApp(
         request: request.body,
         traceId,
       });
+      await withTenantTransaction(
+        options.db,
+        { tenantId: result.tenant.id, userId: principal.userId, traceId },
+        (trx) => ensureDefaultWasteReasons(trx),
+      );
       return reply.status(201).send(result);
     },
   );
@@ -1871,7 +1900,7 @@ export async function buildApp(
         options.db,
         { tenantId, userId: principal.userId, traceId },
         async (trx) => {
-          return onboardTenantOrganization(trx, {
+          const onboarded = await onboardTenantOrganization(trx, {
             slug: request.body.slug,
             legalName: request.body.legalName,
             baseCurrency: request.body.baseCurrency,
@@ -1883,6 +1912,8 @@ export async function buildApp(
             planCode: request.body.planCode as SubscriptionPlanCode | undefined,
             trialDays: request.body.trialDays,
           });
+          await ensureDefaultWasteReasons(trx);
+          return onboarded;
         },
       );
 
@@ -6766,6 +6797,523 @@ export async function buildApp(
     },
   );
 
+  // ============================================================================
+  // Waste Log & Inventory Loss Management Routes
+  // ============================================================================
+
+  app.get(
+    '/v1/inventory/waste-reasons',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        querystring: Type.Object(
+          { activeOnly: Type.Optional(Type.Boolean()) },
+          { additionalProperties: false },
+        ),
+        response: {
+          200: Type.Array(WasteReasonResponseSchema),
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          listWasteReasons(
+            trx,
+            request.query.activeOnly !== undefined
+              ? { activeOnly: request.query.activeOnly }
+              : {},
+          ),
+      );
+    },
+  );
+
+  app.post(
+    '/v1/inventory/waste-reasons',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        body: CreateWasteReasonRequestSchema,
+        response: {
+          201: WasteReasonResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+          422: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      const created = await withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => createWasteReason(trx, request.body),
+      );
+      return reply.status(201).send(created);
+    },
+  );
+
+  app.patch(
+    '/v1/inventory/waste-reasons/:reasonId',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ reasonId: UuidSchema }),
+        body: UpdateWasteReasonRequestSchema,
+        response: {
+          200: WasteReasonResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          422: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => updateWasteReason(trx, request.params.reasonId, request.body),
+      );
+    },
+  );
+
+  app.post(
+    '/v1/inventory/waste-logs/preview-cost',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        body: WasteCostPreviewRequestSchema,
+        response: {
+          200: WasteCostPreviewResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          422: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => previewWasteLogCost(trx, request.body),
+      );
+    },
+  );
+
+  app.get(
+    '/v1/inventory/waste-logs/dashboard',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        querystring: WasteReportQuerySchema,
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => getWasteDashboardAndReport(trx, request.query, 'inv:waste:read'),
+      );
+    },
+  );
+
+  app.get(
+    '/v1/inventory/waste-logs/report',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        querystring: WasteReportQuerySchema,
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => getWasteDashboardAndReport(trx, request.query, 'inv:waste:report'),
+      );
+    },
+  );
+
+  app.get(
+    '/v1/inventory/waste-logs/export',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        querystring: WasteReportQuerySchema,
+      },
+    },
+    async (request, reply) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      const data = await withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        async (trx) => {
+          await assertAuthorized(trx, {
+            permission: 'inv:waste:export',
+            branchId: request.query.branchId,
+            warehouseId: request.query.warehouseId,
+          });
+          await assertFeatureEntitlement(
+            trx,
+            'basicCsvExport',
+            'CSV report export is not enabled on this plan.',
+          );
+          const report = await getWasteDashboardAndReport(
+            trx,
+            request.query,
+            'inv:waste:report',
+          );
+          const logs = await listWasteLogs(trx, {
+            ...(request.query.branchId !== undefined ? { branchId: request.query.branchId } : {}),
+            ...(request.query.warehouseId !== undefined ? { warehouseId: request.query.warehouseId } : {}),
+            status: 'CONFIRMED',
+            ...(request.query.reasonCode !== undefined ? { reasonCode: request.query.reasonCode } : {}),
+            ...(request.query.sourceType !== undefined ? { sourceType: request.query.sourceType } : {}),
+            ...(request.query.startDate !== undefined ? { startDate: request.query.startDate } : {}),
+            ...(request.query.endDate !== undefined ? { endDate: request.query.endDate } : {}),
+            limit: 100,
+            offset: 0,
+          });
+          return { report, logs: logs.items };
+        },
+      );
+
+      const safeCsv = (v: unknown) => {
+        const s = String(v ?? '');
+        const g = /^[=+\-@\t\r]/.test(s) ? `'${s}` : s;
+        return `"${g.replace(/"/g, '""')}"`;
+      };
+
+      const rows: string[][] = [
+        ['Section', 'Reference / Reason', 'Branch / Context', 'Warehouse / Source', 'Base Qty', 'Cost Amount', 'Status / Date'],
+        ['KPI', 'Total Confirmed Waste Cost', data.report.currencyCode, '', data.report.kpis.totalWasteQuantity, data.report.kpis.totalWasteCost, `${data.report.kpis.totalWasteRecords} record(s)`],
+        ['KPI', 'Customer Return Waste Cost', data.report.currencyCode, '', '', data.report.kpis.customerReturnWasteCost, `${data.report.kpis.customerReturnWasteCount} return waste record(s)`],
+      ];
+
+      for (const r of data.report.byReason) {
+        rows.push(['By Reason', `${r.reasonName} (${r.reasonCode})`, `${r.recordCount} record(s)`, '', r.totalQty, r.totalCost, '']);
+      }
+      for (const p of data.report.byProduct) {
+        rows.push(['By Product', `${p.name} (${p.sku})`, p.baseUom, `${p.recordCount} record(s)`, p.totalQty, p.totalCost, '']);
+      }
+      for (const w of data.logs) {
+        for (const line of w.lines) {
+          rows.push([
+            'Confirmed Waste Line',
+            w.wasteNumber,
+            w.branchName ?? w.branchId,
+            `${w.warehouseName ?? w.warehouseId} (${w.sourceType})`,
+            line.normalizedBaseQty,
+            line.totalCostSnapshot,
+            `${w.reasonName} | ${w.confirmedAt ?? w.createdAt}`,
+          ]);
+        }
+      }
+
+      const csvBody = '\uFEFF' + rows.map((r) => r.map(safeCsv).join(',')).join('\r\n');
+      return reply
+        .header('Content-Type', 'text/csv; charset=utf-8')
+        .header('Content-Disposition', 'attachment; filename="nexstock-waste-report.csv"')
+        .header('Cache-Control', 'no-store')
+        .send(csvBody);
+    },
+  );
+
+  app.get(
+    '/v1/inventory/waste-logs',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        querystring: ListWasteLogsQuerySchema,
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => listWasteLogs(trx, request.query),
+      );
+    },
+  );
+
+  app.post(
+    '/v1/inventory/waste-logs',
+    {
+      schema: {
+        headers: AuthenticatedIdempotentHeadersSchema,
+        body: CreateWasteLogRequestSchema,
+        response: {
+          201: WasteLogResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+          422: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const idempotencyKey = request.headers['idempotency-key'];
+      const traceId = String(request.id);
+
+      const outcome = await withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          executeIdempotentMutation({
+            trx,
+            idempotencyKey,
+            endpoint: 'POST /v1/inventory/waste-logs',
+            requestPayload: request.body,
+            execute: async (innerTrx) => {
+              const body = await createWasteLog(
+                innerTrx,
+                idempotencyKey,
+                request.body,
+              );
+              return { statusCode: 201, body };
+            },
+          }),
+      );
+
+      return reply
+        .status(outcome.statusCode as 201)
+        .header('x-idempotent-replayed', String(outcome.replayed))
+        .send(outcome.body);
+    },
+  );
+
+  app.get(
+    '/v1/inventory/waste-logs/:wasteLogId',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ wasteLogId: UuidSchema }),
+        response: {
+          200: WasteLogResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => getWasteLogById(trx, request.params.wasteLogId),
+      );
+    },
+  );
+
+  app.post(
+    '/v1/inventory/waste-logs/:wasteLogId/confirm',
+    {
+      schema: {
+        headers: AuthenticatedIdempotentHeadersSchema,
+        params: Type.Object({ wasteLogId: UuidSchema }),
+        response: {
+          200: WasteLogResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+          422: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const idempotencyKey = request.headers['idempotency-key'];
+      const traceId = String(request.id);
+
+      const outcome = await withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          executeIdempotentMutation({
+            trx,
+            idempotencyKey,
+            endpoint: `POST /v1/inventory/waste-logs/${request.params.wasteLogId}/confirm`,
+            requestPayload: { wasteLogId: request.params.wasteLogId },
+            execute: async (innerTrx) => {
+              const body = await confirmWasteLog(
+                innerTrx,
+                idempotencyKey,
+                request.params.wasteLogId,
+              );
+              return { statusCode: 200, body };
+            },
+          }),
+      );
+
+      return reply
+        .status(outcome.statusCode as 200)
+        .header('x-idempotent-replayed', String(outcome.replayed))
+        .send(outcome.body);
+    },
+  );
+
+  app.post(
+    '/v1/inventory/waste-logs/:wasteLogId/cancel',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ wasteLogId: UuidSchema }),
+        response: {
+          200: WasteLogResponseSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => cancelWasteLog(trx, request.params.wasteLogId),
+      );
+    },
+  );
+
+  app.post(
+    '/v1/inventory/waste-logs/:wasteLogId/reverse',
+    {
+      schema: {
+        headers: AuthenticatedTenantHeadersSchema,
+        params: Type.Object({ wasteLogId: UuidSchema }),
+        body: ReverseWasteLogRequestSchema,
+        response: {
+          200: WasteLogResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+          422: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const traceId = String(request.id);
+
+      return withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) => reverseWasteLog(trx, request.params.wasteLogId, request.body),
+      );
+    },
+  );
+
   app.get(
     '/v1/inventory/balances',
     {
@@ -8863,6 +9411,65 @@ export async function buildApp(
         { tenantId, userId: principal.userId, traceId },
         (trx) => listPosReturnsForSale(trx, request.params.saleId),
       );
+    },
+  );
+
+  app.post(
+    '/v1/pos/returns/:returnId/dispositions',
+    {
+      schema: {
+        headers: AuthenticatedIdempotentHeadersSchema,
+        params: Type.Object({ returnId: UuidSchema }),
+        body: ApplyPosReturnDispositionsRequestSchema,
+        response: {
+          200: PosReturnResponseSchema,
+          400: ProblemDetailsSchema,
+          401: ProblemDetailsSchema,
+          403: ProblemDetailsSchema,
+          404: ProblemDetailsSchema,
+          409: ProblemDetailsSchema,
+          422: ProblemDetailsSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const principal = await verifySupabaseJwt(
+        request.headers.authorization,
+        jwksProvider,
+        jwtOptions,
+      );
+      const tenantId = request.headers['x-tenant-id'];
+      const idempotencyKey = request.headers['idempotency-key'];
+      const traceId = String(request.id);
+
+      const outcome = await withTenantTransaction(
+        options.db,
+        { tenantId, userId: principal.userId, traceId },
+        (trx) =>
+          executeIdempotentMutation({
+            trx,
+            idempotencyKey,
+            endpoint: `POST /v1/pos/returns/${request.params.returnId}/dispositions`,
+            requestPayload: {
+              returnId: request.params.returnId,
+              body: request.body,
+            },
+            execute: async (innerTrx) => {
+              const body = await applyPosReturnDispositions(
+                innerTrx,
+                idempotencyKey,
+                request.params.returnId,
+                request.body,
+              );
+              return { statusCode: 200, body };
+            },
+          }),
+      );
+
+      return reply
+        .status(outcome.statusCode as 200)
+        .header('x-idempotent-replayed', String(outcome.replayed))
+        .send(outcome.body);
     },
   );
 
@@ -12662,6 +13269,7 @@ export async function buildApp(
                 Type.Literal('PROFITABILITY'),
                 Type.Literal('PURCHASING'),
                 Type.Literal('CUSTOMER_CREDIT'),
+                Type.Literal('EMPLOYEE_HR'),
                 Type.Literal('FINANCIAL_EXPENSE'),
                 Type.Literal('AUDIT_OPERATIONAL'),
               ]),
@@ -12695,6 +13303,11 @@ export async function buildApp(
         options.db,
         { tenantId, userId: principal.userId, traceId },
         async (trx) => {
+          await assertAuthorized(trx, {
+            permission: 'rep:report:export',
+            branchId: request.query.branchId,
+            warehouseId: request.query.warehouseId,
+          });
           await assertFeatureEntitlement(
             trx,
             'basicCsvExport',
@@ -12716,6 +13329,11 @@ export async function buildApp(
       const summary = report as unknown as {
         readonly kpis?: ReadonlyArray<{ label?: string; value?: unknown; previousValue?: unknown }>;
         readonly summary?: Record<string, unknown>;
+        readonly tables?: ReadonlyArray<{
+          title?: string;
+          columns?: ReadonlyArray<{ key: string; label?: string }>;
+          rows?: ReadonlyArray<Record<string, unknown>>;
+        }>;
       };
       if (Array.isArray(summary.kpis)) {
         for (const k of summary.kpis) {
@@ -12729,8 +13347,17 @@ export async function buildApp(
           }
         }
       }
+      if (Array.isArray(summary.tables)) {
+        for (const tbl of summary.tables) {
+          if (!tbl.columns || !tbl.rows) continue;
+          rows.push([tbl.title ?? 'Table', ...tbl.columns.map((c: { label?: string; key: string }) => c.label ?? c.key)]);
+          for (const row of tbl.rows) {
+            rows.push([tbl.title ?? 'Table', ...tbl.columns.map((c: { label?: string; key: string }) => String(row[c.key] ?? ''))]);
+          }
+        }
+      }
 
-      const csvBody = rows.map((r) => r.map(safeCsv).join(',')).join('\r\n');
+      const csvBody = '\uFEFF' + rows.map((r) => r.map(safeCsv).join(',')).join('\r\n');
       return reply
         .header('Content-Type', 'text/csv; charset=utf-8')
         .header('Content-Disposition', 'attachment; filename="nexstock-business-report.csv"')

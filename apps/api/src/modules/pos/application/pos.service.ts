@@ -3530,6 +3530,10 @@ export async function checkoutSale(
         },
       );
 
+      if (moveResult.unitCost) {
+        (line as { unitCostSnapshot: string }).unitCostSnapshot = moveResult.unitCost;
+      }
+
       if (!line.stockIntakeLotId && moveResult.stockIntakeLotId) {
         line.stockIntakeLotId = moveResult.stockIntakeLotId;
         if (moveResult.intakeCode) {
@@ -4037,6 +4041,21 @@ export async function voidSale(
     branchId: sale.branch_id,
     warehouseId: sale.warehouse_id,
   });
+
+  const existingReturn = await trx.db
+    .selectFrom('pos_returns')
+    .select(['id', 'return_number'])
+    .where('tenant_id', '=', trx.tenantId)
+    .where('invoice_id', '=', saleId)
+    .executeTakeFirst();
+  if (existingReturn) {
+    throw new AppError({
+      statusCode: 409,
+      errorCode: 'POS_SALE_HAS_RETURNS',
+      title: 'Cannot Void Sale With Processed Returns',
+      detail: `Sales invoice "${sale.invoice_number}" already has return "${existingReturn.return_number}" and cannot be voided without double-restocking inventory.`,
+    });
+  }
 
   const lines = await trx.db
     .selectFrom('sales_invoice_lines')
