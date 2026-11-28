@@ -4339,6 +4339,8 @@
       state.linkedEmployee = null;
       state.linkedEmployeeId = null;
       state.isStaffUnlinked = false;
+      state.wasteLogState = null;
+      state.cachedWasteReasons = [];
     }
 
     // Resolve Linked Employee Profile for Self-Service (BUG-059)
@@ -18954,8 +18956,8 @@
         showToast(`Customer Return ${ret?.returnNumber || ''} processed (${formatTenantMoney(ret?.totalRefundAmount || 0)} refunded)${wasteNote}`, 'success');
         cachedReceipts.delete(saleId);
         closeModal();
-        if (state.currentView === 'pos-sales') renderPosSalesView();
-        if (state.currentView === 'waste-log') renderWasteLogView();
+        if (state.activeView === 'pos-sales') renderPosSalesView();
+        if (state.activeView === 'waste-log') renderWasteLogView();
       } catch (err) {
       } finally {
         if (btn) { btn.disabled = false; btn.textContent = 'Process Customer Return'; }
@@ -19100,8 +19102,8 @@
         showToast('Return dispositions updated successfully', 'success');
         cachedReceipts.delete(saleId);
         closeModal();
-        if (state.currentView === 'waste-log') renderWasteLogView();
-        else if (state.currentView === 'pos-sales') renderPosSalesView();
+        if (state.activeView === 'waste-log') renderWasteLogView();
+        else if (state.activeView === 'pos-sales') renderPosSalesView();
       } catch (err) {
       } finally {
         if (btn) { btn.disabled = false; btn.textContent = 'Apply Dispositions'; }
@@ -38330,10 +38332,11 @@
       const today = new Date().toISOString().slice(0, 10);
       const d30 = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
       return {
+        tenantId: state.tenantId || '',
         activeTab: 'dashboard',
         reportBreakdown: 'byReason',
         branchId: state.branchId || '',
-        warehouseId: '',
+        warehouseId: state.warehouseId || '',
         status: '',
         sourceType: '',
         reasonCode: '',
@@ -38350,12 +38353,15 @@
         branches: [],
         warehouses: [],
         offlineDrafts: [],
+        loadError: null,
         loading: false,
       };
     }
 
     function getWasteLogState() {
-      if (!state.wasteLogState) state.wasteLogState = getDefaultWasteLogState();
+      if (!state.wasteLogState || (state.tenantId && state.wasteLogState.tenantId && state.wasteLogState.tenantId !== state.tenantId)) {
+        state.wasteLogState = getDefaultWasteLogState();
+      }
       return state.wasteLogState;
     }
 
@@ -38433,12 +38439,67 @@
       await loadAndRenderWasteLog();
     }
 
+    function classifyWasteLoadError(err) {
+      if (!err) return null;
+      const status = Number(err.status || err.statusCode || 0);
+      const code = String(err.errorCode || '');
+      const msg = String(err.message || '');
+      const lower = msg.toLowerCase();
+
+      if (status === 401 || code === 'ERR_UNAUTHORIZED') {
+        return {
+          title: 'Session Expired',
+          message: 'Your authentication session expired. Please sign in again to access Waste Logs.',
+          kind: 'auth'
+        };
+      }
+      if (status === 403 || code === 'IAM_PERMISSION_DENIED' || code === 'IAM_LOCATION_SCOPE_DENIED') {
+        return {
+          title: 'Access Restricted',
+          message: formatUserFacingErrorMessage(err),
+          kind: 'permission'
+        };
+      }
+      if (lower.includes('waste_logs') || lower.includes('waste_reasons') || lower.includes('42p01') || (lower.includes('relation') && lower.includes('does not exist'))) {
+        return {
+          title: 'Database Migration Required',
+          message: 'Waste Log database tables are missing or out of date on the backend server (PostgreSQL migration 0034_waste_log_management.sql required).',
+          kind: 'schema'
+        };
+      }
+      if (status === 404) {
+        return {
+          title: 'Backend Route Unavailable',
+          message: 'Waste Log API endpoints returned 404 on the connected backend server. Verify the API service deployment includes commit 589c4d8 or newer.',
+          kind: 'network'
+        };
+      }
+      if (status === 503 || status === 502 || lower.includes('failed to fetch') || lower.includes('network') || lower.includes('timeout') || lower.includes('abort')) {
+        return {
+          title: 'Backend Service Temporarily Unavailable',
+          message: 'Unable to reach the NexStock API server (it may be waking up from sleep or offline). Retry in a few seconds, or inspect local offline drafts below.',
+          kind: 'network'
+        };
+      }
+      return {
+        title: 'Unable to Load Waste Log Data',
+        message: formatUserFacingErrorMessage(err),
+        kind: 'error'
+      };
+    }
+
     async function loadAndRenderWasteLog() {
       const st = getWasteLogState();
       st.loading = true;
-      const seq = ++state.viewRenderSeq;
+      st.loadError = null;
+      const renderSeq = state.viewRenderSeq;
+      state._wasteFetchSeq = (state._wasteFetchSeq || 0) + 1;
+      const wasteSeq = state._wasteFetchSeq;
 
-      const isOfflineMode = (typeof navigator !== 'undefined' && navigator.onLine === false);
+      const isOfflineMode = (typeof isDeviceOffline === 'function')
+        ? isDeviceOffline()
+        : (typeof navigator !== 'undefined' && navigator.onLine === false);
+
       const repQs = new URLSearchParams();
       if (st.branchId) repQs.set('branchId', st.branchId);
       if (st.warehouseId) repQs.set('warehouseId', st.warehouseId);
@@ -38464,22 +38525,31 @@
         ? window.NexStockOfflineClient.listOfflineWasteDrafts(state.tenantId, st.branchId || state.branchId).catch(() => [])
         : Promise.resolve([]);
 
+      const capturedErrors = [];
+      const captureApi = (promise) => promise.catch((err) => {
+        if (err) capturedErrors.push(err);
+        return null;
+      });
+
       try {
         const [dashRes, listRes, reasonsRes, branchesRes, warehousesRes, offlineDrafts] = await Promise.all([
-          !isOfflineMode ? apiFetch(`/v1/inventory/waste-logs/dashboard?${repQs.toString()}`, { silent: true }).catch(() => null) : Promise.resolve(null),
-          !isOfflineMode ? apiFetch(`/v1/inventory/waste-logs?${listQs.toString()}`, { silent: true }).catch(() => null) : Promise.resolve(null),
+          !isOfflineMode ? captureApi(apiFetch(`/v1/inventory/waste-logs/dashboard?${repQs.toString()}`, { silent: true })) : Promise.resolve(null),
+          !isOfflineMode ? captureApi(apiFetch(`/v1/inventory/waste-logs?${listQs.toString()}`, { silent: true })) : Promise.resolve(null),
           !isOfflineMode ? loadCachedWasteReasons() : Promise.resolve(state.cachedWasteReasons || getDefaultFallbackWasteReasons()),
           !isOfflineMode && hasPermission('org:branch:read') ? apiFetch('/v1/org/branches?status=ACTIVE', { silent: true }).catch(() => ({ items: [] })) : Promise.resolve({ items: state.cachedBranches || [] }),
           !isOfflineMode && hasPermission('org:warehouse:read') ? apiFetch('/v1/org/warehouses', { silent: true }).catch(() => ({ items: [] })) : Promise.resolve({ items: state.cachedWarehouses || [] }),
           offlinePromise,
         ]);
 
-        if (seq !== state.viewRenderSeq || state.currentView !== 'waste-log') return;
+        if (!isCurrentViewRender('waste-log', renderSeq) || wasteSeq !== state._wasteFetchSeq) return;
 
         if (dashRes) st.dashboard = dashRes;
         if (listRes) {
           st.records = Array.isArray(listRes.items) ? listRes.items : [];
           st.totalRecords = Number(listRes.total || st.records.length || 0);
+        }
+        if (capturedErrors.length > 0 && (!dashRes || !listRes)) {
+          st.loadError = classifyWasteLoadError(capturedErrors[0]);
         }
         st.reasons = Array.isArray(reasonsRes) ? reasonsRes : getDefaultFallbackWasteReasons();
         const bList = Array.isArray(branchesRes?.items) ? branchesRes.items : (Array.isArray(branchesRes) ? branchesRes : []);
@@ -38497,10 +38567,14 @@
           st.warehouses = state.cachedWarehouses;
         }
         st.offlineDrafts = Array.isArray(offlineDrafts) ? offlineDrafts : [];
+      } catch (err) {
+        if (!isCurrentViewRender('waste-log', renderSeq) || wasteSeq !== state._wasteFetchSeq) return;
+        st.loadError = classifyWasteLoadError(err);
       } finally {
         st.loading = false;
       }
 
+      if (!isCurrentViewRender('waste-log', renderSeq) || wasteSeq !== state._wasteFetchSeq) return;
       renderWasteLogContent();
     }
 
@@ -38532,10 +38606,21 @@
             <div class="view-subtitle">Track manual stock spoilage/damage, customer return write-offs, MAC/FIFO cost losses, and immutable audit trails</div>
           </div>
           <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <button class="btn btn-secondary" id="btnRefreshWasteLog" onclick="loadAndRenderWasteLog()">↻ Refresh</button>
             ${canManageReasons ? `<button class="btn btn-secondary" onclick="openWasteReasonsModal()">Configure Reasons</button>` : ''}
             ${canCreate ? `<button class="btn btn-primary" onclick="openRecordWasteModal()">+ Record Waste</button>` : ''}
           </div>
         </div>
+
+        ${st.loadError ? `
+          <div class="card" id="wasteLoadErrorBanner" style="margin-bottom: 14px; border-left: 4px solid var(--status-danger); background: rgba(239, 68, 68, 0.08); display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; padding: 14px;">
+            <div>
+              <strong style="color: var(--status-danger); font-size: 14px;">${escapeHtml(st.loadError.title || 'Unable to Load Waste Log')}</strong>
+              <div style="font-size: 13px; color: var(--text-primary); margin-top: 3px;">${escapeHtml(st.loadError.message)}</div>
+            </div>
+            <button type="button" class="btn btn-primary btn-sm" id="btnRetryWasteLoad" onclick="loadAndRenderWasteLog()">Retry</button>
+          </div>
+        ` : ''}
 
         ${pendingOffline.length > 0 ? `
           <div class="waste-offline-banner">
@@ -38629,6 +38714,9 @@
         ${st.activeTab === 'records' ? renderWasteRecordsTabHtml(st, curr, pendingOffline) : ''}
         ${st.activeTab === 'reports' ? renderWasteReportsTabHtml(st, curr, canExport) : ''}
       `;
+      if (typeof scheduleEnhanceNexSelects === 'function') {
+        scheduleEnhanceNexSelects();
+      }
     }
 
     function renderWasteDashboardTabHtml(st, kpis, curr) {

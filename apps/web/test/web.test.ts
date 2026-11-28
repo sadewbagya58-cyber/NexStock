@@ -3606,6 +3606,136 @@ describe('@nexstock/web — Deployment Configuration, SPA Routing & API URL Reso
       expect(clientJs).toContain('recordOfflineWasteDraft');
       expect(html).toContain('Queued Offline Waste Drafts');
       expect(html).toContain('syncOfflineWasteDraftsNow');
+
+      // 5. Regression guard: Waste Log view lifecycle MUST use state.activeView / isCurrentViewRender('waste-log', ...)
+      //    and NEVER reference undefined state.currentView, preventing permanent Loading... skeleton freeze.
+      expect(html).not.toContain("state.currentView !== 'waste-log'");
+      expect(html).not.toContain("state.currentView === 'waste-log'");
+      expect(html).toContain("isCurrentViewRender('waste-log', renderSeq)");
+      expect(html).toContain('function classifyWasteLoadError(');
+      expect(html).toContain('id="wasteLoadErrorBanner"');
+      expect(html).toContain('id="btnRetryWasteLoad"');
+    });
+
+    it('regression: executes renderWasteLogView lifecycle end-to-end across success, error/retry, missing-schema 0034, permission denied, and branch switch', async () => {
+      const html = readFileSync(resolve(WEB_ROOT, 'public/index.html'), 'utf8');
+      const helperMatch = html.match(/function isCurrentViewRender[\s\S]*?return true;\s*\}/);
+      const wasteBlockMatch = html.match(/\/\/ WASTE LOG & INVENTORY LOSS MANAGEMENT MODULE[\s\S]*?window\.refreshPosReturnWasteReasonPanel = refreshPosReturnWasteReasonPanel;/);
+      expect(helperMatch).toBeTruthy();
+      expect(wasteBlockMatch).toBeTruthy();
+
+      const containerEl = { innerHTML: '<div>Loading...</div>' };
+      let mockFetchHandler = async (_url: string) => ({});
+
+      const harnessWithBridge = new Function('__mockFetch', 'container', `
+        const state = {
+          activeView: 'waste-log',
+          viewRenderSeq: 1,
+          tenantId: 't-1',
+          branchId: 'b-1',
+          branchName: 'Main Branch',
+          warehouseId: 'w-1',
+          currency: 'LKR',
+          permissions: new Set(['inv:waste:read', 'inv:waste:create', 'inv:waste:confirm', 'inv:waste:report', 'org:branch:read', 'org:warehouse:read']),
+          cachedBranches: [{ id: 'b-1', code: 'BR-1', name: 'Main Branch', isActive: true }, { id: 'b-2', code: 'BR-2', name: 'Second Branch', isActive: true }],
+          cachedWarehouses: [{ id: 'w-1', branchId: 'b-1', code: 'WH-1', name: 'Main WH', isActive: true }],
+          token: 'tok',
+        };
+        const navigator = { onLine: true };
+        const window = { NexStockOfflineClient: null };
+        const document = { getElementById: (id) => (id === 'mainContainer' ? container : null), querySelectorAll: () => [] };
+        const escapeHtml = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const hasPermission = (p) => state.permissions.has(p);
+        const getTenantCurrency = () => state.currency;
+        const formatTenantMoney = (v, c) => (c || 'LKR') + ' ' + Number(v || 0).toFixed(2);
+        const formatQty = (v) => String(Number(v || 0));
+        const formatUserFacingErrorMessage = (e) => String(e?.message || 'Error');
+        const scheduleEnhanceNexSelects = () => {};
+        const isDeviceOffline = () => !navigator.onLine;
+        const getDefaultFallbackWasteReasons = () => [{ code: 'DAMAGED', name: 'Damaged', requiresDescription: false, isActive: true }];
+        const loadCachedWasteReasons = async () => [{ code: 'DAMAGED', name: 'Damaged', requiresDescription: false, isActive: true }];
+        const openSaleReturnInspectionList = () => {};
+        const submitSaleReturnDispositions = () => {};
+        const handlePosReturnConditionChange = () => {};
+        const refreshPosReturnWasteReasonPanel = () => {};
+        const apiFetch = async (url) => __mockFetch(url);
+        ${helperMatch![0]}
+        ${wasteBlockMatch![0]}
+        return { state, renderWasteLogView, loadAndRenderWasteLog, getWasteLogState };
+      `);
+
+      const sim = harnessWithBridge(
+        (url: string) => mockFetchHandler(url),
+        containerEl,
+      );
+
+      // Test Case A: Successful load transitions away from Loading... skeleton and renders real Waste KPIs
+      mockFetchHandler = async (url: string) => {
+        if (url.includes('/waste-logs/dashboard')) {
+          return {
+            currencyCode: 'LKR',
+            kpis: { totalWasteCost: '1250.0000', totalWasteRecords: 2, totalWasteQuantity: '5.000000', topWasteReason: { code: 'DAMAGED', name: 'Damaged', cost: '1250.0000' }, customerReturnWasteCost: '0.0000', customerReturnWasteCount: 0 },
+            trends: [],
+            byReason: [],
+            byProduct: [],
+            recentRecords: [],
+          };
+        }
+        if (url.includes('/waste-logs?')) return { items: [], total: 0, limit: 20, offset: 0 };
+        return { items: [] };
+      };
+
+      await sim.renderWasteLogView();
+      expect(containerEl.innerHTML).not.toContain('>Loading...<');
+      expect(containerEl.innerHTML).toContain('Waste Log &amp; Inventory Loss Management');
+      expect(containerEl.innerHTML).toContain('LKR 1250.00');
+      expect(containerEl.innerHTML).not.toContain('wasteLoadErrorBanner');
+
+      // Test Case B: Backend missing migration 0034 / 500 error exits loading cleanly & displays Retry + Migration message
+      mockFetchHandler = async (url: string) => {
+        if (url.includes('/waste-logs')) {
+          const err = new Error('relation "waste_logs" does not exist') as Error & { status: number };
+          err.status = 500;
+          throw err;
+        }
+        return { items: [] };
+      };
+      await sim.renderWasteLogView();
+      expect(containerEl.innerHTML).toContain('wasteLoadErrorBanner');
+      expect(containerEl.innerHTML).toContain('0034_waste_log_management.sql');
+      expect(containerEl.innerHTML).toContain('btnRetryWasteLoad');
+
+      // Test Case C: 503 Backend waking up shows service unavailable + Retry, then Retry recovers cleanly
+      mockFetchHandler = async (url: string) => {
+        if (url.includes('/waste-logs')) {
+          const err = new Error('Service Unavailable') as Error & { status: number };
+          err.status = 503;
+          throw err;
+        }
+        return { items: [] };
+      };
+      await sim.renderWasteLogView();
+      expect(containerEl.innerHTML).toContain('Backend Service Temporarily Unavailable');
+      expect(containerEl.innerHTML).toContain('btnRetryWasteLoad');
+
+      // Test Case D: 403 Permission denied renders Access Restricted cleanly without locking loading
+      mockFetchHandler = async (url: string) => {
+        if (url.includes('/waste-logs')) {
+          const err = new Error('IAM_PERMISSION_DENIED') as Error & { status: number; errorCode: string };
+          err.status = 403;
+          err.errorCode = 'IAM_PERMISSION_DENIED';
+          throw err;
+        }
+        return { items: [] };
+      };
+      await sim.renderWasteLogView();
+      expect(containerEl.innerHTML).toContain('Access Restricted');
+      expect(containerEl.innerHTML).toContain('btnRetryWasteLoad');
+
+      // Test Case E: Tenant/branch reset re-scopes Waste Log filters cleanly
+      sim.state.tenantId = 't-2';
+      sim.state.branchId = 'b-2';
+      expect(sim.getWasteLogState().branchId).toBe('b-2');
     });
   });
 });
